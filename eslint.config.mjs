@@ -113,4 +113,13 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     rules: { ...reactHooks.configs.recommended.rules },
   },
+
+  // ── Coordinator workflow scripts (docs/handoff) ───────────────────────
+  // Run by the Claude Code Workflow tool, which provides these globals.
+  {
+    files: ["docs/handoff/**/*.workflow.js"],
+    languageOptions: {
+      globals: { agent: "readonly", parallel: "readonly", pipeline: "readonly", phase: "readonly", log: "readonly", args: "readonly" },
+    },
+  },
 );

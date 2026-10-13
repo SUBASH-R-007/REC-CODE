@@ -31,6 +31,24 @@ import type { AuthoredProblem, AuthoredTest } from "../scripts/content/types";
 
 const NEW_PROBLEMS = [HANDLE_MAKER, LAB_POWER_BUDGET, SECOND_SWIPE];
 
+/**
+ * The largest seeds generate 10⁵-session inputs, which take seconds on a slow
+ * runner. Each problem's tests are generated once here and shared (the
+ * determinism test still generates them a second time to compare), and the
+ * tests that walk every generated input get an explicit time budget instead
+ * of vitest's 5 s default.
+ */
+const HEAVY_TIMEOUT_MS = 30_000;
+const generatedTestsCache = new Map<string, AuthoredTest[]>();
+function generatedTests(def: AuthoredProblem): AuthoredTest[] {
+  let tests = generatedTestsCache.get(def.slug);
+  if (!tests) {
+    tests = def.generateTests();
+    generatedTestsCache.set(def.slug, tests);
+  }
+  return tests;
+}
+
 function functionArgs(def: AuthoredProblem, test: AuthoredTest): unknown[] {
   const lines = test.input.split("\n");
   expect(lines.at(-1)).toBe("");
@@ -125,9 +143,9 @@ describe("authored problems: hints and editorials", () => {
 });
 
 describe.each(AUTHORED_PROBLEMS.map((p) => [p.slug, p] as const))("%s: generated tests", (_slug, def) => {
-  const tests = def.generateTests();
+  const tests = generatedTests(def);
 
-  it("are deterministic (byte-identical on every call)", () => {
+  it("are deterministic (byte-identical on every call)", { timeout: HEAVY_TIMEOUT_MS }, () => {
     expect(def.generateTests()).toEqual(tests);
   });
 
@@ -458,12 +476,16 @@ describe("FUNCTION seeds: comparators, canonical tests and references", () => {
     }
   });
 
-  it.each(FUNCTION_SEEDS.map((p) => [p.slug, p] as const))("%s: every test is canonical for its signature", (_slug, def) => {
-    const sig = functionSignatureSchema.parse(def.signature);
-    for (const [i, t] of def.generateTests().entries()) {
-      expect(validateFunctionTest(sig, t.input, t.output), `test ${i}`).toEqual([]);
-    }
-  });
+  it.each(FUNCTION_SEEDS.map((p) => [p.slug, p] as const))(
+    "%s: every test is canonical for its signature",
+    { timeout: HEAVY_TIMEOUT_MS },
+    (_slug, def) => {
+      const sig = functionSignatureSchema.parse(def.signature);
+      for (const [i, t] of generatedTests(def).entries()) {
+        expect(validateFunctionTest(sig, t.input, t.output), `test ${i}`).toEqual([]);
+      }
+    },
+  );
 
   it.each(FUNCTION_SEEDS.map((p) => [p.slug, p] as const))(
     "%s: a Java model solution (judged by the golden suite's extra languages)",
@@ -614,17 +636,21 @@ describe("Phase 4 seeds: independent mirrors", () => {
       expect(def, `${slug} is not in AUTHORED_PROBLEMS`).toBeDefined();
     });
 
-    it.runIf(def !== undefined)("expects what an independent implementation expects (or the checker's rule accepts)", () => {
-      for (const t of def!.generateTests()) {
-        const args = functionArgs(def!, t);
-        const expected = functionResult(def!, t);
-        if (mirror.expected) expect(expected).toEqual(mirror.expected(args));
-        if (mirror.accepts) expect(mirror.accepts(args, expected), "the jury answer must satisfy the checker's rule").toBe(true);
-      }
-    });
+    it.runIf(def !== undefined)(
+      "expects what an independent implementation expects (or the checker's rule accepts)",
+      { timeout: HEAVY_TIMEOUT_MS },
+      () => {
+        for (const t of generatedTests(def!)) {
+          const args = functionArgs(def!, t);
+          const expected = functionResult(def!, t);
+          if (mirror.expected) expect(expected).toEqual(mirror.expected(args));
+          if (mirror.accepts) expect(mirror.accepts(args, expected), "the jury answer must satisfy the checker's rule").toBe(true);
+        }
+      },
+    );
 
-    it.runIf(def !== undefined)("catches every deliberately-wrong reference, mirrored in JS", () => {
-      const tests = def!.generateTests();
+    it.runIf(def !== undefined)("catches every deliberately-wrong reference, mirrored in JS", { timeout: HEAVY_TIMEOUT_MS }, () => {
+      const tests = generatedTests(def!);
       for (const r of def!.references.filter((x) => x.expected === "WA")) {
         const wrong = mirror.wrong[r.label];
         expect(wrong, `no JS mirror for "${r.label}"`).toBeDefined();
