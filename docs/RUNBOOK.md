@@ -663,12 +663,20 @@ is retried with backoff (30 s doubling, at most 6 h); after 8 attempts the
 row is `FAILED`, and for `security.*` mail an `email.delivery_failed`
 SECURITY audit row is written. `/super/settings/integrations` shows the
 transport the scheduler last used and can queue a test email to yourself.
+SMTP connections time out quickly (10 s to connect, 10 s for the greeting,
+20 s of socket idle). Each tick sends for at most 30 s; rows it did not get
+to go back to `PENDING` without spending an attempt. The outbox shares the
+scheduler's tick with the judge reconciler, so a hanging relay must never
+hold it. Two scheduler instances never both finish the same row:
+`attempts` is the claim token.
 
 **Governance sweep (scheduler).** The `governance` job, every tick:
 expires PENDING requests past their 24 hours (`privileged.expired`, the
 requester is notified), fails operations stuck `EXECUTING` for more than 15
-minutes (the process running them stopped: request again), and ends lapsed
-impersonations (`impersonation.ended`, `EXPIRED`). It selects rows by the
+minutes (the process running them stopped: request again) and operations
+`APPROVED` more than 15 minutes ago whose execution never started (the
+process died between the approval and the run: request again), and ends
+lapsed impersonations (`impersonation.ended`, `EXPIRED`). It selects rows by the
 database clock, so it is safe with two scheduler instances.
 
 **Job health.** Each scheduler job upserts `SchedulerJobStatus` after every

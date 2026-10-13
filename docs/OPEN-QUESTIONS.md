@@ -548,8 +548,11 @@ Each Phase 4 stream appends its own sub-heading below.
     because Prisma fills `@default(now())` from the application clock;
   - a PrivilegedOperation is approved or rejected only before `expiresAt`, and
     expired only after it, both on the database clock. APPROVED → EXECUTING is
-    not time-limited: `expiresAt` bounds the wait for a decision, and nothing
-    can move an APPROVED row out except execution;
+    not time-limited: `expiresAt` bounds the wait for a decision. Only
+    execution moves an APPROVED row out, or the governance sweep: an
+    approval whose execution never started within 15 minutes (the process
+    died between approval and claim) goes EXECUTING → FAILED, audited
+    (adversarial review, C4);
   - CANCELLED and EXPIRED operations carry no decider, no `decidedAt` and no
     break-glass flag;
   - an Announcement is created as an unpublished draft. Once published it is
@@ -1132,3 +1135,71 @@ Each is the narrower reading, implemented as described.
   the start of each attempt.
 - **Box ids of the adversarial self-check suite: 950–952.** The live
   maintenance range is 900–909 and verify-toolchains uses 800–899.
+
+### Phase 4 — adversarial review (2026-10-13)
+
+Six dimension reviewers, then two skeptics per finding (reachability and
+reproduction). These are the decisions taken while fixing what survived.
+Ids refer to the review notes.
+
+- **ADMIN views of student submissions and runs (S1).** The student-facing
+  submission and run views (and their API and stream routes) admit the
+  owner, a SUPER_ADMIN, or an ADMIN whose AdminScope covers the owner. Before,
+  any staff role saw any row. An in-scope ADMIN sees the metadata and
+  verdicts of someone else's submission, never its code (`sourceWithheld`).
+  This extends "Admin student page: metadata only, never source" to the
+  submission page (the narrower reading). A SUPER_ADMIN still sees the code.
+- **Approving needs a current requester (S5).** Both people of a two-person
+  decision must be ACTIVE SUPER_ADMINs when it is approved: `canApprove`
+  checks the requester, and so does the approve UPDATE (EXISTS). A demoted
+  or disabled requester's PENDING requests are not cancelled automatically;
+  they can be rejected or left to expire (the narrower change).
+- **The approver sees a bulk change's accounts (S2).** A PENDING
+  BULK_STATUS_CHANGE shows its accounts by role and names every staff or
+  super-admin account in it. Staff targets are not refused: a super-admin may
+  already change another staff account's status directly.
+- **Rate limits on bulk actions stay a Phase 10 item (S3, C3).** The spec
+  lists "admin bulk ops 10/min" under Phase 10 (SECURITY.md §11). The
+  two-person threshold applies per bulk change, as the spec words it.
+  Splitting a change into calls of 25 or fewer is not a bypass, because a
+  single-account change is one-person by spec.
+- **A PII export names its accounts at request time (S4).** The payload
+  holds the resolved account ids (at most 10,000, `PII_EXPORT_MAX_ACCOUNTS`)
+  next to the filter, so the approved digest covers that exact set. The
+  download streams only those accounts; an account that matches the filter
+  later is not in the export.
+- **The last active super-admin, under concurrency (S7).** Every path that
+  can remove a super-admin counts them under one advisory lock
+  (`countActiveSuperAdminsLocked`).
+- **Audit rows in the decision transaction (S6, C2).** `privileged.approved`
+  and `privileged.break_glass` are written in the decision transaction (as
+  SECURITY.md §8a already said). `impersonation.started` and
+  `impersonation.ended` keep the documented audit-after-commit pattern; the
+  immutable ImpersonationSession row is the durable record.
+- **A purged submission is never rejudged (D1).** A global rejudge, its
+  approved count and a single rejudge all skip or refuse submissions whose
+  source is archived. The judge's claim refuses an archived or empty source.
+  The verdict a purge keeps is never overwritten.
+- **Security email cannot stall the reconciler (D2).** SMTP connections time
+  out after 10/10/20 s. The outbox sends for at most 30 s per tick; rows it
+  did not try go back to PENDING with their attempt refunded. `attempts` is
+  the claim token.
+- **A legal hold stops a running purge (D8).** Each purge batch re-reads the
+  hold under the retention lock (shared). Batches already done stay
+  archived, and the operation ends FAILED.
+- **Validation is per toolchain (C1).** Only validation runs judged on the
+  language's current LanguageConfig count toward approval and publish. After
+  a compiler or interpreter upgrade, a revision must be re-validated before
+  it is approved or published. A worker or harness fix that keeps the same
+  LanguageConfig still relies on `check-approved` (RUNBOOK §2.10).
+- **A roster preview survives student activity (D3).** The plan hash covers
+  what the plan depends on (each change's current value, the link, the
+  outcome kinds), not `updatedAt`. The commit's UPDATE is guarded on those
+  values.
+- **Roster previews expire lazily (D10, kept).** Expiry stays lazy, as the
+  admin design records. An expired preview is never shown or committed. A
+  sweep that clears its rows is optional hardening.
+- **FUNCTION tests are canonical on every path (J1).** The test editor and
+  publish check them, as a bulk import does. A signature edit that
+  invalidates stored tests blocks publish until the tests are fixed.
+
