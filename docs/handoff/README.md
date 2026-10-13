@@ -20,75 +20,102 @@ once Phase 4 is gated.
 | 1 Thin vertical slice | Gated 2026-10-10 (`docs/RUNBOOK.md` §3) |
 | 2 Judge hardening and capacity | Gated 2026-10-10 |
 | 3 Student product surface | Gated 2026-10-10 |
-| 4 Authoring, admin, `/super` | **Built and integrated; not gated yet** |
+| 4 Authoring, admin, `/super` | **Built, integrated and adversarially reviewed. The Linux gate is green (cloud, 2026-10-13). Not gated:** the Windows gate on the final tree, the real-isolate suites, the live stage and CI are still to run (below) |
 | 5–10 | Not started |
 
-## Phase 4: what is done
+## Phase 4: what was done in the cloud session (2026-10-13)
 
-Everything below is in this commit. Every Windows unit and structure suite was green
-on 2026-10-13 (web 2,637, repo 564, shared 497, judge-worker 403, …). The Linux
-mirror's DB, Redis and services suites were green twice in a row, and all 260
-real-isolate tests pass, including the golden suite with java21.
+Branch `phase4/integration-aenby5`, pushed to GitHub.
 
-- **Database.** Migrations `20261010100000` through `20261010100200`: 11 new
-  models and the database-enforced invariants (frozen versions; two-person
-  privileged operations; AdminScope; accommodation state machines;
-  impersonation windows; announcement immutability; TRUNCATE guards; comparator
-  CHECKs). Static and live guard fences live in `packages/db/test`.
-- **Streams.**
-  - `/super`: the 12 capabilities, impersonation, privileged operations with
-    break-glass, the email outbox, scheduler jobs, branding, policy (XP override)
-    and judge settings.
-  - `/admin`: AdminScope plus the query fence, roster import, cohorts,
-    sheets/tracks, reports, announcements and accommodations.
-  - Authoring: the review queue, zip import, validation tied to content, and
-    bundle-after-freeze.
-  - Judge: the FUNCTION harness for C++, Python and Java with six comparators,
-    compile-error remapping, and protocol v3.
-  - Content: six new seed problems, REC-0007 to REC-0012.
-  - Public `/judge` page and the workspace footer link.
-- **Integration.**
-  - Role × capability matrix covering the whole app (`capabilities.ts`, a static
-    test and a runtime test; the generated table is in `docs/SECURITY.md`).
-  - Student-exposure fence: a static test plus a DB canary test.
-  - Database test files run serially when `RECX_DB_TESTS=1`.
-  - Playwright projects `rbac`, `authoring` and `judge`, plus 22 gating a11y rows
-    for the admin, super and `/judge` pages.
+- **Leftovers:**
+  - `schema.prisma` `///` comments for the 20261010100200 rules;
+  - the sensitive-path naming section in `docs/CONVENTIONS.md`;
+  - `tests/repo/render-read-only.test.ts`.
+- **Size budgets.** `/judge` measures 116.8 KB (budget 125) and
+  `/dashboard` 120.0 KB (budget 160), recorded in `docs/CAPACITY.md` §7.1.
+  The Monaco-free check now covers `/super` too (43 routes).
+- **Adversarial review.** Six dimension reviewers raised 46 findings (about
+  41 once duplicates are merged). Then two skeptics per finding, one on
+  reachability and one on reproduction. Every confirmed finding is fixed,
+  with a test that fails without the fix. The decisions are in
+  `docs/OPEN-QUESTIONS.md` under "Phase 4 — adversarial review". The headline
+  fixes:
+  - ADMINs could read any student's submissions and code (AdminScope now
+    applies, and an ADMIN never gets the code).
+  - A rejudge could overwrite the verdict a purge keeps.
+  - FUNCTION tests typed in the UI skipped the canonical-form check.
+  - An SMTP outage could stall the judge reconciler.
+  - Super-admins could demote each other to zero.
+  - An approved operation could be stranded forever.
+  - A PII export grew past the approved set.
+  - Roster previews were invalidated by student activity.
+  - Several fence gaps (R3 could be fooled; the new R9 covers seed content).
+  - Thirteen UI and accessibility fixes.
+- **Gate (cloud, Linux).**
+  - Lint, typecheck, test and build all pass, and so does `pnpm size`.
+  - The DB and Redis suites pass with nothing skipped: db 354, scheduler
+    163, web 2,838, repo 607, shared 503, judge-worker 403, design 86.
+  - Postgres was 16 on port 5433, because the network policy blocks the
+    PGDG repository. Re-run on Postgres 17 locally.
+  - Rows are in `docs/RUNBOOK.md` §3.
 
-## Phase 4: what is left before the gate (spec §5, Phase 4 "Done when")
+## Phase 4: what is left before the gate (do these on the local machine)
 
-1. **Four gates on Windows and Linux.** On Linux run `scripts/dev/linux-gate.sh`;
-   it needs Postgres on 5433, Redis, isolate 2.x with cgroup v2 and the toolchains
-   under `/opt/toolchains`. Then `pnpm size` after the build: record the `/judge`
-   budget line in `docs/CAPACITY.md` §7, and check that `/dashboard` (the
-   announcement banner adds a client button) is still ≤ 160 KB.
-2. **Adversarial review** of the Phase 4 change. `phase4/p4-review.workflow.js` is a
-   ready workflow: six dimension reviewers, with two skeptics per finding. Fix the
-   confirmed findings, then re-run the gates.
-3. **Small leftovers.**
-   - `schema.prisma` `///` comments for Accommodation, Announcement,
-     ImpersonationSession and PrivilegedOperation should mention the rules added in
-     `20261010100200` (comments only).
-   - `docs/CONVENTIONS.md` should document the sensitive-path naming that
-     `tests/repo/student-exposure.test.ts` enforces.
-   - Optional: `tests/repo/render-read-only.test.ts` (governance design §9.11).
-   - Open question: should Accommodation `requestedAt` get the same ±5-minute
-     insert window as the other governance tables?
-4. **Live stage**, on a stack with a real judge.
-   - Rebuild the judge worker and scheduler. Protocol 3 means web and worker
-     deploy together (`docs/RUNBOOK.md` §2.9). The scheduler now sends mail
-     through `MAIL_TRANSPORT=log` in dev.
-   - Seed and then `validate-and-publish --approve` the six new problems.
-   - Run Playwright with `E2E_JUDGE=1`: `a11y`, `keyboard`, `rbac`, `authoring`
-     and `judge`. The worker needs ≥ 5 slots with `judge-rejudge` in RECX_QUEUES,
-     or validation never runs.
-   - Manual checks (spec): author a problem end to end in the UI, fail validation
-     with a wrong reference solution, fix it, publish, edit the statement, and
-     confirm an older submission still shows its version. Also: two super-admins
-     approving a 30-user DISABLED change; break-glass with the log transport;
-     impersonation being read-only.
+1. **Windows gate on the final tree.** Run `pnpm lint && pnpm typecheck &&
+   pnpm test && pnpm build && pnpm size`. The last Windows run predates the
+   review fixes.
+2. **Linux mirror on Postgres 17:** `scripts/dev/linux-gate.sh` in full. This
+   includes the real-isolate suites and the golden suite with java21. It
+   could not run in the cloud: no isolate, no cgroup v2 delegation, no
+   `/opt/toolchains`.
+3. **Live stage**, on a stack with a real judge:
+   - Rebuild the judge worker and scheduler. Protocol 3 means web and
+     worker deploy together (`docs/RUNBOOK.md` §2.9). The scheduler sends
+     mail through `MAIL_TRANSPORT=log` in dev.
+   - Seed, then `validate-and-publish --approve` the six new problems
+     REC-0007..0012.
+   - Run Playwright with `E2E_JUDGE=1`: projects `a11y`, `keyboard`, `rbac`,
+     `authoring` and `judge`. The worker needs at least 5 slots, with
+     `judge-rejudge` in RECX_QUEUES.
+   - Manual checks (spec):
+     - author a problem end to end in the UI;
+     - fail validation with a wrong reference solution, fix it, publish;
+     - edit the statement and confirm an older submission still shows its
+       revision;
+     - two super-admins approving a 30-user DISABLED change;
+     - break-glass with the log transport;
+     - impersonation being read-only.
+   - New since the review, worth a look in the browser:
+     - the impersonation banner over the sidebar;
+     - the admin phone menu closing when you navigate;
+     - the node-token dialog (Escape does not close it);
+     - an ADMIN opening an out-of-scope submission (404);
+     - an in-scope submission showing no code.
    - Record every check, with its date, in `docs/RUNBOOK.md` §3.
-5. Then Phases 5–10, in order, each gated.
+4. **CI.** `ci.yml` runs on pull requests (a manual dispatch needs the file
+   on `main`, which has only the initial commit). Opening a PR from this
+   branch runs the Windows and Linux verify jobs and the real-isolate
+   judge-integration job.
+5. **Needs a person:**
+   - Name the owners of the 450-problem content target
+     (`docs/OPEN-QUESTIONS.md`, top). This is a project commitment the spec
+     asks for.
+   - Open question: should Accommodation `requestedAt` get the ±5-minute
+     insert window?
+6. Then Phases 5–10, in order, each gated.
+
+## Moving this session to the local machine
+
+The cloud session is pushed. To continue on the Windows + WSL2 machine:
+
+1. In WSL, `cd` into the REC-CODE clone, then `git fetch origin` and
+   `git checkout phase4/integration-aenby5`.
+2. Run `claude --teleport`, pick this session (or use claude.ai/code →
+   Open in → Terminal for the exact command). The same claude.ai account
+   is needed, and the git state must be clean.
+3. The `.env` files are not in the repo. Keep the existing local ones
+   (`apps/web/.env.local`, `apps/judge-worker/.env.local`,
+   `packages/db/.env`).
 
 ## Ground rules carried over (see `SPEC.md` §0 and §7)
 
