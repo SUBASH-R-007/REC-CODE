@@ -59,8 +59,14 @@ export function Dialog({
       ref={ref}
       onClose={() => {
         // The browser may still close it on its own (a second Escape without
-        // user activation is not cancelable): tell a parent that thinks it is open.
-        if (open) onClose();
+        // user activation is not cancelable). A non-dismissible dialog opens
+        // again; otherwise the parent, which still thinks it is open, is told.
+        if (!open) return;
+        if (!dismissible) {
+          ref.current?.showModal();
+          return;
+        }
+        onClose();
       }}
       onCancel={(e) => {
         // Escape: ask the parent instead of closing natively (see above).
