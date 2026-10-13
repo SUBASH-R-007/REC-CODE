@@ -137,9 +137,11 @@ describe.skipIf(!ENABLED)("privileged operations against recx_test", () => {
     expect(after.executionStartedAt).not.toBeNull();
     expect(after.executedAt).not.toBeNull();
     expect(await m.db.problem.findUnique({ where: { id: problem.id } })).toBeNull();
-    expect(state.audits.map((a) => a.action)).toEqual(
-      expect.arrayContaining(["privileged.approved", "problem.deleted", "privileged.executed"]),
-    );
+    expect(state.audits.map((a) => a.action)).toEqual(expect.arrayContaining(["problem.deleted", "privileged.executed"]));
+    // The approval's SECURITY row is written in the decision transaction (the real audit chain).
+    const approved = await m.db.auditLog.findMany({ where: { action: "privileged.approved", entityId: op.id } });
+    expect(approved).toHaveLength(1);
+    expect(approved[0]).toMatchObject({ actorId: users.b!.id, sensitivity: "SECURITY" });
   });
 
   it("refuses self-approval without break-glass, and a wrong digest", async () => {
@@ -227,8 +229,10 @@ describe.skipIf(!ENABLED)("privileged operations against recx_test", () => {
     expect(JSON.stringify(outbox)).not.toMatch(/@example\.test/);
     const notices = await m.db.notification.count({ where: { kind: "privileged.break_glass", body: { contains: tag } } });
     expect(notices).toBe(outbox.length);
-    const breakGlass = state.audits.find((a) => a.action === "privileged.break_glass");
-    expect(breakGlass).toMatchObject({ sensitivity: "SECURITY", entityId: op.id });
+    // Written in the same transaction as the decision, the emails and the notifications.
+    const breakGlass = await m.db.auditLog.findMany({ where: { action: "privileged.break_glass", entityId: op.id } });
+    expect(breakGlass).toHaveLength(1);
+    expect(breakGlass[0]).toMatchObject({ sensitivity: "SECURITY", actorId: users.a!.id });
     expect(await m.db.problem.findUnique({ where: { id: problem.id } })).toBeNull();
   });
 

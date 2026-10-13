@@ -44,6 +44,8 @@ export interface OutboxReport {
   sent: number;
   retried: number;
   failed: number;
+  /** Claimed but not tried this tick (the send budget ran out); back to PENDING. */
+  deferred: number;
   /** PENDING security mail right now (shown on /super when undelivered). */
   pendingSecurity: number;
 }
@@ -59,9 +61,25 @@ interface ClaimedRow {
   entityId: string | null;
 }
 
+/**
+ * One tick sends for at most this long; rows it did not try go back to
+ * PENDING without spending an attempt. The tick also runs the judge
+ * reconciler, so a slow relay must never hold it for long.
+ */
+export const OUTBOX_SEND_BUDGET_MS = 30_000;
+
 export class OutboxDrainJob {
   constructor(
-    private readonly deps: { db: Db; log: Logger; dryRun: boolean; transport: MailTransport; batch?: number },
+    private readonly deps: {
+      db: Db;
+      log: Logger;
+      dryRun: boolean;
+      transport: MailTransport;
+      batch?: number;
+      /** Tests shorten it. */
+      sendBudgetMs?: number;
+      now?: () => number;
+    },
   ) {}
 
   private async pendingSecurity(): Promise<number> {
@@ -79,6 +97,7 @@ export class OutboxDrainJob {
       sent: 0,
       retried: 0,
       failed: 0,
+      deferred: 0,
       pendingSecurity: 0,
     };
     if (transport.name === "disabled" || dryRun) {
@@ -107,7 +126,24 @@ export class OutboxDrainJob {
       RETURNING id, kind, "toUserId", subject, "bodyText", attempts, "entityType", "entityId"`;
     report.claimed = claimed.length;
 
-    for (const row of claimed) {
+    // `attempts` is the claim token: every claim increments it, so a row
+    // another instance reclaimed after our lease ran out (a slow relay) is
+    // never finished by us as well. Every UPDATE below matches it.
+    const now = this.deps.now ?? Date.now;
+    const deadline = now() + (this.deps.sendBudgetMs ?? OUTBOX_SEND_BUDGET_MS);
+    for (const [index, row] of claimed.entries()) {
+      if (now() > deadline) {
+        const rest = claimed.slice(index);
+        for (const r of rest) {
+          await db.emailOutbox.updateMany({
+            where: { id: r.id, status: "SENDING", attempts: r.attempts },
+            data: { status: "PENDING", lockedUntil: null, attempts: { decrement: 1 } },
+          });
+        }
+        report.deferred = rest.length;
+        log.warn({ deferred: rest.length }, "outbox send budget used up; the rest waits for the next tick");
+        break;
+      }
       let error: string | null = null;
       try {
         const user = await db.user.findUnique({ where: { id: row.toUserId }, select: { email: true } });
@@ -119,7 +155,7 @@ export class OutboxDrainJob {
 
       if (error === null) {
         await db.emailOutbox.updateMany({
-          where: { id: row.id, status: "SENDING" },
+          where: { id: row.id, status: "SENDING", attempts: row.attempts },
           data: { status: "SENT", sentAt: new Date(), lockedUntil: null, lastError: null },
         });
         report.sent++;
@@ -131,7 +167,7 @@ export class OutboxDrainJob {
         await db.$executeRaw`
           UPDATE "EmailOutbox" SET status = 'PENDING', "lockedUntil" = NULL, "lastError" = ${error},
                  "nextAttemptAt" = (now() AT TIME ZONE 'UTC') + make_interval(secs => ${waitSeconds})
-           WHERE id = ${row.id} AND status = 'SENDING'`;
+           WHERE id = ${row.id} AND status = 'SENDING' AND attempts = ${row.attempts}`;
         report.retried++;
         log.warn({ outboxId: row.id, kind: row.kind, attempts: row.attempts, error }, "email send failed; will retry");
         continue;
@@ -139,7 +175,7 @@ export class OutboxDrainJob {
 
       await db.$transaction(async (tx) => {
         const moved = await tx.emailOutbox.updateMany({
-          where: { id: row.id, status: "SENDING" },
+          where: { id: row.id, status: "SENDING", attempts: row.attempts },
           data: { status: "FAILED", lockedUntil: null, lastError: error },
         });
         if (moved.count === 1 && isSecurityMail(row.kind)) {

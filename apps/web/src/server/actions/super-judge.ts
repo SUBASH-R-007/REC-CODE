@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { ConflictError, NotFoundError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
 import { generateNodeToken } from "@/lib/judge/node-token";
+import { SOURCE_NOT_ARCHIVED_SQL } from "@/lib/judge/rejudge";
 import { createPrivilegedOperation } from "@/lib/privileged/operations";
 import { enforcePrivilegedRequestRate } from "@/lib/privileged/rate";
 
@@ -99,6 +100,8 @@ export async function requestGlobalRejudge(
     const filters: Prisma.Sql[] = [
       Prisma.sql`"problemId" = ${problem.id}`,
       Prisma.sql`status IN ('DONE', 'INTERNAL_ERROR')`,
+      // The executor skips purged submissions too, so the approved count matches.
+      SOURCE_NOT_ARCHIVED_SQL,
     ];
     if (problemVersionId) filters.push(Prisma.sql`"problemVersionId" = ${problemVersionId}`);
     if (parsed.languages.length > 0) filters.push(Prisma.sql`language = ANY(${parsed.languages}::text[])`);

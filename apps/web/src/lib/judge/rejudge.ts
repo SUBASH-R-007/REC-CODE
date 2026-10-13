@@ -45,6 +45,19 @@ export const REJUDGE_RESET_DATA = {
  * is set to `now`, a fresh wait, so queue-latency figures measure the
  * rejudge itself. Returns the number of submissions reset.
  */
+/**
+ * A submission whose source was archived (a SUBMISSION_PURGE, or the
+ * retention purge) keeps its verdict row forever: it must never be rejudged,
+ * because the judge would compile an empty file and overwrite that verdict.
+ * Every rejudge selection (global and single) includes this condition on
+ * the "Submission" table.
+ */
+export const SOURCE_NOT_ARCHIVED_SQL = Prisma.sql`NOT EXISTS (
+  SELECT 1 FROM "SubmissionSource" src
+   WHERE src."submissionId" = "Submission".id AND src."archivedAt" IS NOT NULL)`;
+
+export const PURGED_SOURCE_MESSAGE = "This submission's code was purged, so it cannot be rejudged (its verdict is kept).";
+
 export async function resetForRejudge(tx: DbTx, ids: readonly string[], now: Date): Promise<number> {
   if (ids.length === 0) return 0;
   const list = [...ids];

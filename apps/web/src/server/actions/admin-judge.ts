@@ -12,7 +12,7 @@ import { CAP_TIME_ZONE, parseIstLocalDateTime } from "@/lib/judge/caps";
 import { allowUnhardenedNodes } from "@/lib/judge/lanes";
 import { isHeartbeatStale, NODE_ACTIONS, planNodeTransition } from "@/lib/judge/metrics";
 import { enqueueJudge } from "@/lib/judge/queue";
-import { resetForRejudge } from "@/lib/judge/rejudge";
+import { PURGED_SOURCE_MESSAGE, resetForRejudge } from "@/lib/judge/rejudge";
 import { revalidateLanguageConfigs } from "@/server/queries/judge-languages";
 
 /**
@@ -158,10 +158,12 @@ export async function rejudgeSubmission(
           origin: true,
           attemptCount: true,
           judgeNodeId: true,
+          source: { select: { archivedAt: true } },
         },
       });
       if (!row) throw new NotFoundError("That submission was not found.");
       if (row.status === "CANCELLED") throw new ValidationError("A cancelled submission cannot be rejudged.");
+      if (row.source?.archivedAt) throw new ValidationError(PURGED_SOURCE_MESSAGE);
 
       await resetForRejudge(tx, [submissionId], new Date());
       return row;
