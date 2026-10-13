@@ -49,7 +49,8 @@ export function createMailTransport(config: MailConfig, log: Logger): MailTransp
       // Short timeouts: the outbox drains inside the scheduler's tick, so a
       // relay that hangs must fail fast, never for nodemailer's defaults
       // (2 minutes to connect, 10 minutes of socket idle).
-      const transporter = nodemailer.createTransport(config.smtpUrl, {
+      const transporter = nodemailer.createTransport({
+        url: config.smtpUrl,
         connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
         greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
         socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
