@@ -14,6 +14,7 @@ import { requestIpHash } from "@/lib/ip";
 import { activeSuperAdminIds, enqueueEmail } from "@/lib/outbox";
 import { executePrivilegedOperation, privilegedSensitivity } from "@/lib/privileged/operations";
 import { PRIVILEGED_KIND_LABEL } from "@/lib/privileged/payloads";
+import { REQUESTER_IS_ACTIVE_SUPER_ADMIN_SQL, requesterIsActiveSuperAdmin } from "@/lib/privileged/requester";
 import {
   canApprove,
   canCancel,
@@ -72,12 +73,6 @@ function enforce(check: DecisionCheck): void {
   if (!check.ok) throw new ValidationError(check.reason);
 }
 
-/** The requester is still an ACTIVE SUPER_ADMIN (a two-person decision needs both to be current). */
-async function requesterIsActiveSuperAdmin(requestedById: string): Promise<boolean> {
-  const requester = await db.user.findUnique({ where: { id: requestedById }, select: { role: true, status: true } });
-  return requester?.role === "SUPER_ADMIN" && requester.status === "ACTIVE";
-}
-
 /** A decision UPDATE matched no row (or the database refused it): say why. */
 async function refusalAfterRace(id: string): Promise<never> {
   const op = await loadOperation(id);
@@ -133,9 +128,7 @@ export async function approvePrivilegedOperation(
            WHERE id = ${op.id} AND status = 'PENDING' AND "payloadSha256" = ${parsed.payloadSha256}
              AND "requestedById" <> ${actor.id}
              AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
-             AND EXISTS (SELECT 1 FROM "User" r
-                          WHERE r.id = "PrivilegedOperation"."requestedById"
-                            AND r.role = 'SUPER_ADMIN' AND r.status = 'ACTIVE')`;
+             AND ${REQUESTER_IS_ACTIVE_SUPER_ADMIN_SQL}`;
         if (decided === 1) {
           await appendAuditEntriesInTx(tx, [
             {
