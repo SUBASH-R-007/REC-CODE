@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeActionExports,
@@ -48,6 +49,10 @@ import { findFiles, isTestPath, readRepoFile, repoFiles } from "./support/repo";
  *       before it reads the request body or touches the database
  *   R8  every sensitive library module (lib/**, server/queries/**) starts
  *       with `import "server-only"`, except the listed pure helpers
+ *   R9  no value import of the seed content (@recx/shared/samples/*, or
+ *       anything under apps/web/scripts/): it holds reference sources and
+ *       the hidden-test generators. Package specifiers are external to the
+ *       import graph, so R4/R5 cannot see these
  *
  * Every rule has flagged and clean self-tests.
  */
@@ -163,6 +168,25 @@ const read = (rel: string) => {
 const graph = new ModuleGraph({ aliases: { "@/": `${WEB_SRC}/` }, files: new Set(repoFiles()) }, read);
 const outside = webFiles.filter((f) => !isSensitive(f));
 
+const SEED_PACKAGE = /^@recx\/shared\/samples(?:\/|$)/;
+const SEED_DIR = "apps/web/scripts/";
+
+/** R9: value imports of seed content (reference sources, hidden-test generators) from `fromRel`. */
+export function seedContentImports(fromRel: string, source: string): string[] {
+  const hits: string[] = [];
+  for (const edge of importEdges(source, fromRel)) {
+    if (edge.typeOnly) continue;
+    // "@/" maps into apps/web/src, so only a relative specifier can reach apps/web/scripts.
+    const relative = edge.specifier.startsWith(".")
+      ? path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), edge.specifier))
+      : "";
+    if (SEED_PACKAGE.test(edge.specifier) || relative.startsWith(SEED_DIR)) {
+      hits.push(`${fromRel}:${edge.line} imports ${edge.specifier}`);
+    }
+  }
+  return hits;
+}
+
 export function studentEntries(files: readonly string[]): string[] {
   return files.filter(
     (f) =>
@@ -232,6 +256,22 @@ describe("detector self-tests", () => {
       ],
       ["isSample false", "select: { testCases: { where: { isSample: false }, select: { output: true } } }"],
       ["non-literal argument", "const rows = await db.testCase.findMany(args);"],
+      [
+        "isSample: true only in select (no where)",
+        "await db.testCase.findMany({ select: { isSample: true, input: { select: { inline: true } }, output: { select: { inline: true } } } });",
+      ],
+      [
+        "isSample: true in select, where without it",
+        "select: { testCases: { where: { problemVersionId }, select: { isSample: true, input: true } } }",
+      ],
+      ["negated filter", "await db.testCase.findMany({ where: { NOT: { isSample: true } }, select: { input: true } });"],
+      ["OR filter", "await db.testCase.findMany({ where: { OR: [{ isSample: true }, { index: 3 }] }, select: { output: true } });"],
+      [
+        "conditional spread",
+        "await db.testCase.findMany({ where: { problemVersionId, ...(all ? {} : { isSample: true }) }, select: { input: true } });",
+      ],
+      ["spread after the filter", "await db.testCase.findMany({ where: { isSample: true, ...extra }, select: { input: true } });"],
+      ["shorthand where variable", "await db.testCase.findMany({ where, select: { input: { select: { inline: true } } } });"],
     ])("flags %s", (_n, snippet) => expect(scanTestCaseQueries(snippet).length).toBeGreaterThan(0));
 
     it.each([
@@ -408,6 +448,22 @@ describe("detector self-tests", () => {
     ])("rejects %s", (_n, body) => expect(staffGuardBeforeBody(`{ ${body} }`)).toBe(false));
   });
 
+  describe("R9 seed content", () => {
+    const from = "apps/web/src/app/(student)/help/page.tsx";
+    it.each([
+      ["the two-sum references", 'import { TWO_SUM_REFERENCE } from "@recx/shared/samples/two-sum";'],
+      ["the authored problems", 'import { AUTHORED_PROBLEMS } from "../../../../scripts/content/index";'],
+      ["a dynamic import", 'const m = await import("@recx/shared/samples/two-sum");'],
+      ["a re-export", 'export { HANDLE_MAKER } from "../../../../scripts/content/handle-maker";'],
+    ])("flags %s", (_n, src) => expect(seedContentImports(from, src)).toHaveLength(1));
+
+    it.each([
+      ["a type-only import", 'import type { AuthoredProblem } from "../../../../scripts/content/types";'],
+      ["the harness helpers", 'import { starterStub } from "@recx/shared/harness";'],
+      ["an app module", 'import { db } from "@/lib/db";'],
+    ])("does not flag %s", (_n, src) => expect(seedContentImports(from, src)).toEqual([]));
+  });
+
   describe("R8 server-only", () => {
     it("accepts a module that starts with the import", () => {
       expect(startsWithServerOnly('import "server-only";\nimport { db } from "@/lib/db";')).toBe(true);
@@ -460,6 +516,10 @@ describe("student exposure fence over apps/web/src", () => {
   it("the graph resolves every @/ and relative import in apps/web/src", () => {
     for (const f of webFiles) graph.edges(f);
     expect(graph.unresolved.map((u) => `${u.from}:${u.line} ${u.specifier}`)).toEqual([]);
+  });
+
+  it("R9: no module in apps/web/src imports the seed content", () => {
+    expect(webFiles.flatMap((f) => seedContentImports(f, read(f)))).toEqual([]);
   });
 
   it("R4: no module outside the sensitive paths imports a sensitive one", () => {

@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma, Role } from "@recx/db";
 import { LANGUAGE_CATALOG, isLanguageKey, type JobKind, type VerdictDisplay } from "@recx/shared";
 import { isStaff } from "@/lib/auth/guards";
+import { findScopedStudent, loadStudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -13,14 +14,22 @@ import {
   type SubmissionStudentView,
 } from "@/lib/judge/view";
 
-/** Who is asking. Owners see their own rows; ADMIN / SUPER_ADMIN see any. */
+/**
+ * Who is asking. Owners see their own rows. A SUPER_ADMIN sees any row. An
+ * ADMIN sees a row only when its owner is a student their AdminScope covers;
+ * without an active grant the scope is empty and matches no one (fail
+ * closed). A row the viewer may not see reads as missing (a 404), so ids
+ * cannot be probed.
+ */
 export interface Viewer {
   id: string;
   role: Role;
 }
 
-function canView(viewer: Viewer, ownerId: string): boolean {
-  return viewer.id === ownerId || isStaff(viewer.role);
+async function canView(viewer: Viewer, ownerId: string): Promise<boolean> {
+  if (viewer.id === ownerId || viewer.role === "SUPER_ADMIN") return true;
+  if (viewer.role !== "ADMIN") return false;
+  return (await findScopedStudent(await loadStudentScope(viewer), { id: ownerId })) !== null;
 }
 
 /** Sample cases of a pinned version. Never hidden ones: `isSample: true` only. */
@@ -98,7 +107,7 @@ async function submissionViewOf(row: SubmissionRow): Promise<SubmissionStudentVi
 
 export async function getSubmissionView(id: string, viewer: Viewer): Promise<SubmissionStudentView | null> {
   const row = await db.submission.findUnique({ where: { id }, select: SUBMISSION_SELECT });
-  if (!row || !canView(viewer, row.userId)) return null;
+  if (!row || !(await canView(viewer, row.userId))) return null;
   return submissionViewOf(row);
 }
 
@@ -125,9 +134,9 @@ export interface SubmissionDetail {
 }
 
 /**
- * The full submission page (/problems/[slug]/submissions/[id]). Owner or
- * ADMIN / SUPER_ADMIN only — anyone else gets null (a 404, so ids cannot be
- * probed). Students see only their own PRACTICE submissions here; contest
+ * The full submission page (/problems/[slug]/submissions/[id]). The owner,
+ * a SUPER_ADMIN, or an ADMIN whose scope covers the owner (see `canView`);
+ * anyone else gets null (a 404, so ids cannot be probed). Students see only their own PRACTICE submissions here; contest
  * and assessment submissions have their own surfaces and rules. The slug
  * must match the submission's problem. Node and calibration details are
  * never part of this (students never see them).
@@ -144,7 +153,7 @@ export async function getSubmissionDetail(id: string, slug: string, viewer: View
       user: { select: { firstName: true, lastName: true } },
     },
   });
-  if (!row || !canView(viewer, row.userId) || row.problem.slug !== slug) return null;
+  if (!row || row.problem.slug !== slug || !(await canView(viewer, row.userId))) return null;
   const own = row.userId === viewer.id;
   if (!isStaff(viewer.role) && row.origin !== "PRACTICE") return null;
   const view = await submissionViewOf(row);
@@ -182,7 +191,7 @@ export async function getRunView(id: string, viewer: Viewer): Promise<RunStudent
     },
   });
   // Runs live for 24 hours; after that they are gone even before the purge.
-  if (!row || !canView(viewer, row.userId) || row.expiresAt.getTime() < Date.now()) return null;
+  if (!row || row.expiresAt.getTime() < Date.now() || !(await canView(viewer, row.userId))) return null;
   return toStudentView({
     kind: "run",
     id: row.id,

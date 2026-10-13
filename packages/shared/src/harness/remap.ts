@@ -245,11 +245,17 @@ function remapPython(lines: string[], m: Mapper): string[] {
     }
 
     // "IndentationError: expected an indented block after function definition on line 7"
+    // "SyntaxError: unterminated string literal (detected at line 6)"
     let text = /^(?:\w+\.)*\w*(?:Error|Warning)\b/.test(line)
-      ? line.replace(/\bon line (\d+)/g, (_x, ln: string) => {
-          const mapped = m.map(Number(ln));
-          return mapped === null ? `in ${JUDGE_CALL}` : `on line ${mapped}`;
-        })
+      ? line
+          .replace(/\bon line (\d+)/g, (_x, ln: string) => {
+            const mapped = m.map(Number(ln));
+            return mapped === null ? `in ${JUDGE_CALL}` : `on line ${mapped}`;
+          })
+          .replace(/\(detected at line (\d+)\)/g, (_x, ln: string) => {
+            const mapped = m.map(Number(ln));
+            return mapped === null ? "(detected after your last line)" : `(detected at line ${mapped})`;
+          })
       : line;
     text = text.replace(new RegExp(`\\((?:/box/)?${m.fileRe}, line (\\d+)\\)`, "g"), (_x, ln: string) => {
       const mapped = m.map(Number(ln));

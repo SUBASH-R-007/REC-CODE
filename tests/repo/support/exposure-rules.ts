@@ -91,14 +91,51 @@ export function scanTestBytes(source: string): Finding[] {
 /** A testCase(s) query object (`testCase.findMany({…})` or a nested `testCases: {…}` select). */
 const TEST_CASE_BLOCK = /\btestCases?\b\s*(?:\??\.\s*(\w+)\s*\(\s*|:\s*)(\{)?/g;
 const CONTENT_KEY = /(?:^|[\s{,])(input|output)\s*:/;
-const SAMPLE_ONLY = /\bisSample\s*:\s*true\b/;
+const WHERE_KEY = /(?:^|[\s,])where\s*:/;
+const SAMPLE_ONLY = /(?:^|[\s,])isSample\s*:\s*true\b/;
 const READ_METHODS = new Set(["findMany", "findFirst", "findUnique", "findFirstOrThrow", "findUniqueOrThrow"]);
 
 /**
+ * The block's own entries: everything nested deeper than its outer braces
+ * (objects, arrays, parentheses) is blanked, so `NOT: { isSample: true }`,
+ * `OR: [...]` or `...(all ? {} : { isSample: true })` do not count.
+ */
+function topLevel(block: string): string {
+  let depth = 0;
+  let out = "";
+  for (const c of block.split("")) {
+    const opens = c === "{" || c === "[" || c === "(";
+    const closes = c === "}" || c === "]" || c === ")";
+    if (closes) depth--;
+    out += depth === 1 && !opens && !closes ? c : c === "\n" ? "\n" : " ";
+    if (opens) depth++;
+  }
+  return out;
+}
+
+/**
+ * True when the block's own `where: { … }` (an object literal) has its own
+ * `isSample: true` and no spread that could replace it.
+ */
+function filtersSampleOnly(block: string): boolean {
+  const own = topLevel(block);
+  const where = WHERE_KEY.exec(own);
+  if (!where) return false;
+  // `own` keeps offsets but blanks nested braces: find the value's "{" in the block itself.
+  const value = /^\s*\{/.exec(block.slice(where.index + where[0].length));
+  if (!value) return false;
+  const whereBlock = braceBlock(block, where.index + where[0].length + value[0].length - 1);
+  if (!whereBlock) return false;
+  const entries = topLevel(whereBlock);
+  return SAMPLE_ONLY.test(entries) && !entries.includes("...");
+}
+
+/**
  * R3: every testCase(s) query block that selects or includes the `input` /
- * `output` blob relation must filter `isSample: true` in the same block. A
- * read whose argument is not an object literal cannot be checked and is
- * flagged too.
+ * `output` blob relation must filter `isSample: true` in its own `where`
+ * object literal: not in `select`, not under NOT / OR / AND, not behind a
+ * spread or a conditional. A read whose argument (or whose `where`) is not an
+ * object literal cannot be checked and is flagged too.
  */
 export function scanTestCaseQueries(source: string): Finding[] {
   const { code } = structuralCode(source);
@@ -115,8 +152,8 @@ export function scanTestCaseQueries(source: string): Finding[] {
     }
     const block = braceBlock(code, m.index + m[0].length - 1);
     if (!block) continue;
-    if (CONTENT_KEY.test(block) && !SAMPLE_ONLY.test(block)) {
-      findings.push({ line, rule: "R3 testCase query selects input/output without isSample: true" });
+    if (CONTENT_KEY.test(block) && !filtersSampleOnly(block)) {
+      findings.push({ line, rule: "R3 testCase query selects input/output without where: { isSample: true }" });
     }
   }
   return dedupe(findings);

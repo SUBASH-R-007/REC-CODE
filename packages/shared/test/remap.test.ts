@@ -46,6 +46,7 @@ function shownLineNumbers(text: string, b: HarnessBuild): number[] {
     new RegExp(`\\(${display}, line (\\d+)\\)`, "g"),
     /^\s*(\d+) \|/gm,
     /\bon line (\d+)/g,
+    /\(detected at line (\d+)\)/g,
   ];
   for (const re of patterns) for (const m of text.matchAll(re)) out.push(Number(m[1]));
   return out;
@@ -180,6 +181,31 @@ describe("CPython", () => {
       "IndentationError: expected an indented block after function definition on line 2",
     ]);
     expect(diagnosticHints(out)).toContain(UNCLOSED_HINT);
+    expectInRange(out, py);
+  });
+
+  it("maps CPython's \"(detected at line N)\", and never shows a driver line there", () => {
+    const inside = [
+      `  File "main.py", line ${at(py, 3)}`,
+      "    s = 'abc",
+      "        ^",
+      `SyntaxError: unterminated string literal (detected at line ${at(py, 3)})`,
+    ].join("\n");
+    expect(remapDiagnostics(inside, py, "main.py").split("\n")).toEqual([
+      '  File "solution.py", line 3',
+      "    s = 'abc",
+      "        ^",
+      "SyntaxError: unterminated string literal (detected at line 3)",
+    ]);
+    // An unclosed triple-quoted string is only detected in the generated driver.
+    const after = [
+      `  File "main.py", line ${at(py, 3)}`,
+      '    s = """abc',
+      "        ^",
+      `SyntaxError: unterminated triple-quoted string literal (detected at line ${driverLine(py, 18)})`,
+    ].join("\n");
+    const out = remapDiagnostics(after, py, "main.py");
+    expect(out.split("\n").at(-1)).toBe("SyntaxError: unterminated triple-quoted string literal (detected after your last line)");
     expectInRange(out, py);
   });
 
@@ -319,6 +345,7 @@ describe("property: no output line ever shows a line number outside 1..userLineC
         `  File "/opt/toolchains/cpython-3.12.6/lib/python3.12/heapq.py", line ${lineOf(b)}, in heappush`,
         `IndentationError: unexpected indent (main.py, line ${lineOf(b)})`,
         `SyntaxError: something after 'if' statement on line ${lineOf(b)}`,
+        `SyntaxError: unterminated string literal (detected at line ${lineOf(b)})`,
       ].join("\n"),
     java: (b) =>
       [
