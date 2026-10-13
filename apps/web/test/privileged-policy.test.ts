@@ -31,18 +31,24 @@ const op = (fields: Partial<DecidableOperation> = {}): DecidableOperation => ({
 
 describe("decisions", () => {
   it("a second super-admin approves the exact payload", () => {
-    expect(canApprove(op(), "other", SHA, NOW)).toEqual({ ok: true });
-    expect(canApprove(op(), "requester", SHA, NOW)).toEqual({ ok: false, reason: DECISION_MESSAGES.ownRequest });
-    expect(canApprove(op(), "other", "b".repeat(64), NOW)).toEqual({ ok: false, reason: DECISION_MESSAGES.changed });
+    expect(canApprove(op(), "other", SHA, NOW, true)).toEqual({ ok: true });
+    expect(canApprove(op(), "requester", SHA, NOW, true)).toEqual({ ok: false, reason: DECISION_MESSAGES.ownRequest });
+    expect(canApprove(op(), "other", "b".repeat(64), NOW, true)).toEqual({ ok: false, reason: DECISION_MESSAGES.changed });
+  });
+
+  it("refuses to approve once the requester is no longer an active super-admin", () => {
+    expect(canApprove(op(), "other", SHA, NOW, false)).toEqual({ ok: false, reason: DECISION_MESSAGES.requesterGone });
+    // Rejecting stays possible.
+    expect(canReject(op(), "other", NOW)).toEqual({ ok: true });
   });
 
   it("expires at expiresAt (24 h), and decided requests stay decided", () => {
     const expired = op({ expiresAt: NOW });
     expect(effectiveStatus(expired, NOW)).toBe("EXPIRED");
-    expect(canApprove(expired, "other", SHA, NOW)).toEqual({ ok: false, reason: DECISION_MESSAGES.expired });
+    expect(canApprove(expired, "other", SHA, NOW, true)).toEqual({ ok: false, reason: DECISION_MESSAGES.expired });
     expect(canReject(expired, "other", NOW)).toEqual({ ok: false, reason: DECISION_MESSAGES.expired });
     for (const status of ["APPROVED", "EXECUTING", "EXECUTED", "FAILED", "REJECTED", "CANCELLED", "EXPIRED"] as const) {
-      expect(canApprove(op({ status }), "other", SHA, NOW).ok).toBe(false);
+      expect(canApprove(op({ status }), "other", SHA, NOW, true).ok).toBe(false);
       expect(canCancel(op({ status }), "requester", NOW).ok).toBe(false);
     }
     // An APPROVED row past expiresAt is still APPROVED: expiry bounds the wait, not the run.
@@ -98,10 +104,14 @@ describe("payloads", () => {
   it("are strict: no extra keys, only the minimised PII columns", () => {
     expect(() => parsePrivilegedPayload("PROBLEM_DELETE", { problemId: "p", extra: 1 })).toThrow();
     expect(() =>
-      parsePrivilegedPayload("PII_EXPORT", { filter: {}, columns: ["collegeId", "passwordHash"] }),
+      parsePrivilegedPayload("PII_EXPORT", { filter: {}, userIds: ["u1"], columns: ["collegeId", "passwordHash"] }),
     ).toThrow();
-    expect(parsePrivilegedPayload("PII_EXPORT", { filter: { batchYear: 2027 }, columns: ["collegeId"] })).toEqual({
+    // The account set is part of the approved payload.
+    expect(() => parsePrivilegedPayload("PII_EXPORT", { filter: {}, columns: ["collegeId"] })).toThrow();
+    expect(() => parsePrivilegedPayload("PII_EXPORT", { filter: {}, userIds: ["u1", "u1"], columns: ["collegeId"] })).toThrow();
+    expect(parsePrivilegedPayload("PII_EXPORT", { filter: { batchYear: 2027 }, userIds: ["u1"], columns: ["collegeId"] })).toEqual({
       filter: { batchYear: 2027 },
+      userIds: ["u1"],
       columns: ["collegeId"],
     });
   });

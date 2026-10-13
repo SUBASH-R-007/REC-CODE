@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * Who may read a submission or run through the student-facing views
  * (server/queries/submissions.ts): the owner, a SUPER_ADMIN, or an ADMIN whose
  * AdminScope covers the owner. Anyone else, including an ADMIN without a
- * grant, gets null, exactly like a missing id. The scope itself (grants to
+ * grant, gets null, exactly like a missing id. An in-scope ADMIN sees the
+ * metadata and verdicts but never the code (sourceWithheld). The scope itself (grants to
  * students) is tested against Postgres in admin-scope.db.test.ts; here the
  * scope module is replaced so the wiring can be checked without a database.
  */
@@ -106,7 +107,12 @@ describe("submission and run views: owner, SUPER_ADMIN or in-scope ADMIN only", 
     if (!allowed) return expect(detail).toBeNull();
     // The owner's ASSESSMENT submission is not shown on the practice page; staff see it.
     if (viewer.role === "STUDENT") return expect(detail).toBeNull();
-    expect(detail?.source).toBe("print('student source')");
+    // An ADMIN sees metadata and verdicts, never another student's code.
+    if (viewer.role === "ADMIN") {
+      expect(detail).toMatchObject({ source: null, sourceWithheld: true });
+      return;
+    }
+    expect(detail).toMatchObject({ source: "print('student source')", sourceWithheld: false });
   });
 
   it.each(cases)("getStudentView(submission): %s → allowed %s", async (_label, allowed, viewer) => {

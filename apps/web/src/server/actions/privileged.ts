@@ -71,10 +71,19 @@ function enforce(check: DecisionCheck): void {
   if (!check.ok) throw new ValidationError(check.reason);
 }
 
+/** The requester is still an ACTIVE SUPER_ADMIN (a two-person decision needs both to be current). */
+async function requesterIsActiveSuperAdmin(requestedById: string): Promise<boolean> {
+  const requester = await db.user.findUnique({ where: { id: requestedById }, select: { role: true, status: true } });
+  return requester?.role === "SUPER_ADMIN" && requester.status === "ACTIVE";
+}
+
 /** A decision UPDATE matched no row (or the database refused it): say why. */
 async function refusalAfterRace(id: string): Promise<never> {
   const op = await loadOperation(id);
   const status = effectiveStatus(op, new Date());
+  if (status === "PENDING" && !(await requesterIsActiveSuperAdmin(op.requestedById))) {
+    throw new AppError(DECISION_MESSAGES.requesterGone, 409);
+  }
   throw new AppError(status === "EXPIRED" ? DECISION_MESSAGES.expired : DECISION_MESSAGES.decided, 409);
 }
 
@@ -109,7 +118,7 @@ export async function approvePrivilegedOperation(
     const actor = await requireSuperAdmin();
     const parsed = approveSchema.parse(input);
     const op = await loadOperation(parsed.id);
-    enforce(canApprove(op, actor.id, parsed.payloadSha256, new Date()));
+    enforce(canApprove(op, actor.id, parsed.payloadSha256, new Date(), await requesterIsActiveSuperAdmin(op.requestedById)));
     const note = parsed.note ? parsed.note : null;
     await decide(op.id, () =>
       db.$executeRaw`
@@ -119,7 +128,10 @@ export async function approvePrivilegedOperation(
                "decisionNote" = ${note}, "breakGlass" = false
          WHERE id = ${op.id} AND status = 'PENDING' AND "payloadSha256" = ${parsed.payloadSha256}
            AND "requestedById" <> ${actor.id}
-           AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')`,
+           AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
+           AND EXISTS (SELECT 1 FROM "User" r
+                        WHERE r.id = "PrivilegedOperation"."requestedById"
+                          AND r.role = 'SUPER_ADMIN' AND r.status = 'ACTIVE')`,
     );
     await audit({
       actorId: actor.id,

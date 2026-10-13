@@ -128,7 +128,7 @@ export default async function SuperAuditPage({ searchParams }: { searchParams: P
       ) : rows.length === 0 ? (
         <EmptyState compact title="No audit rows match" />
       ) : (
-        <div tabIndex={0} aria-label="Audit rows" className="overflow-x-auto rounded-xl border border-border">
+        <div role="region" tabIndex={0} aria-label="Audit rows" className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[56rem] text-left text-sm">
             <caption className="sr-only">Audit rows, newest first</caption>
             <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">

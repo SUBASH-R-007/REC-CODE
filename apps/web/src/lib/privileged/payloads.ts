@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Prisma, PrivilegedOperationKind } from "@recx/db";
-import { BULK_STATUS_DIRECT_MAX, BULK_STATUS_MAX, LANGUAGE_KEYS, VERDICTS } from "@recx/shared";
+import { BULK_STATUS_DIRECT_MAX, BULK_STATUS_MAX, LANGUAGE_KEYS, PII_EXPORT_MAX_ACCOUNTS, VERDICTS } from "@recx/shared";
 import { canonicalJson } from "@/lib/audit-chain";
 
 /**
@@ -82,7 +82,13 @@ export const privilegedPayloadSchemas = {
     .strict(),
   PII_EXPORT: z
     .object({
+      /** The filter as entered (shown and audited); the export covers exactly `userIds`. */
       filter: userFilterSchema,
+      userIds: z
+        .array(idSchema)
+        .min(1)
+        .max(PII_EXPORT_MAX_ACCOUNTS)
+        .refine((ids) => new Set(ids).size === ids.length, "Each account may appear only once."),
       columns: z
         .array(z.enum(PII_EXPORT_COLUMNS))
         .min(1)

@@ -114,8 +114,14 @@ export async function getSubmissionView(id: string, viewer: Viewer): Promise<Sub
 /** Everything the full submission page shows: the student view plus the submitted source. */
 export interface SubmissionDetail {
   view: SubmissionStudentView;
-  /** Null once the source has been archived out of the database. */
+  /** Null once the source has been archived out of the database, or when withheld (below). */
   source: string | null;
+  /**
+   * True when the viewer is an ADMIN looking at someone else's submission:
+   * they see its metadata and verdicts, never its code (the same rule as the
+   * admin student page). The owner and a SUPER_ADMIN see the code.
+   */
+  sourceWithheld: boolean;
   /** Catalog language id for the cheap highlighter ("cpp", "python", …). */
   editorLanguage: string;
   /** Indexes of the pinned version's sample tests (labels while judging). */
@@ -157,10 +163,12 @@ export async function getSubmissionDetail(id: string, slug: string, viewer: View
   const own = row.userId === viewer.id;
   if (!isStaff(viewer.role) && row.origin !== "PRACTICE") return null;
   const view = await submissionViewOf(row);
-  const source = row.source && !row.source.archivedAt ? row.source.source : null;
+  const sourceWithheld = !own && viewer.role !== "SUPER_ADMIN";
+  const source = !sourceWithheld && row.source && !row.source.archivedAt ? row.source.source : null;
   return {
     view,
     source,
+    sourceWithheld,
     editorLanguage: isLanguageKey(row.language) ? LANGUAGE_CATALOG[row.language].editorLanguage : "plaintext",
     sampleIndexes: row.problemVersion.testCases.filter((t) => t.isSample).map((t) => t.index),
     problem: { slug: row.problem.slug, title: row.problemVersion.title, displayCode: row.problem.displayCode },

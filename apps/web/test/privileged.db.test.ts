@@ -94,6 +94,7 @@ describe.skipIf(!ENABLED)("privileged operations against recx_test", () => {
       a: { role: "SUPER_ADMIN" },
       b: { role: "SUPER_ADMIN" },
       c: { role: "SUPER_ADMIN" },
+      d: { role: "SUPER_ADMIN" },
     });
   });
 
@@ -229,6 +230,24 @@ describe.skipIf(!ENABLED)("privileged operations against recx_test", () => {
     const breakGlass = state.audits.find((a) => a.action === "privileged.break_glass");
     expect(breakGlass).toMatchObject({ sensitivity: "SECURITY", entityId: op.id });
     expect(await m.db.problem.findUnique({ where: { id: problem.id } })).toBeNull();
+  });
+
+  it("a request whose requester is no longer an active super-admin cannot be approved, only rejected", async () => {
+    const problem = await draftProblem("p8");
+    as("d");
+    const requested = await m.problems.requestProblemDeletion({ problemId: problem.id, reason: `Test deletion ${tag}` });
+    if (!requested.ok) throw new Error(requested.error);
+    const op = await m.db.privilegedOperation.findUniqueOrThrow({ where: { id: requested.data.id } });
+    // d is demoted (say the account was compromised) while the request waits.
+    await m.db.user.update({ where: { id: users.d!.id }, data: { role: "ADMIN" } });
+    as("b");
+    const result = await m.privileged.approvePrivilegedOperation({ id: op.id, payloadSha256: op.payloadSha256 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/no longer an active super-admin/);
+    expect((await m.db.privilegedOperation.findUniqueOrThrow({ where: { id: op.id } })).status).toBe("PENDING");
+    expect(await m.db.problem.findUnique({ where: { id: problem.id } })).not.toBeNull();
+    const rejected = await m.privileged.rejectPrivilegedOperation({ id: op.id, note: `Requester was demoted ${tag}` });
+    expect(rejected.ok).toBe(true);
   });
 
   it("refuses to delete a published problem: retire instead", async () => {

@@ -51,7 +51,7 @@ export function SuperNav() {
               className={cn(
                 "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
                 active
-                  ? "bg-danger-subtle text-danger"
+                  ? "bg-danger-subtle font-semibold text-danger underline decoration-2 underline-offset-4"
                   : "text-text-secondary hover:bg-primary-subtle hover:text-text",
               )}
             >

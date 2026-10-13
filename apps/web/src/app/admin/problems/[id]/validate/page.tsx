@@ -135,7 +135,7 @@ export default async function ValidatePage({ params, searchParams }: Props) {
           {references.length === 0 ? (
             <p className="text-sm text-text-secondary">No reference solutions yet.</p>
           ) : (
-            <div tabIndex={0} aria-label="Validation results" className="overflow-x-auto">
+            <div role="region" tabIndex={0} aria-label="Validation results" className="overflow-x-auto">
               <table className="w-full min-w-[48rem] text-sm">
                 <caption className="sr-only">Expected and actual verdict of every reference solution</caption>
                 <thead className="text-left text-xs uppercase tracking-wide text-muted">
@@ -235,7 +235,7 @@ export default async function ValidatePage({ params, searchParams }: Props) {
           {limits.length === 0 ? (
             <p className="text-sm text-text-secondary">Written when every model solution has matched (stage 1).</p>
           ) : (
-            <div tabIndex={0} aria-label="Derived limits" className="overflow-x-auto">
+            <div role="region" tabIndex={0} aria-label="Derived limits" className="overflow-x-auto">
               <table className="w-full min-w-[32rem] text-sm">
                 <caption className="sr-only">Per-language time and memory limits</caption>
                 <thead className="text-left text-xs uppercase tracking-wide text-muted">

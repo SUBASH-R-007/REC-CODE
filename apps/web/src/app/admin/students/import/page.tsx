@@ -29,10 +29,10 @@ export default async function RosterImportPage() {
         description={`Rows outside your scope (${describeScope(scope)}) are rejected in the preview.`}
       />
       <div className="grid gap-6 lg:grid-cols-5">
-        <Card className="p-5 lg:col-span-3">
+        <Card className="min-w-0 p-5 lg:col-span-3">
           <RosterImportForm maxKb={maxKb} />
         </Card>
-        <Card className="lg:col-span-2">
+        <Card className="min-w-0 lg:col-span-2">
           <CardHeader title="File format" />
           <div className="space-y-3 px-5 pb-5 pt-3 text-sm text-text-secondary">
             <p>The first line must be exactly:</p>

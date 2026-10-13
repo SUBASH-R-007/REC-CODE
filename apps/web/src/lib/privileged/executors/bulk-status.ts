@@ -1,6 +1,7 @@
 import "server-only";
 import type { AccountStatus, Role } from "@recx/db";
 import { planStatusChange } from "@/lib/accounts/status";
+import { countActiveSuperAdminsLocked } from "@/lib/accounts/super-admins";
 import { auditMany, type AuditInput } from "@/lib/audit";
 import { closeImpersonationsOf } from "@/lib/auth/impersonation";
 import { db } from "@/lib/db";
@@ -29,7 +30,7 @@ export const executeBulkStatusChange: Executor<"BULK_STATUS_CHANGE"> = async (op
         where: { id: { in: batch } },
         select: { id: true, role: true, status: true },
       });
-      let activeSuperAdmins = await tx.user.count({ where: { role: "SUPER_ADMIN", status: "ACTIVE" } });
+      let activeSuperAdmins = await countActiveSuperAdminsLocked(tx);
       const found = new Map(users.map((u) => [u.id, u]));
       const byFrom = new Map<AccountStatus, string[]>();
       const audits: AuditInput[] = [];

@@ -46,6 +46,9 @@ export function RotateTokenButton({ nodeId, hostname }: { nodeId: string; hostna
       {token !== null && (
         <Dialog
           open
+          // The token is shown once and the old one is already revoked: only
+          // "I have copied it" closes this (not Escape, not the backdrop).
+          dismissible={false}
           title={`New token for ${nodeId}`}
           onClose={() => {
             setToken(null);

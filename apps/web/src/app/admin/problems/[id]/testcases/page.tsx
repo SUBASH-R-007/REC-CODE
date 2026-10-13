@@ -33,7 +33,7 @@ export default async function TestCasesPage({ params, searchParams }: Props) {
   const { problem, version, tests, subtasks } = data;
 
   const table = (
-    <div tabIndex={0} aria-label="Test cases" className="overflow-x-auto rounded-xl border border-border">
+    <div role="region" tabIndex={0} aria-label="Test cases" className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full min-w-[52rem] text-sm">
         <caption className="sr-only">Test cases of revision {version.revision}</caption>
         <thead className="bg-primary-subtle/40 text-left text-xs uppercase tracking-wide text-muted">

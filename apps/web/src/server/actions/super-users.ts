@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AccountStatus, Role } from "@recx/db";
 import { BULK_STATUS_DIRECT_MAX, BULK_STATUS_MAX } from "@recx/shared";
 import { planStatusChange, STATUS_LABEL } from "@/lib/accounts/status";
+import { countActiveSuperAdminsLocked } from "@/lib/accounts/super-admins";
 import { audit, auditMany, type AuditInput } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { closeImpersonationsOf } from "@/lib/auth/impersonation";
@@ -60,7 +61,7 @@ async function applyStatus(
       select: { id: true, role: true, status: true, collegeId: true },
     });
     if (users.length !== ids.length) throw new NotFoundError("One or more of those accounts no longer exist.");
-    let activeSuperAdmins = await tx.user.count({ where: { role: "SUPER_ADMIN", status: "ACTIVE" } });
+    let activeSuperAdmins = await countActiveSuperAdminsLocked(tx);
     const entries: AuditInput[] = [];
     const endSessions: string[] = [];
     const refused: string[] = [];

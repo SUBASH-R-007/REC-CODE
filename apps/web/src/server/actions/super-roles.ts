@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma, type AccountStatus, type Role } from "@recx/db";
 import { planRoleChange } from "@/lib/accounts/status";
+import { countActiveSuperAdminsLocked } from "@/lib/accounts/super-admins";
 import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { closeImpersonationsOf } from "@/lib/auth/impersonation";
@@ -44,7 +45,7 @@ export async function setUserRole(input: SetUserRoleInput): Promise<ActionResult
         SELECT id, role::text AS role, status::text AS status FROM "User" WHERE id = ${parsed.userId} FOR UPDATE`;
       const target = locked[0];
       if (!target) throw new NotFoundError("That account was not found.");
-      const activeSuperAdmins = await tx.user.count({ where: { role: "SUPER_ADMIN", status: "ACTIVE" } });
+      const activeSuperAdmins = await countActiveSuperAdminsLocked(tx);
       const plan = planRoleChange(parsed.role, { actorId: actor.id, target, activeSuperAdmins });
       if (!plan.ok) throw new ValidationError(plan.reason);
       await tx.user.update({ where: { id: target.id }, data: { role: parsed.role } });

@@ -48,7 +48,11 @@ export function BulkStatusTable({ rows, filter, filterLabel }: { rows: BulkRow[]
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [toStatus, setToStatus] = useState<Status>("DISABLED");
   const [open, setOpen] = useState<"selected" | "filter" | null>(null);
-  const count = selected.size;
+  // Only rows on screen count: a client-side page change (?after=, ?user=)
+  // re-renders this table without remounting it, so `selected` may still
+  // hold ids that are no longer shown. They are never counted or submitted.
+  const chosen = rows.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const count = chosen.length;
   const allSelected = rows.length > 0 && count === rows.length;
 
   const toggle = (rowId: string) =>
@@ -82,7 +86,7 @@ export function BulkStatusTable({ rows, filter, filterLabel }: { rows: BulkRow[]
         ) : null}
       </div>
 
-      <div tabIndex={0} aria-label="Accounts" className="overflow-x-auto rounded-xl border border-border">
+      <div role="region" tabIndex={0} aria-label="Accounts" className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full min-w-[40rem] text-left text-sm">
           <caption className="sr-only">Accounts matching the search</caption>
           <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">
@@ -150,7 +154,7 @@ export function BulkStatusTable({ rows, filter, filterLabel }: { rows: BulkRow[]
             )
           }
           onConfirm={async (reason) => {
-            const userIds = [...selected];
+            const userIds = chosen;
             if (userIds.length > DIRECT_MAX) {
               const result = await requestBulkStatusChange({ userIds, toStatus, reason });
               if (result.ok) {
