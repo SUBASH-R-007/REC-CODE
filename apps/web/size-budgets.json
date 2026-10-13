@@ -38,7 +38,7 @@
   "monacoFree": {
     "$comment": "No Monaco module (the monaco-editor package or the editor's own Monaco loader/controller/theme) may appear in these routes' chunk graphs, first-load or lazy.",
     "entries": ["/(student)/problems/page", "/(student)/dashboard/page", "/(student)/leaderboard/page", "/(public)/judge/page"],
-    "entryPrefixes": ["/admin/"]
+    "entryPrefixes": ["/admin/", "/super/"]
   },
   "serverRendered": {
     "$comment": "Pages that add no client JS of their own: the page's chunks beyond the framework and its layout chain may hold only Next's page stub (one module named exactly \"apps/web\"), at most maxOwnKb gzip. Any first-party or third-party client module there is a failure.",
