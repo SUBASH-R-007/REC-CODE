@@ -34,10 +34,11 @@ Branch `phase4/integration-aenby5`, pushed to GitHub.
 - **Size budgets.** `/judge` measures 116.8 KB (budget 125) and
   `/dashboard` 120.0 KB (budget 160), recorded in `docs/CAPACITY.md` §7.1.
   The Monaco-free check now covers `/super` too (43 routes).
-- **Adversarial review.** Six dimension reviewers raised 46 findings (about
-  41 once duplicates are merged). Then two skeptics per finding, one on
-  reachability and one on reproduction. Every confirmed finding is fixed,
-  with a test that fails without the fix. The decisions are in
+- **Adversarial review.** Six dimension reviewers, then two skeptics per
+  finding (reachability and reproduction). Of 43 distinct findings, 39 were
+  confirmed and 4 refuted. Every confirmed finding is fixed except S3 (rate
+  limits, Phase 10). Each fix comes
+  with a test that fails without it. The decisions are in
   `docs/OPEN-QUESTIONS.md` under "Phase 4 — adversarial review". The headline
   fixes:
   - ADMINs could read any student's submissions and code (AdminScope now
