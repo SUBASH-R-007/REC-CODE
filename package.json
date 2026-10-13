@@ -1,0 +1,36 @@
+{
+  "name": "recx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "REC Code — coding practice, contest and proctored-assessment platform for Rajalakshmi Engineering College",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "pnpm -r --workspace-concurrency=4 typecheck && tsc --noEmit -p tests/repo/tsconfig.json && tsc --noEmit -p scripts/load/tsconfig.json",
+    "test": "pnpm -r --workspace-concurrency=1 test && vitest run --config vitest.repo.config.ts",
+    "build": "pnpm -r build",
+    "size": "pnpm --filter @recx/web size",
+    "dev": "pnpm --filter @recx/web dev",
+    "db:generate": "pnpm --filter @recx/db generate",
+    "db:migrate": "pnpm --filter @recx/db migrate:deploy",
+    "db:migrate:dev": "pnpm --filter @recx/db migrate:dev",
+    "db:seed": "pnpm --filter @recx/web seed",
+    "worker:dev": "pnpm --filter @recx/judge-worker dev",
+    "scheduler:dev": "pnpm --filter @recx/scheduler dev",
+    "postinstall": "pnpm --filter @recx/db generate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@next/eslint-plugin-next": "^15.5.4",
+    "@types/node": "^22.18.0",
+    "eslint": "^9.35.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.4.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.44.0",
+    "vitest": "^3.2.4"
+  }
+}

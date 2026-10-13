@@ -1,0 +1,1756 @@
+// REC Code — database `recx`. Never the LMS database. The LMS stays the
+// identity source of record: users arrive by roster sync / on-login upsert
+// keyed on collegeId + lmsUserId; REC Code never creates a student itself.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Web: pooled (PgBouncer transaction mode, ?pgbouncer=true&connection_limit=10).
+  url       = env("DATABASE_URL")
+  // Migrations, scheduler, reconciler: direct, non-pooled (advisory locks,
+  // SKIP LOCKED leases).
+  directUrl = env("DATABASE_URL_DIRECT")
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────
+// Verdict, lanes, compare/scoring/io modes mirror packages/shared; the
+// parity test in packages/db/test keeps them identical.
+
+enum Role {
+  STUDENT
+  TA_MENTOR
+  ADMIN
+  PLACEMENT_OFFICER
+  SUPER_ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SOFT_RESTRICTED
+  DISABLED
+  GRADUATED
+  ARCHIVED
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum ProblemStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  RETIRED
+}
+
+enum IoMode {
+  STDIN
+  FUNCTION
+}
+
+enum Verdict {
+  AC
+  WA
+  TLE
+  MLE
+  RE
+  CE
+  OLE
+  PARTIAL
+  SKIPPED
+  IE
+}
+
+enum SubmissionStatus {
+  QUEUED
+  JUDGING
+  DONE
+  INTERNAL_ERROR
+  CANCELLED
+}
+
+enum JudgeState {
+  PENDING
+  DISPATCHED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum JudgeLane {
+  ASSESSMENT
+  CONTEST
+  RUN
+  PRACTICE
+  REJUDGE
+}
+
+enum SubmissionOrigin {
+  PRACTICE
+  CONTEST
+  ASSESSMENT
+  CUSTOM_RUN
+}
+
+enum ScoringMode {
+  ICPC
+  SUBTASK
+  PER_TEST
+}
+
+enum CompareMode {
+  EXACT
+  TOKEN
+  FLOAT
+  CHECKER
+  INTERACTIVE
+}
+
+enum SubtaskAggregation {
+  MIN
+  SUM_FRACTION
+}
+
+enum ValidationOutcome {
+  PENDING
+  MATCHED
+  MISMATCHED
+  FAILED
+}
+
+/// The closed 14-topic taxonomy (mirror of TOPICS in @recx/shared).
+enum Topic {
+  ARRAYS_HASHING
+  TWO_POINTERS
+  SLIDING_WINDOW
+  STACK_QUEUE
+  BINARY_SEARCH
+  LINKED_LIST
+  TREES
+  HEAPS
+  BACKTRACKING
+  GRAPHS
+  DYNAMIC_PROGRAMMING
+  GREEDY
+  MATH_BITS
+  STRINGS
+}
+
+enum ProblemProgress {
+  ATTEMPTED
+  SOLVED
+}
+
+enum XpPeriod {
+  ALL_TIME
+  MONTH
+  WEEK
+}
+
+enum XpEventKind {
+  SOLVE
+  DAILY_CHALLENGE
+  STREAK_MILESTONE
+  REVISION
+  CONTEST
+  MOCK
+  APTITUDE
+  ADMIN_GRANT
+  REVERSAL
+}
+
+enum ProfileVisibility {
+  PUBLIC
+  REC_ONLY
+  PRIVATE
+}
+
+/// The submission-context discriminator that gates hints and editorials at
+/// ONE chokepoint (hintAccess in @recx/shared): CONTEST and ASSESSMENT get
+/// nothing, unconditionally.
+enum HelpContext {
+  PRACTICE
+  CONTEST
+  ASSESSMENT
+}
+
+enum StudyPlanKind {
+  SHEET
+  TRACK
+}
+
+enum JudgeNodeStatus {
+  ONLINE
+  DRAINING
+  OFFLINE
+  QUARANTINED
+}
+
+enum AuditSensitivity {
+  NORMAL
+  SENSITIVE
+  SECURITY
+}
+
+// Phase 4: super-admin governance.
+
+/// Operations that need a second super-admin's approval (or an audited
+/// break-glass self-approval) before an executor runs them.
+/// RATING_RECOMPUTE is added by Phase 5 (ALTER TYPE ADD VALUE).
+enum PrivilegedOperationKind {
+  BULK_STATUS_CHANGE
+  SUBMISSION_PURGE
+  GLOBAL_REJUDGE
+  PII_EXPORT
+  PROBLEM_DELETE
+  VERSION_DELETE
+}
+
+enum PrivilegedOperationStatus {
+  PENDING
+  APPROVED
+  EXECUTING
+  EXECUTED
+  FAILED
+  REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum ImpersonationEndReason {
+  ENDED
+  EXPIRED
+  SIGNED_OUT
+  REVOKED
+}
+
+enum OutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+}
+
+// Phase 4: admin surface (scope, accommodations, roster, announcements).
+
+/// Mirror of ACCOMMODATION_KINDS in @recx/shared (parity test).
+enum AccommodationKind {
+  SCREEN_READER
+  MAGNIFIER
+  SPEECH_INPUT
+  EXTRA_TIME
+  BREAKS
+  SEPARATE_ROOM
+}
+
+enum AccommodationStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  REVOKED
+  SUPERSEDED
+}
+
+/// Mirror of PROCTOR_EVENT_KINDS in @recx/shared (parity test), same order.
+/// Declared in Phase 4 so Accommodation.exemptSignals is typed; the
+/// ProctorEvent model itself arrives in Phase 6.
+enum ProctorEventKind {
+  FOCUS_LOSS
+  FULLSCREEN_EXIT
+  EXTERNAL_PASTE
+  INTERNAL_PASTE
+  PROGRAMMATIC_INSERT
+  COPY
+  CUT
+  CONTEXT_MENU
+  CADENCE_BURST
+  IDLE_GAP
+  FIRST_KEYSTROKE
+  WINDOW_RESIZE
+  MULTI_MONITOR
+  DEVTOOLS_HEURISTIC
+  AUTOMATION_HINT
+  NETWORK_DROP
+  HEARTBEAT_GAP
+  IP_CHANGED
+  UA_CHANGED
+  SEQUENCE_GAP
+  CONCURRENT_SESSION
+  SUBMISSION_RATE_ANOMALY
+  CLIENT_SCRIPT_ERROR
+  INVIGILATOR_NOTE
+}
+
+enum RosterImportStatus {
+  PREVIEWED
+  COMMITTED
+  EXPIRED
+}
+
+enum AnnouncementTone {
+  INFO
+  IMPORTANT
+}
+
+// Phase 4: problem authoring.
+
+/// Where a revision's content came from. Mirror of CONTENT_ORIGINS in
+/// @recx/shared/authoring (parity test).
+enum ContentOrigin {
+  FACULTY
+  SENIOR_STUDENT
+  AI_ASSISTED
+}
+
+enum ProblemReviewAction {
+  SUBMITTED
+  WITHDRAWN
+  RETURNED
+  APPROVED
+  APPROVAL_REVOKED
+}
+
+enum ProblemImportStatus {
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum ProblemImportRowStatus {
+  CREATED
+  NEW_REVISION
+  UNCHANGED
+  FAILED
+}
+
+// ── Identity ───────────────────────────────────────────────────────────
+
+model User {
+  id             String        @id @default(cuid())
+  lmsUserId      String?       @unique
+  /// Roll number. The join key with the LMS roster.
+  collegeId      String        @unique
+  email          String        @unique
+  firstName      String
+  lastName       String
+  /// Public handle for /u/[handle]. Never the roll number.
+  handle         String        @unique
+  role           Role          @default(STUDENT)
+  status         AccountStatus @default(ACTIVE)
+  /// Argon2id (m=19456, t=2, p=1). Null for LMS-SSO-only accounts.
+  passwordHash   String?
+  batchYear      Int?
+  departmentCode String?
+  section        String?
+  lastActiveAt   DateTime?
+  lastLoginAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  /// Public profile at /u/[handle]: never email, roll number, department or scores.
+  visibility        ProfileVisibility @default(REC_ONLY)
+  /// Hidden from peers on leaderboards; still visible to faculty analytics.
+  leaderboardOptOut Boolean           @default(false)
+  bio               String?
+  /// Editor preferences (font size, tab width, keymap) as plain JSON.
+  editorPrefs       Json              @default("{}")
+
+  sessions        Session[]
+  submissions     Submission[]
+  runRequests     RunRequest[]
+  judgeUsage      UserJudgeUsage[]
+  quotaOverrides  JudgeQuotaOverride[]
+  problemStatuses UserProblemStatus[]
+  activityDays    ActivityDay[]
+  stats           UserStats?
+  xpEvents        XpEvent[]
+  xpBuckets       XpBucket[]
+  hintReveals     HintReveal[]
+  editorialViews  EditorialView[]
+  problemActivity ProblemActivity[]
+  enrollments     StudyPlanEnrollment[]
+  bookmarks       Bookmark[]
+  notes           Note[]
+  notifications   Notification[]
+  codeDrafts      CodeDraft[]
+  badges          UserBadge[]
+  /// ADMIN student-visibility grants (Phase 4). Actor ids elsewhere stay plain strings.
+  adminScopes     AdminScope[]
+  accommodations  Accommodation[]
+
+  @@index([status, lastActiveAt])
+  @@index([batchYear, departmentCode, section])
+}
+
+/// Server-side session rows (an admin can force-logout mid-assessment; a JWT
+/// cannot). The cookie holds the raw token; only its sha256 is stored.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  /// sha256(ip + pepper). Never a raw IP.
+  ipHash     String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+
+  /// Set on the SUPER_ADMIN's own session while it views as another user
+  /// (read-only). The foreign key is SetNull, but an ImpersonationSession row
+  /// is never deleted (trigger), so the code that ends an impersonation
+  /// clears this pointer.
+  impersonationId String?               @unique
+  impersonation   ImpersonationSession? @relation(fields: [impersonationId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Append-only. Each UTC day forms a hash chain (prevHash → hash) whose
+/// terminal hash is exported off-box. This is tamper-EVIDENT only: a
+/// database superuser can still rewrite rows, but not without breaking a
+/// chain whose end has already left the machine.
+/// Enforced by the database: trigger AuditLog_append_only refuses UPDATE;
+/// trigger AuditLog_no_truncate refuses TRUNCATE (20261010100080). Row
+/// DELETE stays allowed on purpose: the retention purge deletes rows older
+/// than 3 years that are not under legal hold.
+model AuditLog {
+  id           BigInt           @id @default(autoincrement())
+  actorId      String?
+  action       String
+  entityType   String
+  entityId     String?
+  targetUserId String?
+  sensitivity  AuditSensitivity @default(NORMAL)
+  metadata     Json             @default("{}")
+  ipHash       String?
+  chainDay     String
+  prevHash     String
+  hash         String
+  createdAt    DateTime         @default(now())
+
+  @@index([targetUserId, createdAt])
+  @@index([sensitivity, createdAt])
+  @@index([chainDay, id])
+}
+
+// ── Problems (immutable versions) ──────────────────────────────────────
+
+/// Stable identity + a pointer to the live version. No statement content
+/// lives here; title/difficulty are denormalised listing columns refreshed
+/// on publish.
+model Problem {
+  id                 String          @id @default(cuid())
+  slug               String          @unique
+  displayCode        String          @unique
+  title              String
+  difficulty         Difficulty
+  status             ProblemStatus   @default(DRAFT)
+  liveVersionId      String?         @unique
+  liveVersion        ProblemVersion? @relation("LiveVersion", fields: [liveVersionId], references: [id])
+  /// Optimistic concurrency for publish (flip liveVersionId).
+  version            Int             @default(0)
+  /// Editorial opens to everyone (in PRACTICE) from this moment; null = never by date.
+  editorialVisibleAt DateTime?
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  versions        ProblemVersion[]    @relation("ProblemVersions")
+  submissions     Submission[]
+  tags            ProblemTag[]
+  companyTags     ProblemCompanyTag[]
+  stat            ProblemStat?
+  statuses        UserProblemStatus[]
+  hintReveals     HintReveal[]
+  editorialViews  EditorialView[]
+  activity        ProblemActivity[]
+  studyPlanItems  StudyPlanItem[]
+  bookmarks       Bookmark[]
+  notes           Note[]
+  codeDrafts      CodeDraft[]
+  dailyChallenges DailyChallenge[]
+
+  @@index([status, difficulty, displayCode])
+  /// Problem search (pg_trgm, created in migration 20261010001004).
+  @@index([title(ops: raw("gin_trgm_ops"))], map: "Problem_title_trgm_idx", type: Gin)
+}
+
+/// Topic tags (closed 14-topic enum). Problem-level, so retagging never needs a new version.
+model ProblemTag {
+  problemId String
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  topic     Topic
+
+  @@id([problemId, topic])
+  @@index([topic, problemId])
+}
+
+/// Placement-cell-curated companies until the InterviewExperience archive
+/// (Phase 11) exists; the UI labels these "curated".
+model Company {
+  id        String              @id @default(cuid())
+  slug      String              @unique
+  name      String
+  curated   Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  problems  ProblemCompanyTag[]
+}
+
+model ProblemCompanyTag {
+  problemId String
+  problem   Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  frequency Int     @default(0)
+  source    String  @default("CURATED")
+
+  @@id([problemId, companyId])
+  @@index([companyId, frequency(sort: Desc)])
+}
+
+/// Maintained in the finalise transaction: acceptance rate is never computed on read.
+model ProblemStat {
+  problemId      String   @id
+  problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  submissions    Int      @default(0)
+  accepted       Int      @default(0)
+  attempters     Int      @default(0)
+  solvers        Int      @default(0)
+  acceptanceRate Float    @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+/// All content. Frozen (frozenAt set) on publish and immutable thereafter —
+/// the repository layer and a database trigger both refuse writes to a frozen
+/// version or its children. Edits clone a new DRAFT revision. TRUNCATE of
+/// ProblemVersion, each frozen child table and TestBlob is refused
+/// (<Table>_no_truncate statement triggers).
+model ProblemVersion {
+  id                 String        @id @default(cuid())
+  problemId          String
+  problem            Problem       @relation("ProblemVersions", fields: [problemId], references: [id])
+  revision           Int
+  status             ProblemStatus @default(DRAFT)
+  title              String
+  difficulty         Difficulty
+  statementMd        String        @db.Text
+  constraints        Json          @default("[]")
+  ioMode             IoMode
+  /// FUNCTION mode: validated by functionSignatureSchema (packages/shared).
+  functionSignature  Json?
+  compareMode        CompareMode   @default(TOKEN)
+  floatEpsilon       Float?
+  scoringMode        ScoringMode   @default(ICPC)
+  stopOnFirstFailure Boolean       @default(true)
+  /// Base (C++) limits; per-language limits arrive with ProblemLanguageLimit.
+  timeLimitMs        Int
+  memoryLimitKb      Int           @default(262144)
+  /// CHECKER compare mode: testlib-compatible checker source (C++20).
+  checkerSha256      String?
+  /// Pinned testlib toolchain id the checker compiles against.
+  testlibId          String?
+  /// problems/{problemId}/v{revision}/tests.tar.zst — immutable once written.
+  bundleKey          String?
+  manifestSha256     String?
+  /// Set only by the publish transition (UPDATE of a version whose frozenAt
+  /// is null). A version is never INSERTed frozen (guard + trigger).
+  frozenAt           DateTime?
+  publishedAt        DateTime?
+  createdById        String?
+  createdAt          DateTime      @default(now())
+
+  // Authoring (Phase 4). Every column below is version content: once
+  // frozenAt is set the ProblemVersion_frozen_guard trigger refuses any
+  // UPDATE of the row, so these freeze with the version.
+  origin               ContentOrigin   @default(FACULTY)
+  /// Optimistic concurrency for draft edits; every content edit increments it.
+  editSeq              Int             @default(0)
+  /// Incremented by edits that change judging (tests, subtasks, reference
+  /// solutions, limits, io/compare/scoring, signature, checker).
+  /// ValidationRun.judgeSeq records it; runs of an older seq no longer count.
+  judgeSeq             Int             @default(0)
+  lastEditedById       String?
+  updatedAt            DateTime        @default(now()) @updatedAt
+  submittedForReviewAt DateTime?
+  submittedById        String?
+  /// APPROVED = status IN_REVIEW with approvedAt set (CHECK
+  /// ProblemVersion_approval_state: approvedAt only with IN_REVIEW or
+  /// PUBLISHED). Frozen with the version on publish.
+  approvedAt           DateTime?
+  approvedById         String?
+  /// sha256 of the canonical import package this revision was created from (import idempotency).
+  importSha256         String?
+  /// Review history (not version content, never frozen).
+  reviews              ProblemReview[]
+
+  liveFor            Problem?               @relation("LiveVersion")
+  testCases          TestCase[]
+  starterCodes       StarterCode[]
+  referenceSolutions ReferenceSolution[]
+  subtasks           Subtask[]
+  languageLimits     ProblemLanguageLimit[]
+  hints              Hint[]
+  editorial          Editorial?
+  submissions        Submission[]
+  runRequests        RunRequest[]
+  validationRuns     ValidationRun[]
+
+  @@unique([problemId, revision])
+}
+
+model TestCase {
+  id               String         @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  index            Int
+  isSample         Boolean        @default(false)
+  inputSha256      String
+  input            TestBlob       @relation("TestInput", fields: [inputSha256], references: [sha256])
+  outputSha256     String
+  output           TestBlob       @relation("TestOutput", fields: [outputSha256], references: [sha256])
+  points           Int?
+  subtaskIndex     Int?
+
+  @@unique([problemVersionId, index])
+}
+
+/// SUBTASK scoring. Child of a version, so frozen with it.
+model Subtask {
+  id               String             @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion     @relation(fields: [problemVersionId], references: [id])
+  index            Int
+  points           Float
+  aggregation      SubtaskAggregation @default(MIN)
+  /// Subtask indexes that must be fully passed first; otherwise SKIPPED.
+  dependsOn        Int[]              @default([])
+
+  @@unique([problemVersionId, index])
+}
+
+/// Per-language limits derived from measured reference solutions (or the
+/// fallback multiplier when no model solution exists in that language).
+/// Child of a version, so frozen with it.
+model ProblemLanguageLimit {
+  id                   String         @id @default(cuid())
+  problemVersionId     String
+  problemVersion       ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  language             String
+  timeLimitMs          Int
+  memoryLimitKb        Int
+  /// Max per-test CPU ms of the model solution in this language; null = fallback multiplier.
+  measuredModelMs      Int?
+  /// "workerVersion/node/calibrationScore" the measurement was taken on.
+  measuredOnGeneration String?
+  createdAt            DateTime       @default(now())
+
+  @@unique([problemVersionId, language])
+}
+
+/// Content-addressed. Small blobs inline (≤ 64 KB); larger ones in object
+/// storage under an immutable key. A blob is never mutated: the
+/// TestBlob_immutable trigger refuses any UPDATE that changes sha256,
+/// sizeBytes, inline or storageKey (a no-op upsert of an existing sha is fine),
+/// and TestBlob_no_truncate refuses TRUNCATE. A blob no TestCase references
+/// can still be deleted.
+model TestBlob {
+  id         String     @id @default(cuid())
+  sha256     String     @unique
+  sizeBytes  Int
+  inline     String?    @db.Text
+  storageKey String?
+  createdAt  DateTime   @default(now())
+  asInput    TestCase[] @relation("TestInput")
+  asOutput   TestCase[] @relation("TestOutput")
+}
+
+model StarterCode {
+  id               String         @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  language         String
+  code             String         @db.Text
+
+  @@unique([problemVersionId, language])
+}
+
+/// Model and deliberately-wrong solutions. The source is never returned to a
+/// STUDENT by any query path (asserted by a Phase 4 test).
+model ReferenceSolution {
+  id               String          @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion  @relation(fields: [problemVersionId], references: [id])
+  language         String
+  label            String?
+  source           String          @db.Text
+  expectedVerdict  Verdict
+  measuredMs       Int?
+  createdAt        DateTime        @default(now())
+  validationRuns   ValidationRun[]
+
+  @@index([problemVersionId])
+}
+
+/// One row per (language, pinned toolchain). Upgrading a toolchain adds a
+/// row; old rows stay so an old submission rejudges on its own toolchain.
+model LanguageConfig {
+  id             String          @id @default(cuid())
+  key            String
+  toolchainId    String
+  version        String
+  label          String
+  /// The full LanguageRuntime (argv, env, limits). Fixed server-side.
+  runtime        Json
+  enabled        Boolean         @default(false)
+  /// The row new submissions in this language use.
+  isCurrent      Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  retiredAt      DateTime?
+  submissions    Submission[]
+  runRequests    RunRequest[]
+  validationRuns ValidationRun[]
+
+  @@unique([key, toolchainId])
+}
+
+// ── Submissions ────────────────────────────────────────────────────────
+
+/// Narrow by design (~7M/year). Per-test results are a compact jsonb array
+/// [{"i":0,"v":"AC","ms":12,"kb":2048}], never a row per test.
+model Submission {
+  id                  String           @id @default(cuid())
+  userId              String
+  user                User             @relation(fields: [userId], references: [id])
+  problemId           String
+  problem             Problem          @relation(fields: [problemId], references: [id])
+  /// Pinned version — never the live pointer.
+  problemVersionId    String
+  problemVersion      ProblemVersion   @relation(fields: [problemVersionId], references: [id])
+  languageConfigId    String
+  languageConfig      LanguageConfig   @relation(fields: [languageConfigId], references: [id])
+  language            String
+  origin              SubmissionOrigin @default(PRACTICE)
+  lane                JudgeLane        @default(PRACTICE)
+  status              SubmissionStatus @default(QUEUED)
+  judgeState          JudgeState       @default(PENDING)
+  verdict             Verdict?
+  score               Float?
+  maxScore            Float?
+  /// [{index, earned, max, verdict}] for SUBTASK scoring.
+  subtaskResults      Json?
+  /// Sum of per-test CPU ms — charged to the user's daily CPU budget.
+  cpuMs               Int?
+  testResults         Json?
+  passedCases         Int              @default(0)
+  totalCases          Int              @default(0)
+  maxTimeMs           Int?
+  maxMemoryKb         Int?
+  firstFailedIndex    Int?
+  compileOutput       String?          @db.Text
+  /// Doubles as the exact-duplicate signal.
+  sourceSha256        String
+  sourceBytes         Int
+  contestId           String?
+  assessmentAttemptId String?
+  claimedByNodeId     String?
+  claimToken          String?
+  leaseExpiresAt      DateTime?
+  attemptCount        Int              @default(0)
+  /// Node that produced the stored result + its calibration at the time, so
+  /// a timing dispute is auditable.
+  judgeNodeId         String?
+  calibrationScore    Float?
+  queuedAt            DateTime         @default(now())
+  startedAt           DateTime?
+  judgedAt            DateTime?
+  createdAt           DateTime         @default(now())
+
+  source  SubmissionSource?
+  details SubmissionTestDetail[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, problemId, createdAt(sort: Desc)])
+  @@index([problemId, verdict, createdAt(sort: Desc)])
+  @@index([contestId, userId, problemId])
+  @@index([assessmentAttemptId, problemVersionId, createdAt(sort: Desc)])
+  @@index([judgeState, queuedAt])
+  @@index([status, leaseExpiresAt])
+  @@index([sourceSha256])
+  @@index([createdAt])
+}
+
+/// 1:1 side table so list queries never drag 256 KB of source. CHECK
+/// constraint (migration) caps octet_length at 256 KB.
+model SubmissionSource {
+  submissionId String     @id
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  source       String     @db.Text
+  archivedAt   DateTime?
+}
+
+/// Visible-case output only: ≤ 4 KB per test, ≤ 32 KB per submission,
+/// purged after 30 days. Hidden tests never get a row.
+model SubmissionTestDetail {
+  id           String     @id @default(cuid())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  testIndex    Int
+  input        String?    @db.Text
+  expected     String?    @db.Text
+  stdout       String?    @db.Text
+  stderr       String?    @db.Text
+  createdAt    DateTime   @default(now())
+
+  @@unique([submissionId, testIndex])
+  @@index([createdAt])
+}
+
+/// The editor's Run button: sample cases or custom stdin. No checker, no
+/// scoring, no XP. 24h TTL.
+model RunRequest {
+  id               String           @id @default(cuid())
+  userId           String
+  user             User             @relation(fields: [userId], references: [id])
+  problemVersionId String
+  problemVersion   ProblemVersion   @relation(fields: [problemVersionId], references: [id])
+  languageConfigId String
+  languageConfig   LanguageConfig   @relation(fields: [languageConfigId], references: [id])
+  language         String
+  source           String           @db.Text
+  /// Null = run the sample tests.
+  customInput      String?          @db.Text
+  status           SubmissionStatus @default(QUEUED)
+  judgeState       JudgeState       @default(PENDING)
+  verdict          Verdict?
+  /// [{i, v, ms, kb, stdout, stderr, expected?, input?}]
+  result           Json?
+  compileOutput    String?          @db.Text
+  claimedByNodeId  String?
+  claimToken       String?
+  leaseExpiresAt   DateTime?
+  attemptCount     Int              @default(0)
+  judgeNodeId      String?
+  createdAt        DateTime         @default(now())
+  /// First claim — queue wait = startedAt − createdAt.
+  startedAt        DateTime?
+  judgedAt         DateTime?
+  expiresAt        DateTime
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, leaseExpiresAt])
+  @@index([expiresAt])
+}
+
+// ── Progress, XP and gamification (Phase 3) ────────────────────────────
+
+/// The critical denormalisation that keeps the problem-list status column off
+/// Submission. "Done" for study plans is status = SOLVED (one source of truth).
+model UserProblemStatus {
+  userId               String
+  user                 User            @relation(fields: [userId], references: [id])
+  problemId            String
+  problem              Problem         @relation(fields: [problemId], references: [id])
+  status               ProblemProgress
+  /// Judged practice submissions (CE included, IE excluded).
+  attempts             Int             @default(0)
+  failedAttempts       Int             @default(0)
+  firstAttemptAt       DateTime
+  lastAttemptAt        DateTime
+  firstAcceptedAt      DateTime?
+  bestSubmissionId     String?
+  /// The first solve came after a tier-3 hint or the editorial: it counts as
+  /// solved, pays 40 % XP, and is excluded from unassisted readiness inputs.
+  assisted             Boolean         @default(false)
+  solvedLanguage       String?
+  /// Active workspace seconds before the first AC (time-to-solve).
+  activeSecondsToSolve Int?
+
+  @@id([userId, problemId])
+  @@index([userId, status, firstAcceptedAt(sort: Desc)])
+  @@index([problemId, status])
+}
+
+/// One row per user per campus (Asia/Kolkata) day with any activity: the
+/// streak source, the heatmap, and the inactivity evidence.
+model ActivityDay {
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  date          DateTime @db.Date
+  submissions   Int      @default(0)
+  accepted      Int      @default(0)
+  /// First solves that day.
+  solved        Int      @default(0)
+  xp            Int      @default(0)
+  /// XP from Easy first solves that day (the 600/day Easy cap).
+  xpEasy        Int      @default(0)
+  activeSeconds Int      @default(0)
+
+  @@id([userId, date])
+  @@index([date])
+  @@index([userId, date(sort: Desc)])
+}
+
+model UserStats {
+  userId         String    @id
+  user           User      @relation(fields: [userId], references: [id])
+  solvedEasy     Int       @default(0)
+  solvedMedium   Int       @default(0)
+  solvedHard     Int       @default(0)
+  solvedTotal    Int       @default(0)
+  assistedSolves Int       @default(0)
+  submissions    Int       @default(0)
+  accepted       Int       @default(0)
+  currentStreak  Int       @default(0)
+  longestStreak  Int       @default(0)
+  lastActiveDate DateTime? @db.Date
+  xpTotal        Int       @default(0)
+  /// Solves per language, e.g. {"cpp20": 12, "py312": 3}.
+  languageCounts Json      @default("{}")
+  /// Unassisted first solves per topic, e.g. {"GRAPHS": 4}.
+  topicSolved    Json      @default("{}")
+  /// Assisted first solves per topic.
+  topicAssisted  Json      @default("{}")
+  updatedAt      DateTime  @updatedAt
+}
+
+/// Append-only XP ledger: no UPDATE, no DELETE (trigger XpEvent_append_only +
+/// test) and no TRUNCATE (trigger XpEvent_no_truncate, 20261010100080).
+/// Voiding XP writes a compensating REVERSAL row. Pages never aggregate this
+/// table; they read XpBucket (tests/repo/xp-ledger.test.ts).
+model XpEvent {
+  id              BigInt      @id @default(autoincrement())
+  userId          String
+  user            User        @relation(fields: [userId], references: [id])
+  kind            XpEventKind
+  amount          Int
+  /// solve:{userId}:{problemId}, streak:{userId}:{milestone},
+  /// contest:{contestId}:{userId}:participation, daily:{userId}:{yyyy-MM-dd}
+  idempotencyKey  String      @unique
+  rulesVersion    Int
+  problemId       String?
+  submissionId    String?
+  contestId       String?
+  assessmentId    String?
+  reversesEventId BigInt?
+  grantedById     String?
+  meta            Json        @default("{}")
+  occurredAt      DateTime    @default(now())
+
+  @@index([userId, occurredAt])
+}
+
+/// Period buckets the leaderboards read: one ordered index scan per board.
+model XpBucket {
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  period         XpPeriod
+  /// "all" | "2026-10" | "2026-W41" (ISO week, Asia/Kolkata).
+  periodKey      String
+  xp             Int      @default(0)
+  solvedEasy     Int      @default(0)
+  solvedMedium   Int      @default(0)
+  solvedHard     Int      @default(0)
+  batchYear      Int?
+  departmentCode String?
+  section        String?
+  lastXpAt       DateTime
+
+  @@unique([period, periodKey, userId])
+  @@index([period, periodKey, xp(sort: Desc), lastXpAt(sort: Asc)])
+  @@index([period, periodKey, batchYear, xp(sort: Desc), lastXpAt(sort: Asc)])
+  @@index([period, periodKey, departmentCode, xp(sort: Desc), lastXpAt(sort: Asc)])
+  @@index([period, periodKey, batchYear, departmentCode, section, xp(sort: Desc), lastXpAt(sort: Asc)])
+}
+
+/// Closed periods freeze into a snapshot (top 200) so historical boards stop being written.
+model LeaderboardSnapshot {
+  id        String   @id @default(cuid())
+  period    XpPeriod
+  periodKey String
+  /// COLLEGE | DEPARTMENT | BATCH | SECTION
+  scope     String
+  /// "" for COLLEGE; "CSE", "2027" or "2027:CSE:A" otherwise.
+  scopeKey  String
+  top       Json
+  frozenAt  DateTime @default(now())
+
+  @@unique([period, periodKey, scope, scopeKey])
+}
+
+/// Daily challenge: 2x XP on a first solve that day.
+model DailyChallenge {
+  date        DateTime @id @db.Date
+  problemId   String
+  problem     Problem  @relation(fields: [problemId], references: [id])
+  createdById String?
+}
+
+model Badge {
+  id          String      @id @default(cuid())
+  key         String      @unique
+  name        String
+  description String
+  /// lucide icon name, always rendered with its text (never colour alone).
+  icon        String
+  sortOrder   Int         @default(0)
+  users       UserBadge[]
+}
+
+model UserBadge {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  badgeId   String
+  badge     Badge    @relation(fields: [badgeId], references: [id])
+  awardedAt DateTime @default(now())
+
+  @@id([userId, badgeId])
+}
+
+// ── Hints and editorials (Phase 3) ─────────────────────────────────────
+
+/// Tiered hints are version content, frozen with the version.
+model Hint {
+  id               String         @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  /// 1, 2 or 3.
+  tier             Int
+  contentMd        String         @db.Text
+  reveals          HintReveal[]
+
+  @@unique([problemVersionId, tier])
+}
+
+model Editorial {
+  id               String         @id @default(cuid())
+  problemVersionId String         @unique
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  contentMd        String         @db.Text
+}
+
+model HintReveal {
+  id         String      @id @default(cuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id])
+  problemId  String
+  problem    Problem     @relation(fields: [problemId], references: [id])
+  hintId     String
+  hint       Hint        @relation(fields: [hintId], references: [id])
+  tier       Int
+  context    HelpContext
+  revealedAt DateTime    @default(now())
+
+  @@unique([userId, hintId])
+  @@index([userId, problemId])
+}
+
+model EditorialView {
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  problemId     String
+  problem       Problem  @relation(fields: [problemId], references: [id])
+  firstViewedAt DateTime @default(now())
+
+  @@id([userId, problemId])
+}
+
+/// Active (focused, recently typing) workspace time per user per problem:
+/// the "active minutes" that unlock hint tiers.
+model ProblemActivity {
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  problemId     String
+  problem       Problem  @relation(fields: [problemId], references: [id])
+  activeSeconds Int      @default(0)
+  lastPingAt    DateTime @default(now())
+
+  @@id([userId, problemId])
+}
+
+// ── Study plans, bookmarks, notes, notifications, drafts (Phase 3) ─────
+
+model StudyPlan {
+  id          String                @id @default(cuid())
+  slug        String                @unique
+  kind        StudyPlanKind
+  title       String
+  description String                @db.Text
+  published   Boolean               @default(false)
+  sortOrder   Int                   @default(0)
+  /// Maintained: number of items in the plan.
+  itemsTotal  Int                   @default(0)
+  /// Owned by the seed (scripts/content/study-plans.ts): /admin edits of
+  /// these plans would be overwritten on the next seed, so admin treats
+  /// them as read-only. Set for the seeded plans by the Phase 4 migration.
+  seedManaged Boolean               @default(false)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  sections    StudyPlanSection[]
+  items       StudyPlanItem[]
+  enrollments StudyPlanEnrollment[]
+}
+
+model StudyPlanSection {
+  id        String          @id @default(cuid())
+  planId    String
+  plan      StudyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  title     String
+  sortOrder Int             @default(0)
+  items     StudyPlanItem[]
+}
+
+model StudyPlanItem {
+  id        String           @id @default(cuid())
+  planId    String
+  plan      StudyPlan        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  sectionId String
+  section   StudyPlanSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  problemId String
+  problem   Problem          @relation(fields: [problemId], references: [id])
+  sortOrder Int              @default(0)
+
+  @@unique([planId, problemId])
+  @@index([problemId])
+}
+
+/// itemsDone is maintained from UserProblemStatus (status = SOLVED); there is
+/// no per-item progress table.
+model StudyPlanEnrollment {
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  planId      String
+  plan        StudyPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  itemsTotal  Int       @default(0)
+  itemsDone   Int       @default(0)
+  enrolledAt  DateTime  @default(now())
+  completedAt DateTime?
+
+  @@id([userId, planId])
+  @@index([planId])
+}
+
+model Bookmark {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  problemId String
+  problem   Problem  @relation(fields: [problemId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@id([userId, problemId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// Private to the student. Never visible to PLACEMENT_OFFICER (Phase 9 guard + test).
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  problemId String?
+  problem   Problem? @relation(fields: [problemId], references: [id])
+  title     String?
+  contentMd String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt(sort: Desc)])
+}
+
+model Notification {
+  id             String        @id @default(cuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id])
+  kind           String
+  title          String
+  body           String
+  link           String?
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  /// Kind "announcement": the Announcement this row was fanned out from.
+  announcementId String?
+  announcement   Announcement? @relation(fields: [announcementId], references: [id])
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@index([announcementId, readAt])
+}
+
+/// Server copy of the editor draft; the browser keeps an IndexedDB copy too
+/// and the newer of the two wins. Private to the student.
+model CodeDraft {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  problemId       String
+  problem         Problem  @relation(fields: [problemId], references: [id])
+  language        String
+  source          String   @db.Text
+  /// When the browser saved it (newest-wins comparison with the local copy).
+  clientUpdatedAt DateTime
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, problemId, language])
+}
+
+/// A reference solution judged at authoring/publish time (judge job kind
+/// "validation"): measures per-language limits and proves model solutions
+/// pass and deliberately-wrong ones fail. Generous limits, never scored.
+model ValidationRun {
+  id                  String            @id @default(cuid())
+  problemVersionId    String
+  problemVersion      ProblemVersion    @relation(fields: [problemVersionId], references: [id])
+  referenceSolutionId String
+  referenceSolution   ReferenceSolution @relation(fields: [referenceSolutionId], references: [id])
+  language            String
+  languageConfigId    String
+  languageConfig      LanguageConfig    @relation(fields: [languageConfigId], references: [id])
+  status              SubmissionStatus  @default(QUEUED)
+  judgeState          JudgeState        @default(PENDING)
+  verdict             Verdict?
+  outcome             ValidationOutcome @default(PENDING)
+  /// Max per-test CPU ms.
+  measuredMs          Int?
+  testResults         Json?
+  compileOutput       String?           @db.Text
+  claimedByNodeId     String?
+  claimToken          String?
+  leaseExpiresAt      DateTime?
+  attemptCount        Int               @default(0)
+  judgeNodeId         String?
+  calibrationScore    Float?
+  requestedById       String?
+  createdAt           DateTime          @default(now())
+  /// First claim — queue wait = startedAt − createdAt.
+  startedAt           DateTime?
+  judgedAt            DateTime?
+  /// ProblemVersion.judgeSeq when this run was requested. Only runs whose
+  /// seq equals the version's current judgeSeq count toward publishing.
+  judgeSeq            Int               @default(0)
+
+  @@index([problemVersionId, createdAt(sort: Desc)])
+  @@index([status, leaseExpiresAt])
+}
+
+/// Daily judge usage per user (Asia/Kolkata calendar day), maintained in the
+/// finalise transaction. Backs the 300 practice/day and 20 CPU-min/day caps.
+model UserJudgeUsage {
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  day         DateTime @db.Date
+  submissions Int      @default(0)
+  runs        Int      @default(0)
+  cpuMs       BigInt   @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@id([userId, day])
+}
+
+/// Admin override of a user's judge caps (audited). Null fields keep the default.
+model JudgeQuotaOverride {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  practicePerDay   Int?
+  runsPerHour      Int?
+  cpuMinutesPerDay Int?
+  reason           String
+  grantedById      String
+  expiresAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+/// Key/value platform settings (Super-admin writes, audited).
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+// ── Judge fleet ────────────────────────────────────────────────────────
+
+model JudgeNode {
+  id                String          @id
+  hostname          String
+  /// sha256 of the node's narrowly scoped token. The token can only claim,
+  /// fetch the bundle for its claimed job, post results and heartbeat.
+  tokenHash         String
+  workerVersion     String          @default("")
+  isolateVersion    String          @default("")
+  driver            String          @default("isolate")
+  languages         Json            @default("[]")
+  slots             Int             @default(0)
+  busySlots         Int             @default(0)
+  calibrationScore  Float?
+  calibratedAt      DateTime?
+  /// Kernel hardening verified at boot (sysctl + module blacklist).
+  hostHardened      Boolean?
+  hardeningFailures Json?
+  /// Median hello-world CPU ms per language (startup credit).
+  startupMs         Json            @default("{}")
+  /// Computed: may this node serve ASSESSMENT / CONTEST right now?
+  sensitiveLanesOk  Boolean         @default(false)
+  laneRestrictions  Json            @default("[]")
+  status            JudgeNodeStatus @default(OFFLINE)
+  consecutiveIe     Int             @default(0)
+  lastHeartbeatAt   DateTime?
+  lastSelfCheckAt   DateTime?
+  selfCheckOk       Boolean?
+  selfCheckFailures Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+// ── Platform ───────────────────────────────────────────────────────────
+
+/// Singleton. Derived once on save (packages/design/derive.ts), never per
+/// request, never in the browser.
+model PlatformTheme {
+  id             String   @id @default("default")
+  presetKey      String   @default("rec-purple")
+  brandSeed      String   @default("#6d28d9")
+  accentSeed     String   @default("#b45309")
+  radius         String   @default("0.75rem")
+  palette        Json
+  css            String   @db.Text
+  paletteVersion Int      @default(1)
+  updatedAt      DateTime @updatedAt
+  updatedById    String?
+}
+
+// ── Governance (Phase 4) ───────────────────────────────────────────────
+// Actor ids are plain strings (no User relation), like
+// PlatformSetting.updatedById and JudgeQuotaOverride.grantedById.
+
+/// A request → decide → execute record for a privileged operation.
+/// Enforced by the database (migrations 20261010100000, 20261010100050 and
+/// 20261010100080; a refusal raises check_violation):
+///   - CHECK PrivilegedOperation_two_person: once decided, breakGlass is true
+///     exactly when the decider is the requester, so a self-approval is
+///     always flagged break-glass and a two-person approval never is;
+///   - CHECK PrivilegedOperation_expiry: expiresAt ≤ requestedAt + 24 h;
+///     CHECK PrivilegedOperation_expires_after_request_check: expiresAt >
+///     requestedAt;
+///   - CHECK PrivilegedOperation_decided_check: APPROVED, EXECUTING, EXECUTED,
+///     FAILED and REJECTED rows have a decidedById;
+///     CHECK PrivilegedOperation_undecided_close_check: CANCELLED and EXPIRED
+///     rows have no decidedById and breakGlass = false;
+///     CHECK PrivilegedOperation_decision_pair_check: decidedById and
+///     decidedAt are set together; CHECK
+///     PrivilegedOperation_decided_after_request_check: decidedAt ≥
+///     requestedAt;
+///   - CHECK PrivilegedOperation_execution_started_check: EXECUTING, EXECUTED
+///     and FAILED carry executionStartedAt; CHECK
+///     PrivilegedOperation_executed_check: EXECUTED and FAILED carry
+///     executedAt; CHECK PrivilegedOperation_export_artifact_check: an
+///     EXECUTED PII_EXPORT carries artifactAvailableUntil;
+///   - trigger PrivilegedOperation_insert_pending: a row is created PENDING,
+///     with no decision or execution fields, and requestedAt within 5 minutes
+///     of the database clock (Prisma fills @default(now()) from the app
+///     clock, hence the tolerance);
+///   - trigger PrivilegedOperation_request_immutable:
+///       * the request fields (id, kind, payload, payloadSha256, summary,
+///         affectedCount, reason, requestedById, requestedAt, expiresAt) never
+///         change, and a row is never deleted;
+///       * status machine: PENDING → APPROVED | REJECTED | CANCELLED |
+///         EXPIRED; APPROVED → EXECUTING; EXECUTING → EXECUTED | FAILED.
+///         EXECUTED, FAILED, REJECTED, CANCELLED and EXPIRED are final;
+///       * PENDING → APPROVED | REJECTED only while the database clock is
+///         before expiresAt; PENDING → EXPIRED only once it has reached
+///         expiresAt. APPROVED → EXECUTING is not time-limited (expiresAt
+///         bounds the wait for a decision, not the execution that follows
+///         it, and nothing moves an APPROVED row to EXPIRED);
+///       * the decision (decidedById, decidedAt, breakGlass, decisionNote) is
+///         written only by the update that leaves PENDING, and is final once
+///         decidedById is set;
+///       * executionStartedAt is set once by APPROVED → EXECUTING; executedAt,
+///         result and error by EXECUTING → EXECUTED | FAILED;
+///         artifactAvailableUntil once by EXECUTING → EXECUTED;
+///         artifactDownloads only increases, and only while EXECUTED;
+///   - trigger PrivilegedOperation_no_truncate: TRUNCATE is refused.
+/// Enforced by the server actions, not the database: who may request and
+/// decide (SUPER_ADMIN; break-glass needs its flag and a justification), the
+/// payloadSha256 match at approval, running the expiry sweep (the database
+/// only refuses an early EXPIRED), the 3-download cap, and the SECURITY audit
+/// and email of a break-glass approval.
+model PrivilegedOperation {
+  id                     String                    @id @default(cuid())
+  kind                   PrivilegedOperationKind
+  status                 PrivilegedOperationStatus @default(PENDING)
+  payload                Json
+  payloadSha256          String
+  summary                String
+  affectedCount          Int
+  reason                 String
+  requestedById          String
+  requestedAt            DateTime                  @default(now())
+  expiresAt              DateTime
+  decidedById            String?
+  decidedAt              DateTime?
+  decisionNote           String?
+  breakGlass             Boolean                   @default(false)
+  executionStartedAt     DateTime?
+  executedAt             DateTime?
+  result                 Json?
+  error                  String?
+  /// PII_EXPORT: download window and counter. The file is never stored.
+  artifactAvailableUntil DateTime?
+  artifactDownloads      Int                       @default(0)
+
+  @@index([status, expiresAt])
+  @@index([requestedById, requestedAt(sort: Desc)])
+  @@index([kind, requestedAt(sort: Desc)])
+}
+
+/// Read-only view as another user. Enforced by the database:
+///   - CHECK ImpersonationSession_box: at most 15 minutes (expiresAt ≤
+///     startedAt + 15 min); CHECK ImpersonationSession_window_check:
+///     expiresAt > startedAt;
+///   - CHECK ImpersonationSession_not_self: never the impersonator's own
+///     account;
+///   - CHECK ImpersonationSession_end_pair_check: endedAt and endReason are
+///     set together; CHECK ImpersonationSession_end_after_start_check:
+///     endedAt ≥ startedAt;
+///   - trigger ImpersonationSession_insert_window: startedAt is within 5
+///     minutes of the database clock at INSERT (no back-dated or future
+///     window);
+///   - trigger ImpersonationSession_immutable: impersonatorId, targetUserId,
+///     reason, startedAt and expiresAt never change (no extension, no sliding
+///     window); endedAt/endReason are set once (an ended session is never
+///     reopened); a row is never deleted;
+///   - trigger ImpersonationSession_no_truncate: TRUNCATE is refused.
+/// Enforced by the app, not the database: the reason's length, the target's
+/// role and status, read-only mode, the start and end audit, and closing a
+/// session once expiresAt has passed (getCurrentUser and the scheduler sweep).
+model ImpersonationSession {
+  id             String                  @id @default(cuid())
+  impersonatorId String
+  targetUserId   String
+  reason         String
+  startedAt      DateTime                @default(now())
+  expiresAt      DateTime
+  endedAt        DateTime?
+  endReason      ImpersonationEndReason?
+  /// The super-admin's Session row that points here while it is live.
+  session        Session?
+
+  @@index([impersonatorId, startedAt(sort: Desc)])
+  @@index([targetUserId, startedAt(sort: Desc)])
+  @@index([endedAt, expiresAt])
+}
+
+/// Transactional outbox for security email, drained by apps/scheduler.
+/// The address is resolved from User at send time and never stored here or
+/// logged.
+model EmailOutbox {
+  id            String       @id @default(cuid())
+  kind          String
+  toUserId      String
+  subject       String
+  bodyText      String       @db.Text
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  nextAttemptAt DateTime     @default(now())
+  lockedUntil   DateTime?
+  lastError     String?
+  transport     String?
+  entityType    String?
+  entityId      String?
+  createdAt     DateTime     @default(now())
+  sentAt        DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([entityType, entityId])
+}
+
+/// Upserted after every scheduler job tick (never in --dry-run). Read by /super/jobs.
+model SchedulerJobStatus {
+  job                 String    @id
+  instance            String
+  lastStartedAt       DateTime
+  lastFinishedAt      DateTime?
+  lastOk              Boolean
+  lastError           String?
+  lastReport          Json      @default("{}")
+  consecutiveFailures Int       @default(0)
+  updatedAt           DateTime  @updatedAt
+}
+
+// ── Admin: scope, accommodations, roster, announcements (Phase 4) ─────
+
+/// Student visibility granted to one ADMIN by department and/or batch (no
+/// section). A null dimension = every value; both null = college-wide.
+/// Fail closed: an ADMIN with no active row (revokedAt null) sees no
+/// students. SUPER_ADMIN is never scoped. By convention (the app, not the
+/// database) it is written only by the governance actions (grant/revoke,
+/// SUPER_ADMIN, SECURITY-audited) and read only through
+/// lib/auth/scope-where.ts and lib/auth/scope.ts.
+/// Enforced by the database:
+///   - partial unique index AdminScope_active_grant_key (migration only;
+///     Prisma does not model it): at most one active row per (adminId,
+///     departmentCode, batchYear), nulls equal;
+///   - trigger AdminScope_grant_immutable: adminId, departmentCode,
+///     batchYear, reason, grantedById and createdAt never change (re-scoping
+///     is a revoke plus a new grant); revokedAt and revokedById are set once;
+///     a row is never deleted;
+///   - CHECK AdminScope_revoke_pair_check: revokedAt and revokedById are set
+///     together;
+///   - trigger AdminScope_no_truncate: TRUNCATE is refused.
+model AdminScope {
+  id             String    @id @default(cuid())
+  adminId        String
+  admin          User      @relation(fields: [adminId], references: [id])
+  departmentCode String?
+  batchYear      Int?
+  reason         String
+  grantedById    String
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime?
+  revokedById    String?
+
+  @@index([adminId, revokedAt])
+}
+
+/// Exam accommodation. An ADMIN requests; only a SUPER_ADMIN approves, with
+/// an expiry (validUntil) and full audit — the role checks and the audit are
+/// the server actions' job. Phase 6 reads the APPROVED row (validUntil > now)
+/// at attempt start; nothing in the database expires a row by itself.
+/// `kinds` is a disability label: shown only on /admin/accommodations/[id]
+/// (ADMIN/SUPER_ADMIN) and to the student — never to a reviewer or
+/// invigilator, never in audit metadata (an application rule).
+/// Enforced by the database (migrations 20261010100000, 20261010100050 and
+/// 20261010100080; a refusal raises check_violation):
+///   - partial unique indexes Accommodation_one_approved_per_user and
+///     Accommodation_one_open_request_per_user: at most one APPROVED and one
+///     REQUESTED row per user. They are not deferrable;
+///   - trigger Accommodation_insert_requested: a row is INSERTed only as
+///     REQUESTED with no decision, grant or revoke fields ("approve now" is
+///     an INSERT as REQUESTED and then the approving UPDATE, in one
+///     transaction); a supersedesId names another accommodation of the same
+///     student;
+///   - trigger Accommodation_granted_terms_immutable:
+///       * id, userId, requestedById and requestedAt never change;
+///       * status machine: REQUESTED → APPROVED | REJECTED | WITHDRAWN;
+///         APPROVED → REVOKED | SUPERSEDED. REJECTED, WITHDRAWN, REVOKED and
+///         SUPERSEDED are final;
+///       * APPROVED → SUPERSEDED needs, at that moment, a REQUESTED
+///         accommodation of the same student whose supersedesId is this row.
+///         A supersede is therefore, in one transaction: the successor
+///         exists as REQUESTED (INSERT it now for "approve now"), the old row
+///         → SUPERSEDED, the successor → APPROVED. Once its predecessor is
+///         SUPERSEDED, a REQUESTED successor keeps its supersedesId, is never
+///         deleted and can only be approved;
+///       * the decision (decidedById, decidedAt, decisionNote,
+///         approvedBySuperAdminId, grantedAt) is written only by the single
+///         update that leaves REQUESTED; decision and revoke fields are set
+///         once and then final (a revoke reason goes to the audit row);
+///       * a changed supersedesId names another accommodation of the same
+///         student, never the row itself;
+///       * once grantedAt is set, the terms, the grant, supersedesId and
+///         documentFileId never change and the row is never deleted (a change
+///         of terms is a new request that supersedes this one); a row never
+///         granted may be deleted;
+///   - CHECKs: extraTimePercent 0–100, extraTimeMinutes 0–240, breakMinutes
+///     0–120 (0 unless allowBreaks), fontScalePercent 100–200, kinds
+///     non-empty; and attribution by status:
+///       REQUESTED: no decision or grant fields
+///         (Accommodation_requested_undecided_check);
+///       APPROVED, REVOKED, SUPERSEDED: approvedBySuperAdminId, grantedAt,
+///         decidedById and decidedAt (Accommodation_granted_check,
+///         Accommodation_granted_attribution_check), and only these carry
+///         grantedAt (Accommodation_granted_status_check);
+///       REJECTED, WITHDRAWN: decidedById and decidedAt, no approver
+///         (Accommodation_closed_attribution_check). WITHDRAWN names who
+///         withdrew (the requester or a SUPER_ADMIN);
+///       REVOKED exactly when revokedAt and revokedById are both set
+///         (Accommodation_revoke_pair_check);
+///   - trigger Accommodation_no_truncate: TRUNCATE is refused.
+model Accommodation {
+  id                     String              @id @default(cuid())
+  userId                 String
+  user                   User                @relation(fields: [userId], references: [id])
+  status                 AccommodationStatus @default(REQUESTED)
+  kinds                  AccommodationKind[]
+  exemptSignals          ProctorEventKind[]  @default([])
+  /// 0–100 (33 ≈ the standard 20 min/hour). CHECK in migration.
+  extraTimePercent       Int                 @default(0)
+  /// 0–240. CHECK in migration.
+  extraTimeMinutes       Int                 @default(0)
+  allowBreaks            Boolean             @default(false)
+  /// 0–120, and 0 unless allowBreaks. CHECK in migration.
+  breakMinutes           Int                 @default(0)
+  /// 100–200. CHECK in migration.
+  fontScalePercent       Int                 @default(100)
+  allowScribe            Boolean             @default(false)
+  highContrast           Boolean             @default(false)
+  reason                 String              @db.Text
+  /// No upload in Phase 4: documents stay with the accessibility office.
+  documentFileId         String?
+  validUntil             DateTime
+  requestedById          String
+  requestedAt            DateTime            @default(now())
+  approvedBySuperAdminId String?
+  grantedAt              DateTime?
+  decidedById            String?
+  decidedAt              DateTime?
+  decisionNote           String?
+  revokedById            String?
+  revokedAt              DateTime?
+  supersedesId           String?             @unique
+  supersedes             Accommodation?      @relation("AccommodationSupersedes", fields: [supersedesId], references: [id])
+  supersededBy           Accommodation?      @relation("AccommodationSupersedes")
+  updatedAt              DateTime            @updatedAt
+
+  @@index([userId, status])
+  @@index([status, validUntil])
+}
+
+/// Dry-run LMS roster import: a preview stored here, then a separate commit
+/// that recomputes the diff and refuses if diffSha256 changed. `rows` (PII)
+/// is nulled on commit, discard or expiry.
+model RosterImport {
+  id            String             @id @default(cuid())
+  status        RosterImportStatus @default(PREVIEWED)
+  createdById   String
+  fileName      String
+  fileSha256    String
+  rowCount      Int
+  /// Validated RosterRow[]; NULL after commit/discard/expiry.
+  rows          Json?
+  /// Outcome counts {create, update, link, unchanged, skipped, rejected}.
+  counts        Json
+  /// sha256 of the canonical plan shown at preview (informational; commit compares to the form's hash).
+  diffSha256    String
+  /// After commit: [{line, outcome, userId?, changedFields?}] — ids and field names only.
+  results       Json?
+  resultsSha256 String?
+  expiresAt     DateTime
+  committedAt   DateTime?
+  createdAt     DateTime           @default(now())
+
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+}
+
+/// Plain-text staff announcement. Publishing fans out one Notification per
+/// in-scope ACTIVE/SOFT_RESTRICTED student in the audience (the server action
+/// does the fan-out and the scope check). Enforced by the database:
+///   - CHECKs: title 1–120 characters, body 1–2000, and an audienceSection
+///     only together with a batch and a department;
+///     CHECK Announcement_publish_pair_check: publishedAt and publishedById
+///     are set together;
+///   - trigger Announcement_insert_draft: a row is created as an unpublished
+///     draft (no publishedAt, publishedById, archivedAt or archivedById;
+///     recipientCount 0);
+///   - trigger Announcement_published_immutable: publishedAt, publishedById,
+///     archivedAt and archivedById are set once. Once publishedAt is set, the
+///     text (title, body, tone, link), the audience and recipientCount never
+///     change, so the publish UPDATE sets recipientCount together with
+///     publishedAt. endsAt stays writable. A published row (archived or not)
+///     is never deleted: notifications link to it and it is history; a draft
+///     may be deleted;
+///   - trigger Announcement_no_truncate: TRUNCATE is refused.
+model Announcement {
+  id                     String           @id @default(cuid())
+  title                  String
+  body                   String           @db.Text
+  tone                   AnnouncementTone @default(INFO)
+  /// Same-origin path only (safeNotificationHref).
+  link                   String?
+  /// Audience; null = every value of that dimension (must be covered by the author's scope).
+  audienceBatchYear      Int?
+  audienceDepartmentCode String?
+  audienceSection        String?
+  /// Banner stops after this; notifications stay in history.
+  endsAt                 DateTime
+  publishedAt            DateTime?
+  publishedById          String?
+  archivedAt             DateTime?
+  archivedById           String?
+  recipientCount         Int              @default(0)
+  createdById            String
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  notifications          Notification[]
+
+  @@index([publishedAt(sort: Desc)])
+}
+
+// ── Problem authoring (Phase 4) ────────────────────────────────────────
+// Actor ids are plain strings; no new User back-relations.
+
+/// Review history of a draft revision. NOT version content, so it is not a
+/// frozen child (FROZEN_EXEMPT_MODELS in packages/db/src/frozen.ts): it is
+/// cascade-deleted with a deleted draft and append-only by convention.
+model ProblemReview {
+  id               String              @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion      @relation(fields: [problemVersionId], references: [id], onDelete: Cascade)
+  action           ProblemReviewAction
+  actorId          String?
+  comment          String?             @db.Text
+  /// SUBMITTED only: the submitter attested the content is originally authored.
+  attestedOriginal Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+
+  @@index([problemVersionId, createdAt])
+}
+
+/// One bulk problem import (a zip upload or the CLI). Re-importing the same
+/// archive is safe: entries already imported come back UNCHANGED.
+model ProblemImport {
+  id            String              @id @default(cuid())
+  uploadedById  String
+  fileName      String
+  sizeBytes     BigInt
+  archiveSha256 String
+  /// "upload" | "cli:<operator>"
+  via           String
+  status        ProblemImportStatus @default(PROCESSING)
+  total         Int                 @default(0)
+  created       Int                 @default(0)
+  revised       Int                 @default(0)
+  unchanged     Int                 @default(0)
+  failed        Int                 @default(0)
+  /// Whole-archive failure (not a zip, over a cap, interrupted). Per-entry failures live on rows.
+  error         String?
+  startedAt     DateTime            @default(now())
+  finishedAt    DateTime?
+  rows          ProblemImportRow[]
+
+  @@index([uploadedById, startedAt(sort: Desc)])
+}
+
+/// One problem directory of an import. Written as soon as that entry commits
+/// or fails. problemVersionId is a plain string (no relation), so this is
+/// not a ProblemVersion child.
+model ProblemImportRow {
+  id               String                 @id @default(cuid())
+  importId         String
+  import           ProblemImport          @relation(fields: [importId], references: [id], onDelete: Cascade)
+  entry            String
+  slug             String?
+  status           ProblemImportRowStatus
+  problemId        String?
+  problemVersionId String?
+  revision         Int?
+  packageSha256    String?
+  /// [{path, message}] — every problem found in the entry, not only the first.
+  errors           Json                   @default("[]")
+  warnings         Json                   @default("[]")
+  createdAt        DateTime               @default(now())
+
+  @@unique([importId, entry])
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@recx/scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Scheduled jobs: judge reconciler (10s) for submissions, runs and validation runs, node-offline sweep and lane hygiene, RunRequest TTL and retention purge (legal-hold aware); later dormancy sweep, leaderboard freeze. Uses the direct (non-pooled) database URL.",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@prisma/client": "6.16.2",
+    "@recx/db": "workspace:*",
+    "@recx/shared": "workspace:*",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.7.0",
+    "nodemailer": "10.0.10",
+    "pino": "^9.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
