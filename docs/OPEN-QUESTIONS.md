@@ -1199,6 +1199,19 @@ Ids refer to the review notes.
 - **Roster previews expire lazily (D10, kept).** Expiry stays lazy, as the
   admin design records. An expired preview is never shown or committed. A
   sweep that clears its rows is optional hardening.
+- **Derived themes keep the DO-NOT bounds on `--muted` (C5).** The
+  spec's derivation (dark muted starts at oklch 0.655 and is "clamped
+  lighter until ≥ 4.5") produced a dark muted darker than #9c95b4 for some
+  hues, while the DO-NOT list forbids that. The skeptics split on whether
+  this is a defect, so both rules now apply: derived dark muted is lightened
+  until its WCAG luminance reaches #9c95b4's, and derived light muted is
+  darkened until it is no lighter than #6f6a87. Each clamp only moves muted
+  away from the surface, so contrast only improves. The canonical
+  rec-purple palette is unchanged. A theme saved before this keeps its
+  stored palette until it is saved again.
+- **The content target still needs named owners (C6, open).** Naming
+  people is a decision for the placement cell and department heads; the
+  placeholder at the top of this file stays until they do.
 - **FUNCTION tests are canonical on every path (J1).** The test editor and
   publish check them, as a bulk import does. A signature edit that
   invalidates stored tests blocks publish until the tests are fixed.

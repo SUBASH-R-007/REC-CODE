@@ -88,3 +88,24 @@ describe("derivation property: never an illegal palette", () => {
     expect(violations).toEqual([]);
   });
 });
+
+describe("derivation property: the DO-NOT bounds on --muted", () => {
+  it("light muted is never lighter than #6f6a87 and dark muted never darker than #9c95b4 (WCAG luminance)", async () => {
+    const { contrast } = await import("../src/contrast");
+    const lum = (hex: string) => contrast(hex, "#000000");
+    const ceiling = lum("#6f6a87");
+    const floor = lum("#9c95b4");
+    const violations: string[] = [];
+    for (const c of [0.05, 0.12, 0.21]) {
+      for (let h = 0; h < 360; h += 2) {
+        const seed = seedAt(0.5, c, h);
+        const result = deriveTheme({ presetKey: "custom", brandSeed: seed, accentSeed: "#b45309", radius: "0.75rem" });
+        if (!result.ok) continue;
+        const { light, dark } = result.palette as unknown as { light: Record<string, string>; dark: Record<string, string> };
+        if (lum(light.muted!) > ceiling + 1e-9) violations.push(`${seed} light muted ${light.muted}`);
+        if (lum(dark.muted!) < floor - 1e-9) violations.push(`${seed} dark muted ${dark.muted}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
