@@ -18,6 +18,7 @@ export type AdminNavIcon =
   | "problems"
   | "sheets"
   | "tracks"
+  | "contests"
   | "announcements"
   | "reports"
   | "judge"
@@ -58,6 +59,7 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = Object.freeze([
       item("/admin/problems", "Problems", "problems"),
       item("/admin/sheets", "Sheets", "sheets"),
       item("/admin/tracks", "Tracks", "tracks"),
+      item("/admin/contests", "Contests", "contests"),
       item("/admin/announcements", "Announcements", "announcements"),
     ]),
   },

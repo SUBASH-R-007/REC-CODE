@@ -284,6 +284,22 @@ export const STAFF_CAPABILITIES = deepFreeze([
     ],
   },
   {
+    key: "contests.manage",
+    label: "Create contests and pin their problems",
+    roles: STAFF,
+    actions: [
+      "admin-contests#createContest",
+      "admin-contests#addContestProblem",
+      "admin-contests#removeContestProblem",
+      "admin-contests#publishContest",
+    ],
+    pages: [
+      "app/admin/contests/page.tsx",
+      "app/admin/contests/new/page.tsx",
+      "app/admin/contests/[id]/page.tsx",
+    ],
+  },
+  {
     key: "announcements.manage",
     label: "Draft, publish and archive announcements to in-scope students",
     roles: STAFF,

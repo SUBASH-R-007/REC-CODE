@@ -25,7 +25,11 @@ describe("admin navigation", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => [g.label, g.items.map((i) => i.href)])).toEqual([
       ["Overview", ["/admin"]],
       ["People", ["/admin/students", "/admin/cohorts", "/admin/accommodations"]],
-      ["Content", ["/admin/problems", "/admin/sheets", "/admin/tracks", "/admin/announcements"]],
+      // Contests joined Content in Phase 5.
+      [
+        "Content",
+        ["/admin/problems", "/admin/sheets", "/admin/tracks", "/admin/contests", "/admin/announcements"],
+      ],
       ["Insight", ["/admin/reports"]],
       ["Operations", ["/admin/judge"]],
     ]);

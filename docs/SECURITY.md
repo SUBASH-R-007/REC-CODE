@@ -170,6 +170,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `students.signOut` | staff | - | - | yes | - | yes | 1 action, 1 page |
 | `roster.import` | staff | - | - | yes | - | yes | 3 actions, 2 pages |
 | `plans.manage` | staff | - | - | yes | - | yes | 11 actions, 6 pages |
+| `contests.manage` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `announcements.manage` | staff | - | - | yes | - | yes | 3 actions, 3 pages |
 | `accommodations.request` | staff | - | - | yes | - | yes | 2 actions, 3 pages |
 | `problems.author` | staff | - | - | yes | - | yes | 18 actions, 4 pages |
