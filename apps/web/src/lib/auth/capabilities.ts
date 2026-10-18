@@ -402,6 +402,12 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     actions: ["notes#createNote", "notes#updateNote", "notes#deleteNote", "notes#previewNote"],
   },
   {
+    key: "contests.enter",
+    label: "Enter contests",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["contests#registerForContest", "contests#startVirtualContest"],
+  },
+  {
     key: "bookmarks.manage",
     label: "Bookmark problems",
     roles: EVERY_SIGNED_IN_ROLE,

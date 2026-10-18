@@ -59,7 +59,8 @@ describe("shell navigation model", () => {
     const shown = visibleGroups().map((g) => [g.label, g.items.map((i) => i.href)]);
     expect(shown).toEqual([
       ["Practice", ["/problems", "/sheets", "/learn"]],
-      ["Compete", ["/leaderboard"]],
+      // Contests arrived in Phase 5.
+      ["Compete", ["/contests", "/leaderboard"]],
       ["Me", ["/profile", "/bookmarks", "/notes", "/notifications"]],
     ]);
   });
@@ -71,9 +72,10 @@ describe("shell navigation model", () => {
     expect(visibleGroups([{ id: "compete", label: "Compete", items: [] }])).toEqual([]);
   });
 
-  it("does not link contests or assessments before their phases", () => {
+  it("links contests (Phase 5) and not assessments (Phase 6) yet", () => {
+    const hrefs = allNavItems().map((i) => i.href);
+    expect(hrefs).toContain("/contests");
     for (const item of allNavItems()) {
-      expect(item.href.startsWith("/contests")).toBe(false);
       expect(item.href.startsWith("/assessments")).toBe(false);
     }
   });

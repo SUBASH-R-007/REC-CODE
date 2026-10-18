@@ -181,6 +181,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
 | `notes.manage` | self-service | yes | yes | yes | yes | yes | 4 actions |
+| `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |

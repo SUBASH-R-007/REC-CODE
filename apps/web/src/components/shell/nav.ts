@@ -15,6 +15,7 @@ export type NavIconKey =
   | "problems"
   | "sheets"
   | "learn"
+  | "contests"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -53,6 +54,7 @@ export const DASHBOARD_ITEM = item("/dashboard", "Dashboard", "dashboard", "Your
 const PROBLEMS = item("/problems", "Problems", "problems", "Browse and solve practice problems");
 const SHEETS = item("/sheets", "Sheets", "sheets", "Curated problem sheets for placements");
 const LEARN = item("/learn", "Learn", "learn", "Guided topic tracks");
+const CONTESTS = item("/contests", "Contests", "contests", "Timed rounds, standings and your rating");
 const LEADERBOARD = item("/leaderboard", "Leaderboard", "leaderboard", "Weekly, monthly and all-time XP rankings");
 const PROFILE = item("/profile", "Profile", "profile", "Your progress, badges and settings");
 const BOOKMARKS = item("/bookmarks", "Bookmarks", "bookmarks", "Problems you saved for later");
@@ -61,7 +63,7 @@ const NOTIFICATIONS = item("/notifications", "Notifications", "notifications", "
 
 export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
   { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, SHEETS, LEARN]) },
-  { id: "compete", label: "Compete", items: Object.freeze([LEADERBOARD]) },
+  { id: "compete", label: "Compete", items: Object.freeze([CONTESTS, LEADERBOARD]) },
   // ASSESS (Phases 6-7): no implemented routes yet, so nothing is rendered.
   { id: "assess", label: "Assess", items: Object.freeze([]) },
   { id: "me", label: "Me", items: Object.freeze([PROFILE, BOOKMARKS, NOTES, NOTIFICATIONS]) },
