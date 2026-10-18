@@ -1214,3 +1214,24 @@ Each is the narrower reading, implemented as described.
   with a date-and-time field must do the same — on a Windows development box
   whose local zone IS Asia/Kolkata the bug is invisible, because the
   server's zone and the author's zone agree.
+- **A student who registers and submits nothing is not on the board, and is
+  not rated** (decided 2026-10-19, surfaced by the 150-participant
+  simulation: 148 of 150 registrants had submitted, and exactly those 148
+  were rated). `ContestStanding` is materialised from
+  `ContestProblemAttempt` (SPEC §4e), so a student with no attempt row has
+  no board row, and `releaseContestRating` reads the board — so they are
+  outside the rated field and their rating does not move. It also means they
+  do not count towards the 30-participant minimum.
+  This is the narrower reading of "materialised from the attempts", and it is
+  what the code does. The trade-off is worth stating plainly, because the
+  reference implementation does the opposite — it rates every registrant,
+  placing a no-show last:
+  - **For our reading:** a student who registers and then has a class, or a
+    power cut, loses nothing. In a college where contests are scheduled
+    against timetables, that is the kinder default.
+  - **Against:** registering costs nothing, so there is no reason not to
+    register for everything, and a student who turned up and finished last
+    is treated worse than one who never appeared.
+  Revisit with the placement cell once a few real rounds have run: the fix
+  is to seed a zero-score standing row for every registration at the start,
+  which makes a no-show a last place rather than an absence.

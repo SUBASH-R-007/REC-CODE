@@ -212,6 +212,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     track: "",
     sheetSlug: `${tag}-sheet`,
     trackSlug: `${tag}-track`,
+    contest: "",
+    contestSlug: `${tag}-contest`,
+    contestProblem: "",
     cpp20Config: "",
   };
   const blobShas: string[] = [];
@@ -400,6 +403,39 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       else ids.track = plan.id;
     }
     await db.studyPlanEnrollment.create({ data: { userId: user.id, planId: ids.sheet, itemsTotal: 1 } });
+
+    // Phase 5: a RUNNING contest that pins the SAME frozen version carrying
+    // every canary, with this student registered and on the board. The
+    // contest queries reach a ProblemVersion, so they are a plausible leak
+    // path and must be proved clean rather than assumed.
+    const contest = await db.contest.create({
+      data: {
+        slug: ids.contestSlug,
+        title: `Contest ${tag}`,
+        rules: "Be quick.",
+        kind: "ICPC",
+        status: "RUNNING",
+        startsAt: new Date(now.getTime() - 30 * 60_000),
+        endsAt: new Date(now.getTime() + 90 * 60_000),
+        freezeMinutes: 30,
+        isRated: false,
+        createdById: user.id,
+      },
+      select: { id: true },
+    });
+    ids.contest = contest.id;
+    const contestProblem = await db.contestProblem.create({
+      data: { contestId: contest.id, problemVersionId: ids.live, index: "A", points: 1 },
+      select: { id: true },
+    });
+    ids.contestProblem = contestProblem.id;
+    await db.contestRegistration.create({ data: { contestId: contest.id, userId: user.id, kind: "UNRATED" } });
+    await db.contestProblemAttempt.create({
+      data: { contestId: contest.id, userId: user.id, contestProblemId: contestProblem.id, wrongAttempts: 1 },
+    });
+    await db.contestStanding.create({
+      data: { contestId: contest.id, userId: user.id, score: 0, penalty: 0, solved: 0, rank: 1 },
+    });
   }, 120_000);
 
   afterAll(async () => {
@@ -435,6 +471,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
           "RunRequest",
           "Session",
         ].map((t) => raw(`DELETE FROM "public"."${t}" WHERE "userId" = ANY($1::text[])`, userIds)),
+        // Phase 5 contest fixture. ContestProblem_frozen_version refuses an
+        // UPDATE but not a DELETE, so only the contest's own guards come off.
+        raw(`ALTER TABLE "public"."Contest" DISABLE TRIGGER "Contest_rating_once"`),
+        raw(`DELETE FROM "public"."ContestStanding" WHERE "contestId" = $1`, ids.contest),
+        raw(`DELETE FROM "public"."ContestProblemAttempt" WHERE "contestId" = $1`, ids.contest),
+        raw(`DELETE FROM "public"."ContestRegistration" WHERE "contestId" = $1`, ids.contest),
+        raw(`DELETE FROM "public"."ContestProblem" WHERE "contestId" = $1`, ids.contest),
+        raw(`DELETE FROM "public"."Contest" WHERE "id" = $1`, ids.contest),
+        raw(`ALTER TABLE "public"."Contest" ENABLE TRIGGER "Contest_rating_once"`),
         raw(`DELETE FROM "public"."StudyPlan" WHERE "slug" = ANY($1::text[])`, [ids.sheetSlug, ids.trackSlug]),
         raw(`DELETE FROM "public"."ProblemStat" WHERE "problemId" = ANY($1::text[])`, problemIds),
         ...["TestCase", "ReferenceSolution", "Hint", "Editorial", "StarterCode", "Subtask", "ProblemLanguageLimit"].map((t) =>
@@ -623,6 +668,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getRunView!,
     "submissions#getStudentView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getStudentView!,
     "submissions#recentSubmissions": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).recentSubmissions!,
+    "contests#listContests": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).listContests!,
+    "contests#getContest": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getContest!,
+    "contests#getStandings": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getStandings!,
+    "contests#getRatingSummary": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getRatingSummary!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -651,6 +700,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": () => [[ids.run, viewer()]],
     "submissions#getStudentView": () => [["submission", ids.submission, viewer()], ["run", ids.run, viewer()]],
     "submissions#recentSubmissions": () => [[ids.user, ids.problem]],
+    "contests#listContests": () => [[{ id: ids.user, batchYear: 2027, departmentCode: "CSE" }]],
+    "contests#getContest": () => [[ids.contestSlug, { id: ids.user, batchYear: 2027, departmentCode: "CSE" }]],
+    "contests#getStandings": () => [
+      [ids.contestSlug, { id: ids.user, role: "STUDENT", batchYear: 2027, departmentCode: "CSE" }],
+      // Also as staff, which bypasses the freeze and reads the live board.
+      [ids.contestSlug, { id: ids.user, role: "ADMIN", batchYear: 2027, departmentCode: "CSE" }],
+    ],
+    "contests#getRatingSummary": () => [[ids.user]],
   };
   /** Exports that read nothing problem-scoped, with the reason. */
   const NOT_PROBLEM_SCOPED: Record<string, string> = {
@@ -673,6 +730,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "profile#languageShares": "pure transform of UserStats JSON",
     "profile#cohortMedianSql": "pure SQL builder; executed through getOwnProfile (called)",
     "submissions#HISTORY_LIMIT": "constant",
+    "contests#elapsedMinutes": "pure arithmetic on a window and a clock",
   };
 
   it("QUERY_CALLS and NOT_PROBLEM_SCOPED cover every export of the student query modules", async () => {
@@ -722,6 +780,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "(student)/accessibility/page.tsx": () => ({}),
     "(student)/bookmarks/page.tsx": () => ({}),
     "(student)/dashboard/loading.tsx": () => ({}),
+    "(student)/contests/page.tsx": () => ({}),
+    "(student)/contests/[slug]/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
+    "(student)/contests/[slug]/analysis/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
+    "(student)/contests/[slug]/arena/layout.tsx": () => ({}),
+    "(student)/contests/[slug]/arena/page.tsx": () => ({ params: { slug: ids.contestSlug }, searchParams: { p: "A" } }),
+    "(student)/contests/[slug]/standings/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
     "(student)/dashboard/page.tsx": () => ({}),
     "(student)/help/page.tsx": () => ({}),
     "(student)/layout.tsx": () => ({}),
@@ -867,6 +931,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       () => [{ slug: ids.slug, language: "py312", source: "print(input())\n" }],
       () => [{ slug: ids.draftSlug, language: "py312", source: "print(input())\n" }],
     ],
+    // Phase 5: a student registers themselves for a contest, and starts
+    // their own virtual run. Both are self-service, so both are called as S
+    // and must leak no canary. The contest fixture is RUNNING, so
+    // registering succeeds; a virtual run of a running contest is refused by
+    // the action's own rule, which is still a non-Forbidden answer and so
+    // still has to be canary-clean.
+    "contests#registerForContest": [() => [{ slug: ids.contestSlug }]],
+    "contests#startVirtualContest": [() => [{ slug: ids.contestSlug }]],
     "notes#createNote": [() => [{ title: `Second ${tag}`, contentMd: "Another note.", problemId: ids.problem }]],
     "notes#updateNote": [() => [{ id: ids.note, title: `Note ${tag}`, contentMd: "Edited.", problemId: ids.problem }]],
     "notes#previewNote": [() => [{ contentMd: "# Preview" }]],

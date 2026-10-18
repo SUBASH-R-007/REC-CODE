@@ -23,8 +23,9 @@ that review has happened or been dropped.
 | 2 Judge hardening and capacity | Gated 2026-10-10 |
 | 3 Student product surface | Gated 2026-10-10 |
 | 4 Authoring, admin, `/super` | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
-| 5 Contests | **In progress** — design in `phase5/DESIGN.md` |
-| 6–10 | Not started |
+| 5 Contests | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
+| 6 Assessments and proctoring | **Next** |
+| 7–10 | Not started |
 
 ## Phase 4: what is done
 
@@ -74,11 +75,21 @@ needs its own go-ahead. It stays available if a deeper review is wanted; the
 gate rows say plainly that the review performed was a focused read, not the
 six-dimension workflow.
 
-## Phase 5: contests
+## Phase 5: gated 2026-10-19
 
-`phase5/DESIGN.md`. Phase 5 is greenfield: no `Contest` models exist, only the
-`Submission.contestId` / `XpEvent.contestId` placeholders and the `CONTEST`
-lane and origin enums.
+`phase5/DESIGN.md` holds the plan it was built from. Every "Done when" item
+is a dated row in `docs/RUNBOOK.md` §3: the four gates on Windows (4,748
+tests) and Linux (7/7, every suite at full count, 260/260 real isolate), the
+rating fixture and idempotence, `rebuild-standings` byte-for-byte, the
+150-participant simulated contest, `pnpm size` with two new budgets, and the
+`contest` Playwright project.
+
+Two findings worth carrying forward, both in `docs/OPEN-QUESTIONS.md`:
+a `datetime-local` field is campus time and the client must make it absolute
+before sending (invisible on an IST dev box, wrong on a UTC host); and a
+student who registers but submits nothing is not on the board and so is not
+rated, which is the narrower reading of "materialised from the attempts" but
+the opposite of what the reference implementation does.
 
 ## Ground rules carried over (see `SPEC.md` §0 and §7)
 
