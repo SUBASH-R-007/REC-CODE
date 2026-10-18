@@ -363,28 +363,37 @@ model User {
   /// Editor preferences (font size, tab width, keymap) as plain JSON.
   editorPrefs       Json              @default("{}")
 
-  sessions        Session[]
-  submissions     Submission[]
-  runRequests     RunRequest[]
-  judgeUsage      UserJudgeUsage[]
-  quotaOverrides  JudgeQuotaOverride[]
-  problemStatuses UserProblemStatus[]
-  activityDays    ActivityDay[]
-  stats           UserStats?
-  xpEvents        XpEvent[]
-  xpBuckets       XpBucket[]
-  hintReveals     HintReveal[]
-  editorialViews  EditorialView[]
-  problemActivity ProblemActivity[]
-  enrollments     StudyPlanEnrollment[]
-  bookmarks       Bookmark[]
-  notes           Note[]
-  notifications   Notification[]
-  codeDrafts      CodeDraft[]
-  badges          UserBadge[]
+  sessions             Session[]
+  submissions          Submission[]
+  runRequests          RunRequest[]
+  judgeUsage           UserJudgeUsage[]
+  quotaOverrides       JudgeQuotaOverride[]
+  problemStatuses      UserProblemStatus[]
+  activityDays         ActivityDay[]
+  stats                UserStats?
+  xpEvents             XpEvent[]
+  xpBuckets            XpBucket[]
+  hintReveals          HintReveal[]
+  editorialViews       EditorialView[]
+  problemActivity      ProblemActivity[]
+  enrollments          StudyPlanEnrollment[]
+  bookmarks            Bookmark[]
+  notes                Note[]
+  notifications        Notification[]
+  codeDrafts           CodeDraft[]
+  badges               UserBadge[]
   /// ADMIN student-visibility grants (Phase 4). Actor ids elsewhere stay plain strings.
-  adminScopes     AdminScope[]
-  accommodations  Accommodation[]
+  adminScopes          AdminScope[]
+  accommodations       Accommodation[]
+  /// Contests (Phase 5). Participation is student data, like submissions and
+  /// XP, so it relates to User (onDelete RESTRICT by default) rather than
+  /// holding a plain id: a student is never hard-deleted, and past standings
+  /// must stay honest.
+  contestRegistrations ContestRegistration[]
+  contestAttempts      ContestProblemAttempt[]
+  contestStandings     ContestStanding[]
+  ratingChanges        RatingChange[]
+  rating               UserRating?
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -604,6 +613,8 @@ model ProblemVersion {
   submissions        Submission[]
   runRequests        RunRequest[]
   validationRuns     ValidationRun[]
+  /// Contests that pin this (frozen) version — Phase 5.
+  contestProblems    ContestProblem[]
 
   @@unique([problemId, revision])
 }
@@ -1790,4 +1801,270 @@ model ProblemImportRow {
   createdAt        DateTime               @default(now())
 
   @@unique([importId, entry])
+}
+
+// ── Contests (Phase 5) ─────────────────────────────────────────────────
+// Structural decision (e), SPEC §4: ContestProblemAttempt is AUTHORITATIVE
+// and ContestStanding is a materialised view of it, recomputed by one job
+// every 15 s — never renumbered inside a submission transaction.
+// scripts/rebuild-standings.ts must reproduce a standings table from the
+// attempts alone, which is the gate test for this decision.
+
+/// ICPC or subtask partial credit. Mirrors CONTEST_KINDS (@recx/shared).
+enum ContestKind {
+  ICPC
+  SUBTASK
+}
+
+enum ContestStatus {
+  DRAFT
+  PUBLISHED
+  RUNNING
+  FINISHED
+  RATED
+  CANCELLED
+}
+
+/// PUBLIC = the whole college. COHORT = the audience columns apply.
+enum ContestVisibility {
+  PUBLIC
+  COHORT
+}
+
+/// RATED counts for rating; UNRATED is a live entry that does not; VIRTUAL
+/// replays the original clock later and is excluded from standings.
+enum ParticipationKind {
+  RATED
+  UNRATED
+  VIRTUAL
+}
+
+/// Mirrors DIVISIONS (@recx/shared): Div 3 < 1400, Div 2 1400-1799, Div 1 >= 1800.
+enum ContestDivision {
+  DIV3
+  DIV2
+  DIV1
+}
+
+/// A contest. The window is fixed at publish; problems pin frozen versions.
+/// Enforced by the database (migration 20261019120000; a refusal raises
+/// check_violation):
+///   - CHECK Contest_window_check: endsAt > startsAt;
+///   - CHECK Contest_freeze_check: freezeMinutes >= 0, and a freeze only on a
+///     contest of at least 90 minutes that the window does not swallow
+///     (freezeMinutes < the duration) - the 90-minute rule of SPEC section 5;
+///   - CHECK Contest_rated_check: a RATED contest carries ratingComputedAt;
+///   - CHECK Contest_rated_min_check: a RATED contest carries
+///     ratedParticipants >= 30 (MIN_RATED_PARTICIPANTS) - a smaller field is
+///     unrated, and says so before the start;
+///   - trigger Contest_rating_once: ratingComputedAt is set once and never
+///     cleared or changed, and ratedParticipants is written with it. Rating
+///     is computed in one transaction that takes SELECT ... FOR UPDATE on this
+///     row and aborts if ratingComputedAt is already set, so a second run
+///     changes nothing (idempotence is a gate test);
+///   - trigger Contest_no_truncate: TRUNCATE is refused.
+/// Enforced by the app: who may create and publish (staff; AdminScope for
+/// COHORT visibility), and that the arena refuses a non-registered user.
+model Contest {
+  id                     String            @id @default(cuid())
+  slug                   String            @unique
+  title                  String
+  /// Markdown, sanitised server-side like a problem statement.
+  rules                  String            @db.Text
+  kind                   ContestKind       @default(ICPC)
+  status                 ContestStatus     @default(DRAFT)
+  visibility             ContestVisibility @default(PUBLIC)
+  startsAt               DateTime
+  endsAt                 DateTime
+  /// 0 = no freeze. Only honoured on a contest of >= 90 minutes.
+  freezeMinutes          Int               @default(30)
+  isRated                Boolean           @default(true)
+  /// Audience when visibility = COHORT; null = every value of that dimension.
+  audienceBatchYear      Int?
+  audienceDepartmentCode String?
+  /// Set once, by the rating transaction. Its presence means "rated".
+  ratingComputedAt       DateTime?
+  /// Size of the rated field at that moment, stored for the dispute trail.
+  ratedParticipants      Int?
+  /// Bumped by the rank job; lets a client tell a stale board from a fresh one.
+  standingsVersion       Int               @default(0)
+  createdById            String
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  problems      ContestProblem[]
+  registrations ContestRegistration[]
+  attempts      ContestProblemAttempt[]
+  standings     ContestStanding[]
+  ratingChanges RatingChange[]
+
+  @@index([status, startsAt(sort: Desc)])
+  @@index([startsAt])
+}
+
+/// One problem in a contest, at a PINNED frozen version - never
+/// Problem.liveVersionId (SPEC section 4a and section 7). This is what makes
+/// "a mid-contest problem edit does not change any already-judged verdict"
+/// true by construction. It is in FROZEN_EXEMPT_MODELS
+/// (packages/db/src/frozen.ts): it references a frozen version without being
+/// version content.
+/// Enforced by the database:
+///   - CHECK ContestProblem_points_check: points > 0;
+///   - unique (contestId, index) and (contestId, problemVersionId): a problem
+///     appears once, under one letter;
+///   - trigger ContestProblem_frozen_version: the version it pins is frozen
+///     (frozenAt not null) at INSERT, and contestId, problemVersionId and
+///     index never change afterwards.
+model ContestProblem {
+  id               String         @id @default(cuid())
+  contestId        String
+  contest          Contest        @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  problemVersionId String
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  /// "A", "B", "C" ... the letter shown in the arena and on the board.
+  index            String
+  /// ICPC: 1. SUBTASK: the problem's maximum score.
+  points           Float          @default(1)
+  createdAt        DateTime       @default(now())
+
+  attempts ContestProblemAttempt[]
+
+  @@unique([contestId, index])
+  @@unique([contestId, problemVersionId])
+  @@index([problemVersionId])
+}
+
+/// Registration, and the only place a virtual run's own clock lives.
+/// Enforced by the database:
+///   - CHECK ContestRegistration_virtual_check: a VIRTUAL registration
+///     carries virtualStartsAt and a RATED/UNRATED one does not;
+///   - unique (contestId, userId, kind): one live entry and one virtual run
+///     per student per contest.
+model ContestRegistration {
+  id              String            @id @default(cuid())
+  contestId       String
+  contest         Contest           @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User              @relation(fields: [userId], references: [id])
+  kind            ParticipationKind @default(RATED)
+  /// VIRTUAL only: when this student's replayed clock starts.
+  virtualStartsAt DateTime?
+  registeredAt    DateTime          @default(now())
+
+  @@unique([contestId, userId, kind])
+  @@index([userId, registeredAt(sort: Desc)])
+}
+
+/// AUTHORITATIVE per-problem record (SPEC section 4e). Everything the board
+/// shows is derivable from these rows; rebuild-standings reads only this
+/// table.
+/// Enforced by the database:
+///   - CHECK ContestProblemAttempt_counts_check: wrongAttempts >= 0 and
+///     penaltyMinutes >= 0;
+///   - CHECK ContestProblemAttempt_solved_check: solvedAt, solvedAtMinutes
+///     and bestSubmissionId are all set together or all null - a solve
+///     always names the submission that earned it;
+///   - CHECK ContestProblemAttempt_points_check: points >= 0.
+model ContestProblemAttempt {
+  contestId        String
+  contest          Contest        @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User           @relation(fields: [userId], references: [id])
+  contestProblemId String
+  contestProblem   ContestProblem @relation(fields: [contestProblemId], references: [id], onDelete: Cascade)
+  /// REJECTED submissions before the accepted one (or in total, if unsolved).
+  wrongAttempts    Int            @default(0)
+  /// SUBTASK: the best score the judge awarded. ICPC leaves it 0.
+  points           Float          @default(0)
+  solvedAt         DateTime?
+  /// Minutes from the contest start (this student's start, if virtual).
+  solvedAtMinutes  Int?
+  /// ICPC: solvedAtMinutes + 20 x wrongAttempts. 0 while unsolved.
+  penaltyMinutes   Int            @default(0)
+  bestSubmissionId String?
+  updatedAt        DateTime       @updatedAt
+
+  @@id([contestId, userId, contestProblemId])
+  @@index([contestId, contestProblemId])
+  @@index([userId, contestId])
+}
+
+/// Materialised standings (SPEC section 4e). `rank` is written by ONE job
+/// every 15 s - never per submission, because 5,000 rank renumberings a
+/// minute is a deadlock generator - under optimistic concurrency on
+/// `version`.
+/// Enforced by the database:
+///   - CHECK ContestStanding_rank_check: rank >= 1, or null while the job has
+///     not ranked the row yet;
+///   - CHECK ContestStanding_values_check: score >= 0, penalty >= 0,
+///     solved >= 0, version >= 0;
+///   - trigger ContestStanding_no_truncate: TRUNCATE is refused (the table is
+///     rebuildable, but never by accident).
+model ContestStanding {
+  contestId      String
+  contest        Contest   @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  /// ICPC: problems solved. SUBTASK: summed points.
+  score          Float     @default(0)
+  /// ICPC penalty in minutes. 0 for SUBTASK.
+  penalty        Int       @default(0)
+  solved         Int       @default(0)
+  lastAcceptedAt DateTime?
+  rank           Int?
+  version        Int       @default(0)
+  updatedAt      DateTime  @updatedAt
+
+  @@id([contestId, userId])
+  @@index([contestId, score(sort: Desc), penalty, lastAcceptedAt])
+}
+
+/// Append-only rating history: no UPDATE, no DELETE (the XpEvent rule).
+/// `seed` is the expected rank the field gave this participant - it is what
+/// makes a disputed rating reconstructable years later (SPEC section 5).
+/// Enforced by the database:
+///   - unique (contestId, userId): one row per participant per contest;
+///   - CHECK RatingChange_delta_check: after = before + delta, and
+///     |delta| <= 200 (RATING_CLAMP);
+///   - CHECK RatingChange_rank_check: rank >= 1 and seed > 0;
+///   - trigger RatingChange_append_only: UPDATE and DELETE are refused;
+///   - trigger RatingChange_no_truncate: TRUNCATE is refused.
+model RatingChange {
+  id         String   @id @default(cuid())
+  contestId  String
+  contest    Contest  @relation(fields: [contestId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  before     Int
+  after      Int
+  delta      Int
+  /// Competition rank in this contest (tied participants share one).
+  rank       Int
+  /// The expected rank the pre-contest field gave them.
+  seed       Float
+  /// Size of the rated field, so the row explains itself.
+  ratedCount Int
+  computedAt DateTime @default(now())
+
+  @@unique([contestId, userId])
+  @@index([userId, computedAt(sort: Desc)])
+}
+
+/// Current rating. Derived from RatingChange, kept for fast reads; the
+/// ledger is the truth. `division` is NOT stored: divisionOf() derives it,
+/// so the two can never drift (docs/OPEN-QUESTIONS.md).
+/// Enforced by the database:
+///   - CHECK UserRating_values_check: rating >= 0 and contestsRated >= 0.
+model UserRating {
+  userId        String    @id
+  user          User      @relation(fields: [userId], references: [id])
+  /// Seeded at 1200 (RATING_SEED) on the first rated contest.
+  rating        Int       @default(1200)
+  /// Provisional for the first 5 rated contests (PROVISIONAL_CONTESTS):
+  /// shown with "?" and excluded from readiness.
+  contestsRated Int       @default(0)
+  lastRatedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@index([rating(sort: Desc)])
 }

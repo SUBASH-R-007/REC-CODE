@@ -63,6 +63,8 @@ export const FROZEN_EXEMPT_MODELS: Readonly<Record<string, string>> = Object.fre
   ValidationRun: "validation history of a version",
   ProblemReview:
     "review history of a draft revision, not version content; cascade-deleted with a deleted draft, append-only by convention",
+  ContestProblem:
+    "pins a frozen version into a contest; not version content. The ContestProblem_frozen_version trigger refuses an unfrozen version at INSERT and freezes contestId/problemVersionId/index afterwards",
 });
 
 const WRITE_OPS = new Set([

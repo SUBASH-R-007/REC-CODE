@@ -131,8 +131,9 @@ describe("the twelve SUPER_ADMIN capabilities", () => {
         expect(c.actions.length + (c.routes?.length ?? 0), c.key).toBeGreaterThan(0);
       }
     }
+    // ratings.manage was wired in Phase 5 (super-ratings#releaseContestRating),
+    // so it is no longer an arriving capability.
     expect(SUPER_ADMIN_CAPABILITIES.filter((c) => c.arrives).map((c) => [c.key, c.arrives?.phase])).toEqual([
-      ["ratings.manage", 5],
       ["integrity.overturn", 6],
       ["calendar.manage", 8],
     ]);

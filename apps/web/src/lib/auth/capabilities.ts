@@ -129,8 +129,7 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
     key: "ratings.manage",
     label: "Release, recompute or override ratings",
     roles: SUPER_ONLY,
-    actions: [],
-    arrives: { phase: 5, models: ["Contest", "RatingChange"] },
+    actions: ["super-ratings#releaseContestRating"],
   },
   {
     key: "integrity.overturn",

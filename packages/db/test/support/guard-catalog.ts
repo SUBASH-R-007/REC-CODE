@@ -33,6 +33,10 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_accommodation_insert",
   "recx_refuse_impersonation_insert",
   "recx_refuse_announcement_insert",
+  // 20261019120000_phase5_contests
+  "recx_refuse_contest_rating_rewrite",
+  "recx_refuse_unfrozen_contest_problem",
+  "recx_refuse_rating_change_write",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -50,6 +54,11 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "XpEvent",
   "AuditLog",
   "Announcement",
+  // 20261019120000_phase5_contests
+  "Contest",
+  "ContestProblemAttempt",
+  "ContestStanding",
+  "RatingChange",
 ];
 
 export interface GuardTrigger {
@@ -125,6 +134,28 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     level: "ROW",
   },
   { name: "Announcement_insert_draft", timing: "BEFORE INSERT", table: "Announcement", fn: "recx_refuse_announcement_insert", level: "ROW" },
+  // 20261019120000_phase5_contests
+  {
+    name: "Contest_rating_once",
+    timing: "BEFORE UPDATE",
+    table: "Contest",
+    fn: "recx_refuse_contest_rating_rewrite",
+    level: "ROW",
+  },
+  {
+    name: "ContestProblem_frozen_version",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "ContestProblem",
+    fn: "recx_refuse_unfrozen_contest_problem",
+    level: "ROW",
+  },
+  {
+    name: "RatingChange_append_only",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "RatingChange",
+    fn: "recx_refuse_rating_change_write",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -143,7 +174,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261010100200_phase4_integration_hardening";
+export const CHECK_CATALOG_THROUGH = "20261019120000_phase5_contests";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -224,6 +255,37 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["Announcement_draft_recipients_check", "Announcement"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261010100200_phase4_integration_hardening" })),
+  ...(
+    [
+      // Contest: the window, the 90-minute freeze rule (kept identical to
+      // canFreeze() in @recx/shared) and the rated rules.
+      ["Contest_window_check", "Contest"],
+      ["Contest_freeze_check", "Contest"],
+      ["Contest_rated_check", "Contest"],
+      ["Contest_rated_min_check", "Contest"],
+      ["Contest_rated_participants_check", "Contest"],
+      ["Contest_standings_version_check", "Contest"],
+      ["Contest_slug_check", "Contest"],
+      ["Contest_title_check", "Contest"],
+      ["Contest_rules_check", "Contest"],
+      ["ContestProblem_points_check", "ContestProblem"],
+      ["ContestProblem_index_check", "ContestProblem"],
+      ["ContestRegistration_virtual_check", "ContestRegistration"],
+      // The authoritative attempt row: a solve names the submission that
+      // earned it, and an unsolved problem carries no penalty.
+      ["ContestProblemAttempt_counts_check", "ContestProblemAttempt"],
+      ["ContestProblemAttempt_points_check", "ContestProblemAttempt"],
+      ["ContestProblemAttempt_solved_check", "ContestProblemAttempt"],
+      ["ContestProblemAttempt_solved_minutes_check", "ContestProblemAttempt"],
+      ["ContestProblemAttempt_unsolved_penalty_check", "ContestProblemAttempt"],
+      ["ContestStanding_rank_check", "ContestStanding"],
+      ["ContestStanding_values_check", "ContestStanding"],
+      // after = before + delta, and |delta| <= RATING_CLAMP.
+      ["RatingChange_delta_check", "RatingChange"],
+      ["RatingChange_values_check", "RatingChange"],
+      ["UserRating_values_check", "UserRating"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019120000_phase5_contests" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
