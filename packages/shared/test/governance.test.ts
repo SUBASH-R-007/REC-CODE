@@ -56,6 +56,14 @@ describe("retention setting", () => {
 
 describe("scheduler jobs", () => {
   it("lists the jobs /super/jobs reports on", () => {
-    expect(SCHEDULER_JOB_NAMES).toEqual(["reconciler", "dailyChallenge", "leaderboardFreeze", "outbox", "governance"]);
+    expect(SCHEDULER_JOB_NAMES).toEqual([
+      "reconciler",
+      "dailyChallenge",
+      "leaderboardFreeze",
+      "outbox",
+      "governance",
+      // Phase 5: the only writer of ContestStanding.rank.
+      "contestRank",
+    ]);
   });
 });

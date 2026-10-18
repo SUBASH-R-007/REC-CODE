@@ -85,5 +85,19 @@ export const SECURITY_EMAIL_KIND_PREFIX = "security.";
 export const MAIL_TRANSPORTS = ["smtp", "log", "disabled"] as const;
 export type MailTransportName = (typeof MAIL_TRANSPORTS)[number];
 
-export const SCHEDULER_JOB_NAMES = ["reconciler", "dailyChallenge", "leaderboardFreeze", "outbox", "governance"] as const;
+/**
+ * How often the contest rank job re-ranks a live board (SPEC §4e: "rank is
+ * recomputed by ONE job every 15 seconds"). The scheduler loop ticks every
+ * RECONCILER_INTERVAL_MS, so the job itself enforces this cadence.
+ */
+export const CONTEST_RANK_INTERVAL_MS = 15_000;
+
+export const SCHEDULER_JOB_NAMES = [
+  "reconciler",
+  "dailyChallenge",
+  "leaderboardFreeze",
+  "outbox",
+  "governance",
+  "contestRank",
+] as const;
 export type SchedulerJobName = (typeof SCHEDULER_JOB_NAMES)[number];

@@ -6,6 +6,7 @@ import { Redis } from "ioredis";
 import pino from "pino";
 import { describeDatabaseUrl, loadConfig, loadDevEnvFile, withSingleConnection } from "./config";
 import { DailyChallengeJob } from "./daily-challenge";
+import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
 import { LeaderboardFreezeJob } from "./leaderboard-freeze";
@@ -92,6 +93,8 @@ const leaderboardFreeze = new LeaderboardFreezeJob({ db, log, dryRun });
 const mailTransport = createMailTransport(config.mail, log);
 const outbox = new OutboxDrainJob({ db, log, dryRun, transport: mailTransport });
 const governance = new GovernanceSweepJob({ db, log, dryRun });
+// Contests (Phase 5): the only writer of ContestStanding.rank.
+const contestRank = new ContestRankJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -185,6 +188,15 @@ async function tick(): Promise<boolean> {
   // Governance: SKIP LOCKED claims and conditional updates, safe with two instances.
   results.push(await runJob("outbox", async () => ({ ok: true, report: await outbox.tick() })));
   results.push(await runJob("governance", async () => ({ ok: true, report: await governance.tick() })));
+  // Contests: idempotent "set rank to this value" writes, so it is safe
+  // with two instances; the job itself holds the 15-second cadence.
+  results.push(
+    await runJob("contestRank", async () => {
+      const report = await contestRank.tick(now);
+      if (report.reranked > 0) log.info({ report }, "contest rank tick");
+      return { ok: !report.failed, report };
+    }),
+  );
   return results.every(Boolean);
 }
 

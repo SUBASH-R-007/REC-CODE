@@ -9,6 +9,7 @@ import {
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { applyContestSubmission } from "@/lib/contests/attempt";
 import { applySubmissionProgressSafely } from "@/lib/progress/apply";
 import { getTestDataStore } from "@/lib/testdata/store";
 import { JOB_ENTITY, markInternalError, publishProgress, requeueLease } from "./claim";
@@ -118,6 +119,7 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
           problemVersionId: true,
           language: true,
           createdAt: true,
+          contestId: true,
         },
       });
       if (!owner) throw new StaleResultError();
@@ -179,8 +181,23 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
       // Written here, inside this transaction and under the per-user
       // advisory lock above, so a verdict and its progress commit together.
       // Behind a savepoint: a progress failure is rolled back and logged,
-      // and the verdict still commits (src/lib/progress/apply.ts). Contest
-      // and assessment origins get their own scoring in later phases.
+      // and the verdict still commits (src/lib/progress/apply.ts). The
+      // ASSESSMENT origin gets its own scoring in Phase 6.
+      if (owner.origin === "CONTEST" && owner.contestId) {
+        // Phase 5: the authoritative attempt row and this student's own
+        // standing row, in this transaction and under the same per-user
+        // lock. Rank is NOT touched here — one job every 15 s does that
+        // (SPEC §4e).
+        await applyContestSubmission(tx, {
+          submissionId: id,
+          userId: owner.userId,
+          contestId: owner.contestId,
+          problemVersionId: owner.problemVersionId,
+          verdict: body.verdict,
+          score: body.score ?? 0,
+          submittedAt: owner.createdAt,
+        });
+      }
       if (owner.origin === "PRACTICE") {
         await applySubmissionProgressSafely(tx, {
           submissionId: id,
