@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Field, Input, Select, Textarea, useToast } from "@recx/design";
+import { istLocalInput } from "@/components/admin/admin-ui";
 import {
   addContestProblem,
   createContest,
@@ -21,10 +22,18 @@ const KINDS = [
   ["SUBTASK", "Subtask — partial credit, no penalty"],
 ] as const;
 
-/** `datetime-local` wants "YYYY-MM-DDTHH:mm" in local time. */
-function toLocalInput(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+/**
+ * A `datetime-local` value is timezone-naive, and the author means CAMPUS
+ * time. Sending the bare string would let the server parse it in the
+ * server's own zone — on a UTC host, "10:00" would become 15:30 IST, which
+ * for a contest window is not a cosmetic bug.
+ *
+ * So the same convention as the announcement form: the field shows IST
+ * (istLocalInput) and this turns it back into an absolute instant with an
+ * explicit +05:30 before it leaves the browser.
+ */
+function istInputToIso(local: string): string {
+  return new Date(`${local}:00+05:30`).toISOString();
 }
 
 export function CreateContestForm({ canGoCollegeWide }: { canGoCollegeWide: boolean }) {
@@ -48,8 +57,8 @@ export function CreateContestForm({ canGoCollegeWide }: { canGoCollegeWide: bool
             title: String(formData.get("title") ?? ""),
             rules: String(formData.get("rules") ?? ""),
             kind: String(formData.get("kind") ?? "ICPC") as "ICPC" | "SUBTASK",
-            startsAt: String(formData.get("startsAt") ?? ""),
-            endsAt: String(formData.get("endsAt") ?? ""),
+            startsAt: istInputToIso(String(formData.get("startsAt") ?? "")),
+            endsAt: istInputToIso(String(formData.get("endsAt") ?? "")),
             freezeMinutes: String(formData.get("freezeMinutes") ?? "0"),
             isRated: formData.get("isRated") === "on",
             visibility,
@@ -85,11 +94,11 @@ export function CreateContestForm({ canGoCollegeWide }: { canGoCollegeWide: bool
         </Select>
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Starts" htmlFor="startsAt">
-          <Input id="startsAt" name="startsAt" type="datetime-local" required defaultValue={toLocalInput(inTwoHours)} />
+        <Field label="Starts" htmlFor="startsAt" hint="Campus time (IST).">
+          <Input id="startsAt" name="startsAt" type="datetime-local" required defaultValue={istLocalInput(inTwoHours)} />
         </Field>
         <Field label="Ends" htmlFor="endsAt">
-          <Input id="endsAt" name="endsAt" type="datetime-local" required defaultValue={toLocalInput(andTwoMore)} />
+          <Input id="endsAt" name="endsAt" type="datetime-local" required defaultValue={istLocalInput(andTwoMore)} />
         </Field>
       </div>
       <Field

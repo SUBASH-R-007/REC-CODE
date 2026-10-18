@@ -74,5 +74,13 @@ export default defineConfig({
     },
     // Phase 4: the public /judge page and the workspace footer link into it.
     { name: "judge", testMatch: /judge-page\.spec\.ts$/, outputDir: "./test-results/judge" },
+    // Phase 5: authoring a contest, entering it, and the arena's hard block
+    // below 768 px. No judge needed — nothing here submits.
+    {
+      name: "contest",
+      testMatch: /contest-journey\.spec\.ts$/,
+      outputDir: "./test-results/contest",
+      fullyParallel: false,
+    },
   ],
 });

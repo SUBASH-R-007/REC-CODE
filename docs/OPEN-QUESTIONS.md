@@ -1199,3 +1199,18 @@ Each is the narrower reading, implemented as described.
   rating, a non-integer or non-positive rank, or a duplicated participant.
   Rating runs in one transaction per contest, so a refusal aborts cleanly;
   a silently wrong rating would be far worse and is hard to detect later.
+- **A `datetime-local` field is CAMPUS time, and the client makes it
+  absolute before sending** (found 2026-10-19 by the contest e2e; fixed).
+  `<input type="datetime-local">` yields a timezone-naive string
+  ("2026-10-19T02:36"). The contest form first sent that string straight to
+  the server, where `new Date(...)` parsed it in the SERVER's zone — and the
+  dev stack runs on a UTC host, so a contest an author set for 10:00 was
+  stored as 10:00 UTC, i.e. 15:30 IST. The e2e caught it because the contest
+  it had just created for "five minutes ago" rendered as *Upcoming*.
+  The fix follows the convention the announcement form already used
+  (`announcement-form.tsx`): the field is populated with `istLocalInput()`
+  and converted back with an explicit `+05:30` before it leaves the browser,
+  so the server only ever parses an unambiguous instant. Any future form
+  with a date-and-time field must do the same — on a Windows development box
+  whose local zone IS Asia/Kolkata the bug is invisible, because the
+  server's zone and the author's zone agree.
