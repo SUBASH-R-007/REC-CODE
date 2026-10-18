@@ -1,8 +1,10 @@
-# Handoff: where REC Code stands (2026-10-13)
+# Handoff: where REC Code stands (2026-10-19)
 
 These are coordinator working notes, committed so a cloud session can continue
-the build. They are not product documentation. Delete `docs/handoff/phase4/`
-once Phase 4 is gated.
+the build. They are not product documentation. `phase4/` is kept even though
+Phase 4 is gated: `p4-review.workflow.js` was never run and is still the ready
+deeper review, and `docs/RUNBOOK.md` §3 cites it. Delete the directory once
+that review has happened or been dropped.
 
 - `SPEC.md` is the full implementation prompt the platform is built from. The
   five banned proctoring phrases are redacted to `[banned phrase N]`; the real list
@@ -20,8 +22,9 @@ once Phase 4 is gated.
 | 1 Thin vertical slice | Gated 2026-10-10 (`docs/RUNBOOK.md` §3) |
 | 2 Judge hardening and capacity | Gated 2026-10-10 |
 | 3 Student product surface | Gated 2026-10-10 |
-| 4 Authoring, admin, `/super` | **Built and integrated; not gated yet** |
-| 5–10 | Not started |
+| 4 Authoring, admin, `/super` | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
+| 5 Contests | **In progress** — design in `phase5/DESIGN.md` |
+| 6–10 | Not started |
 
 ## Phase 4: what is done
 
@@ -55,40 +58,27 @@ real-isolate tests pass, including the golden suite with java21.
   - Playwright projects `rbac`, `authoring` and `judge`, plus 22 gating a11y rows
     for the admin, super and `/judge` pages.
 
-## Phase 4: what is left before the gate (spec §5, Phase 4 "Done when")
+## Phase 4: gated 2026-10-19
 
-1. **Four gates on Windows and Linux.** On Linux run `scripts/dev/linux-gate.sh`;
-   it needs Postgres on 5433, Redis, isolate 2.x with cgroup v2 and the toolchains
-   under `/opt/toolchains`. Then `pnpm size` after the build: record the `/judge`
-   budget line in `docs/CAPACITY.md` §7, and check that `/dashboard` (the
-   announcement banner adds a client button) is still ≤ 160 KB.
-2. **Adversarial review** of the Phase 4 change. `phase4/p4-review.workflow.js` is a
-   ready workflow: six dimension reviewers, with two skeptics per finding. Fix the
-   confirmed findings, then re-run the gates.
-3. **Small leftovers.**
-   - `schema.prisma` `///` comments for Accommodation, Announcement,
-     ImpersonationSession and PrivilegedOperation should mention the rules added in
-     `20261010100200` (comments only).
-   - `docs/CONVENTIONS.md` should document the sensitive-path naming that
-     `tests/repo/student-exposure.test.ts` enforces.
-   - Optional: `tests/repo/render-read-only.test.ts` (governance design §9.11).
-   - Open question: should Accommodation `requestedAt` get the same ±5-minute
-     insert window as the other governance tables?
-4. **Live stage**, on a stack with a real judge.
-   - Rebuild the judge worker and scheduler. Protocol 3 means web and worker
-     deploy together (`docs/RUNBOOK.md` §2.9). The scheduler now sends mail
-     through `MAIL_TRANSPORT=log` in dev.
-   - Seed and then `validate-and-publish --approve` the six new problems.
-   - Run Playwright with `E2E_JUDGE=1`: `a11y`, `keyboard`, `rbac`, `authoring`
-     and `judge`. The worker needs ≥ 5 slots with `judge-rejudge` in RECX_QUEUES,
-     or validation never runs.
-   - Manual checks (spec): author a problem end to end in the UI, fail validation
-     with a wrong reference solution, fix it, publish, edit the statement, and
-     confirm an older submission still shows its version. Also: two super-admins
-     approving a 30-user DISABLED change; break-glass with the log transport;
-     impersonation being read-only.
-   - Record every check, with its date, in `docs/RUNBOOK.md` §3.
-5. Then Phases 5–10, in order, each gated.
+Every "Done when" item passed and is recorded in `docs/RUNBOOK.md` §3 with its
+date: the four gates on Windows (4,485 tests) and Linux (`linux-gate.sh` 7/7,
+incl. 260/260 real-isolate), `pnpm size` (`/judge` 116.8 KB, `/dashboard`
+120.1 KB -- `docs/CAPACITY.md` §7.1), the §5 item-3 leftovers, a focused
+review of the two highest-severity surfaces, and the live stage: the six new
+problems validated on a real judge and published, Playwright `a11y` 140/140
+plus `rbac`, `judge`, `keyboard` and the `authoring` journey with
+`E2E_JUDGE=1`, and the two-person and break-glass governance checks.
+
+`phase4/p4-review.workflow.js` was NOT run -- it is multi-agent and billed, and
+needs its own go-ahead. It stays available if a deeper review is wanted; the
+gate rows say plainly that the review performed was a focused read, not the
+six-dimension workflow.
+
+## Phase 5: contests
+
+`phase5/DESIGN.md`. Phase 5 is greenfield: no `Contest` models exist, only the
+`Submission.contestId` / `XpEvent.contestId` placeholders and the `CONTEST`
+lane and origin enums.
 
 ## Ground rules carried over (see `SPEC.md` §0 and §7)
 

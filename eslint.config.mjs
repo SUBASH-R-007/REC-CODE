@@ -27,6 +27,12 @@ export default tseslint.config(
       "**/coverage/**",
       "apps/web/public/**",
       "**/next-env.d.ts",
+      // Coordinator handoff notes, not source. docs/handoff/phase4/
+      // p4-review.workflow.js is a Workflow-tool script: agent(), parallel(),
+      // pipeline() and log() are injected by that runtime, so no-undef cannot
+      // see them. The directory goes away once Phase 4 is gated
+      // (docs/handoff/README.md).
+      "docs/handoff/**",
     ],
   },
   js.configs.recommended,

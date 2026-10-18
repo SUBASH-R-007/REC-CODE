@@ -1105,8 +1105,36 @@ Each is the narrower reading, implemented as described.
 - **Accommodation timestamps are bounded only against the request:**
   `decidedAt >= requestedAt` and `grantedAt >= requestedAt` (CHECKs).
   `requestedAt` itself has no insert-time clock window, unlike
-  PrivilegedOperation and ImpersonationSession. Open question: should it get
-  the same 5-minute window?
+  PrivilegedOperation and ImpersonationSession. **Decided 2026-10-18: it does
+  not get one** (the narrower reading — §0 "ask before inventing" — and no
+  spec line asks for a third window). The window is load-bearing on the other
+  two because `startedAt` / `requestedAt` there anchor a *database-enforced
+  expiry*: `expiresAt <= startedAt + 15 min` and `expiresAt <= requestedAt +
+  24 h`, with PENDING -> APPROVED | REJECTED gated on the database clock being
+  before `expiresAt`. A forged insert timestamp would therefore buy a longer
+  live impersonation or a longer approval window — a privilege. Accommodation
+  has no such lever: no Accommodation CHECK or trigger compares anything to
+  the clock, and nothing derives an expiry from `requestedAt` (`validUntil` is
+  supplied by the admin and tied to nothing). `requestedAt` anchors only the
+  two CHECKs above, and the failure modes are self-limiting — a future
+  `requestedAt` makes the row *undecidable*, because a decision taken from a
+  real clock would then violate `decidedAt >= requestedAt`, and a back-dated
+  one only lowers that floor. The real request time is in the
+  `accommodation.requested` audit row either way. Revisit if an Accommodation
+  rule ever becomes clock-gated (an auto-expiry on `validUntil`, say): the
+  window would then be protecting something, and it is a two-line trigger.
+- **`normaliseGrant` widens on a malformed `batchYear`** (noted
+  2026-10-19, reviewing Phase 4; code unchanged). `lib/auth/scope-where.ts`
+  maps a `batchYear` that is not an integer to `null`, and `null` means
+  "every batch" — a fail-**open** in a module whose stated posture is
+  fail-closed everywhere else (no grants matches nothing; an empty scope is
+  `FALSE` in raw SQL). It is not reachable today: grants are read from
+  `AdminScope.batchYear`, which is `Int?`, so Postgres guarantees
+  integer-or-null, and `buildStudentScope` is the only way to mint a scope.
+  Left as is on the narrower reading — changing it would alter behaviour on a
+  path nothing can take, for no gain. Revisit if a grant ever arrives from
+  somewhere other than that column (an import, a cache, an API), because then
+  one bad value silently grants an ADMIN every batch in its department.
 - **Approve-now writes one clock reading.** `requestAccommodation` now
   INSERTs `requestedAt` from the same `now` that the approving UPDATE uses
   for `grantedAt` and `decidedAt`. Before, Prisma's own `now()` for

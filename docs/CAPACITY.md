@@ -205,7 +205,7 @@ slots of 1,000–1,200, or provision ~21 slots) stands until then.
 
 ## 7. Front-end budgets
 
-### 7.1 Bundle sizes — measured 2026-10-10 (production build, Windows)
+### 7.1 Bundle sizes — measured 2026-10-18 (production build, Windows)
 
 `pnpm --filter @recx/web build && pnpm --filter @recx/web size`
 (`apps/web/scripts/size-budget.mjs` against `apps/web/size-budgets.json`;
@@ -219,22 +219,39 @@ out and reads the HTML (`apps/web/scripts/served-html.mjs`); it also serves
 | Budget | Measured | Limit | Breakdown |
 |---|---|---|---|
 | `/login` | **0.0 KB** | 90 KB | Pages Router, `unstable_runtimeJS: false`: 0 `<script src>`, 0 script preloads, no `__NEXT_DATA__`; 1 inline script (the theme script, CSP hash). Not JS: one 12.4 KB stylesheet (gzip), two font preloads, 2.6 KB of HTML (gzip) |
-| `/dashboard` | 117.0 KB | 160 KB | framework 100.4 + app 16.6 |
-| `/problems` | 122.5 KB | 170 KB | framework 100.4 + app 22.1 |
-| `/leaderboard` | 139.3 KB | 150 KB | framework 100.4 + app 38.9 |
-| `/problems/[slug]` shell | 169.2 KB | 220 KB | framework 100.4 + app 68.8 |
-| Shared first-party | 12.5 KB | 120 KB | of 131.4 KB in chunks two or more budgeted routes load |
+| `/dashboard` | 120.1 KB | 160 KB | framework 100.3 + app 19.7 |
+| `/problems` | 122.5 KB | 170 KB | framework 100.3 + app 22.2 |
+| `/leaderboard` | 139.3 KB | 150 KB | framework 100.3 + app 39.0 |
+| `/problems/[slug]` shell | 171.6 KB | 220 KB | framework 100.3 + app 71.2 |
+| `/judge` | **116.8 KB** | 125 KB | framework 100.3 + app 16.5. Public, server-rendered: its own chunks add 0.2 KB, Next's page stub only (`serverRendered` in `size-budgets.json`). `shared: false`, so it does not enter the shared measure |
+| Shared first-party | 12.4 KB | 120 KB | of 131.4 KB in chunks two or more budgeted routes load |
 | Monaco chunk (lazy, `/monaco/vs`) | 942.1 KB | 1,050 KB | `loader.js` 9.0 + `editor/editor.main.js` 930.4 + largest grammar (`javascript.js`) 2.7 |
 | Monaco editor worker (lazy) | 112.0 KB | 120 KB | `base/worker/workerMain.js` |
 | `editor.main.css`, `codicon.ttf` | 20.0 KB, 43.4 KB | reported | not JS |
-| CodeMirror lazy set (< 768 px) | 148.8 KB | 190 KB | core 97.2 + largest grammar (`@codemirror/lang-javascript`) 51.5 |
+| CodeMirror lazy set (< 768 px) | 148.7 KB | 190 KB | core 97.2 + largest grammar (`@codemirror/lang-javascript`) 51.5 |
 
-**Monaco-free: ok** — `/problems`, `/dashboard`, `/leaderboard`, `/admin`
-and `/admin/judge` (every admin page) carry no Monaco module or loader
-marker in their first-load or lazy chunk graphs; the workspace shell loads
-Monaco only lazily, and the detector sees it there (self-check).
+**Monaco-free: ok** — 31 routes checked (first-load and lazy chunk graphs):
+`/problems`, `/dashboard`, `/leaderboard`, `/judge` and every `/admin` page
+carry no Monaco module or loader marker; the workspace shell loads Monaco
+only lazily, and the detector sees it there (self-check).
 
-History, same day: `/login` as an App Router page measured 113.6 KB (over
+**Zero-JS: ok** — `/login` served from this build has no `<script src>`, no
+script preload and no `__NEXT_DATA__`; the detector sees 10 `<script src>`
+on `/offline` (self-check), so it has not gone blind.
+
+Phase 4 deltas against 2026-10-10 (same machine, same build command). The
+gate item was `/judge` (new) and `/dashboard` staying under 160 KB:
+`/dashboard` 117.0 → **120.1 KB** (app 16.6 → 19.7), the announcement
+banner's dismiss button — the one client component Phase 4 adds to the
+student shell. `/problems/[slug]` shell 169.2 → 171.6 KB (app 68.8 → 71.2)
+and `/leaderboard` (app 38.9 → 39.0 KB) come from the same shell chain.
+Shared first-party 12.5 → 12.4 KB and CodeMirror 148.8 → 148.7 KB are
+rounding; the framework chunk measured 100.4 → 100.3 KB. Monaco is
+unchanged. Every budget is met with ≥ 8.0 KB of headroom; the tightest three
+are the Monaco editor worker (8.0 KB), `/judge` (8.2 KB) and `/leaderboard`
+(10.7 KB).
+
+History, 2026-10-10: `/login` as an App Router page measured 113.6 KB (over
 by 23.6 KB) — hence the zero-JavaScript Pages Router page
 (`docs/ARCHITECTURE.md`). The Monaco set first counted the editor worker
 inside the chunk (1,054.0 KB); the worker is a separate worker script and

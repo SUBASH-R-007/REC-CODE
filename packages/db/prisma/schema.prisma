@@ -1335,8 +1335,8 @@ model PlatformTheme {
 // PlatformSetting.updatedById and JudgeQuotaOverride.grantedById.
 
 /// A request → decide → execute record for a privileged operation.
-/// Enforced by the database (migrations 20261010100000, 20261010100050 and
-/// 20261010100080; a refusal raises check_violation):
+/// Enforced by the database (migrations 20261010100000, 20261010100050,
+/// 20261010100080 and 20261010100200; a refusal raises check_violation):
 ///   - CHECK PrivilegedOperation_two_person: once decided, breakGlass is true
 ///     exactly when the decider is the requester, so a self-approval is
 ///     always flagged break-glass and a two-person approval never is;
@@ -1374,7 +1374,12 @@ model PlatformTheme {
 ///         it, and nothing moves an APPROVED row to EXPIRED);
 ///       * the decision (decidedById, decidedAt, breakGlass, decisionNote) is
 ///         written only by the update that leaves PENDING, and is final once
-///         decidedById is set;
+///         decidedById is set; decidedAt may not be more than 5 minutes after
+///         the database clock (20261010100200), so a decision cannot be
+///         dated into the future — together with
+///         PrivilegedOperation_decided_after_request_check it is boxed
+///         between requestedAt and the clock, and the approve path's
+///         GREATEST(statement_timestamp(), requestedAt) always passes;
 ///       * executionStartedAt is set once by APPROVED → EXECUTING; executedAt,
 ///         result and error by EXECUTING → EXECUTED | FAILED;
 ///         artifactAvailableUntil once by EXECUTING → EXECUTED;
@@ -1425,11 +1430,17 @@ model PrivilegedOperation {
 ///     endedAt ≥ startedAt;
 ///   - trigger ImpersonationSession_insert_window: startedAt is within 5
 ///     minutes of the database clock at INSERT (no back-dated or future
-///     window);
+///     window), and the row is created open — no endedAt and no endReason, so
+///     a session is only ever ended by the one UPDATE that closes it
+///     (20261010100200);
 ///   - trigger ImpersonationSession_immutable: impersonatorId, targetUserId,
 ///     reason, startedAt and expiresAt never change (no extension, no sliding
 ///     window); endedAt/endReason are set once (an ended session is never
-///     reopened); a row is never deleted;
+///     reopened) and endedAt may not be more than 5 minutes after the
+///     database clock, so a session cannot be closed into the future
+///     (20261010100200; startedAt is already within 5 minutes of the clock,
+///     so the close path's GREATEST(now(), startedAt) always passes); a row
+///     is never deleted;
 ///   - trigger ImpersonationSession_no_truncate: TRUNCATE is refused.
 /// Enforced by the app, not the database: the reason's length, the target's
 /// role and status, read-only mode, the start and end audit, and closing a
@@ -1530,8 +1541,8 @@ model AdminScope {
 /// `kinds` is a disability label: shown only on /admin/accommodations/[id]
 /// (ADMIN/SUPER_ADMIN) and to the student — never to a reviewer or
 /// invigilator, never in audit metadata (an application rule).
-/// Enforced by the database (migrations 20261010100000, 20261010100050 and
-/// 20261010100080; a refusal raises check_violation):
+/// Enforced by the database (migrations 20261010100000, 20261010100050,
+/// 20261010100080 and 20261010100200; a refusal raises check_violation):
 ///   - partial unique indexes Accommodation_one_approved_per_user and
 ///     Accommodation_one_open_request_per_user: at most one APPROVED and one
 ///     REQUESTED row per user. They are not deferrable;
@@ -1551,7 +1562,13 @@ model AdminScope {
 ///         exists as REQUESTED (INSERT it now for "approve now"), the old row
 ///         → SUPERSEDED, the successor → APPROVED. Once its predecessor is
 ///         SUPERSEDED, a REQUESTED successor keeps its supersedesId, is never
-///         deleted and can only be approved;
+///         deleted and can only be approved. Both halves of that pair read
+///         the other row FOR SHARE (20261010100200), so the rules hold under
+///         concurrency: a supersede and a concurrent withdraw, unlink or
+///         DELETE of the successor can no longer both commit on a stale
+///         snapshot and leave a SUPERSEDED row with no successor — the
+///         second transaction waits for the first and is then refused (or
+///         Postgres aborts one of them with a deadlock, 40P01);
 ///       * the decision (decidedById, decidedAt, decisionNote,
 ///         approvedBySuperAdminId, grantedAt) is written only by the single
 ///         update that leaves REQUESTED; decision and revoke fields are set
@@ -1576,6 +1593,18 @@ model AdminScope {
 ///         withdrew (the requester or a SUPER_ADMIN);
 ///       REVOKED exactly when revokedAt and revokedById are both set
 ///         (Accommodation_revoke_pair_check);
+///     and the decision is not dated before the request (20261010100200):
+///       decidedAt ≥ requestedAt
+///         (Accommodation_decided_after_request_check), grantedAt ≥
+///         requestedAt (Accommodation_granted_after_request_check).
+///         requestedAt itself has no insert-time clock window, unlike
+///         ImpersonationSession.startedAt and PrivilegedOperation.requestedAt:
+///         those two anchor a database-enforced expiry (expiresAt ≤ startedAt
+///         + 15 min; ≤ requestedAt + 24 h, with the decision gated on the
+///         database clock), so a forged value would buy a longer live window.
+///         No Accommodation rule compares anything to the clock and no expiry
+///         is derived from requestedAt, so it anchors only these two CHECKs
+///         (decided 2026-10-18, docs/OPEN-QUESTIONS.md);
 ///   - trigger Accommodation_no_truncate: TRUNCATE is refused.
 model Accommodation {
   id                     String              @id @default(cuid())
@@ -1646,21 +1675,29 @@ model RosterImport {
 
 /// Plain-text staff announcement. Publishing fans out one Notification per
 /// in-scope ACTIVE/SOFT_RESTRICTED student in the audience (the server action
-/// does the fan-out and the scope check). Enforced by the database:
+/// does the fan-out and the scope check). Enforced by the database
+/// (migrations 20261010100000, 20261010100050, 20261010100080 and
+/// 20261010100200; a refusal raises check_violation):
 ///   - CHECKs: title 1–120 characters, body 1–2000, and an audienceSection
 ///     only together with a batch and a department;
 ///     CHECK Announcement_publish_pair_check: publishedAt and publishedById
 ///     are set together;
+///     CHECK Announcement_draft_recipients_check (20261010100200): an
+///     unpublished row counts 0 recipients. The insert trigger already
+///     requires that at INSERT; this holds it for the row's whole life as a
+///     draft, so a count can never appear without a publish;
 ///   - trigger Announcement_insert_draft: a row is created as an unpublished
 ///     draft (no publishedAt, publishedById, archivedAt or archivedById;
 ///     recipientCount 0);
-///   - trigger Announcement_published_immutable: publishedAt, publishedById,
-///     archivedAt and archivedById are set once. Once publishedAt is set, the
-///     text (title, body, tone, link), the audience and recipientCount never
-///     change, so the publish UPDATE sets recipientCount together with
-///     publishedAt. endsAt stays writable. A published row (archived or not)
-///     is never deleted: notifications link to it and it is history; a draft
-///     may be deleted;
+///   - trigger Announcement_published_immutable: id and createdById never
+///     change, draft or published (20261010100200 — Notification rows
+///     reference the id, and the author is attribution). publishedAt,
+///     publishedById, archivedAt and archivedById are set once. Once
+///     publishedAt is set, the text (title, body, tone, link), the audience
+///     and recipientCount never change, so the publish UPDATE sets
+///     recipientCount together with publishedAt. endsAt stays writable. A
+///     published row (archived or not) is never deleted: notifications link
+///     to it and it is history; a draft may be deleted;
 ///   - trigger Announcement_no_truncate: TRUNCATE is refused.
 model Announcement {
   id                     String           @id @default(cuid())

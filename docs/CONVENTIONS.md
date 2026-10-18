@@ -10,6 +10,13 @@ Prisma 6 + PostgreSQL 17, Redis 7 + BullMQ 5, IOI isolate 2.7, vitest.
 
 > On Windows, if a globally installed pnpm 10 fails to switch to 9.15.9, run
 > commands as `npx pnpm@9.15.9 <command>`.
+>
+> **It fails green.** That switch error (`Failed to switch pnpm to v9.15.9 …
+> ENOENT`) goes to stderr and the process still **exits 0**, so a bare
+> `pnpm lint` or `pnpm test` reports success while having run nothing at all.
+> Never read a gate as passed without its exit code and its test counts: run
+> each gate on its own, and assert `$?` (a pipe into `tail` or `grep` masks
+> it — that is the pipeline's exit code, not pnpm's).
 
 ## Golden rules
 
@@ -76,6 +83,62 @@ controls.
 
 Pages export `metadata = { title: "…" }`. Params are Promises:
 `{ params }: { params: Promise<{ slug: string }> }`.
+
+## Sensitive paths (hidden tests, checkers, reference solutions)
+
+Hidden test bytes, checker sources and `ReferenceSolution.source` are the one
+class of data a student must never reach. Rather than auditing every file,
+the repo confines that code to a fixed set of paths and lets
+`tests/repo/student-exposure.test.ts` (static, part of `pnpm test`) plus
+`apps/web/test/student-exposure.db.test.ts` (live canaries) police the rest.
+`SENSITIVE_PREFIXES` in the static test is the list; **put new code that
+touches that data at one of these paths, and name it accordingly**:
+
+| Path | What goes there |
+|---|---|
+| `src/app/admin/**`, `src/app/super/**` | staff pages |
+| `src/app/api/admin/**`, `src/app/api/judge/**` | staff and judge-node routes |
+| `src/components/admin/**`, `src/components/super/**` | staff UI |
+| `src/server/queries/admin-*.ts`, `super-*.ts` | staff read helpers |
+| `src/server/actions/admin-*.ts`, `super-*.ts`, `privileged.ts` | staff actions |
+| `src/lib/authoring/**`, `src/lib/testdata/**`, `src/lib/privileged/**` | authoring, the blob store, SUPER_ADMIN executors |
+| `src/lib/judge/claim.ts`, `finalize.ts`, `validation.ts` | job specs, finalise, validate-and-publish |
+
+The `admin-` / `super-` **filename prefix is the convention that carries the
+rule** under `src/server/queries` and `src/server/actions`: a staff query in
+`src/server/queries/accommodations.ts` is not sensitive as far as the test is
+concerned, so the fences below would reject it. Rename, don't exempt.
+
+Everywhere else under `apps/web/src` (comments never count):
+
+- no `referenceSolution(s)` / `ReferenceSolution`, in code or in SQL text;
+- no `testBlob` delegate, `readBlobBytes`, `getTestDataStore`, `checkerSha256`,
+  and no SQL naming `TestBlob`, `inline`, `storageKey` or `checkerSha256`;
+- a `testCase(s)` query selecting `input` / `output` must say `isSample: true`;
+- no value import of a sensitive module (a type-only import is erased, so it
+  is fine).
+
+And across the import graph:
+
+- every **student entry** — `page` / `layout` / `route` / `loading` / `error` /
+  `global-error` / `not-found` / `template` / `default` under `src/app` outside
+  `admin/**`, `super/**`, `api/judge/**` and `api/admin/**`, plus
+  `src/middleware.ts` and `src/pages/**` — must have no sensitive module
+  anywhere in its closure;
+- every `"use server"` file whose closure reaches a sensitive module must start
+  **every** export's `runAction` body with a staff-only guard
+  (`requireSuperAdmin()`, or `requireActionRole(…)` naming ADMIN or
+  SUPER_ADMIN and never STUDENT, or a composite that itself starts so). No
+  function-level `"use server"` anywhere in `src`;
+- every route handler under `src/app/api/admin/**` calls a staff-only guard
+  before it reads the body or touches the database;
+- every sensitive `lib/**` and `server/queries/**` module starts with
+  `import "server-only"`. The exemptions are pure helpers and store drivers
+  loaded outside the react-server condition (`SERVER_ONLY_EXEMPT`).
+
+A module that genuinely has to be reachable from a student entry goes in
+`STUDENT_REACHABLE_ACTIONS` with its reason, and the graph is still followed
+*through* it — the root layout's impersonation banner is the only entry today.
 
 ## Judge worker
 
