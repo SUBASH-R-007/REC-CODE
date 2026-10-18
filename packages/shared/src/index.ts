@@ -25,3 +25,4 @@ export {
   type TypeNode,
 } from "./harness/signature";
 export { FUNCTION_HARNESS_LANGUAGES, supportsFunctionMode } from "./harness/family";
+export * from "./rating";

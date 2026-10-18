@@ -1160,3 +1160,42 @@ Each is the narrower reading, implemented as described.
   the start of each attempt.
 - **Box ids of the adversarial self-check suite: 950–952.** The live
   maintenance range is 900–909 and verify-toolchains uses 800–899.
+
+## Phase 5 — decisions recorded during the build
+
+- **The rating formula's three corrections are in tension; the resolution is
+  written into `packages/shared/src/rating.ts`.** The spec fixes the order:
+  level the field so Σdelta = 0, *then* shift the top
+  min(n, round(4·√n)) by pre-contest rating so their delta sum is ≤ 0,
+  *then* clamp |delta| ≤ 200 — and it also asks the gate test to assert
+  "Σdelta ≈ 0". Those cannot all hold literally:
+  - **The top-set shift.** Taking the top set's excess off them and
+    discarding it breaks the Σdelta = 0 that the previous step just
+    established. We therefore **redistribute** the excess to the rest of the
+    field instead of destroying it: the top set lands at exactly 0 (≤ 0 as
+    required) and the total stays 0, so both invariants hold exactly. The
+    reference implementation instead derives a bounded negative increment
+    from the top set and applies it to *everyone*, which is deliberately
+    deflationary (it also subtracts a flat 1 point in the levelling step).
+    Ours is the narrower reading: it does what the spec's two sentences each
+    ask for, and nothing extra. Revisit if the college wants deliberate
+    rating deflation over time, which is a policy choice, not a bug.
+    For n ≤ 16, round(4·√n) ≥ n, so the whole field is the "top set" and
+    there is nobody to redistribute to; the excess is simply removed.
+  - **The clamp wins.** Because the clamp is ordered last, a field extreme
+    enough to need it loses the discarded excess and Σdelta is then no
+    longer ≈ 0. So "Σdelta ≈ 0" is a property of the formula *when the clamp
+    does not bind*, which is the normal case: the gate fixture is a realistic
+    round (local upsets, no delta within 200) and asserts no delta is
+    clamped, so the zero-sum assertion means something; a separate test
+    drives a reversed field, shows the clamp binding at ±200, and asserts
+    that the total is then non-zero, so the trade-off cannot change
+    unnoticed.
+- **Ranks passed to the rating engine are competition ranks (1, 2, 2, 4).**
+  Tied participants must share a rank, or tying with somebody would move
+  your rating. `competitionRanks()` is exported next to the engine so the
+  live board and `rebuild-standings` cannot disagree about ties.
+- **`computeRatingChanges` throws rather than guessing** on a non-finite
+  rating, a non-integer or non-positive rank, or a duplicated participant.
+  Rating runs in one transaction per contest, so a refusal aborts cleanly;
+  a silently wrong rating would be far worse and is hard to detect later.
