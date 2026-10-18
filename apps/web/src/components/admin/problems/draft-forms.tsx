@@ -363,7 +363,15 @@ export function StarterCodeForm({ starters, languages }: { starters: { language:
         }}
       >
         <Field label="Starter code for" htmlFor={`${id}-starter-for`}>
-          <Select id={`${id}-starter-for`} value={lang} onChange={(e) => setLang(e.target.value)}>
+          <Select
+            id={`${id}-starter-for`}
+            value={lang}
+            onChange={(e) => {
+              // Load the chosen language's saved starter, so Save never writes another language's code.
+              setLang(e.target.value);
+              setCode(starters.find((s) => s.language === e.target.value)?.code ?? "");
+            }}
+          >
             {languages.map((l) => (
               <option key={l.value} value={l.value}>
                 {l.label}

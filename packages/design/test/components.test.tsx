@@ -10,6 +10,7 @@ import {
   CardBody,
   CardHeader,
   CardSkeleton,
+  Dialog,
   DifficultyBadge,
   Dropdown,
   DropdownItem,
@@ -205,6 +206,28 @@ describe("primitives", () => {
     const markup = renderToStaticMarkup(<EmptyState title="Empty" />);
     expect(markup).not.toContain("<img");
     expect(markup).not.toContain("aria-hidden");
+  });
+});
+
+describe("Dialog", () => {
+  it("offers a labelled close button by default", () => {
+    const markup = renderToStaticMarkup(
+      <Dialog open onClose={() => undefined} title="Rotate">
+        body
+      </Dialog>,
+    );
+    expect(markup).toContain('aria-label="Close dialog"');
+    expect(markup).toMatch(/<h2 id="[^"]+"[^>]*>Rotate<\/h2>/);
+  });
+
+  it("dismissible={false} has no close button (the content must offer the way out)", () => {
+    const markup = renderToStaticMarkup(
+      <Dialog open dismissible={false} onClose={() => undefined} title="New token">
+        <button type="button">I have copied it</button>
+      </Dialog>,
+    );
+    expect(markup).not.toContain("Close dialog");
+    expect(markup).toContain("I have copied it");
   });
 });
 

@@ -17,6 +17,7 @@ import {
   Layers,
   type LucideIcon,
 } from "lucide-react";
+import { MenuDetails } from "@/components/admin/menu-details";
 import { NavLink } from "@/components/shell/nav-link";
 import { UserMenu } from "@/components/shell/user-menu";
 import { Wordmark } from "@/components/shell/wordmark";
@@ -119,7 +120,7 @@ export function AdminShell({
         <div className="flex h-14 shrink-0 items-center px-4">
           <Wordmark href="/admin" />
         </div>
-        <div className="scroll-thin flex-1 overflow-y-auto px-3 pb-4 pt-2" tabIndex={0} aria-label="Admin sections">
+        <div role="region" className="scroll-thin flex-1 overflow-y-auto px-3 pb-4 pt-2" tabIndex={0} aria-label="Admin sections">
           <AdminNav groups={groups} idPrefix="side" />
         </div>
       </aside>
@@ -144,17 +145,17 @@ export function AdminShell({
             roleLabel={ROLE_LABELS[user.role] ?? "Staff"}
           />
         </div>
-        <details className="group border-t border-border lg:hidden">
+        <MenuDetails className="group border-t border-border lg:hidden">
           <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 text-sm font-medium text-text sm:px-6 [&::-webkit-details-marker]:hidden">
             <Menu className="h-4 w-4" aria-hidden />
             Admin menu
             <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden />
             <ScopeChip label={scopeLabel} className="ml-auto max-w-[11rem] sm:hidden" />
           </summary>
-          <div className="max-h-[70vh] overflow-y-auto px-3 pb-4" tabIndex={0} aria-label="Admin sections">
+          <div role="region" className="max-h-[70vh] overflow-y-auto px-3 pb-4" tabIndex={0} aria-label="Admin sections">
             <AdminNav groups={groups} idPrefix="menu" />
           </div>
-        </details>
+        </MenuDetails>
       </header>
 
       <main id="main-content" tabIndex={-1} className="w-full px-4 pb-16 pt-6 outline-none sm:px-6 lg:pl-66">

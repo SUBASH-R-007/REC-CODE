@@ -33,10 +33,7 @@ vi.mock("@/lib/db", () => ({
       return [{ artifactDownloads: h.downloads }];
     },
     user: {
-      findMany: async ({ where }: { where: { AND?: Array<{ id?: { gt: string } }> } }) => {
-        const after = where.AND?.[1]?.id?.gt;
-        return after ? h.users.filter((u) => String(u.id) > after) : h.users;
-      },
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) => h.users.filter((u) => where.id.in.includes(String(u.id))),
     },
   },
 }));
@@ -57,7 +54,7 @@ beforeEach(() => {
     kind: "PII_EXPORT",
     status: "EXECUTED",
     requestedById: "super_1",
-    payload: { filter: { batchYear: 2027 }, columns: ["collegeId", "firstName", "email"] },
+    payload: { filter: { batchYear: 2027 }, userIds: ["u1", "u2"], columns: ["collegeId", "firstName", "email"] },
     artifactAvailableUntil: new Date(Date.now() + 3_600_000),
   };
   h.users = [
@@ -81,6 +78,14 @@ describe("PII export download", () => {
     expect(h.audit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "pii.export.downloaded", sensitivity: "SECURITY", metadata: expect.objectContaining({ download: 1 }) }),
     );
+  });
+
+  it("exports exactly the approved accounts, not whoever matches the filter now", async () => {
+    // u3 matches the filter today (say a roster import after approval) but was not approved.
+    h.users.push({ id: "u3", collegeId: "2116231001003", firstName: "Late", email: "late@example.test" });
+    const lines = (await (await call()).text()).trim().split("\r\n");
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toContain("Late");
   });
 
   it("allows at most 3 downloads", async () => {

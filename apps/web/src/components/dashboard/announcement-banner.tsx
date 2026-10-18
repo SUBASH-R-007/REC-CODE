@@ -47,11 +47,11 @@ export function AnnouncementBanner({ announcements }: { announcements: ActiveAnn
                     Important
                   </Badge>
                 ) : null}
-                <h2 id={`announcement-${a.notificationId}`} className="text-sm font-semibold text-text">
+                <h2 id={`announcement-${a.notificationId}`} className="text-sm font-semibold text-text [overflow-wrap:anywhere]">
                   {a.title}
                 </h2>
               </div>
-              <p className={cn("mt-1 text-sm whitespace-pre-line", important ? "text-text" : "text-text-secondary")}>{a.body}</p>
+              <p className={cn("mt-1 text-sm whitespace-pre-line [overflow-wrap:anywhere]", important ? "text-text" : "text-text-secondary")}>{a.body}</p>
               {href ? (
                 <Link href={href as never} className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
                   Open

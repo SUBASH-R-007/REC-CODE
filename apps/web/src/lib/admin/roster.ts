@@ -70,7 +70,6 @@ export async function loadRosterMatches(
       email: true,
       batchYear: true,
       departmentCode: true,
-      updatedAt: true,
     },
   });
   if (keyed.length === 0) return [];
@@ -120,9 +119,10 @@ async function takenHandles(tx: DbTx, bases: readonly string[]): Promise<Set<str
 /**
  * Apply a plan inside the commit transaction. Creates copy the LMS identity
  * (role STUDENT, status ACTIVE, no password: such an account cannot sign in
- * until LMS sign-in ships). Updates are conditional on the account being
- * unchanged since the plan was made (updatedAt), still current and still in
- * scope; anything else aborts the whole commit. Role, status and password
+ * until LMS sign-in ships). Updates are conditional on every changed field
+ * still holding the value the plan saw (and, for a link, no LMS id yet), the
+ * account still current and still in scope; anything else aborts the whole
+ * commit. Activity (sign-in, submissions) never conflicts. Role, status and password
  * are never written. The open-period XpBucket rows of moved students get
  * their new cohort, so this week's and month's boards follow the move.
  */
@@ -180,8 +180,10 @@ export async function applyRosterPlan(
       else data[c.field] = c.to as string;
     }
     if (o.link) data.lmsUserId = o.row.lmsUserId;
+    const unchangedSincePlan: Prisma.UserWhereInput = Object.fromEntries(o.changes.map((c) => [c.field, c.from]));
+    if (o.link) unchangedSincePlan.lmsUserId = null;
     const moved = await tx.user.updateMany({
-      where: scopedStudentWhere(scope, { id: o.userId, updatedAt: new Date(o.updatedAt), status: { in: current } }),
+      where: scopedStudentWhere(scope, { id: o.userId, status: { in: current }, ...unchangedSincePlan }),
       data,
     });
     if (moved.count !== 1) {

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { PII_EXPORT_MAX_ACCOUNTS } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -48,14 +49,29 @@ export async function requestPiiExport(
     const actor = await requireSuperAdmin();
     const parsed = piiSchema.parse(input);
     await enforcePrivilegedRequestRate(actor.id);
-    const count = await db.user.count({ where: userFilterWhere(parsed.filter) });
-    if (count === 0) throw new ValidationError("No account matches this filter.");
+    // Resolve the accounts now, so the approver approves an exact set: an
+    // account that matches the filter later (a roster import, a status or
+    // role change) is not in the export.
+    const matched = await db.user.findMany({
+      where: userFilterWhere(parsed.filter),
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: PII_EXPORT_MAX_ACCOUNTS + 1,
+    });
+    if (matched.length === 0) throw new ValidationError("No account matches this filter.");
+    if (matched.length > PII_EXPORT_MAX_ACCOUNTS) {
+      throw new ValidationError(
+        `More than ${PII_EXPORT_MAX_ACCOUNTS.toLocaleString("en-IN")} accounts match. Narrow the filter (for example by batch or department).`,
+      );
+    }
+    const userIds = matched.map((u) => u.id);
+    const count = userIds.length;
     const filterText = Object.entries(parsed.filter)
       .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("|") : String(v)}`)
       .join(", ");
     const op = await createPrivilegedOperation({
       kind: "PII_EXPORT",
-      payload: { filter: parsed.filter, columns: parsed.columns },
+      payload: { filter: parsed.filter, userIds, columns: parsed.columns },
       summary: `Export ${count} account(s) (${parsed.columns.join(", ")})${filterText ? ` where ${filterText}` : ""}`,
       affectedCount: count,
       reason: parsed.reason,

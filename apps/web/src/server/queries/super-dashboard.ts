@@ -4,6 +4,7 @@ import { RECONCILER_INTERVAL_MS, SCHEDULER_JOB_NAMES, SECURITY_EMAIL_KIND_PREFIX
 import { chainDayOf } from "@/lib/audit-chain";
 import { db } from "@/lib/db";
 import { getFeatureFlags } from "@/lib/flags";
+import { privilegedPayloadSchemas } from "@/lib/privileged/payloads";
 import { readRetention } from "@/lib/privileged/retention";
 import { terminalHashOf } from "@/server/queries/super-audit";
 
@@ -25,6 +26,20 @@ export interface OperationView {
   decidedAt: Date | null;
   breakGlass: boolean;
   error: string | null;
+  /**
+   * A PENDING bulk status change: who is in the approved id list, so the
+   * approver can see what they approve (accounts by role, and every
+   * non-student named). Null for other kinds and decided requests.
+   */
+  targets: BulkTargets | null;
+}
+
+export interface BulkTargets {
+  byRole: { role: string; count: number }[];
+  /** Every staff or super-admin account in the set, "First Last (roll)". */
+  staff: string[];
+  /** Ids in the payload that no longer match an account. */
+  missing: number;
 }
 
 export async function namesOf(ids: readonly string[]): Promise<Map<string, string>> {
@@ -55,6 +70,8 @@ const OP_SELECT = {
 } as const;
 
 type OpRow = {
+  /** Only the PENDING lists select it (to resolve a bulk change's targets). */
+  payload?: unknown;
   id: string;
   kind: PrivilegedOperationKind;
   status: PrivilegedOperationStatus;
@@ -71,9 +88,28 @@ type OpRow = {
   error: string | null;
 };
 
+async function bulkTargets(row: OpRow): Promise<BulkTargets | null> {
+  if (row.kind !== "BULK_STATUS_CHANGE" || row.status !== "PENDING" || row.payload === undefined) return null;
+  const parsed = privilegedPayloadSchemas.BULK_STATUS_CHANGE.safeParse(row.payload);
+  if (!parsed.success) return null;
+  const users = await db.user.findMany({
+    where: { id: { in: parsed.data.userIds } },
+    select: { role: true, firstName: true, lastName: true, collegeId: true },
+    orderBy: { collegeId: "asc" },
+  });
+  const counts = new Map<string, number>();
+  for (const u of users) counts.set(u.role, (counts.get(u.role) ?? 0) + 1);
+  return {
+    byRole: [...counts].map(([role, count]) => ({ role, count })).sort((a, b) => b.count - a.count),
+    staff: users.filter((u) => u.role !== "STUDENT").map((u) => `${u.firstName} ${u.lastName} (${u.collegeId})`),
+    missing: parsed.data.userIds.length - users.length,
+  };
+}
+
 export async function toOperationViews(rows: readonly OpRow[]): Promise<OperationView[]> {
   const names = await namesOf(rows.flatMap((r) => [r.requestedById, r.decidedById ?? ""]));
-  return rows.map((r) => ({
+  const targets = await Promise.all(rows.map(bulkTargets));
+  return rows.map((r, i) => ({
     id: r.id,
     kind: r.kind,
     status: r.status,
@@ -89,6 +125,7 @@ export async function toOperationViews(rows: readonly OpRow[]): Promise<Operatio
     decidedAt: r.decidedAt,
     breakGlass: r.breakGlass,
     error: r.error,
+    targets: targets[i] ?? null,
   }));
 }
 
@@ -155,13 +192,13 @@ export async function loadSuperDashboard(actorId: string, now: Date) {
       where: { status: "PENDING", expiresAt: { gt: now }, requestedById: { not: actorId } },
       orderBy: { requestedAt: "asc" },
       take: 50,
-      select: OP_SELECT,
+      select: { ...OP_SELECT, payload: true },
     }),
     db.privilegedOperation.findMany({
       where: { status: "PENDING", expiresAt: { gt: now }, requestedById: actorId },
       orderBy: { requestedAt: "asc" },
       take: 50,
-      select: OP_SELECT,
+      select: { ...OP_SELECT, payload: true },
     }),
     db.privilegedOperation.findMany({
       where: { status: { not: "PENDING" } },

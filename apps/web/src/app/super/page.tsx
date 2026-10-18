@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Activity, CheckCircle2, Eye, Inbox, Link2, ShieldAlert, XCircle } from "lucide-react";
 import { Badge, Card, CardBody, CardHeader, EmptyState, StatCard } from "@recx/design";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
+import { ROLE_LABEL } from "@/lib/accounts/status";
 import { PRIVILEGED_KIND_LABEL } from "@/lib/privileged/payloads";
 import { loadSuperDashboard, type OperationView } from "@/server/queries/super-dashboard";
 import { OperationActions } from "@/components/super/operation-card";
@@ -32,6 +33,24 @@ function OperationItem({
         ) : null}
       </div>
       <p className="text-sm">{op.summary}</p>
+      {op.targets ? (
+        <div className="space-y-1 rounded-lg border border-border bg-background p-3 text-xs">
+          <p>
+            <span className="font-medium">Accounts in this request: </span>
+            {op.targets.byRole
+              .map(({ role, count }) => `${count.toLocaleString("en-IN")} ${ROLE_LABEL[role as keyof typeof ROLE_LABEL] ?? role}`)
+              .join(", ") || "none"}
+            {op.targets.missing > 0 ? `; ${op.targets.missing} no longer exist` : ""}
+          </p>
+          {op.targets.staff.length > 0 ? (
+            <p className="font-medium text-danger">
+              Includes staff accounts: <span className="break-words font-normal text-text">{op.targets.staff.join(", ")}</span>
+            </p>
+          ) : (
+            <p className="text-text-secondary">No staff or super-admin account is included.</p>
+          )}
+        </div>
+      ) : null}
       <dl className="grid gap-x-4 gap-y-1 text-xs text-text-secondary sm:grid-cols-2">
         <div>
           <dt className="inline font-medium">Requested by </dt>

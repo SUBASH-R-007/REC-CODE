@@ -159,6 +159,17 @@ function mk(l: number, c: number, h: number): string {
  * passed. Returns the first passing colour, or the last one tried, in which
  * case the palette evaluation reports the measured ratio as a failure.
  */
+/**
+ * The DO-NOT bounds on --muted (SPEC: never lighter than #6f6a87 in light,
+ * never darker than #9c95b4 in dark), compared by WCAG relative luminance
+ * (contrast against black is monotonic in it). The contrast clamp alone can
+ * stop short of the dark bound for some hues, so both clamps apply; each only
+ * moves muted further from the surface, so contrast only improves.
+ */
+const BLACK = "#000000";
+const MUTED_LIGHT_CEILING = contrast("#6f6a87", BLACK);
+const MUTED_DARK_FLOOR = contrast("#9c95b4", BLACK);
+
 function stepUntil(
   start: number,
   delta: number,
@@ -263,7 +274,7 @@ function deriveLight(brand: SeedLch, accent: SeedLch, shadowHue: number): Tokens
   const text = neutral(0.22, 0.045);
   const textSecondary = neutral(0.46, 0.035);
   const muted = stepUntil(0.53, -STEP, 0, (l) => neutral(l, 0.03), (hex) =>
-    contrast(hex, surface) >= 4.5 && contrast(hex, background) >= 4.5,
+    contrast(hex, surface) >= 4.5 && contrast(hex, background) >= 4.5 && contrast(hex, BLACK) <= MUTED_LIGHT_CEILING,
   );
 
   const primarySubtle = mk(0.965, c * 0.16, h);
@@ -345,7 +356,7 @@ function deriveDark(brand: SeedLch, accent: SeedLch, shadowHue: number): Tokens 
   const text = neutral(0.955, 0.015);
   const textSecondary = neutral(0.745, 0.028);
   const muted = stepUntil(0.655, STEP, 1, (l) => neutral(l, 0.026), (hex) =>
-    contrast(hex, surface) >= 4.5 && contrast(hex, background) >= 4.5,
+    contrast(hex, surface) >= 4.5 && contrast(hex, background) >= 4.5 && contrast(hex, BLACK) >= MUTED_DARK_FLOOR,
   );
 
   const primarySubtle = mk(0.24, c * 0.3, h);

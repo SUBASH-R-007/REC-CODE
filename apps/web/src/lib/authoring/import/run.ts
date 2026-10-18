@@ -206,20 +206,22 @@ export async function importOnePackage(entry: string, files: PackageFiles, ctx: 
         // A retried attempt starts from the parsed warnings again (no duplicate topic warning).
         warnings.length = parsed.warnings.length;
         await lockSlug(tx, meta.slug);
-        const problem = await tx.problem.findUnique({
-          where: { slug: meta.slug },
-          select: {
-            id: true,
-            status: true,
-            displayCode: true,
-            liveVersionId: true,
-            tags: { select: { topic: true } },
-            liveVersion: { select: { importSha256: true, revision: true } },
-            versions: { orderBy: { revision: "desc" }, select: { id: true, revision: true, frozenAt: true, importSha256: true } },
-          },
-        });
+        const readProblem = () =>
+          tx.problem.findUnique({
+            where: { slug: meta.slug },
+            select: {
+              id: true,
+              status: true,
+              displayCode: true,
+              liveVersionId: true,
+              tags: { select: { topic: true } },
+              liveVersion: { select: { importSha256: true, revision: true } },
+              versions: { orderBy: { revision: "desc" }, select: { id: true, revision: true, frozenAt: true, importSha256: true } },
+            },
+          });
+        const found = await readProblem();
         let row: ImportRowResult;
-        if (!problem) {
+        if (!found) {
           const taken = await tx.problem.findUnique({ where: { displayCode: meta.displayCode }, select: { slug: true } });
           if (taken) throw new RowFailure([{ path: "meta.json", message: `The display code ${meta.displayCode} is already used by ${taken.slug}.` }]);
           const created = await tx.problem.create({
@@ -245,7 +247,10 @@ export async function importOnePackage(entry: string, files: PackageFiles, ctx: 
           });
           row = { ...base, status: "CREATED", problemId: created.id, versionId, revision: 1, errors: [], warnings };
         } else {
-          await lockProblem(tx, problem.id);
+          await lockProblem(tx, found.id);
+          // Decide on the state AFTER the problem lock: a revision another
+          // admin started (or published) a moment ago is seen, not overwritten.
+          const problem = (await readProblem()) ?? found;
           if (problem.status === "RETIRED") throw new RowFailure([{ path: "meta.json", message: `${meta.slug} is retired; it takes no new revisions.` }]);
           if (problem.displayCode !== meta.displayCode) {
             throw new RowFailure([

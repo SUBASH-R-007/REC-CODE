@@ -245,6 +245,30 @@ describe.skipIf(!ENABLED)("publishProblemVersion under concurrency (recx_test)",
     expect(await publishedAudits(problemId, t0)).toHaveLength(0);
   });
 
+  it("validation on an older toolchain no longer counts: publish is refused until it is re-validated", async () => {
+    const problemId = await createProblem();
+    const r1 = await approvedDraft(problemId, 1);
+    // The model run was judged on a cpp20 toolchain that is no longer current (a GCC upgrade since).
+    const old = await m.db.languageConfig.create({
+      data: { key: "cpp20", toolchainId: `${tag}-old-gcc`, label: "C++20 (old)", version: "old", runtime: {}, enabled: true, isCurrent: false },
+      select: { id: true },
+    });
+    try {
+      await m.db.validationRun.updateMany({ where: { problemVersionId: r1 }, data: { languageConfigId: old.id } });
+      const expected = await problemVersionOf(problemId);
+      const result = await as(adminA, () => m.actions.publishProblemVersion({ versionId: r1, expectedProblemVersion: expected }));
+      expect(result.ok).toBe(false);
+      expect((await m.db.problemVersion.findUniqueOrThrow({ where: { id: r1 } })).frozenAt).toBeNull();
+      // Back on the current toolchain, the same run counts again.
+      await m.db.validationRun.updateMany({ where: { problemVersionId: r1 }, data: { languageConfigId: cppConfigId } });
+      const again = await as(adminA, () => m.actions.publishProblemVersion({ versionId: r1, expectedProblemVersion: expected }));
+      expect(again.ok).toBe(true);
+    } finally {
+      await m.db.validationRun.updateMany({ where: { languageConfigId: old.id }, data: { languageConfigId: cppConfigId } });
+      await m.db.languageConfig.delete({ where: { id: old.id } });
+    }
+  });
+
   it("omitting expectedProblemVersion fails validation with no writes", async () => {
     const problemId = await createProblem();
     const r1 = await approvedDraft(problemId, 1);

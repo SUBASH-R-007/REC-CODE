@@ -48,7 +48,6 @@ export interface ExistingUser {
   email: string;
   batchYear: number | null;
   departmentCode: string | null;
-  updatedAt: Date;
   detail?: { firstName: string; lastName: string; section: string | null };
 }
 
@@ -63,9 +62,9 @@ export interface FieldChange {
 
 export type RosterOutcome =
   | { kind: "CREATE"; row: RosterRow }
-  | { kind: "UPDATE"; userId: string; updatedAt: string; changes: FieldChange[]; link: boolean; row: RosterRow }
-  | { kind: "UNCHANGED"; userId: string; updatedAt: string }
-  | { kind: "SKIPPED"; userId: string; updatedAt: string; reason: "ACCOUNT_NOT_ACTIVE" }
+  | { kind: "UPDATE"; userId: string; changes: FieldChange[]; link: boolean; row: RosterRow }
+  | { kind: "UNCHANGED"; userId: string }
+  | { kind: "SKIPPED"; userId: string; reason: "ACCOUNT_NOT_ACTIVE" }
   | { kind: "REJECTED"; reason: RejectReason; message: string };
 
 export interface PlannedLine {
@@ -154,13 +153,12 @@ function planLine(row: RosterRow, matches: readonly ExistingUser[], scope: Stude
   // The student now AND the cohort the row moves them to must both be in scope.
   const now = { departmentCode: user.departmentCode, batchYear: user.batchYear };
   if (!user.detail || !scopeCovers(scope, now) || !scopeCovers(scope, target)) return reject("OUTSIDE_SCOPE");
-  const updatedAt = user.updatedAt.toISOString();
-  if (!CURRENT.has(user.status)) return { kind: "SKIPPED", userId: user.id, updatedAt, reason: "ACCOUNT_NOT_ACTIVE" };
+  if (!CURRENT.has(user.status)) return { kind: "SKIPPED", userId: user.id, reason: "ACCOUNT_NOT_ACTIVE" };
 
   const changes = changesFor(user, row);
   const link = user.lmsUserId === null;
-  if (changes.length === 0 && !link) return { kind: "UNCHANGED", userId: user.id, updatedAt };
-  return { kind: "UPDATE", userId: user.id, updatedAt, changes, link, row };
+  if (changes.length === 0 && !link) return { kind: "UNCHANGED", userId: user.id };
+  return { kind: "UPDATE", userId: user.id, changes, link, row };
 }
 
 export function countOutcomes(lines: readonly PlannedLine[]): RosterCounts {
@@ -198,9 +196,12 @@ export function planRosterImport(
 }
 
 /**
- * sha256 of the plan in a canonical form (sorted by line; each matched
- * account's updatedAt included). The commit recomputes the plan and refuses
- * unless this hash equals the one the importer was shown.
+ * sha256 of the plan in a canonical form (sorted by line). The commit
+ * recomputes the plan and refuses unless this hash equals the one the
+ * importer was shown. It covers everything the plan depends on: each
+ * change's current value (`from`), the link, and every outcome kind (status,
+ * role and scope decide those). It never covers updatedAt: a student signing
+ * in or submitting bumps it, and that must not invalidate a preview.
  */
 export function rosterPlanSha256(plan: RosterPlan): string {
   const canonical = [...plan.lines]
@@ -210,11 +211,11 @@ export function rosterPlanSha256(plan: RosterPlan): string {
         case "CREATE":
           return [line, o.kind, o.row];
         case "UPDATE":
-          return [line, o.kind, o.userId, o.updatedAt, o.link, o.changes.map((c) => [c.field, c.from, c.to]), o.row];
+          return [line, o.kind, o.userId, o.link, o.changes.map((c) => [c.field, c.from, c.to]), o.row];
         case "UNCHANGED":
-          return [line, o.kind, o.userId, o.updatedAt];
+          return [line, o.kind, o.userId];
         case "SKIPPED":
-          return [line, o.kind, o.userId, o.updatedAt, o.reason];
+          return [line, o.kind, o.userId, o.reason];
         case "REJECTED":
           return [line, o.kind, o.reason];
       }

@@ -62,7 +62,7 @@ export default async function SuperJobsPage() {
       <Card>
         <CardHeader title="Scheduler" subtitle="Stale = no finished tick in 3 reconciler intervals." />
         <CardBody>
-          <div tabIndex={0} aria-label="Scheduler jobs" className="overflow-x-auto rounded-xl border border-border">
+          <div role="region" tabIndex={0} aria-label="Scheduler jobs" className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full min-w-[44rem] text-left text-sm">
               <caption className="sr-only">Scheduler jobs and their last tick</caption>
               <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">

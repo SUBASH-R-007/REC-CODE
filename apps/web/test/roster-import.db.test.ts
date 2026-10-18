@@ -163,11 +163,25 @@ describe.skipIf(!ENABLED)("roster import against recx_test", () => {
     const shown = await m.queries.getImportPreview(state.user as never, await m.scope.loadStudentScope(u.admin), importId);
     expect(shown?.kind).toBe("preview");
     const staleHash = shown!.kind === "preview" ? shown!.diffSha256 : "";
-    await m.db.user.update({ where: { id: u.s1.id }, data: { firstName: "s1" } }); // same value, new updatedAt
-    const result = await m.actions.commitRosterImport({ importId, diffSha256: staleHash });
-    expect(result.ok || result.error).toMatch(/changed since your preview/);
-    expect(await m.db.user.count({ where: { collegeId: newCollegeId } })).toBe(0);
-    expect((await m.db.rosterImport.findUniqueOrThrow({ where: { id: importId } })).status).toBe("PREVIEWED");
+    const s1 = await m.db.user.findUniqueOrThrow({ where: { id: u.s1.id }, select: { firstName: true } });
+    await m.db.user.update({ where: { id: u.s1.id }, data: { firstName: `${s1.firstName}-renamed` } }); // a real change
+    try {
+      const result = await m.actions.commitRosterImport({ importId, diffSha256: staleHash });
+      expect(result.ok || result.error).toMatch(/changed since your preview/);
+      expect(await m.db.user.count({ where: { collegeId: newCollegeId } })).toBe(0);
+      expect((await m.db.rosterImport.findUniqueOrThrow({ where: { id: importId } })).status).toBe("PREVIEWED");
+    } finally {
+      await m.db.user.update({ where: { id: u.s1.id }, data: { firstName: s1.firstName } });
+    }
+  });
+
+  it("students signing in or submitting after the preview do not invalidate it", async () => {
+    const shown = await m.queries.getImportPreview(state.user as never, await m.scope.loadStudentScope(u.admin), importId);
+    const hash = shown!.kind === "preview" ? shown!.diffSha256 : "";
+    // Activity bumps updatedAt on every matched account.
+    await m.db.user.updateMany({ where: { id: { in: [u.s1.id] } }, data: { lastLoginAt: new Date(), lastActiveAt: new Date() } });
+    const again = await m.queries.getImportPreview(state.user as never, await m.scope.loadStudentScope(u.admin), importId);
+    expect(again!.kind === "preview" ? again!.diffSha256 : "").toBe(hash);
   });
 
   it("the commit applies exactly the plan", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseType } from "../src/harness/signature";
-import { parseValue, serializeArgs, serializeValue, ValueError } from "../src/harness/values";
+import { parseType, type FunctionSignature } from "../src/harness/signature";
+import { decodeValue, parseValue, serializeArgs, serializeValue, ValueError } from "../src/harness/values";
 
 const t = parseType;
 
@@ -67,6 +67,18 @@ describe("int and long range checks", () => {
     expect(() => serializeValue(t("long"), 2 ** 53)).toThrow(ValueError);
     expect(() => serializeValue(t("long"), 0.5)).toThrow(ValueError);
     expect(serializeValue(t("long"), Number.MAX_SAFE_INTEGER)).toBe("9007199254740991");
+  });
+
+  it("refuses an overlong integer token quickly, without BigInt on all of it", () => {
+    const huge = "9".repeat(4_000_000);
+    const started = Date.now();
+    const r = decodeValue(t("list<long>"), `[${huge}]`);
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/^9{24}… is outside the 64-bit long range$/);
+    // The longest valid long still decodes.
+    expect(decodeValue(t("long"), "-9223372036854775808")).toMatchObject({ ok: true, canonical: "-9223372036854775808" });
+    expect(decodeValue(t("long"), "9223372036854775808").ok).toBe(false);
   });
 
   it("checks ints inside containers and trees", () => {
@@ -152,5 +164,31 @@ describe("serializeArgs", () => {
   it("rejects an argument count that does not match the signature", () => {
     expect(() => serializeArgs([t("int")], [1, 2])).toThrow(ValueError);
     expect(() => serializeArgs([t("int"), t("int")], [1])).toThrow(ValueError);
+  });
+});
+
+describe("validateFunctionTest: in-place arrays keep their length (Java)", () => {
+  const sig = (type: string): FunctionSignature => ({
+    className: "Solution",
+    methodName: "f",
+    params: [{ name: "nums", type }],
+    returns: "void",
+    comparator: "IN_PLACE_MUTATION",
+    mutatedParam: "nums",
+  });
+
+  it("refuses an expected list<int> of another length", async () => {
+    const { validateFunctionTest } = await import("../src/harness/values");
+    expect(validateFunctionTest(sig("list<int>"), "[1,2,3]\n", "[2,3,1]\n")).toEqual([]);
+    const issues = validateFunctionTest(sig("list<int>"), "[1,2,2,3]\n", "[1,2,3]\n");
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatch(/has 3 elements but the input has 4/);
+  });
+
+  it("checks only the outer length of a matrix<leaf>, and not list<list<…>> (an ArrayList in Java)", async () => {
+    const { validateFunctionTest } = await import("../src/harness/values");
+    expect(validateFunctionTest(sig("matrix<int>"), "[[1,2],[3]]\n", "[[1],[2,3]]\n")).toEqual([]);
+    expect(validateFunctionTest(sig("matrix<int>"), "[[1,2],[3]]\n", "[[1,2]]\n")).toHaveLength(1);
+    expect(validateFunctionTest(sig("list<list<int>>"), "[[1],[2]]\n", "[[1]]\n")).toEqual([]);
   });
 });

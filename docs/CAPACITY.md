@@ -241,6 +241,30 @@ inside the chunk (1,054.0 KB); the worker is a separate worker script and
 now has its own line (`docs/OPEN-QUESTIONS.md`, Phase 3, "Front-end
 budgets").
 
+**Phase 4 re-measure: 2026-10-13, production build, Linux** (Ubuntu 24.04
+cloud container, Node 22.22, the same commands). This adds the `/judge`
+budget, and checks `/dashboard` after the announcement banner's client
+button.
+
+| Budget | Measured | Limit | Breakdown (change in app since 2026-10-10) |
+|---|---|---|---|
+| `/login` | **0.0 KB** | 90 KB | zero-JS page, unchanged |
+| `/dashboard` | 120.0 KB | 160 KB | framework 100.3 + app 19.8 (+3.2) |
+| `/problems` | 122.5 KB | 170 KB | framework 100.3 + app 22.2 (+0.1) |
+| `/leaderboard` | 139.3 KB | 150 KB | framework 100.3 + app 39.0 (+0.1) |
+| `/problems/[slug]` shell | 171.5 KB | 220 KB | framework 100.3 + app 71.2 (+2.4) |
+| **`/judge`** (new) | **116.8 KB** | **125 KB** | framework 100.3 + app 16.5. The page is server-rendered: its own stub is 0.2 KB, and the rest is the shared layout chain |
+| Shared first-party | 12.4 KB | 120 KB | of 131.4 KB in chunks two or more budgeted routes load |
+| Monaco chunk (lazy) | 942.1 KB | 1,050 KB | unchanged |
+| Monaco editor worker (lazy) | 112.0 KB | 120 KB | unchanged |
+| CodeMirror lazy set (< 768 px) | 148.7 KB | 190 KB | core 97.2 + largest grammar 51.5 |
+
+All three checks pass: Zero-JS, Monaco-free and Server-rendered (`/judge`).
+Monaco-free first covered 31 routes: the four listed routes and every `/admin`
+page. `/super/` was then added to `monacoFree.entryPrefixes` (the governance
+design says no super page ships Monaco, but nothing enforced it), and the check
+now covers 43 routes. The run ends `[size] all budgets met.`
+
 ### 7.2 Throttled workspace — measured 2026-10-10 (production build, Windows)
 
 `apps/web/e2e/perf-workspace.spec.ts` (Playwright project `perf`) against

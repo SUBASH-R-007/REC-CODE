@@ -126,7 +126,11 @@ in three tiers:
 * **super-admin:** the spec's twelve. Only SUPER_ADMIN holds them. The
   ones wired in a later phase bind nothing until then.
 * **staff:** ADMIN and SUPER_ADMIN. AdminScope then narrows which students
-  an ADMIN can see or change; that narrowing is data, not a role.
+  an ADMIN can see or change; that narrowing is data, not a role. It also
+  applies to the student-facing submission and run views and their API and
+  stream routes. There, an ADMIN sees an in-scope student's metadata and
+  verdicts but never the code, and an out-of-scope submission reads as
+  missing.
 * **self-service:** any signed-in user, acting only on their own rows.
 
 Two tests keep the map honest:

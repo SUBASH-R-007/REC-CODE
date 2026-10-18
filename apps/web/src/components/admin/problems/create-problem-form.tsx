@@ -154,7 +154,11 @@ export function CreateProblemForm({
         <Field
           label="Function signature (JSON)"
           htmlFor={`${id}-sig`}
-          hint='{"className":"Solution","methodName":"…","params":[{"name":"nums","type":"list<int>"}],"returns":"int","comparator":"EXACT","mutatedParam":null}'
+          hint={
+            <code className="break-all">
+              {'{"className":"Solution","methodName":"…","params":[{"name":"nums","type":"list<int>"}],"returns":"int","comparator":"EXACT","mutatedParam":null}'}
+            </code>
+          }
         >
           <Textarea id={`${id}-sig`} name="functionSignature" rows={6} className="font-mono text-xs" spellCheck={false} required />
         </Field>

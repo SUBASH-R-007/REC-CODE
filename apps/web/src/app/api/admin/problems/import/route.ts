@@ -1,10 +1,11 @@
+import { unlink } from "node:fs/promises";
 import { after } from "next/server";
 import { IMPORT_LIMITS } from "@recx/shared/authoring";
 import { requireActionRole } from "@/lib/auth/guards";
 import { audit } from "@/lib/audit";
 import { processSpooledImport } from "@/lib/authoring/import/process";
-import { sweepStaleImports } from "@/lib/authoring/import/run";
-import { spoolDir, spoolRequestBody } from "@/lib/authoring/import/spool";
+import { IMPORT_STALE_AFTER_MS, sweepStaleImports } from "@/lib/authoring/import/run";
+import { spoolDir, spoolRequestBody, sweepSpoolFiles } from "@/lib/authoring/import/spool";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
@@ -71,6 +72,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   await sweepStaleImports();
+  // Archives left by an import that was interrupted (a restart during after()).
+  await sweepSpoolFiles(spoolDir(env().IMPORT_SPOOL_DIR), IMPORT_STALE_AFTER_MS);
   const running = await db.problemImport.findFirst({
     where: { uploadedById: actorId, status: "PROCESSING" },
     select: { id: true },
@@ -86,11 +89,19 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const fileName = fileNameOf(request);
-  const ipHash = await requestIpHash();
-  const record = await db.problemImport.create({
-    data: { uploadedById: actorId, fileName, sizeBytes: BigInt(spool.sizeBytes), archiveSha256: spool.sha256, via: "upload" },
-    select: { id: true },
-  });
+  let record: { id: string };
+  let ipHash: string | null;
+  try {
+    ipHash = await requestIpHash();
+    record = await db.problemImport.create({
+      data: { uploadedById: actorId, fileName, sizeBytes: BigInt(spool.sizeBytes), archiveSha256: spool.sha256, via: "upload" },
+      select: { id: true },
+    });
+  } catch (error) {
+    // Nothing will process the file: do not leave up to 256 MB behind.
+    await unlink(spool.path).catch(() => undefined);
+    throw error;
+  }
   await audit({
     actorId,
     action: "problem.import.started",

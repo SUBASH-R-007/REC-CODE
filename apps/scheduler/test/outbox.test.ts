@@ -89,4 +89,15 @@ describe("classifyPrivilegedOperation", () => {
     // APPROVED is never expired: expiry bounds the wait for a decision only.
     expect(classifyPrivilegedOperation({ status: "APPROVED", expiresAt: new Date(0), executionStartedAt: null }, now)).toBe("keep");
   });
+
+  it("fails an APPROVED operation that never started within 15 minutes of its approval", () => {
+    const approved = (msAgo: number) => ({
+      status: "APPROVED" as const,
+      expiresAt: new Date(0),
+      executionStartedAt: null,
+      decidedAt: new Date(now.getTime() - msAgo),
+    });
+    expect(classifyPrivilegedOperation(approved(15 * 60_000 + 1), now)).toBe("fail-unstarted");
+    expect(classifyPrivilegedOperation(approved(60_000), now)).toBe("keep");
+  });
 });

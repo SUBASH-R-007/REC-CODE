@@ -26,7 +26,15 @@ export function RoleChange({ userId, collegeId, current }: { userId: string; col
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          // After a change, `current` is the new role: start again from it.
+          setRole(current === "ADMIN" ? "STUDENT" : "ADMIN");
+          setOpen(true);
+        }}
+      >
         <KeyRound className="h-3.5 w-3.5" aria-hidden />
         Change role
       </Button>

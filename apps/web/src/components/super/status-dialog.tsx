@@ -26,7 +26,15 @@ export function StatusChange({ userId, collegeId, current }: { userId: string; c
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          // After a change, `current` is the new status: start again from it.
+          setToStatus(current === "ACTIVE" ? "DISABLED" : "ACTIVE");
+          setOpen(true);
+        }}
+      >
         <UserCog className="h-3.5 w-3.5" aria-hidden />
         Change status
       </Button>

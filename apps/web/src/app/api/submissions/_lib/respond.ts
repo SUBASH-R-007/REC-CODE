@@ -12,8 +12,9 @@ import { getStudentView, type Viewer } from "@/server/queries/submissions";
 
 /**
  * Shared by /api/submissions/[id](/stream) and /api/runs/[id](/stream): the
- * browser's read side of a judge job. Owner or ADMIN / SUPER_ADMIN only; a
- * row the viewer may not see is indistinguishable from a missing one (404).
+ * browser's read side of a judge job. The owner, a SUPER_ADMIN, or an ADMIN
+ * whose scope covers the owner (canView); a row the viewer may not see is
+ * indistinguishable from a missing one (404).
  * Everything returned is the student view (src/lib/judge/view.ts).
  */
 
