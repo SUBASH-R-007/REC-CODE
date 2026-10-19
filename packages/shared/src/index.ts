@@ -13,6 +13,7 @@ export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";
 export * from "./attempt-clock";
+export * from "./exam-protocol";
 export * from "./roster";
 export * from "./governance";
 export {

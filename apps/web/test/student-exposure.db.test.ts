@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -215,8 +215,17 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     contest: "",
     contestSlug: `${tag}-contest`,
     contestProblem: "",
+    assessment: "",
+    assessmentSlug: `${tag}-exam`,
+    attempt: "",
     cpp20Config: "",
   };
+  /**
+   * The attempt token S holds, so the heartbeat's AUTHENTICATED path is the
+   * one the canary sweep calls. A refused heartbeat proves nothing: it never
+   * reads the paper.
+   */
+  const ATTEMPT_TOKEN = `${tag}-attempt-token`;
   const blobShas: string[] = [];
   const createdNoteIds: string[] = [];
 
@@ -436,6 +445,46 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     await db.contestStanding.create({
       data: { contestId: contest.id, userId: user.id, score: 0, penalty: 0, solved: 0, rank: 1 },
     });
+
+    // Phase 6b: a live assessment attempt for this student, whose assessment
+    // pins the SAME frozen version carrying every canary. The heartbeat
+    // returns only a clock today, but it is the route an exam client calls
+    // every ten seconds, and this is what fails if anyone ever makes it echo
+    // the paper.
+    const assessment = await db.assessment.create({
+      data: {
+        slug: ids.assessmentSlug,
+        title: `Exam ${tag}`,
+        instructions: "Answer the question.",
+        status: "OPEN",
+        proctorMode: "ADVISORY",
+        opensAt: new Date(now.getTime() - 30 * 60_000),
+        closesAt: new Date(now.getTime() + 4 * 60 * 60_000),
+        durationSec: 3_600,
+        createdById: user.id,
+      },
+      select: { id: true },
+    });
+    ids.assessment = assessment.id;
+    await db.assessmentProblem.create({
+      data: { assessmentId: assessment.id, problemVersionId: ids.live, position: 1, points: 1 },
+    });
+    const attempt = await db.assessmentAttempt.create({
+      data: {
+        assessmentId: assessment.id,
+        userId: user.id,
+        attemptNumber: 1,
+        seed: 1,
+        startedAt: new Date(now.getTime() - 10 * 60_000),
+        expiresAt: new Date(now.getTime() + 50 * 60_000),
+        layout: { order: [1] },
+        tokenHash: createHash("sha256").update(ATTEMPT_TOKEN).digest("hex"),
+        proctorMode: "ADVISORY",
+        status: "IN_PROGRESS",
+      },
+      select: { id: true },
+    });
+    ids.attempt = attempt.id;
   }, 120_000);
 
   afterAll(async () => {
@@ -480,6 +529,18 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         raw(`DELETE FROM "public"."ContestProblem" WHERE "contestId" = $1`, ids.contest),
         raw(`DELETE FROM "public"."Contest" WHERE "id" = $1`, ids.contest),
         raw(`ALTER TABLE "public"."Contest" ENABLE TRIGGER "Contest_rating_once"`),
+        // Phase 6b assessment fixture. The attempt refuses DELETE by trigger
+        // (it is the record of a sitting), and a published assessment refuses
+        // UPDATE, so both guards come off for the delete.
+        raw(`ALTER TABLE "public"."AssessmentAttempt" DISABLE TRIGGER "AssessmentAttempt_machine"`),
+        raw(`DELETE FROM "public"."ProctorEvent" WHERE "attemptId" = $1`, ids.attempt),
+        raw(`DELETE FROM "public"."AttemptSnapshot" WHERE "attemptId" = $1`, ids.attempt),
+        raw(`DELETE FROM "public"."AssessmentAttempt" WHERE "id" = $1`, ids.attempt),
+        raw(`ALTER TABLE "public"."AssessmentAttempt" ENABLE TRIGGER "AssessmentAttempt_machine"`),
+        raw(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`),
+        raw(`DELETE FROM "public"."AssessmentProblem" WHERE "assessmentId" = $1`, ids.assessment),
+        raw(`DELETE FROM "public"."Assessment" WHERE "id" = $1`, ids.assessment),
+        raw(`ALTER TABLE "public"."Assessment" ENABLE TRIGGER "Assessment_published_immutable"`),
         raw(`DELETE FROM "public"."StudyPlan" WHERE "slug" = ANY($1::text[])`, [ids.sheetSlug, ids.trackSlug]),
         raw(`DELETE FROM "public"."ProblemStat" WHERE "problemId" = ANY($1::text[])`, problemIds),
         ...["TestCase", "ReferenceSolution", "Hint", "Editorial", "StarterCode", "Subtask", "ProblemLanguageLimit"].map((t) =>
@@ -568,6 +629,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         studentRequest("/api/drafts", { method: "POST", json: { problemId: ids.problem, language: "cpp20", source: "// draft\n", clientUpdatedAt: Date.now() } }),
       ),
     },
+    "api/exam/[attemptId]/hb/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.attempt}/hb`, {
+            method: "POST",
+            // The in-memory mirror of the attempt token (SPEC §5), which is
+            // how the call reaches the authenticated path without a cookie jar.
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            json: { clientSeq: 0 },
+          }),
+        () => params({ attemptId: ids.attempt }),
+      ),
+      status: [200],
+    },
     "api/judge/blob/[sha256]/route.ts#GET": {
       call: call(() => studentRequest(`/api/judge/blob/${blobShas[2]}`), () => params({ sha256: blobShas[2]! })),
       status: JUDGE_REFUSED,
@@ -610,6 +685,27 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     }
     expect(problems).toEqual([]);
   }, 120_000);
+
+  it("the exam heartbeat canary sweep really reached the authenticated path", async () => {
+    // Every heartbeat answers 200, including a refusal (a candidate mid-exam
+    // must get a body they can render, not an error status). So `status:
+    // [200]` above does NOT prove the sweep got past the attempt guard, and
+    // a sweep over a refusal would prove nothing about leaking the paper.
+    // This asserts the authenticated path specifically.
+    const mod = await load(path.join(APP, "api/exam/[attemptId]/hb/route.ts"));
+    const response = await (mod.POST as (...args: unknown[]) => Promise<Response>)(
+      studentRequest(`/api/exam/${ids.attempt}/hb`, {
+        method: "POST",
+        headers: { "x-attempt-token": ATTEMPT_TOKEN },
+        json: { clientSeq: 1 },
+      }),
+      params({ attemptId: ids.attempt }),
+    );
+    const body = (await response.json()) as { revokeReason: string | null; status: string; msRemaining: number };
+    expect(body.revokeReason).toBeNull();
+    expect(body.status).toBe("IN_PROGRESS");
+    expect(body.msRemaining).toBeGreaterThan(0);
+  }, 60_000);
 
   it("api/judge/* with the protocol header but no node credentials refuses S with 401", async () => {
     const { JUDGE_HEADERS, JUDGE_PROTOCOL_VERSION } = await import("@recx/shared");

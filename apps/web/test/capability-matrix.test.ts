@@ -195,6 +195,14 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
   "app/api/admin/problems/import/route.ts#POST": () => [sameOrigin("/api/admin/problems/import", "not a zip")],
   "app/api/drafts/route.ts#POST": () => [sameOrigin("/api/drafts", "{}")],
   "app/api/activity/route.ts#POST": () => [sameOrigin("/api/activity", "{}")],
+  "app/api/exam/[attemptId]/hb/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/exam/att_1/hb", {
+      method: "POST",
+      headers: { host: "localhost:3100", origin: "http://localhost:3100", "content-type": "application/json" },
+      body: JSON.stringify({ clientSeq: 0 }),
+    }),
+    { params: Promise.resolve({ attemptId: "att_1" }) },
+  ],
   "app/super/data/exports/[id]/route.ts#GET": () => [
     new Request("http://localhost:3100/super/data/exports/op_1", { headers: { host: "localhost:3100" } }),
     { params: Promise.resolve({ id: "op_1" }) },

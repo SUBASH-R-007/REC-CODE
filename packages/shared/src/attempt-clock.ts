@@ -1,3 +1,5 @@
+import { ACCOMMODATION_LIMITS, accommodatedDurationSec } from "./accommodation";
+
 /**
  * The assessment clock and the heartbeat bitmap (Phase 6b). Pure: no I/O, no
  * ambient clock — `now` is always passed in.
@@ -74,14 +76,24 @@ export function computeExpiresAt(input: ExpiryInput): Expiry {
 
   const percent = input.accommodation?.extraTimePercent ?? 0;
   const minutes = input.accommodation?.extraTimeMinutes ?? 0;
-  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-    throw new Error("extraTimePercent must be between 0 and 100");
+  // The same bounds the Accommodation CHECKs enforce. Refused rather than
+  // clamped: a deadline computed from terms the database would have rejected
+  // is a deadline nobody can explain afterwards.
+  if (!Number.isFinite(percent) || percent < 0 || percent > ACCOMMODATION_LIMITS.extraTimePercent.max) {
+    throw new Error(`extraTimePercent must be between 0 and ${ACCOMMODATION_LIMITS.extraTimePercent.max}`);
   }
-  if (!Number.isFinite(minutes) || minutes < 0) throw new Error("extraTimeMinutes must not be negative");
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > ACCOMMODATION_LIMITS.extraTimeMinutes.max) {
+    throw new Error(`extraTimeMinutes must be between 0 and ${ACCOMMODATION_LIMITS.extraTimeMinutes.max}`);
+  }
 
-  // Seconds, rounded once at the end so a 33% accommodation on an odd
-  // duration cannot drift by a second between two computations.
-  const wanted = Math.round(durationSec * (1 + percent / 100) + minutes * 60);
+  // Delegated, NOT re-derived. Phase 4 already ships this formula to the
+  // accommodation screens; computing it a second way here would put the
+  // deadline a second away from the extra time the student was told they
+  // had, on exactly the odd durations nobody tests by hand.
+  const wanted = accommodatedDurationSec(durationSec, {
+    extraTimePercent: percent,
+    extraTimeMinutes: minutes,
+  });
   const wantedAt = startedAt.getTime() + wanted * 1000;
   const cappedByClose = wantedAt > closesAt.getTime();
   const expiresAt = new Date(Math.min(wantedAt, closesAt.getTime()));

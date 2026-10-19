@@ -24,8 +24,8 @@ that review has happened or been dropped.
 | 3 Student product surface | Gated 2026-10-10 |
 | 4 Authoring, admin, `/super` | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
 | 5 Contests | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
-| 6 Assessments and proctoring | **Next** |
-| 7–10 | Not started |
+| 6 Assessments and proctoring | **In progress** — 6a, 6b done (`docs/handoff/phase6/DESIGN.md`); 6c, 6d, 6e next |
+| 7–10 | Not started. Draft designs exist (`docs/handoff/phaseN/DESIGN.md`), each with a "Review findings — fix before implementing" section an independent pass produced; settle those first |
 
 ## Phase 4: what is done
 

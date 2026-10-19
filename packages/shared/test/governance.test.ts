@@ -64,6 +64,9 @@ describe("scheduler jobs", () => {
       "governance",
       // Phase 5: the only writer of ContestStanding.rank.
       "contestRank",
+      // Phase 6b: auto-submit at the deadline and the 45-second presence
+      // sweep. The only automatic action in the system runs here.
+      "attemptSweep",
     ]);
   });
 });

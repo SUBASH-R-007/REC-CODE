@@ -149,6 +149,34 @@ that instead, because PowerShell mangles them.
 wsl -d Ubuntu -- bash -lc 'RECX_SRC=/mnt/c/Users/SUBASH/OneDrive/Documents/GitHub/REC-CODE bash <(sed "s/\r$//" /mnt/c/Users/SUBASH/OneDrive/Documents/GitHub/REC-CODE/scripts/dev/linux-sync.sh) && cd ~/recx && <command>'
 ```
 
+> **`RECX_SRC` is not optional in that form, and leaving it out is
+> destructive.** `linux-sync.sh` falls back to a source derived from its own
+> `$0`, and under `bash <(…)` `$0` is `/dev/fd/63`, whose `../..` is `/` — so
+> the script runs `rsync -a --delete / ~/recx/`, mirroring the root
+> filesystem into the mirror and deleting the checkout's own top-level files
+> on the way (2026-10-19: `docs`, `tests`, `infra`, `package.json`,
+> `pnpm-lock.yaml` and more went, and ~3 GB of `/etc`, `/usr`, `/var`
+> arrived; `node_modules` and the three mirror-only `.env` files survived,
+> because the script excludes them).
+>
+> The variable is also easy to lose by accident:
+> `RECX_SRC=… bash <(sed … "$RECX_SRC/…")` does NOT work, because the process
+> substitution is expanded before the assignment takes effect.
+>
+> So prefer passing the script as a **file path** rather than a process
+> substitution, which makes the `$0` fallback correct in the first place:
+>
+> ```powershell
+> wsl -d Ubuntu -- bash -lc 'export RECX_SRC=/mnt/c/Users/SUBASH/OneDrive/Documents/GitHub/REC-CODE; bash "$RECX_SRC/scripts/dev/linux-sync.sh" && cd ~/recx && <command>'
+> ```
+>
+> The recovery, if it happens, is the sync itself: run it once with
+> `RECX_SRC` set correctly and `--delete` removes the root-filesystem
+> directories and restores the missing files. Verify the three `.env` files
+> afterwards (`apps/web`, `apps/judge-worker`, `packages/db`) rather than
+> assuming they are there.
+
+
 The sync never copies `.env` / `.env.local` files and never deletes them
 from the mirror, so the judge worker's environment is set up once inside
 WSL2:
@@ -768,6 +796,13 @@ coordinator from actual runs — never in advance.
 | 5 | 2026-10-19 | `rebuild-standings` reproduces a standings table from `ContestProblemAttempt` byte-for-byte (SPEC §5) | PASS — `scripts/rebuild-standings.ts` (with a `--check` mode that diffs and exits non-zero), proved on a 150-participant board in the simulation below and on a live database in `contest-invariants.db.test.ts` | Claude |
 | 5 | 2026-10-19 | Manual (spec): **a 150-participant simulated contest** — `apps/web/scripts/contest-sim.ts`, 3 problems pinned at frozen revisions, 364 authoritative attempt rows | PASS — rank pass **4 ms** against the 2-second budget; a second pass moves 0 rows (idempotent); the rebuild equals the stored board byte for byte; the freeze engages 10 minutes before the end, hides other rows, keeps the viewer's own, and never hides anything from staff; a mid-contest problem edit moves the live pointer and changes **neither the pin nor any verdict**; rating over 148 participants with Σdelta −18 and every delta inside the clamp. Cleans up after itself; the dev database was verified pristine afterwards | Claude |
 | 5 | — | The "practice lane is never starved" half of that manual item | NOT RUN for Phase 5 — it is a judge-lane property, not a standings one, and was measured in Phase 2 with the burst harness (`scripts/load/`, `docs/CAPACITY.md` §6.2). Re-measure there if the lane weights change | — |
+| 6a+6b | 2026-10-19 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted. Covers slices 6a (assessments, THE HARD RULE in the data) and 6b (the attempt engine: server-computed `expiresAt`, the attempt token, the heartbeat route, the status machine, auto-submit at the deadline, `ProctorEvent` partitioned monthly) | PASS (lint 0 warnings; **4,963 tests passed, 0 failed**, 607 DB/Redis tests skipped by default: shared 712, judge-worker 403, db 172, design 84, scheduler 136, web 2,829, repo 627; `next build`) | Claude |
+| 6a+6b | 2026-10-19 | Same four gates — Linux via `scripts/dev/linux-gate.sh` (WSL2 Ubuntu 24.04.4, PostgreSQL 17.11 on 5433, Redis 7.0.15, isolate 2.7), plus `migrate deploy` to `recx_test`, the `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1` suites and the real-isolate suite | PASS 7/7 steps (lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration). With the services suites every test runs, none skipped: shared 712, judge-worker 403, db **587**, design 84, scheduler 172, web **2,986**, repo 627; isolate-integration **260/260** | Claude |
+| 6b | 2026-10-19 | The Linux gate again caught what Windows structurally cannot: `student-exposure.db.test.ts` (live content-leak canaries, `RECX_DB_TESTS=1` only) refused the new exam surface until the heartbeat route was registered in its `ROUTE_CALLS`. Fixed by adding an OPEN assessment to that fixture whose `AssessmentProblem` pins the SAME frozen `ProblemVersion` carrying canaries in every hidden test, checker and reference solution, plus a live `IN_PROGRESS` attempt for the student with a known token | PASS 14/14. Note the heartbeat answers **200 even when it refuses** (a candidate mid-exam needs a renderable body, not an error status), so `status: [200]` alone would not have proved the sweep got past the attempt guard — a separate assertion checks `revokeReason === null`, `status === "IN_PROGRESS"` and `msRemaining > 0`, so the canary sweep is known to exercise the authenticated path | Claude |
+| 6b | 2026-10-19 | Auto-submit and the presence sweep, against a live database (`packages/db/test/attempt-sweep.db.test.ts`, 28 tests). The deadline is `expiresAt + pausedMs`, so a candidate on an invigilator-granted break is not force-submitted mid-break — the spec states the sweeper predicate as bare `expiresAt` two lines before defining `msRemaining = expiresAt + pausedMs − now()` and calling that "the bug that voids an exam"; the reconciliation is in `docs/OPEN-QUESTIONS.md`. **Mutation-checked**: replacing the deadline expression with bare `expiresAt` fails exactly the granted-break test and nothing else (1 failed / 27 passed), and restoring it returns 28/28 | PASS | Claude |
+| 6b | 2026-10-19 | Proved by the same suite: auto-submit is idempotent, never re-submits a student's own submission, records `submittedAt` at the **deadline** rather than when the sweeper noticed, bumps `version`, cannot move `expiresAt` (the write-once trigger), and two concurrent sweeps finalise each attempt exactly once (`FOR UPDATE SKIP LOCKED`). And what it must never do: it cannot reach `VOIDED`, writes no `integrityScore`, and records no `ProctorEvent` — being finalised at a deadline is not evidence (SPEC §0) | PASS | Claude |
+| 6b | — | The `db` suites are a **Linux-gate** item, not a Windows one | Recorded 2026-10-19 after running them from Windows against the WSL2 Postgres: several Phase 4/5 governance fixtures write an app-clock timestamp into a column a CHECK compares against a database-clock one (`PrivilegedOperation_decided_after_request_check`), and across hosts those are two clocks. WSL2's had drifted 210 ms ahead of the host over a suspend, which failed 13 tests **on an unmodified checkout**. Inside the mirror there is one clock and they pass. The underlying fragility is real in production too (app and database are separate hosts); the durable fix is for both columns to come from one `now()`, which is Phase 4/5 code and wants its own gated change — see `docs/OPEN-QUESTIONS.md` | — |
+| 6b | — | Phase 6b's own live/e2e stage (an exam sat end to end) | NOT RUN for 6b — there is no exam surface to sit yet: 6b is the server-authoritative engine, and the client that beats at it is slice 6c. The heartbeat's own contract, the attempt guard and both sweeps are covered by unit and live-database suites above; the end-to-end sitting is a 6c gate item | — |
 | 5 | 2026-10-19 | `pnpm size` after the build. Two budgets added for the new surface | PASS — all budgets met: `/contests` **116.9 KB** (limit 130) and `/contests/[slug]/arena` **117.5 KB** (limit 135), both ~1 KB over the framework floor plus their shell because the arena links out to the existing workspace instead of embedding a second editor; the countdown is its only client component, costing 0.6 KB. Monaco-free now covers 34 routes incl. every contest page. Nothing else moved. Details: `docs/CAPACITY.md` §7.1 | Claude |
 | 5 | 2026-10-19 | Playwright `contest` project against the live WSL stack | PASS 3/3 — a super-admin authors a contest, a DRAFT is invisible to students, publishing is refused with no problems, a problem is pinned at its current revision and the page states which, a letter cannot be reused, a student who never registered is turned away from the arena, registration lets them in, the arena is hard-blocked below 768 px with an explanation (the problem navigation is absent, not restyled), and a student cannot reach `/admin/contests` | Claude |
 | 5 | 2026-10-19 | A bug the contest e2e caught on its first run: `<input type="datetime-local">` is timezone-naive, and the contest form sent the bare string, so the server parsed it in the SERVER zone — on a UTC host a contest set for 10:00 became 10:00 UTC, i.e. 15:30 IST. Fixed to the convention `announcement-form.tsx` already used (`istLocalInput()` in, explicit `+05:30` out) | PASS (after fix) — and recorded in `docs/OPEN-QUESTIONS.md`, because on a development box whose local zone IS Asia/Kolkata the bug is invisible: it appears only where the server zone and the author zone differ, which is production | Claude |

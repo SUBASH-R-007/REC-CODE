@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ACCOMMODATION_LIMITS, accommodatedDurationSec } from "../src/accommodation";
 import {
   acceptsWork,
   ATTEMPT_STATUSES,
@@ -324,5 +325,57 @@ describe("the attempt status machine", () => {
     for (const s of ATTEMPT_STATUSES as readonly AttemptStatus[]) {
       expect(acceptsWork(s) || isFinished(s) || s === "NOT_STARTED").toBe(true);
     }
+  });
+});
+
+describe("computeExpiresAt agrees with the Phase 4 accommodation formula", () => {
+  // Two modules compute "how long does this candidate get". If they ever
+  // disagree, the accommodation screen tells a student they have N minutes
+  // and the exam clock gives them N minus one second, which is unanswerable
+  // when it happens on the last question.
+  const closesFarAway = new Date("2030-01-01T00:00:00Z");
+  const startedAt = new Date("2026-10-19T10:00:00Z");
+
+  it("grants exactly accommodatedDurationSec whenever closesAt does not bite", () => {
+    // Odd durations and odd percentages are where floor-then-add and
+    // round-at-the-end part company.
+    for (const durationSec of [60, 61, 599, 1_777, 3_601, 5_401, 7_199]) {
+      for (const extraTimePercent of [0, 1, 25, 33, 50, 67, 100]) {
+        for (const extraTimeMinutes of [0, 1, 7, 20, 240]) {
+          const accommodation = { extraTimePercent, extraTimeMinutes };
+          const { grantedSec, cappedByClose } = computeExpiresAt({
+            startedAt,
+            durationSec,
+            closesAt: closesFarAway,
+            accommodation,
+          });
+          expect(cappedByClose).toBe(false);
+          expect(grantedSec).toBe(accommodatedDurationSec(durationSec, accommodation));
+        }
+      }
+    }
+  });
+
+  it("refuses terms the Accommodation CHECKs would have rejected", () => {
+    const base = { startedAt, durationSec: 3_600, closesAt: closesFarAway };
+    expect(() =>
+      computeExpiresAt({ ...base, accommodation: { extraTimePercent: 101, extraTimeMinutes: 0 } }),
+    ).toThrow(/extraTimePercent/);
+    expect(() =>
+      computeExpiresAt({ ...base, accommodation: { extraTimePercent: 0, extraTimeMinutes: 241 } }),
+    ).toThrow(/extraTimeMinutes/);
+  });
+
+  it("accepts the maxima themselves", () => {
+    const { grantedSec } = computeExpiresAt({
+      startedAt,
+      durationSec: 3_600,
+      closesAt: closesFarAway,
+      accommodation: {
+        extraTimePercent: ACCOMMODATION_LIMITS.extraTimePercent.max,
+        extraTimeMinutes: ACCOMMODATION_LIMITS.extraTimeMinutes.max,
+      },
+    });
+    expect(grantedSec).toBe(3_600 * 2 + 240 * 60);
   });
 });

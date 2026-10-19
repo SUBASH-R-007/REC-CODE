@@ -379,6 +379,12 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AttemptSnapshot_hash_check", "AttemptSnapshot"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019160000_phase6b_attempt_engine" })),
+  ...(
+    [
+      // The heartbeat's sequence high-water mark (SEQUENCE_GAP detection).
+      ["AssessmentAttempt_client_seq_check", "AssessmentAttempt"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019180000_phase6b_heartbeat" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

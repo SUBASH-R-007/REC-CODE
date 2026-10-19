@@ -412,6 +412,17 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     routes: ["app/api/activity/route.ts#POST"],
   },
   {
+    key: "exam.heartbeat",
+    label: "Sit a proctored assessment",
+    // Every signed-in role, because the capability is not "be a student": a
+    // staff member sitting a practice assessment is a candidate too, and the
+    // attempt row itself (plus its token) is what decides whose sitting this
+    // is. The route's own guard checks ownership and the attempt token.
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: [],
+    routes: ["app/api/exam/[attemptId]/hb/route.ts#POST"],
+  },
+  {
     key: "notes.manage",
     label: "Write my notes",
     roles: EVERY_SIGNED_IN_ROLE,

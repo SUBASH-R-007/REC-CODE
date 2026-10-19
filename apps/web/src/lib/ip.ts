@@ -9,6 +9,17 @@ export function hashIp(ip: string): string {
 }
 
 /**
+ * sha256(userAgent + pepper). The same rule as an IP: a change is worth
+ * noticing (UA_CHANGED mid-attempt), the raw string is not worth keeping —
+ * a full user-agent is a fingerprint, and an exam attempt does not need one.
+ * Shares IP_HASH_PEPPER because it is the same promise about the same kind
+ * of value.
+ */
+export function hashUserAgent(userAgent: string): string {
+  return createHash("sha256").update(userAgent + env().IP_HASH_PEPPER).digest("hex");
+}
+
+/**
  * Best-effort client IP for the current request. Forwarding headers are
  * client-controlled unless a trusted reverse proxy overwrites them, so they
  * are read only when TRUST_PROXY=true (Caddy sets X-Real-IP from the socket

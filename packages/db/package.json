@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./audit": "./src/audit.ts",
-    "./audit-chain": "./src/audit-chain.ts"
+    "./audit-chain": "./src/audit-chain.ts",
+    "./attempt": "./src/attempt.ts"
   },
   "scripts": {
     "generate": "prisma generate",

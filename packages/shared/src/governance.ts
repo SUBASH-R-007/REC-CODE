@@ -99,5 +99,6 @@ export const SCHEDULER_JOB_NAMES = [
   "outbox",
   "governance",
   "contestRank",
+  "attemptSweep",
 ] as const;
 export type SchedulerJobName = (typeof SCHEDULER_JOB_NAMES)[number];

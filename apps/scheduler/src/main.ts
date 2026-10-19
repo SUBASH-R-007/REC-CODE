@@ -6,6 +6,7 @@ import { Redis } from "ioredis";
 import pino from "pino";
 import { describeDatabaseUrl, loadConfig, loadDevEnvFile, withSingleConnection } from "./config";
 import { DailyChallengeJob } from "./daily-challenge";
+import { AttemptSweepJob } from "./attempt-sweep";
 import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
@@ -95,6 +96,7 @@ const outbox = new OutboxDrainJob({ db, log, dryRun, transport: mailTransport })
 const governance = new GovernanceSweepJob({ db, log, dryRun });
 // Contests (Phase 5): the only writer of ContestStanding.rank.
 const contestRank = new ContestRankJob({ db, log, dryRun });
+const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -194,6 +196,16 @@ async function tick(): Promise<boolean> {
     await runJob("contestRank", async () => {
       const report = await contestRank.tick(now);
       if (report.reranked > 0) log.info({ report }, "contest rank tick");
+      return { ok: !report.failed, report };
+    }),
+  );
+  // Assessments: auto-submit at the deadline and the 45-second presence
+  // sweep. SKIP LOCKED claims and status-conditional writes, so it is safe
+  // with two instances; the job itself holds the 15-second cadence.
+  results.push(
+    await runJob("attemptSweep", async () => {
+      const report = await attemptSweep.tick(now);
+      if (report.autoSubmitted > 0 || report.disconnected > 0) log.info({ report }, "attempt sweep tick");
       return { ok: !report.failed, report };
     }),
   );

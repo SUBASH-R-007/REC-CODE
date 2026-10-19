@@ -1235,3 +1235,82 @@ Each is the narrower reading, implemented as described.
   Revisit with the placement cell once a few real rounds have run: the fix
   is to seed a zero-score standing row for every registration at the start,
   which makes a no-show a last place rather than an absence.
+
+## Phase 6b — the attempt engine
+
+- **The auto-submit sweeper also finalises DISCONNECTED sittings, not only
+  IN_PROGRESS ones** (decided 2026-10-19). SPEC §5 writes the sweeper's
+  predicate as `status = IN_PROGRESS AND expiresAt <= now()`, which is one
+  status short: DISCONNECTED is a sitting in progress whose candidate lost
+  their connection, and whose clock the spec is explicit never stopped. On
+  the literal reading, a candidate whose wifi dies at minute 20 of a
+  60-minute paper is never finalised — the row sits past its deadline for
+  ever, holding a seat on the invigilator's dashboard and never scoring the
+  work already submitted. The status machine already allows
+  `DISCONNECTED → AUTO_SUBMITTED` for exactly this case. Widened, and the
+  reason recorded here rather than left as a silent departure.
+- **The deadline is `expiresAt + pausedMs`, everywhere** (decided
+  2026-10-19). The same §5 sentence says the sweeper finalises on
+  `expiresAt <= now()`, and two lines later defines
+  `msRemaining = expiresAt + pausedMs − now()` and warns that this is "the
+  bug that voids an exam". Both cannot be right: sweeping on bare `expiresAt`
+  auto-submits a candidate in the middle of an invigilator-granted break.
+  One SQL expression (`packages/db/src/attempt.ts`) is the deadline for the
+  sweeper, the lazy guard and the heartbeat alike, and
+  `attempt-sweep.db.test.ts` covers the break case directly — dropping
+  `pausedMs` from that expression fails that test and nothing else
+  (mutation-checked).
+- **A request on a different session re-binds the sitting rather than ending
+  it** (decided 2026-10-19). `AssessmentAttempt.lockSessionId` exists "so an
+  admin force-logout ends it" (SPEC §4), but a session also simply expires,
+  and a candidate who signs in again must be able to resume — §5 is emphatic
+  that a connectivity or session hiccup must not cost someone their exam.
+  So the guard distinguishes two cases: the original session is **gone**, and
+  the lock moves to the new one (a resume); or it is **still alive** and a
+  second one is beating, which is a genuine `CONCURRENT_SESSION` — recorded
+  for a human, lock unmoved, request still allowed, because no signal
+  auto-penalises (§0). `lockSessionId` is deliberately outside the
+  write-once tuple the `AssessmentAttempt_machine` trigger freezes.
+- **A null sequence high-water mark reports no gap** (decided 2026-10-19).
+  `SEQUENCE_GAP` needs a server-side high-water mark, which is what
+  `AssessmentAttempt.lastClientSeq` is for (migration
+  `20261019180000_phase6b_heartbeat`). Treating "no client message yet" as
+  `-1` would raise a gap on every attempt whose client happens to start
+  counting at 1 — a signal about a counting convention, not about a
+  candidate. The first message sets the baseline instead.
+- **Clock drift is logged, not recorded as a ProctorEvent** (decided
+  2026-10-19). §5 asks the client to "correct and log drift over 5s". None of
+  the 25 `ProctorEventKind` members covers a clock, and the 25 are a closed
+  set the spec enumerates deliberately; a candidate's laptop being twenty
+  seconds out is a fact about their laptop, not evidence about them. The
+  heartbeat logs it and the client corrects itself from `serverNow` on the
+  same response. Revisit only if a real sitting shows drift being used to
+  explain something.
+- **`computeExpiresAt` delegates to Phase 4's `accommodatedDurationSec`**
+  (decided 2026-10-19). Two modules were computing "how long does this
+  candidate get" by different arithmetic — Phase 4 floors the percentage then
+  adds the flat minutes, Phase 6b rounded once at the end — which differ by
+  up to a second on odd durations. The accommodation screens have shipped
+  that formula since Phase 4, so the clock now calls it rather than
+  re-deriving it, and a test sweeps durations × percentages × minutes
+  asserting the two agree. A deadline one second away from the extra time a
+  student was told they had is unanswerable when it lands on the last
+  question.
+
+### Not a Phase 6b decision, but found while gating it
+
+- **The `db` suites belong to the Linux gate, not the Windows one**
+  (2026-10-19). Several governance fixtures write an app-clock timestamp into
+  a column a CHECK compares against a database-clock one (e.g.
+  `PrivilegedOperation_decided_after_request_check`). Run from Windows
+  against the WSL2 Postgres those are two different clocks, and WSL2's drifts
+  from the host across a suspend — a measured 210 ms was enough to fail 13
+  tests on an unmodified checkout. Inside the mirror, where
+  `scripts/dev/linux-gate.sh` runs them, there is one clock and they pass.
+  Worth noting that the fragility is not purely a test artefact: in
+  production the app and the database are on separate hosts, so an
+  app-supplied `decidedAt` really can land before a database-supplied
+  `requestedAt`. The durable fix is for those columns to come from one clock
+  — `now()` in the same statement — rather than for the test to be retimed.
+  Not changed here: it is Phase 4 and Phase 5 code, outside this slice, and
+  changing a guard's inputs deserves its own gated change.

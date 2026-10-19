@@ -2357,6 +2357,12 @@ model AssessmentAttempt {
   heartbeatBitmap        Bytes?
   heartbeatSlotSeconds   Int           @default(15)
   lastHeartbeatAt        DateTime?
+  /// High-water mark of the client's own message sequence. The heartbeat
+  /// carries it, so a run of numbers the server never saw is detectable as
+  /// a SEQUENCE_GAP even when the events themselves never arrived. Null
+  /// until the first client message. A gap is recorded for a human to read,
+  /// never acted on (SPEC section 0).
+  lastClientSeq          Int?
   blurEventCount         Int           @default(0)
   fullscreenExitCount    Int           @default(0)
   pasteEventCount        Int           @default(0)
