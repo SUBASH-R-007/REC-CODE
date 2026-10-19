@@ -94,7 +94,31 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       // session_replication_role = replica, so it never fires for the app; 'A' is ENABLE ALWAYS.
       expect(live.enabled, `${name} is not plainly enabled`).toBe("O");
       expect(live.type, `${name} fires on other events: ${live.def}`).toBe(expectedType(t));
-      expect(live.columns, `${name} is limited to columns: ${live.def}`).toBe("");
+      if (t.updateOf) {
+        /**
+         * A catalogued column scope. `tgattr` is the attribute NUMBERS, so
+         * what is checked is that the live definition names exactly the
+         * catalogued columns — widening the trigger to plain UPDATE, or
+         * adding a column, fails here.
+         */
+        expect(live.columns, `${name} lost its column scope: ${live.def}`).not.toBe("");
+        for (const column of t.updateOf) {
+          expect(live.def, `${name} no longer limited to ${column}`).toMatch(
+            new RegExp(String.raw`UPDATE\s+OF\s+[^O]*"${column}"`, "i"),
+          );
+        }
+        const named = (live.def.match(/UPDATE\s+OF\s+([^)]*?)\s+ON\s/i)?.[1] ?? "")
+          .split(",")
+          .map((part) => part.trim().replace(/"/g, ""))
+          .filter((part) => part.length > 0);
+        expect(named.sort(), `${name} is limited to different columns: ${live.def}`).toEqual(
+          [...t.updateOf].sort(),
+        );
+      } else {
+        // The default, and the rule: a guard limited to some columns is a
+        // guard that misses writes to the others.
+        expect(live.columns, `${name} is limited to columns: ${live.def}`).toBe("");
+      }
       const when = /\bWHEN\s*\(([\s\S]*)\)\s*EXECUTE\s+FUNCTION\b/i.exec(live.def)?.[1] ?? null;
       expect(when === null ? null : normalizePredicate(when), live.def).toBe(t.when ? normalizePredicate(t.when) : null);
     },

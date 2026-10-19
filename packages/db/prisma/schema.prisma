@@ -588,6 +588,11 @@ model User {
   restriction  AccountRestriction?
   statusEvents AccountStatusEvent[]
 
+  /// Readiness (Phase 9). Snapshots are never hard-deleted with the student.
+  readinessSnapshots ReadinessSnapshot[]
+  menteeAssignments  MentorAssignment[] @relation("MenteeAssignments")
+  mentorAssignments  MentorAssignment[] @relation("MentorAssignments")
+
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
 }
@@ -1083,6 +1088,12 @@ model UserProblemStatus {
   @@id([userId, problemId])
   @@index([userId, status, firstAcceptedAt(sort: Desc)])
   @@index([problemId, status])
+  /// Phase 9b. The readiness job reads the per-difficulty unassisted counts
+  /// in ONE grouped pass over the whole college (UserStats has only a single
+  /// `assistedSolves` scalar, so the split needs this joined to Problem).
+  /// One sequential scan rather than 5,000 queries, and this keeps it to the
+  /// solved rows.
+  @@index([status])
 }
 
 /// One row per user per campus (Asia/Kolkata) day with any activity: the
@@ -3517,4 +3528,126 @@ model AccountStatusEvent {
   @@index([userId, createdAt(sort: Desc)])
   @@index([toStage, createdAt])
   @@index([source, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 9b — readiness snapshots, and the named mentor
+//
+// SPEC §5: readiness is "a preparation-coverage measure, explicitly not a
+// prediction of being placed", computed nightly and RETAINING the component
+// breakdown. The breakdown is the point: a disputed number has to be
+// recomputable years later from the stored components and the rules version
+// that produced them, or "the platform said I was not ready" is
+// unanswerable in exactly the way Phase 8's lockouts would have been.
+//
+// There is no `dryRun` column. A dry run computes, reports and writes
+// NOTHING — the same shape Phase 8c shipped, and for the same reason: a
+// column plus a filter is an invitation to forget the filter in one query,
+// and `computedOn` being the primary key means a dry run and a live run
+// could not have coexisted on one campus day anyway.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One nightly run. `computedOn` is the primary key: one run per campus day,
+/// no hot "current" row to increment.
+model ReadinessRun {
+  computedOn        DateTime  @id @db.Date
+  /// The version of the weights these scores were computed under. An event
+  /// cites it, so a recalibration after the first placement cycle does not
+  /// silently rewrite last year's numbers.
+  rulesVersion      Int
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  studentsEvaluated Int       @default(0)
+  /// The frozen per-cohort distribution the percentiles were taken against,
+  /// so a percentile can be re-derived rather than recomputed against a
+  /// cohort that has since changed.
+  cohortStats       Json      @default("{}")
+  ok                Boolean   @default(false)
+  notes             String?
+
+  snapshots ReadinessSnapshot[]
+
+  @@index([ok, computedOn(sort: Desc)])
+}
+
+/// One student per run. Cohort columns are COPIED, like XpBucket's: every
+/// officer aggregate is then one index scan with no join to User.
+model ReadinessSnapshot {
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  computedOn DateTime     @db.Date
+  run        ReadinessRun @relation(fields: [computedOn], references: [computedOn])
+  rulesVersion Int
+
+  /// The cohort the percentiles were taken in, and how many were in it. A
+  /// percentile against eleven people is a different claim from one against
+  /// a thousand, and the number is kept so a reader can tell.
+  cohortKey  String
+  cohortSize Int
+
+  batchYear      Int?
+  departmentCode String?
+  section        String?
+
+  /// 0–100. Null ONLY when nothing in the tier was measurable.
+  serviceScore Int?
+  productScore Int?
+  topScore     Int?
+
+  /// The weight that WAS measurable, 0–100. The honest denominator: with
+  /// mockInterviewScore unsourced, no TOP score can exceed 85, and every
+  /// surface that compares a score to a threshold divides by this.
+  serviceAvailableWeight Int @default(0)
+  productAvailableWeight Int @default(0)
+  topAvailableWeight     Int @default(0)
+
+  /// 0–100, per tier, because the two tiers that use breadth divide by
+  /// different per-topic targets. A single column could not hold both.
+  topicBreadthProduct Int?
+  topicBreadthTop     Int?
+  /// The argmin that set each breadth. "Your breadth is 0.17" is useless;
+  /// "graphs is holding you back" is actionable.
+  limitingTopicProduct Topic?
+  limitingTopicTop     Topic?
+
+  /// The full breakdown, keyed by TIER and then by component, zod-validated
+  /// on write. Keyed by tier because topicBreadth is tier-specific.
+  components      Json
+  /// The fourteen counts the MIN was taken over, so the minimum is checkable.
+  topicUnassisted Json
+
+  /// Copied from ActivityDay, so the at-risk list sorts without joining User.
+  lastActiveOn DateTime? @db.Date
+  createdAt    DateTime  @default(now())
+
+  @@unique([userId, computedOn])
+  @@index([computedOn, departmentCode, batchYear, section])
+  @@index([computedOn, serviceScore])
+  @@index([computedOn, productScore])
+  @@index([computedOn, topScore])
+  @@index([computedOn, lastActiveOn])
+  @@index([userId, computedOn(sort: Desc)])
+}
+
+/// The named human an at-risk student is routed to.
+///
+/// SPEC §5: "The at-risk list routes to a named mentor for a conversation,
+/// never an automated email." So exactly one live mentor per mentee — two is
+/// not a representable state — and a PLACEMENT_OFFICER may never be that
+/// mentor, because the whole point of the list is to route a student AWAY
+/// from analytics and towards a person.
+model MentorAssignment {
+  id           String    @id @default(cuid())
+  menteeId     String
+  mentee       User      @relation("MenteeAssignments", fields: [menteeId], references: [id])
+  mentorId     String
+  mentor       User      @relation("MentorAssignments", fields: [mentorId], references: [id])
+  assignedById String
+  assignedAt   DateTime  @default(now())
+  reason       String
+  endedAt      DateTime?
+  endedById    String?
+
+  @@index([mentorId, endedAt])
+  @@index([menteeId, endedAt])
 }

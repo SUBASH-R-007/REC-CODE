@@ -72,6 +72,10 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_stage_jump",
   "recx_refuse_sweep_with_open_attempt",
   "recx_refuse_restriction_without_event",
+  // 20261020270000_phase9b_readiness
+  "recx_refuse_snapshot_identity_change",
+  "recx_refuse_mentor_assignment_change",
+  "recx_refuse_unsuitable_mentor",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -128,6 +132,10 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019260200_phase8c_restriction
   "AccountRestriction",
   "AccountStatusEvent",
+  // 20261020270000_phase9b_readiness
+  "ReadinessRun",
+  "ReadinessSnapshot",
+  "MentorAssignment",
 ];
 
 export interface GuardTrigger {
@@ -139,6 +147,20 @@ export interface GuardTrigger {
   level: "ROW" | "STATEMENT";
   /** The only WHEN clause a guard trigger may have; absent = no WHEN clause at all. */
   when?: string;
+  /**
+   * The columns an `UPDATE OF` clause limits this guard to.
+   *
+   * Absent means the guard sees EVERY write, which is what a guard normally
+   * must do — a guard limited to some columns is a guard that misses writes
+   * to the others, and the live fence refuses one by default.
+   *
+   * It is listed, with a reason, only where the limit is the point: a role
+   * check that fired on the end-of-assignment write would refuse an ordinary
+   * close, and one that fired on every edit would read the mentor's User row
+   * on writes that cannot change it. Naming the columns here means widening
+   * or narrowing them fails the fence rather than passing silently.
+   */
+  updateOf?: readonly string[];
 }
 
 /** Every guard trigger, with the definition it must keep. */
@@ -410,6 +432,37 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
   { name: "AccountStatusEvent_single_step", timing: "BEFORE INSERT", table: "AccountStatusEvent", fn: "recx_refuse_stage_jump", level: "ROW" },
   /** Never escalate a student who is sitting an assessment right now. */
   { name: "AccountStatusEvent_no_sweep_mid_attempt", timing: "BEFORE INSERT", table: "AccountStatusEvent", fn: "recx_refuse_sweep_with_open_attempt", level: "ROW" },
+  /**
+   * 20261020270000_phase9b_readiness. A snapshot is RECOMPUTED, never
+   * edited: the nightly job may overwrite the computed columns for the same
+   * (student, day), but the row never moves to another student or another
+   * day and `rulesVersion` never goes backwards — a row whose rules version
+   * regressed would be a row whose stored components no longer explain its
+   * score, which is the one thing the breakdown exists to prevent.
+   */
+  { name: "ReadinessSnapshot_recompute_only", timing: "BEFORE UPDATE", table: "ReadinessSnapshot", fn: "recx_refuse_snapshot_identity_change", level: "ROW" },
+  /** Re-assigning a mentor is an end plus a new row, so the history of who was asked survives it. */
+  { name: "MentorAssignment_immutable", timing: "BEFORE UPDATE OR DELETE", table: "MentorAssignment", fn: "recx_refuse_mentor_assignment_change", level: "ROW" },
+  /**
+   * A PLACEMENT_OFFICER may never be the mentor of record, and neither may a
+   * student. SPEC §5's at-risk list exists to route a student AWAY from the
+   * analytics surface and towards a person who teaches them, so the person
+   * it routes to must not be the one reading the dashboard.
+   *
+   * The `UPDATE OF "mentorId"` clause is part of the definition this
+   * fence pins: a trigger widened to plain UPDATE would fire on every edit
+   * (including the end-of-assignment write), and one that lost the column
+   * would let a mentorId change slip past.
+   */
+  {
+    name: "MentorAssignment_mentor_is_not_student_or_officer",
+    timing: 'BEFORE INSERT OR UPDATE OF "mentorId"',
+    table: "MentorAssignment",
+    fn: "recx_refuse_unsuitable_mentor",
+    level: "ROW",
+    // The one catalogued column scope in the database. See `updateOf`.
+    updateOf: ["mentorId"],
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -435,6 +488,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
    * `DEFERRED_CONSTRAINT_TRIGGERS` below pins its definition.
    */
   { name: "AccountRestriction_requires_event", table: "AccountRestriction" },
+
   /**
    * 20261019250100_phase7b_patterns. The one non-guard trigger in the
    * database: it MAINTAINS MockPattern's denormalised totals rather than
@@ -449,7 +503,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019260200_phase8c_restriction";
+export const CHECK_CATALOG_THROUGH = "20261020270000_phase9b_readiness";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -803,6 +857,25 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AccountStatusEvent_undisable_check", "AccountStatusEvent"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019260200_phase8c_restriction" })),
+  ...(
+    [
+      ["ReadinessRun_window_check", "ReadinessRun"],
+      ["ReadinessRun_ok_check", "ReadinessRun"],
+      ["ReadinessRun_version_check", "ReadinessRun"],
+      ["ReadinessRun_stats_check", "ReadinessRun"],
+      ["ReadinessSnapshot_score_range", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_weight_range", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_score_le_available", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_null_when_unmeasurable", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_breadth_range", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_breadth_pairs", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_cohort_check", "ReadinessSnapshot"],
+      ["ReadinessSnapshot_components_object", "ReadinessSnapshot"],
+      ["MentorAssignment_not_self", "MentorAssignment"],
+      ["MentorAssignment_end_pair", "MentorAssignment"],
+      ["MentorAssignment_reason_check", "MentorAssignment"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261020270000_phase9b_readiness" })),
 ];
 
 /**
@@ -922,5 +995,18 @@ export const PARTIAL_UNIQUE_INDEXES = [
     columns: ["userId", "evaluationDate"],
     nullsNotDistinct: false,
     where: String.raw`"?source"?\s*=\s*'INACTIVITY_SWEEP'`,
+  },
+  /**
+   * 20261020270000_phase9b_readiness. Exactly one LIVE mentor per mentee.
+   * Two is not a representable state: a list that routed to both would have
+   * each of them assume the other had spoken to the student.
+   */
+  {
+    name: "MentorAssignment_one_active_per_mentee",
+    table: "MentorAssignment",
+    migration: "20261020270000_phase9b_readiness",
+    columns: ["menteeId"],
+    nullsNotDistinct: false,
+    where: String.raw`"?endedAt"?\s+IS\s+NULL`,
   },
 ] as const;
