@@ -84,7 +84,7 @@ export class MockSweepJob {
       report.worstLatenessMs = swept.worstLatenessMs;
 
       if (this.statsAreDue(now)) {
-        const stats = await this.restatePatterns();
+        const stats = await this.restatePatterns(now);
         report.patternsRestated = stats.restated;
         report.patternsWithCohort = stats.withCohort;
       }
@@ -129,13 +129,16 @@ export class MockSweepJob {
     return now.getTime() - this.lastStatsAt >= MOCK_STATS_INTERVAL_MS;
   }
 
-  private async restatePatterns(): Promise<{ restated: number; withCohort: number }> {
+  private async restatePatterns(now: Date): Promise<{ restated: number; withCohort: number }> {
     if (this.dryRun) {
       this.log.info("would recompute mock pattern statistics");
       return { restated: 0, withCohort: 0 };
     }
     const stats = await recomputePatternStats(this.db);
-    this.lastStatsAt = Date.now();
+    // The clock the tick was GIVEN, never Date.now(): a job that mixes the
+    // two is a job whose cadence cannot be tested and whose behaviour
+    // depends on how long its own queries took.
+    this.lastStatsAt = now.getTime();
     const withCohort = stats.filter((row) => row.finalizedAttemptCount >= MOCK_PERCENTILE_MIN_ATTEMPTS).length;
     this.log.info({ restated: stats.length, withCohort }, "recomputed mock pattern statistics");
     return { restated: stats.length, withCohort };

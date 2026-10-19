@@ -140,9 +140,17 @@ export async function gradeAndCloseSection(
     );
     graded.push(result);
 
+    // An UNANSWERED question is not graded: there is nothing to be right
+    // about and nothing is earned, so BOTH columns stay null.
+    // `MockAttemptAnswer_graded_check` holds them together — it refused the
+    // first draft of this for writing `isCorrect: null, awarded: 0`, which
+    // is a half-graded row and exactly what the CHECK exists to catch.
     await tx.mockAttemptAnswer.update({
       where: { id: answer.id },
-      data: { isCorrect: result.isCorrect, awarded: result.awarded },
+      data:
+        result.state === "UNANSWERED"
+          ? { isCorrect: null, awarded: null }
+          : { isCorrect: result.isCorrect, awarded: result.awarded },
     });
 
     const seconds = secondsOn(answer.firstSeenAtMs, answer.answeredAtMs);

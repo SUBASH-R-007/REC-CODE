@@ -257,6 +257,41 @@ export async function serveIndex(args: {
     throw new ValidationError("That question is not in this section.");
   }
 
+  const layoutForSection = layoutSection(sitting.layout, current.key);
+  const served = layoutForSection?.questions.find((question) => question.index === args.index);
+  if (!served) throw new ValidationError("That question is not in this section.");
+
+  // Create the answer row on FIRST serve, blank. Three things come of it:
+  // the palette has a row to colour, `firstSeenAtMs` records when the
+  // candidate actually saw the question rather than when they answered it,
+  // and `@@unique([attemptId, questionId])` makes "first serve" exactly once
+  // without a second table to consult.
+  const sinceSectionStart =
+    current.startedAt === null ? 0 : Math.max(0, Date.now() - current.startedAt.getTime());
+  const created = await db.mockAttemptAnswer.createMany({
+    data: [
+      {
+        attemptId: sitting.id,
+        sectionStateId: current.stateId,
+        questionId: served.questionId,
+        position: served.index,
+        firstSeenAtMs: Math.min(sinceSectionStart, 24 * 3_600_000),
+      },
+    ],
+    skipDuplicates: true,
+  });
+  if (created.count === 1) {
+    // SERVED, not answered. The two are different events, and
+    // `AptitudeQuestionStat_counts_check` (timesAnswered <= timesServed) is
+    // protective only because this increment happens HERE — at the moment the
+    // server decides what the candidate may see — rather than at finalise.
+    await db.aptitudeQuestionStat.upsert({
+      where: { questionId: served.questionId },
+      create: { questionId: served.questionId, timesServed: 1, lastServedAt: new Date() },
+      update: { timesServed: { increment: 1 }, lastServedAt: new Date() },
+    });
+  }
+
   const next = Math.max(current.highWaterIndex, args.index);
   if (next !== current.highWaterIndex) {
     // Conditional, so two tabs cannot lower it between the read and the write.
