@@ -68,6 +68,22 @@ export const APTITUDE_POOL_SELECT = {
   passageId: true,
 } as const;
 
+/**
+ * Just enough to recognise a question an import might be about.
+ *
+ * The importer matches a row by code and then by content hash, and needs the
+ * status to refuse an edit to a published one. Named, like every other read,
+ * so `tests/repo/aptitude-answer-exposure.test.ts` can require a NAMED select
+ * everywhere rather than merely the absence of the key — which is the
+ * difference between a fence and a habit.
+ */
+export const APTITUDE_IDENTITY_SELECT = {
+  id: true,
+  displayCode: true,
+  contentHash: true,
+  status: true,
+} as const;
+
 /** The passage body, which carries no key at all and is public with the question. */
 export const APTITUDE_PASSAGE_SELECT = {
   id: true,

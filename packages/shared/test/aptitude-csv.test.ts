@@ -30,6 +30,8 @@ const DEFAULTS: RowDefaults = {
 };
 
 const WORKED = "Ten percent is one tenth of the number, so dividing 250 by ten gives 25 without the formula.";
+const PASSAGE =
+  "A quiet revolution has reshaped the way small towns buy and sell, and it arrived without a single announcement anywhere.";
 
 /** A row as the LMS question bank writes one: its columns, its spellings. */
 const lmsRow = (over: Partial<Record<string, string>> = {}): Record<string, string> => ({
@@ -209,7 +211,7 @@ describe("reading one row", () => {
       expect(result.question.kind).toBe("SINGLE_CHOICE");
       expect(result.question.options).toEqual(["25", "20", "30", "35"]);
       expect(result.question.sourceBatch).toBe("batch-2026");
-      expect(result.needsPassage).toBe(false);
+      expect(result.passage).toBeNull();
     }
   });
 
@@ -322,17 +324,53 @@ describe("reading one row", () => {
     if (good.ok) expect(good.question.expectedSeconds).toBe(90);
   });
 
-  it("leaves a passage row's passage to the importer, and says so", () => {
+  it("reads a passage row's shared text and leaves the passage ROW to the importer", () => {
     const result = rowToQuestion(
-      lmsRow({ type: "passage", tags: "reading_comprehension", area: "VERBAL" }),
+      lmsRow({ type: "passage", tags: "reading_comprehension", area: "VERBAL", passage: PASSAGE }),
       { ...DEFAULTS, topic: null, area: null },
     );
     expect(result.ok, result.ok ? "" : result.errors.join("; ")).toBe(true);
     if (result.ok) {
-      expect(result.needsPassage).toBe(true);
+      expect(result.passage?.body).toBe(PASSAGE);
+      // A title is optional; without one the opening words stand in, which is
+      // what a reviewer scanning a list needs.
+      expect(result.passage?.title.length).toBeGreaterThan(0);
       // Null, never a sentinel somebody could mistake for an id.
       expect(result.question.passageId).toBeNull();
     }
+  });
+
+  it("refuses a passage question with no shared text, and says where to put it", () => {
+    // The LMS columns have nowhere to put a passage, and the Phase 7 design
+    // never said where it would come from.
+    const result = rowToQuestion(lmsRow({ type: "passage", tags: "reading_comprehension" }), DEFAULTS);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.join(" ")).toContain("`passage` column");
+      expect(result.errors.join(" ")).toContain("repeated on every question of the group");
+    }
+  });
+
+  it("refuses a passage shorter than a passage", () => {
+    const result = rowToQuestion(
+      lmsRow({ type: "passage", tags: "reading_comprehension", passage: "Too short." }),
+      DEFAULTS,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("it is a stem, not a passage");
+  });
+
+  it("refuses a passage on a question that is not passage-grouped", () => {
+    // A passage no sibling shares is a stem with extra steps by another route.
+    const result = rowToQuestion(lmsRow({ passage: PASSAGE }), DEFAULTS);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toContain("Only a passage question carries a `passage`");
+  });
+
+  it("leaves `passage` null on an ordinary question", () => {
+    const result = rowToQuestion(lmsRow(), DEFAULTS);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.passage).toBeNull();
   });
 
   it("carries a code through, for a re-import that updates", () => {
@@ -412,6 +450,25 @@ describe("the round trip", () => {
       expect(result.question.numericTolerance).toBe(0.01);
       expect(result.question.numericUnit).toBe("km/h");
       expect(result.question.options).toEqual([]);
+    }
+  });
+
+  it("re-imports an exported PASSAGE question with its text intact", () => {
+    // Lossless for a passage too, or the round trip would quietly orphan
+    // every comprehension question in the bank.
+    const passaged = {
+      ...question,
+      kind: "PASSAGE_GROUPED" as const,
+      area: "VERBAL",
+      topic: "READING_COMPREHENSION",
+      passage: { title: "A quiet revolution", body: PASSAGE },
+    };
+    const file = aptitudeCsvHeader() + questionToRow(passaged);
+    const result = rowToQuestion(parseCsvRecords(file, APTITUDE_CSV_SHAPE).rows[0]!.cells, DEFAULTS);
+    expect(result.ok, result.ok ? "" : result.errors.join("; ")).toBe(true);
+    if (result.ok) {
+      expect(result.passage).toEqual({ title: "A quiet revolution", body: PASSAGE });
+      expect(result.question.kind).toBe("PASSAGE_GROUPED");
     }
   });
 

@@ -3146,3 +3146,62 @@ model AptitudeUserTopicStat {
   @@id([userId, topic])
   @@index([topic, correct])
 }
+
+/// One CSV upload of aptitude questions. Field for field the ProblemImport
+/// shape, with ProblemImportStatus and ProblemImportRowStatus reused — the
+/// counters included, so `revised` is spelled the way the NEW_REVISION row
+/// status it counts is. A counter named `updated` with no UPDATED status
+/// cannot be reconciled.
+///
+/// A row is written as soon as that line commits or fails, so a 300-question
+/// file with three bad rows imports 297 and reports three (SPEC §5). That is
+/// why the counters live on the parent while the reasons live on the rows.
+model AptitudeImport {
+  id           String              @id @default(cuid())
+  uploadedById String
+  fileName     String
+  sizeBytes    BigInt
+  fileSha256   String
+  /// "upload" | "cli:<operator>"
+  via          String
+  status       ProblemImportStatus @default(PROCESSING)
+  /// What the upload was imported INTO when the file named no area or topic
+  /// — an LMS export has neither, so the operator chooses at upload and the
+  /// choice is recorded with the file.
+  defaultArea  AptitudeArea?
+  defaultTopic AptitudeTopic?
+  total        Int                 @default(0)
+  created      Int                 @default(0)
+  revised      Int                 @default(0)
+  unchanged    Int                 @default(0)
+  failed       Int                 @default(0)
+  /// Whole-file failure (not a CSV, over a cap, malformed quoting). Per-row
+  /// failures live on rows.
+  error        String?
+  startedAt    DateTime            @default(now())
+  finishedAt   DateTime?
+  rows         AptitudeImportRow[]
+
+  @@index([uploadedById, startedAt(sort: Desc)])
+}
+
+/// One line of an import. questionId is a plain string (no relation), so this
+/// is not an AptitudeQuestion child and a retired question never drags its
+/// import history with it.
+model AptitudeImportRow {
+  id          String                 @id @default(cuid())
+  importId    String
+  import      AptitudeImport         @relation(fields: [importId], references: [id], onDelete: Cascade)
+  /// 1-based line in the file.
+  line        Int
+  status      ProblemImportRowStatus
+  questionId  String?
+  displayCode String?
+  contentHash String?
+  /// [{path, message}] — EVERY problem found in the row, not only the first.
+  errors      Json                   @default("[]")
+  warnings    Json                   @default("[]")
+  createdAt   DateTime               @default(now())
+
+  @@unique([importId, line])
+}

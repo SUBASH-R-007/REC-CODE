@@ -7,7 +7,16 @@ import {
   type PlannedRow,
   type ReadRow,
 } from "../src/aptitude-import";
-import type { AptitudeCsvQuestion } from "../src/aptitude-csv";
+import type { AptitudeCsvQuestion, CsvPassage } from "../src/aptitude-csv";
+
+const PASSAGE_A: CsvPassage = {
+  title: "A quiet revolution",
+  body: "A quiet revolution has reshaped the way small towns buy and sell, and it arrived without a single announcement.",
+};
+const PASSAGE_B: CsvPassage = {
+  title: "The long road",
+  body: "The long road out of the valley was paved twice in living memory, and neither time did anybody ask the farmers.",
+};
 
 /**
  * SPEC §5: *so one bad row cannot discard a 300-question file.*
@@ -44,7 +53,7 @@ const ok = (line: number, contentHash: string, over: Partial<Extract<ReadRow, { 
   question: question(),
   code: null,
   contentHash,
-  needsPassage: false,
+  passage: null,
   warnings: [],
   ...over,
 });
@@ -209,67 +218,72 @@ const row = (line: number, over: Partial<PlannedRow> = {}): PlannedRow => ({
   questionId: null,
   displayCode: null,
   contentHash: "x".repeat(64),
-  needsPassage: true,
+  passage: PASSAGE_A,
   errors: [],
   warnings: [],
   ...over,
 });
 
 describe("grouping a passage's questions", () => {
-  it("groups consecutive passage rows of the same topic", () => {
-    // Consecutive, because that is how a human writes a passage's questions
-    // in a spreadsheet — and any cleverer rule would be one nobody could
-    // predict from looking at the file.
+  it("groups every row that repeats the same passage text", () => {
+    // By the text, not by adjacency: it is the only rule an operator can
+    // predict by looking at the file.
     const result = passageGroups([row(2), row(3), row(4)]);
     expect(result.errors).toEqual([]);
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]!.lines).toEqual([2, 3, 4]);
+    expect(result.groups[0]!.passage).toEqual(PASSAGE_A);
   });
 
-  it("starts a new group at a non-passage row", () => {
-    const result = passageGroups([row(2), row(3), row(4, { needsPassage: false }), row(5), row(6)]);
+  it("groups two passages correctly even when the file interleaves them", () => {
+    // A consecutive-rows rule would get this wrong, and an operator who
+    // sorted their spreadsheet by topic would never know why.
+    const result = passageGroups([
+      row(2, { passage: PASSAGE_A }),
+      row(3, { passage: PASSAGE_B }),
+      row(4, { passage: PASSAGE_A }),
+      row(5, { passage: PASSAGE_B }),
+    ]);
+    expect(result.errors).toEqual([]);
     expect(result.groups.map((g) => g.lines)).toEqual([
-      [2, 3],
-      [5, 6],
+      [2, 4],
+      [3, 5],
     ]);
   });
 
-  it("starts a new group when the topic changes", () => {
-    const other = row(4, {
-      question: question({ kind: "PASSAGE_GROUPED", area: "VERBAL", topic: "CLOZE" }),
-    });
-    const result = passageGroups([row(2), row(3), other, row(5, { question: question({ kind: "PASSAGE_GROUPED", area: "VERBAL", topic: "CLOZE" }) })]);
-    expect(result.groups.map((g) => g.topic)).toEqual(["READING_COMPREHENSION", "CLOZE"]);
+  it("keeps the groups in the order the file first mentions them", () => {
+    const result = passageGroups([row(9, { passage: PASSAGE_B }), row(2, { passage: PASSAGE_A }), row(3, { passage: PASSAGE_A }), row(10, { passage: PASSAGE_B })]);
+    expect(result.groups.map((g) => g.passage.title)).toEqual(["The long road", "A quiet revolution"]);
+  });
+
+  it("ignores a row with no passage", () => {
+    const result = passageGroups([row(2), row(3), row(4, { passage: null, question: question() })]);
+    expect(result.groups[0]!.lines).toEqual([2, 3]);
   });
 
   it("refuses a passage with one question, and says what to do instead", () => {
     // SPEC §5 says "one shared passage, N questions"; a passage with one
     // question is a stem with extra steps.
-    const result = passageGroups([row(2), row(3, { needsPassage: false })]);
+    const result = passageGroups([row(2), row(3, { passage: PASSAGE_B })]);
     expect(result.groups).toEqual([]);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]!.line).toBe(2);
+    expect(result.errors).toHaveLength(2);
     expect(result.errors[0]!.message).toContain("at least two questions");
-    expect(result.errors[0]!.message).toContain("single-choice question instead");
+    expect(result.errors[0]!.message).toContain("Repeat the same passage text");
   });
 
-  it("refuses a lone passage row at the end of the file", () => {
-    const result = passageGroups([row(2), row(3), row(9)]);
-    // Lines 2 and 3 are one group; line 9 follows a gap but is still
-    // consecutive in the ROW LIST, so it joins them.
-    expect(result.groups[0]!.lines).toEqual([2, 3, 9]);
-  });
-
-  it("closes a group at a FAILED row, so a bad row cannot join two passages", () => {
-    const result = passageGroups([row(2), row(3), row(4, { status: "FAILED", question: null }), row(5), row(6)]);
-    expect(result.groups.map((g) => g.lines)).toEqual([
-      [2, 3],
-      [5, 6],
-    ]);
+  it("does not count a FAILED row toward its group", () => {
+    // Otherwise a group of one good row and one bad one would look complete,
+    // and the passage would ship with a single question.
+    const result = passageGroups([row(2), row(3, { status: "FAILED", question: null, errors: ["bad"] })]);
+    expect(result.groups).toEqual([]);
+    expect(result.errors[0]!.line).toBe(2);
   });
 
   it("finds nothing in a file with no passage rows", () => {
-    const result = passageGroups([row(2, { needsPassage: false }), row(3, { needsPassage: false })]);
+    const result = passageGroups([
+      row(2, { passage: null, question: question() }),
+      row(3, { passage: null, question: question() }),
+    ]);
     expect(result.groups).toEqual([]);
     expect(result.errors).toEqual([]);
   });

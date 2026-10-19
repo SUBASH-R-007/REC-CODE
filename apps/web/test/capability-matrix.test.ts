@@ -225,6 +225,26 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
     }),
     { params: Promise.resolve({ sessionId: "sess_1" }) },
   ],
+  // Phase 7d. The import is a route handler rather than a server action
+  // because a server action's body limit is 1 MB and an aptitude CSV is
+  // allowed 4 MB; the recipe therefore posts a real CSV body.
+  "app/api/admin/aptitude/import/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/admin/aptitude/import?topic=PERCENTAGES&area=QUANTITATIVE", {
+      method: "POST",
+      headers: {
+        host: "localhost:3100",
+        origin: "http://localhost:3100",
+        "content-type": "text/csv",
+        "x-recx-file-name": "probe.csv",
+      },
+      body: ["type,text,explanation", ""].join("\r\n"),
+    }),
+  ],
+  // The export carries the answer key and the worked explanations, so every
+  // role except staff has to be refused before a byte is streamed.
+  "app/api/admin/aptitude/export/route.ts#GET": () => [
+    new Request("http://localhost:3100/api/admin/aptitude/export", { headers: { host: "localhost:3100" } }),
+  ],
   "app/api/exam/device/assert/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/device/assert", {
       method: "POST",

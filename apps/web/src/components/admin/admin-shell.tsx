@@ -1,23 +1,5 @@
 import type { Role, User } from "@recx/db";
-import {
-  Accessibility,
-  ChartColumnBig,
-  ChevronDown,
-  Cpu,
-  Eye,
-  GraduationCap,
-  LayoutDashboard,
-  ListChecks,
-  Megaphone,
-  Menu,
-  ShieldAlert,
-  ShieldCheck,
-  SquareCode,
-  Swords,
-  UsersRound,
-  Layers,
-  type LucideIcon,
-} from "lucide-react";
+import { Accessibility, Calculator, ChartColumnBig, ChevronDown, Cpu, Eye, GraduationCap, Layers, LayoutDashboard, ListChecks, Megaphone, Menu, ShieldAlert, ShieldCheck, SquareCode, Swords, UsersRound, type LucideIcon } from "lucide-react";
 import { NavLink } from "@/components/shell/nav-link";
 import { UserMenu } from "@/components/shell/user-menu";
 import { Wordmark } from "@/components/shell/wordmark";
@@ -35,6 +17,7 @@ const ICONS: Readonly<Record<AdminNavIcon, LucideIcon>> = {
   cohorts: Layers,
   accommodations: Accessibility,
   problems: SquareCode,
+  aptitude: Calculator,
   sheets: ListChecks,
   tracks: GraduationCap,
   contests: Swords,

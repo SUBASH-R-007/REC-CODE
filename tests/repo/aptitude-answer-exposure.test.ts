@@ -140,7 +140,7 @@ describe("the aptitude answer key is not student-reachable", () => {
       const reads = aptitudeQuestionReads(source);
       if (reads.length === 0) continue;
       const usesNamedSelect =
-        /APTITUDE_PUBLIC_SELECT|APTITUDE_ANSWER_SELECT|APTITUDE_POOL_SELECT/.test(source) ||
+        /APTITUDE_PUBLIC_SELECT|APTITUDE_ANSWER_SELECT|APTITUDE_POOL_SELECT|APTITUDE_IDENTITY_SELECT/.test(source) ||
         // A read that asks for nothing but ids and scalars with no select at
         // all would return every column, key included.
         false;

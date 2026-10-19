@@ -16,6 +16,7 @@ export type AdminNavIcon =
   | "cohorts"
   | "accommodations"
   | "problems"
+  | "aptitude"
   | "sheets"
   | "tracks"
   | "contests"
@@ -57,6 +58,9 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = Object.freeze([
     label: "Content",
     items: Object.freeze([
       item("/admin/problems", "Problems", "problems"),
+      // Phase 7: the aptitude bank is content like any other, and it sits
+      // next to Problems because an author moves between the two.
+      item("/admin/aptitude", "Aptitude", "aptitude"),
       item("/admin/sheets", "Sheets", "sheets"),
       item("/admin/tracks", "Tracks", "tracks"),
       item("/admin/contests", "Contests", "contests"),

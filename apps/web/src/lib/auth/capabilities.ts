@@ -122,6 +122,10 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       "super-problems#requestProblemDeletion",
       "super-problems#requestVersionDeletion",
       "super-judge#requestGlobalRejudge",
+      // Phase 7d: publishing an aptitude question is the act that makes a
+      // cohort scorable on it, which is the class of act this capability
+      // already holds.
+      "super-aptitude#publishAptitudeQuestion",
     ],
     privileged: ["PROBLEM_DELETE", "VERSION_DELETE", "GLOBAL_REJUDGE"],
   },
@@ -361,6 +365,36 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "app/admin/accommodations/page.tsx",
       "app/admin/accommodations/new/page.tsx",
       "app/admin/accommodations/[id]/page.tsx",
+    ],
+  },
+  {
+    key: "aptitude.authoring",
+    label: "Author the aptitude bank: write, review, retire and import questions",
+    roles: STAFF,
+    actions: [
+      "admin-aptitude#createAptitudeQuestion",
+      "admin-aptitude#updateAptitudeQuestion",
+      "admin-aptitude#reviseAptitudeExplanation",
+      "admin-aptitude#submitAptitudeQuestionForReview",
+      // Retiring is ADMIN's, not SUPER_ADMIN's: it only ever stops a question
+      // being served, and "this question is wrong" must not wait.
+      "admin-aptitude#retireAptitudeQuestion",
+      "admin-aptitude#saveAptitudePassage",
+    ],
+    routes: [
+      "app/api/admin/aptitude/import/route.ts#POST",
+      // The export carries the answer key and the worked explanations, which
+      // is why it is here and why it audits every download.
+      "app/api/admin/aptitude/export/route.ts#GET",
+    ],
+    pages: [
+      "app/admin/aptitude/page.tsx",
+      "app/admin/aptitude/new/page.tsx",
+      // The ONE staff page that shows an answer key, which is why it is one
+      // question rather than a list.
+      "app/admin/aptitude/[questionId]/page.tsx",
+      "app/admin/aptitude/import/page.tsx",
+      "app/admin/aptitude/import/[importId]/page.tsx",
     ],
   },
   {

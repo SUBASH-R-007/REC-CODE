@@ -364,3 +364,24 @@ output.
 
 The teardown fix is also the rule: bring a fixture's status DOWN before
 deleting what the status depends on.
+
+## A CHECK that spans the app clock and the database clock will fail
+
+`startedAt DateTime @default(now())` with a `finishedAt` written by the
+application, and a CHECK that `finishedAt >= startedAt`, compares two clocks.
+On this development machine the WSL2 Postgres runs 174–214 ms ahead of the
+Windows host, so the application's "now" is genuinely earlier than a default
+Postgres wrote milliseconds before — and the CHECK refuses a row that is
+perfectly correct. In production the application and the database are
+different machines, so this is not a development artefact.
+
+It has now bitten three times: the Phase 4/5 governance fixtures (RUNBOOK §3,
+which is why the `db` suites are a Linux-gate item), and `AptitudeImport`'s
+own `finished_check` in Phase 7d.
+
+So: when two timestamp columns are compared by a CHECK, **write both from one
+clock**. The Phase 7d importer sets `startedAt` explicitly rather than taking
+the default, and clamps `finishedAt` so it is never earlier — a clock stepping
+backwards mid-import (an NTP correction, a resumed laptop) must not cost the
+whole import report. The alternative, taking both from `now()` in SQL, works
+too and is better where nothing else needs the value.

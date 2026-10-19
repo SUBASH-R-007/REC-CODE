@@ -156,7 +156,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `roles.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `settings.write` | super-admin | - | - | - | - | yes | 4 actions, 3 pages |
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
-| `problems.lifecycle` | super-admin | - | - | - | - | yes | 4 actions |
+| `problems.lifecycle` | super-admin | - | - | - | - | yes | 5 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
 | `integrity.overturn` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `audit.readFull` | super-admin | - | - | - | - | yes | 1 action, 1 page |
@@ -176,6 +176,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `contests.manage` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `announcements.manage` | staff | - | - | yes | - | yes | 3 actions, 3 pages |
 | `accommodations.request` | staff | - | - | yes | - | yes | 2 actions, 3 pages |
+| `aptitude.authoring` | staff | - | - | yes | - | yes | 6 actions, 2 routes, 5 pages |
 | `problems.author` | staff | - | - | yes | - | yes | 18 actions, 4 pages |
 | `problems.validate` | staff | - | - | yes | - | yes | 2 actions, 1 page |
 | `problems.review` | staff | - | - | yes | - | yes | 3 actions |

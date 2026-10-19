@@ -25,10 +25,18 @@ describe("admin navigation", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => [g.label, g.items.map((i) => i.href)])).toEqual([
       ["Overview", ["/admin"]],
       ["People", ["/admin/students", "/admin/cohorts", "/admin/accommodations"]],
-      // Contests joined Content in Phase 5.
+      // Contests joined Content in Phase 5; the aptitude bank in Phase 7,
+      // next to Problems because an author moves between the two.
       [
         "Content",
-        ["/admin/problems", "/admin/sheets", "/admin/tracks", "/admin/contests", "/admin/announcements"],
+        [
+          "/admin/problems",
+          "/admin/aptitude",
+          "/admin/sheets",
+          "/admin/tracks",
+          "/admin/contests",
+          "/admin/announcements",
+        ],
       ],
       ["Insight", ["/admin/reports"]],
       ["Operations", ["/admin/judge"]],

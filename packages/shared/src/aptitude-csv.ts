@@ -60,8 +60,26 @@ export const LMS_CSV_COLUMNS = [
   "tags",
 ] as const;
 
-/** What this product adds. All optional: an LMS export has none of them. */
-export const APTITUDE_EXTRA_COLUMNS = ["area", "topic", "code", "expectedSeconds", "origin"] as const;
+/**
+ * What this product adds. All optional: an LMS export has none of them.
+ *
+ * `passage` is where a passage-grouped question's SHARED TEXT lives, and it
+ * has to exist: the LMS columns have nowhere to put it, and the Phase 7
+ * design never said where it would come from. Every row of one group repeats
+ * the same body — which is how a human writes them in a spreadsheet anyway —
+ * and the importer creates ONE passage per distinct body. Grouping by the
+ * text itself is also the only rule an operator can predict by looking at
+ * the file.
+ */
+export const APTITUDE_EXTRA_COLUMNS = [
+  "area",
+  "topic",
+  "code",
+  "expectedSeconds",
+  "origin",
+  "passage",
+  "passageTitle",
+] as const;
 
 export const APTITUDE_CSV_COLUMNS = [...LMS_CSV_COLUMNS, ...APTITUDE_EXTRA_COLUMNS] as const;
 
@@ -255,12 +273,19 @@ export interface RowDefaults {
  * A question read from a row.
  *
  * `passageId` is null even for a PASSAGE_GROUPED row: a CSV row cannot carry
- * a database id, so the IMPORTER decides which rows share a passage and
- * assigns it. `needsPassage` says so out loud rather than leaving a sentinel
- * string for somebody to mistake for an id.
+ * a database id, so the IMPORTER creates the passage and assigns it. The row
+ * carries the passage's TEXT instead (`RowResult.passage`), which is what its
+ * siblings are keyed by — null, never a sentinel string somebody could
+ * mistake for an id.
  */
 export interface AptitudeCsvQuestion extends Omit<AptitudeQuestionInput, "passageId"> {
   readonly passageId: null;
+}
+
+/** The shared text a passage-grouped row carries, repeated by its siblings. */
+export interface CsvPassage {
+  readonly title: string;
+  readonly body: string;
 }
 
 export type RowResult =
@@ -268,8 +293,8 @@ export type RowResult =
       readonly ok: true;
       readonly question: AptitudeCsvQuestion;
       readonly code: string | null;
-      /** True for a PASSAGE_GROUPED row: the importer owes it a passage. */
-      readonly needsPassage: boolean;
+      /** Set for a PASSAGE_GROUPED row: the shared text its group is keyed by. */
+      readonly passage: CsvPassage | null;
       readonly warnings: string[];
     }
   | { readonly ok: false; readonly errors: string[]; readonly warnings: string[] };
@@ -362,6 +387,30 @@ export function rowToQuestion(cells: Readonly<Record<string, string>>, defaults:
 
   const code = (cells.code ?? "").trim() || null;
 
+  /**
+   * The shared passage text. Required for a PASSAGE_GROUPED row and refused
+   * on every other kind: a passage on a standalone question is a passage no
+   * sibling shares, which is a stem with extra steps by another route.
+   */
+  const passageBody = (cells.passage ?? "").trim();
+  let passage: CsvPassage | null = null;
+  if (kind === "PASSAGE_GROUPED") {
+    if (passageBody.length < APTITUDE_LIMITS.passageBody.min) {
+      errors.push(
+        passageBody.length === 0
+          ? "A passage question needs its shared text in the `passage` column, repeated on every question of the group."
+          : `The passage is ${passageBody.length} characters; a passage is at least ${APTITUDE_LIMITS.passageBody.min}. Shorter than that it is a stem, not a passage.`,
+      );
+    } else if (passageBody.length > APTITUDE_LIMITS.passageBody.max) {
+      errors.push(`The passage is longer than ${APTITUDE_LIMITS.passageBody.max} characters.`);
+    } else {
+      const title = (cells.passageTitle ?? "").trim();
+      passage = { title: title.length > 0 ? title : passageBody.slice(0, 60).trim(), body: passageBody };
+    }
+  } else if (passageBody.length > 0) {
+    errors.push("Only a passage question carries a `passage`. Set the type to passage, or clear the column.");
+  }
+
   if (kind === "NUMERIC_ENTRY") {
     const answerCell = (cells.correct ?? "").trim();
     const answer = Number(answerCell);
@@ -400,6 +449,7 @@ export function rowToQuestion(cells: Readonly<Record<string, string>>, defaults:
         passageId: null,
       },
       code,
+      passage,
       warnings,
     );
   }
@@ -449,6 +499,7 @@ export function rowToQuestion(cells: Readonly<Record<string, string>>, defaults:
       passageId: null,
     } as Record<string, unknown>,
     code,
+    passage,
     warnings,
   );
 }
@@ -460,12 +511,16 @@ export function rowToQuestion(cells: Readonly<Record<string, string>>, defaults:
  * text into the shape this schema judges, and a row that got past the
  * column-level checks and fails here fails for a reason the schema states.
  */
-function finish(draft: Record<string, unknown>, code: string | null, warnings: string[]): RowResult {
-  const needsPassage = draft.kind === "PASSAGE_GROUPED";
-  // A passage-grouped row has no passage yet, and the schema requires one for
-  // that kind — so it is asked about everything else with a stand-in, and the
-  // stand-in never leaves this function.
-  const forSchema = needsPassage ? { ...draft, passageId: "assigned-by-the-importer" } : draft;
+function finish(
+  draft: Record<string, unknown>,
+  code: string | null,
+  passage: CsvPassage | null,
+  warnings: string[],
+): RowResult {
+  // A passage-grouped row has no passage ROW yet, and the schema requires one
+  // for that kind — so it is asked about everything else with a stand-in, and
+  // the stand-in never leaves this function.
+  const forSchema = passage !== null ? { ...draft, passageId: "assigned-by-the-importer" } : draft;
   const parsed = aptitudeQuestionSchema.safeParse(forSchema);
   if (!parsed.success) {
     return {
@@ -480,7 +535,7 @@ function finish(draft: Record<string, unknown>, code: string | null, warnings: s
     ok: true,
     question: { ...parsed.data, passageId: null } as AptitudeCsvQuestion,
     code,
-    needsPassage,
+    passage,
     warnings,
   };
 }
@@ -513,6 +568,7 @@ export function questionToRow(question: {
   readonly explanation: string;
   readonly expectedSeconds: number;
   readonly origin: string;
+  readonly passage?: { readonly title: string; readonly body: string } | null;
 }): string {
   const numeric = question.kind === "NUMERIC_ENTRY";
   return csvRow([
@@ -536,6 +592,10 @@ export function questionToRow(question: {
     question.displayCode ?? "",
     question.expectedSeconds,
     question.origin.toLowerCase(),
+    // Repeated on every question of a group, which is how the importer keys
+    // them — and what makes the round trip lossless for a passage.
+    question.passage?.body ?? "",
+    question.passage?.title ?? "",
   ]);
 }
 

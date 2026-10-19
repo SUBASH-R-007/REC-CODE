@@ -1,4 +1,4 @@
-import type { AptitudeCsvQuestion } from "./aptitude-csv";
+import type { AptitudeCsvQuestion, CsvPassage } from "./aptitude-csv";
 
 /**
  * Deciding what an import DOES, row by row (Phase 7d).
@@ -46,7 +46,8 @@ export interface PlannedRow {
   readonly questionId: string | null;
   readonly displayCode: string | null;
   readonly contentHash: string | null;
-  readonly needsPassage: boolean;
+  /** The shared text of the passage this row belongs to, if any. */
+  readonly passage: CsvPassage | null;
   readonly errors: readonly string[];
   readonly warnings: readonly string[];
 }
@@ -68,7 +69,7 @@ export type ReadRow =
       readonly question: AptitudeCsvQuestion;
       readonly code: string | null;
       readonly contentHash: string;
-      readonly needsPassage: boolean;
+      readonly passage: CsvPassage | null;
       readonly warnings: readonly string[];
     }
   | { readonly line: number; readonly ok: false; readonly errors: readonly string[]; readonly warnings: readonly string[] };
@@ -99,7 +100,7 @@ export function planImport(rows: readonly ReadRow[], existing: readonly Existing
         questionId: null,
         displayCode: null,
         contentHash: null,
-        needsPassage: false,
+        passage: null,
         errors: row.errors,
         warnings: row.warnings,
       });
@@ -110,7 +111,7 @@ export function planImport(rows: readonly ReadRow[], existing: readonly Existing
       line: row.line,
       question: row.question,
       contentHash: row.contentHash,
-      needsPassage: row.needsPassage,
+      passage: row.passage,
       warnings: row.warnings,
     };
 
@@ -199,52 +200,52 @@ export function planImport(rows: readonly ReadRow[], existing: readonly Existing
 }
 
 /**
- * Group the passage rows of a plan.
+ * Group the passage rows of a plan, by the TEXT they share.
  *
  * A CSV row cannot carry a database id, so the importer decides which rows
- * share a passage: consecutive PASSAGE_GROUPED rows of the same topic are
- * one group. Consecutive because that is how a human writes a passage's
- * questions in a spreadsheet — under the passage, together — and because any
- * cleverer rule would be a rule nobody could predict from looking at the
- * file.
+ * share a passage — and it decides by the `passage` column's content, which
+ * is the only rule an operator can predict by looking at the file. Rows need
+ * not be adjacent; a file that interleaves two passages still groups
+ * correctly, which a consecutive-rows rule would get wrong.
  *
  * A group of fewer than two is refused: SPEC §5 says "one shared passage, N
  * questions", and a passage with one question is a stem with extra steps.
  */
+export interface PassageGroup {
+  readonly passage: CsvPassage;
+  readonly lines: number[];
+}
+
 export function passageGroups(rows: readonly PlannedRow[]): {
-  groups: Array<{ lines: number[]; topic: string }>;
+  groups: PassageGroup[];
   errors: Array<{ line: number; message: string }>;
 } {
-  const groups: Array<{ lines: number[]; topic: string }> = [];
-  const errors: Array<{ line: number; message: string }> = [];
-  let current: { lines: number[]; topic: string } | null = null;
-
-  const close = () => {
-    if (!current) return;
-    if (current.lines.length < 2) {
-      errors.push({
-        line: current.lines[0]!,
-        message:
-          "A passage needs at least two questions. Put the passage's questions on consecutive lines, or make this a single-choice question instead.",
-      });
-    } else {
-      groups.push(current);
-    }
-    current = null;
-  };
+  const byBody = new Map<string, PassageGroup>();
+  const order: string[] = [];
 
   for (const row of rows) {
-    if (row.status === "FAILED" || !row.needsPassage || !row.question) {
-      close();
-      continue;
-    }
-    const topic = String(row.question.topic);
-    if (current && current.topic === topic) current.lines.push(row.line);
+    if (row.status === "FAILED" || row.passage === null) continue;
+    const existing = byBody.get(row.passage.body);
+    if (existing) existing.lines.push(row.line);
     else {
-      close();
-      current = { lines: [row.line], topic };
+      byBody.set(row.passage.body, { passage: row.passage, lines: [row.line] });
+      order.push(row.passage.body);
     }
   }
-  close();
+
+  const groups: PassageGroup[] = [];
+  const errors: Array<{ line: number; message: string }> = [];
+  for (const body of order) {
+    const group = byBody.get(body)!;
+    if (group.lines.length < 2) {
+      errors.push({
+        line: group.lines[0]!,
+        message:
+          "A passage needs at least two questions. Repeat the same passage text on each question of the group, or make this a single-choice question instead.",
+      });
+      continue;
+    }
+    groups.push(group);
+  }
   return { groups, errors };
 }

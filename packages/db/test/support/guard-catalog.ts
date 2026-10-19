@@ -106,6 +106,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "MockAttempt",
   "MockSectionState",
   "MockAttemptAnswer",
+  // 20261019250400_phase7d_import
+  "AptitudeImport",
+  "AptitudeImportRow",
 ];
 
 export interface GuardTrigger {
@@ -374,7 +377,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019250200_phase7c_sitting";
+export const CHECK_CATALOG_THROUGH = "20261019250400_phase7d_import";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -673,6 +676,21 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AptitudeUserTopicStat_counts_check", "AptitudeUserTopicStat"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019250200_phase7c_sitting" })),
+  { name: "ActivityDay_aptitude_check", table: "ActivityDay", migration: "20261019250300_phase7c_activity" },
+  ...(
+    [
+      ["AptitudeImport_counts_check", "AptitudeImport"],
+      ["AptitudeImport_file_check", "AptitudeImport"],
+      ["AptitudeImport_via_check", "AptitudeImport"],
+      ["AptitudeImport_finished_check", "AptitudeImport"],
+      // A whole-file failure says why, and only a FAILED import has one.
+      ["AptitudeImport_error_check", "AptitudeImport"],
+      ["AptitudeImportRow_line_check", "AptitudeImportRow"],
+      // A FAILED row says why — every reason, as a non-empty list.
+      ["AptitudeImportRow_errors_check", "AptitudeImportRow"],
+      ["AptitudeImportRow_applied_check", "AptitudeImportRow"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019250400_phase7d_import" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
