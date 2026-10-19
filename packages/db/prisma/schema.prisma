@@ -584,6 +584,9 @@ model User {
 
   /// Excused absences, read by the inactivity counter (Phase 8).
   leaveExceptions LeaveException[]
+  /// Where they stand with the inactivity policy, and why (Phase 8c).
+  restriction  AccountRestriction?
+  statusEvents AccountStatusEvent[]
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -3385,5 +3388,133 @@ model InactivityPolicy {
   createdById String
   createdAt   DateTime @default(now())
 
+  /// Rows citing this version. Both relations exist so Prisma knows the FK;
+  /// the version itself is immutable and never deleted, so neither side can
+  /// be orphaned.
+  restrictions AccountRestriction[]
+  statusEvents AccountStatusEvent[]
+
   @@index([isActive, version(sort: Desc)])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 8c — the restriction, and the append-only history of why
+//
+// SPEC §5: a disputed lockout must be explainable months later. So an
+// AccountStatusEvent cannot exist without the evidence it was decided on,
+// the history is append-only, and the policy version it cites is immutable.
+// Without that, "the system disabled me" is unanswerable — and that is the
+// failure mode that destroys trust in a placement platform.
+//
+// `source` is what makes the whole thing writable. The two restoration paths
+// the spec requires (a solve clearing a restriction, and a retroactive leave
+// reversing one) are stage moves with no human actor, so without a source
+// column they would be "system" rows forced to manufacture sweep evidence
+// inside a submission transaction, colliding with the sweep's own row on the
+// per-day unique index. With it, every constraint is scoped to the sources it
+// is actually about.
+// ─────────────────────────────────────────────────────────────────────────
+
+enum AccountStatusSource {
+  /// The nightly job. The only source that carries a policy version, an
+  /// evaluation date and the full evidence — and the only one the per-day
+  /// idempotence index applies to.
+  INACTIVITY_SWEEP
+  /// A solved problem, inside the finalise transaction. The cheapest exit
+  /// from a restriction is doing the thing the policy wanted.
+  AUTO_CLEAR_ON_SOLVE
+  /// One student click, no approval. Carries the student as its actor,
+  /// because that is true and is what their own history should show.
+  SELF_CLEAR
+  /// A leave approved after the fact, reversing what was counted.
+  LEAVE_REVERSAL
+  MANUAL_ADMIN
+  MANUAL_SUPER
+}
+
+/// One row per student, holding where they currently stand. The history is
+/// in AccountStatusEvent; this is the state the app reads.
+///
+/// A stage never moves without an event explaining it — enforced by a
+/// DEFERRED constraint trigger, so the two can be written in either order
+/// inside one transaction but neither can be written alone.
+model AccountRestriction {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id])
+
+  stage          RestrictionStage @default(NONE)
+  stageEnteredAt DateTime         @default(now())
+  /// Until when the student has grace before the next rung.
+  graceEndsAt    DateTime?
+
+  countedInactiveDays Int       @default(0)
+  lastEvaluatedAt     DateTime?
+  /// The policy version the last evaluation was made under.
+  policyVersion       Int?
+  policy              InactivityPolicy? @relation(fields: [policyVersion], references: [version])
+
+  /// Self-service restorations used, and the term they belong to. The spec
+  /// gates this on "once per semester" without defining a semester; storing
+  /// the term is what makes the reset real rather than a cron guess.
+  selfClearedCount   Int     @default(0)
+  selfClearedTermKey String?
+
+  /// True while the inactivity engine is the thing holding `User.status`
+  /// away from ACTIVE. It may only move that status back while this is true,
+  /// so an account a human suspended for another reason is never
+  /// un-suspended by a clear-on-solve.
+  ownsAccountStatus Boolean @default(false)
+
+  /// The review queue `/admin/inactivity` reads: the job stopped at
+  /// SOFT_RESTRICTED (or could not count) and wants a human to look.
+  adminReviewOpenedAt  DateTime?
+  adminReviewClearedAt DateTime?
+
+  @@index([stage, stageEnteredAt])
+  @@index([lastEvaluatedAt])
+  @@index([adminReviewOpenedAt])
+}
+
+/// Append-only. UPDATE is refused except setting `notifiedAt` once; DELETE
+/// and TRUNCATE are refused outright. The same shape as XpEvent, for the
+/// same reason: this is the thing an appeal reads.
+model AccountStatusEvent {
+  id        BigInt @id @default(autoincrement())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id])
+
+  fromStage  RestrictionStage
+  toStage    RestrictionStage
+  fromStatus AccountStatus
+  toStatus   AccountStatus
+
+  source AccountStatusSource
+
+  /// The rules this was decided under. `Restrict` rather than Prisma's
+  /// default `SetNull` for an optional relation: the version an event cites
+  /// must never vanish, or the evidence stops meaning anything. The policy
+  /// row refuses DELETE by trigger anyway — this is the same rule said twice,
+  /// which is the right number of times for the one that makes old evidence
+  /// readable.
+  policyVersion Int?
+  policy        InactivityPolicy? @relation(fields: [policyVersion], references: [version], onDelete: Restrict)
+
+  /// Always an object. For a sweep row, the eight keys the CHECK requires;
+  /// for a clear, who or what cleared it and when.
+  evidence Json
+
+  triggeredBySystem Boolean
+  actorId           String?
+  /// Mandatory and minimum-length on a manual row: hard disabling is "only
+  /// ever a manual, REASONED, audit-logged admin action".
+  reason            String?  @db.Text
+  notifiedAt        DateTime?
+  /// The campus day a sweep evaluated. Exactly the sweep's rows have one,
+  /// and the partial unique index on it is what makes a second run a no-op.
+  evaluationDate    DateTime? @db.Date
+  createdAt         DateTime  @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([toStage, createdAt])
+  @@index([source, createdAt])
 }

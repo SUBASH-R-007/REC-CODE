@@ -24,6 +24,8 @@ import {
   CALENDAR_DAY_KINDS,
   LEAVE_KINDS,
   LEAVE_STATUSES,
+  INACTIVITY_STAGES,
+  ACCOUNT_STATUS_SOURCES,
 } from "@recx/shared";
 import { CONTENT_ORIGINS } from "@recx/shared/authoring";
 import { describe, expect, it } from "vitest";
@@ -121,6 +123,8 @@ const MIRRORS: Array<[prismaEnum: string, sharedName: string, shared: readonly s
   ["CalendarDayKind", "CALENDAR_DAY_KINDS", CALENDAR_DAY_KINDS],
   ["LeaveKind", "LEAVE_KINDS", LEAVE_KINDS],
   ["LeaveStatus", "LEAVE_STATUSES", LEAVE_STATUSES],
+  ["RestrictionStage", "INACTIVITY_STAGES", INACTIVITY_STAGES],
+  ["AccountStatusSource", "ACCOUNT_STATUS_SOURCES", ACCOUNT_STATUS_SOURCES],
   // Difficulty keys the XP table; the Prisma enum must offer exactly those.
   ["Difficulty", "the keys of XP_RULES.firstSolve", Object.keys(XP_RULES.firstSolve)],
 ];

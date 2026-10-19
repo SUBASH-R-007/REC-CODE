@@ -10,6 +10,7 @@ import {
   GUARDED_TABLES,
   HAND_WRITTEN_CHECKS,
   OTHER_TRIGGERS_ON_GUARDED_TABLES,
+  DEFERRED_CONSTRAINT_TRIGGERS,
   EXCLUSION_CONSTRAINTS,
   PARTIAL_UNIQUE_INDEXES,
   TRUNCATE_GUARDED,
@@ -362,6 +363,49 @@ function partialIndexProblems(migs: readonly Migration[]): string[] {
   return problems;
 }
 
+// ── Deferred constraint triggers ─────────────────────────────────────────
+
+/**
+ * Problems with the catalogued CONSTRAINT triggers (empty = intact).
+ *
+ * The `DEFERRABLE INITIALLY DEFERRED` is the part worth pinning: without it
+ * the trigger fires at statement time, and a transaction that writes the
+ * restriction before its event would fail on ordering alone.
+ */
+function deferredTriggerProblems(migs: readonly Migration[]): string[] {
+  const problems: string[] = [];
+  const given = new Set(migs.map((m) => m.dir));
+  const all = migs.map((m) => m.sql).join("\n");
+  for (const t of DEFERRED_CONSTRAINT_TRIGGERS) {
+    if (!given.has(t.migration)) continue;
+    const creates = [
+      ...all.matchAll(
+        new RegExp(String.raw`CREATE\s+CONSTRAINT\s+TRIGGER\s+"?${escape(t.name)}"?[\s\S]*?;`, "gi"),
+      ),
+    ].map((m) => m[0]);
+    if (creates.length !== 1) {
+      problems.push(`${t.name}: created ${creates.length} times`);
+      continue;
+    }
+    const sql = creates[0]!;
+    if (!new RegExp(t.timing, "i").test(sql)) problems.push(`${t.name}: timing changed`);
+    if (!/DEFERRABLE/i.test(sql)) problems.push(`${t.name}: no longer DEFERRABLE`);
+    if (!/INITIALLY\s+DEFERRED/i.test(sql)) problems.push(`${t.name}: no longer INITIALLY DEFERRED`);
+    if (!new RegExp(String.raw`EXECUTE\s+FUNCTION\s+${escape(t.fn)}\(\)`, "i").test(sql)) {
+      problems.push(`${t.name}: runs a different function`);
+    }
+    for (const { dir, sql: mig } of migs) {
+      if (new RegExp(String.raw`DROP\s+TRIGGER\b[^;]*"?${escape(t.name)}"?`, "i").test(mig)) {
+        problems.push(`${dir} drops ${t.name}`);
+      }
+      if (new RegExp(String.raw`ALTER\s+TABLE\b[^;]*DISABLE\s+TRIGGER\s+"?${escape(t.name)}"?`, "i").test(mig)) {
+        problems.push(`${dir} disables ${t.name}`);
+      }
+    }
+  }
+  return problems;
+}
+
 // ── EXCLUDE constraints ──────────────────────────────────────────────────
 
 /**
@@ -683,6 +727,29 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
       expect(partialIndexProblems(nullsDistinct)).not.toEqual([]);
     });
 
+    it("flags a deferred constraint trigger that loses DEFERRABLE, its events or its function", () => {
+      // DEFERRABLE is the whole point: the sweep writes the restriction and
+      // its event in one transaction, so a trigger firing at statement time
+      // would fail on ordering alone — and nothing in GUARD_TRIGGERS can
+      // express the difference, so nothing there would notice.
+      const intact = migrations.filter((m) => /_phase8c_restriction$/.test(m.dir));
+      expect(deferredTriggerProblems(intact)).toEqual([]);
+      const mutate = (fn: (sql: string) => string) => intact.map((m) => ({ ...m, sql: fn(m.sql) }));
+      expect(deferredTriggerProblems(mutate((sql) => sql.replace(/\s*DEFERRABLE INITIALLY DEFERRED/, "")))).not.toEqual([]);
+      expect(deferredTriggerProblems(mutate((sql) => sql.replace(/AFTER INSERT OR UPDATE OF "stage"/, "AFTER INSERT")))).not.toEqual([]);
+      expect(
+        deferredTriggerProblems(
+          mutate((sql) => sql.replace(/EXECUTE FUNCTION recx_refuse_restriction_without_event\(\)/, "EXECUTE FUNCTION recx_refuse_truncate()")),
+        ),
+      ).not.toEqual([]);
+      expect(
+        deferredTriggerProblems([
+          ...intact,
+          { dir: "29990101000000_mutant", sql: 'DROP TRIGGER "AccountRestriction_requires_event" ON "AccountRestriction";' },
+        ]),
+      ).not.toEqual([]);
+    });
+
     it("flags an EXPRESSION index that loses its COALESCE, a column, or its predicate", () => {
       // The one index built on expressions rather than columns. Its COALESCE
       // is what makes two GLOBAL policies collide — without it NULL <> NULL
@@ -725,7 +792,16 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
   });
 
   it("lists every trigger that executes a guard function", () => {
-    const listed = new Set(GUARD_TRIGGERS.map((t) => t.name));
+    // CONSTRAINT triggers are catalogued in DEFERRED_CONSTRAINT_TRIGGERS
+    // instead: their timing, their UPDATE OF clause and their DEFERRABLE-ness
+    // cannot be expressed in the GUARD_TRIGGERS shape, and
+    // `deferredTriggerProblems` pins all three. Listed here too so this
+    // assertion stays a completeness check over EVERY guard trigger rather
+    // than only the row ones.
+    const listed = new Set([
+      ...GUARD_TRIGGERS.map((t) => t.name),
+      ...DEFERRED_CONSTRAINT_TRIGGERS.map((t) => t.name),
+    ]);
     const unlisted = splitSqlStatements(allSql)
       .map((s) => /^CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+"?([^"\s]+)"?[\s\S]*?EXECUTE\s+(?:FUNCTION|PROCEDURE)\s+(?:"?public"?\.)?"?(recx_refuse_\w+)/i.exec(s))
       .filter((m): m is RegExpExecArray => m !== null)
@@ -762,6 +838,13 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
 
   it("keeps the three partial unique indexes with their predicates, never dropped or altered", () => {
     expect(partialIndexProblems(migrations)).toEqual([]);
+  });
+
+  it("keeps every deferred constraint trigger DEFERRABLE, on its events, running its guard", () => {
+    expect(DEFERRED_CONSTRAINT_TRIGGERS.map((t) => t.name)).toEqual([
+      ...new Set(DEFERRED_CONSTRAINT_TRIGGERS.map((t) => t.name)),
+    ]);
+    expect(deferredTriggerProblems(migrations)).toEqual([]);
   });
 
   it("keeps every EXCLUDE constraint with its operator class, elements and predicate", () => {

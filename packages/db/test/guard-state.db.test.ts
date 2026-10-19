@@ -5,6 +5,7 @@ import {
   GUARDED_TABLES,
   HAND_WRITTEN_CHECKS,
   OTHER_TRIGGERS_ON_GUARDED_TABLES,
+  DEFERRED_CONSTRAINT_TRIGGERS,
   EXCLUSION_CONSTRAINTS,
   PARTIAL_UNIQUE_INDEXES,
   type GuardTrigger,
@@ -100,7 +101,14 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
   );
 
   it("no other trigger runs a guard function, and no user trigger in the database is disabled or in replica/always mode", () => {
-    const listed = new Set(GUARD_TRIGGERS.map((t) => t.name));
+    // DEFERRED_CONSTRAINT_TRIGGERS are guard triggers too — they raise, and
+    // `frozen-coverage.test.ts` pins their timing, their DEFERRABLE-ness and
+    // the function they run. They are catalogued separately only because the
+    // GUARD_TRIGGERS shape cannot express a CONSTRAINT trigger.
+    const listed = new Set([
+      ...GUARD_TRIGGERS.map((t) => t.name),
+      ...DEFERRED_CONSTRAINT_TRIGGERS.map((t) => t.name),
+    ]);
     const guardFns = new Set<string>(GUARD_FUNCTIONS);
     expect(triggers.filter((r) => guardFns.has(r.fn) && !listed.has(r.name)).map((r) => r.name)).toEqual([]);
     expect(triggers.filter((r) => r.enabled !== "O").map((r) => `${r.table}.${r.name}=${r.enabled}`)).toEqual([]);

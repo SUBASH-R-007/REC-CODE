@@ -66,6 +66,12 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_leave_terms_change",
   // 20261019260100_phase8b_policy
   "recx_refuse_inactivity_policy_change",
+  // 20261019260200_phase8c_restriction
+  "recx_refuse_account_status_event_change",
+  "recx_refuse_system_disable",
+  "recx_refuse_stage_jump",
+  "recx_refuse_sweep_with_open_attempt",
+  "recx_refuse_restriction_without_event",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -119,6 +125,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "LeaveException",
   // 20261019260100_phase8b_policy
   "InactivityPolicy",
+  // 20261019260200_phase8c_restriction
+  "AccountRestriction",
+  "AccountStatusEvent",
 ];
 
 export interface GuardTrigger {
@@ -382,6 +391,25 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
    * possible version of "the system disabled me and nobody can say why".
    */
   { name: "InactivityPolicy_version_immutable", timing: "BEFORE UPDATE OR DELETE", table: "InactivityPolicy", fn: "recx_refuse_inactivity_policy_change", level: "ROW" },
+  /**
+   * 20261019260200_phase8c_restriction. The status history is what an appeal
+   * reads, so it is append-only in the same shape as XpEvent: `notifiedAt`
+   * moves from NULL to a value exactly once (the job has to record that it
+   * told somebody), and nothing else ever changes.
+   */
+  { name: "AccountStatusEvent_append_only", timing: "BEFORE UPDATE OR DELETE", table: "AccountStatusEvent", fn: "recx_refuse_account_status_event_change", level: "ROW" },
+  /**
+   * §0's "no account is hard-disabled by a cron job", expressed where no code
+   * path can route around it: a sweep row reaching DISABLED is refused unless
+   * the policy version it cites has autoDisableEnabled. With the shipped
+   * default (false) the DATABASE refuses it — a future job, a future
+   * migration and a future psql session all hit the same refusal.
+   */
+  { name: "AccountStatusEvent_system_disable_opt_in", timing: "BEFORE INSERT", table: "AccountStatusEvent", fn: "recx_refuse_system_disable", level: "ROW" },
+  /** One rung per escalation; a drop to NONE is always allowed. */
+  { name: "AccountStatusEvent_single_step", timing: "BEFORE INSERT", table: "AccountStatusEvent", fn: "recx_refuse_stage_jump", level: "ROW" },
+  /** Never escalate a student who is sitting an assessment right now. */
+  { name: "AccountStatusEvent_no_sweep_mid_attempt", timing: "BEFORE INSERT", table: "AccountStatusEvent", fn: "recx_refuse_sweep_with_open_attempt", level: "ROW" },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -399,6 +427,15 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
  */
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [
   /**
+   * 20261019260200_phase8c_restriction. A CONSTRAINT trigger, DEFERRABLE
+   * INITIALLY DEFERRED and with an UPDATE OF clause, so it does not fit the
+   * GUARD_TRIGGERS shape — but it DOES raise, and it is the thing that makes
+   * "every automatic decision carries its evidence" true of the state and not
+   * only of the history: a stage set by hand with no event does not commit.
+   * `DEFERRED_CONSTRAINT_TRIGGERS` below pins its definition.
+   */
+  { name: "AccountRestriction_requires_event", table: "AccountRestriction" },
+  /**
    * 20261019250100_phase7b_patterns. The one non-guard trigger in the
    * database: it MAINTAINS MockPattern's denormalised totals rather than
    * refusing a write, so a listing page never aggregates to render (SPEC
@@ -412,7 +449,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019260100_phase8b_policy";
+export const CHECK_CATALOG_THROUGH = "20261019260200_phase8c_restriction";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -747,6 +784,25 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["InactivityPolicy_parent_email_check", "InactivityPolicy"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019260100_phase8b_policy" })),
+  ...(
+    [
+      ["AccountRestriction_counted_check", "AccountRestriction"],
+      ["AccountRestriction_self_cleared_check", "AccountRestriction"],
+      ["AccountRestriction_grace_check", "AccountRestriction"],
+      ["AccountRestriction_none_check", "AccountRestriction"],
+      ["AccountRestriction_owns_status_check", "AccountRestriction"],
+      ["AccountRestriction_review_check", "AccountRestriction"],
+      ["AccountStatusEvent_change_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_evidence_object_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_actor_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_manual_reason_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_system_policy_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_evaluation_date_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_system_evidence_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_clear_evidence_check", "AccountStatusEvent"],
+      ["AccountStatusEvent_undisable_check", "AccountStatusEvent"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019260200_phase8c_restriction" })),
 ];
 
 /**
@@ -775,6 +831,30 @@ export const EXCLUSION_CONSTRAINTS = [
       String.raw`daterange\("?startDate"?,\s*"?endDate"?,\s*'\[\]'(?:::text)?\)\s+WITH\s+&&`,
     ],
     where: String.raw`"?status"?\s*=\s*'APPROVED'`,
+  },
+] as const;
+
+/**
+ * CONSTRAINT triggers, which are a different animal from the row triggers in
+ * GUARD_TRIGGERS: they fire at COMMIT rather than at statement time, they
+ * carry an `UPDATE OF` column list, and their whole usefulness depends on
+ * `DEFERRABLE INITIALLY DEFERRED`.
+ *
+ * That last part is why they need their own fence. If
+ * `AccountRestriction_requires_event` lost its DEFERRABLE it would fire
+ * immediately — and since the sweep writes the restriction and its event in
+ * one transaction, every single write would start failing depending on
+ * statement order. Nothing in GUARD_TRIGGERS can express the difference, so
+ * nothing in GUARD_TRIGGERS would notice.
+ */
+export const DEFERRED_CONSTRAINT_TRIGGERS = [
+  {
+    name: "AccountRestriction_requires_event",
+    table: "AccountRestriction",
+    migration: "20261019260200_phase8c_restriction",
+    fn: "recx_refuse_restriction_without_event",
+    /** Events, in the order the migration writes them. */
+    timing: String.raw`AFTER\s+INSERT\s+OR\s+UPDATE\s+OF\s+"?stage"?`,
   },
 ] as const;
 
@@ -827,5 +907,20 @@ export const PARTIAL_UNIQUE_INDEXES = [
     columnsPattern: String.raw`\(\s*COALESCE\(\s*"?batchYear"?\s*,\s*[^)]+\)\s*,\s*COALESCE\(\s*"?departmentCode"?\s*,\s*[^)]+\)\s*\)`,
     nullsNotDistinct: false,
     where: String.raw`"?isActive"?`,
+  },
+  /**
+   * 20261019260200_phase8c_restriction. Idempotence per campus day, scoped to
+   * the SWEEP — which is what lets a student escalated at 02:00 who solves a
+   * problem at 09:00 have both rows. An index without the source predicate
+   * would make the clear collide with the escalation and the day's history
+   * would be whichever won.
+   */
+  {
+    name: "AccountStatusEvent_sweep_once_per_day",
+    table: "AccountStatusEvent",
+    migration: "20261019260200_phase8c_restriction",
+    columns: ["userId", "evaluationDate"],
+    nullsNotDistinct: false,
+    where: String.raw`"?source"?\s*=\s*'INACTIVITY_SWEEP'`,
   },
 ] as const;
