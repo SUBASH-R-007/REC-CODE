@@ -40,3 +40,7 @@ export { FUNCTION_HARNESS_LANGUAGES, supportsFunctionMode } from "./harness/fami
 export * from "./rating";
 export * from "./contest-scoring";
 export * from "./contest-attempt";
+export * from "./aptitude-taxonomy";
+export * from "./aptitude-question";
+export * from "./aptitude-grading";
+export * from "./mock-pattern";

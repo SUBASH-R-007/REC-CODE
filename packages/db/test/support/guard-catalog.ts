@@ -54,6 +54,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_appeal_change",
   "recx_refuse_message_change",
   "recx_refuse_termination_change",
+  // 20261019250000_phase7a_question_bank
+  "recx_refuse_published_question_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -89,6 +91,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "IntegrityReview",
   "IntegrityAppeal",
   "AttemptTermination",
+  // 20261019250000_phase7a_question_bank
+  "AptitudePassage",
+  "AptitudeQuestion",
 ];
 
 export interface GuardTrigger {
@@ -281,6 +286,14 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_termination_change",
     level: "ROW",
   },
+  // 20261019250000_phase7a_question_bank
+  {
+    name: "AptitudeQuestion_published_immutable",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "AptitudeQuestion",
+    fn: "recx_refuse_published_question_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -299,7 +312,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019240000_phase6e_review";
+export const CHECK_CATALOG_THROUGH = "20261019250000_phase7a_question_bank";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -518,6 +531,35 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AttemptTermination_order_check", "AttemptTermination"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019240000_phase6e_review" })),
+  ...(
+    [
+      // A passage shorter than 80 characters is a stem, not a passage.
+      ["AptitudePassage_body_check", "AptitudePassage"],
+      ["AptitudePassage_word_count_check", "AptitudePassage"],
+      ["AptitudePassage_source_note_check", "AptitudePassage"],
+      ["AptitudePassage_title_check", "AptitudePassage"],
+      ["AptitudePassage_area_topic_check", "AptitudePassage"],
+      ["AptitudeQuestion_display_code_check", "AptitudeQuestion"],
+      ["AptitudeQuestion_stem_check", "AptitudeQuestion"],
+      // SPEC section 5: worked explanations are mandatory, enforced at
+      // publish — and enforced where a back-fill script cannot step around it.
+      ["AptitudeQuestion_explanation_published", "AptitudeQuestion"],
+      ["AptitudeQuestion_explanation_length", "AptitudeQuestion"],
+      // A VERBAL question tagged MENSURATION would corrupt every blueprint
+      // and every weakness heatmap. The mapping is immutable, so: a CHECK.
+      ["AptitudeQuestion_area_topic_check", "AptitudeQuestion"],
+      ["AptitudeQuestion_passage_kind", "AptitudeQuestion"],
+      ["AptitudeQuestion_choice_shape", "AptitudeQuestion"],
+      ["AptitudeQuestion_single_answer", "AptitudeQuestion"],
+      ["AptitudeQuestion_multi_answer", "AptitudeQuestion"],
+      ["AptitudeQuestion_numeric_shape", "AptitudeQuestion"],
+      ["AptitudeQuestion_option_index_check", "AptitudeQuestion"],
+      ["AptitudeQuestion_expected_seconds_check", "AptitudeQuestion"],
+      ["AptitudeQuestion_content_hash_check", "AptitudeQuestion"],
+      ["AptitudeQuestion_status_dates_check", "AptitudeQuestion"],
+      ["AptitudeQuestionStat_counts_check", "AptitudeQuestionStat"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019250000_phase7a_question_bank" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

@@ -16,6 +16,9 @@ import {
   ACCOMMODATION_KINDS,
   CONTEST_KINDS,
   DIVISIONS,
+  APTITUDE_AREAS,
+  APTITUDE_TOPICS,
+  APTITUDE_QUESTION_KINDS,
 } from "@recx/shared";
 import { CONTENT_ORIGINS } from "@recx/shared/authoring";
 import { describe, expect, it } from "vitest";
@@ -105,6 +108,9 @@ const MIRRORS: Array<[prismaEnum: string, sharedName: string, shared: readonly s
   ["ContentOrigin", "CONTENT_ORIGINS (@recx/shared/authoring)", CONTENT_ORIGINS],
   ["ContestKind", "CONTEST_KINDS", CONTEST_KINDS],
   ["ContestDivision", "DIVISIONS", DIVISIONS],
+  ["AptitudeArea", "APTITUDE_AREAS", APTITUDE_AREAS],
+  ["AptitudeTopic", "APTITUDE_TOPICS", APTITUDE_TOPICS],
+  ["AptitudeQuestionKind", "APTITUDE_QUESTION_KINDS", APTITUDE_QUESTION_KINDS],
   // Difficulty keys the XP table; the Prisma enum must offer exactly those.
   ["Difficulty", "the keys of XP_RULES.firstSolve", Object.keys(XP_RULES.firstSolve)],
 ];

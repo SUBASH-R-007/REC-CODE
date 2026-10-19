@@ -1434,3 +1434,94 @@ Each is the narrower reading, implemented as described.
   three exam routes live. The fence's scope is still worth widening: any
   `route.ts` exporting a mutating method should have to be bound wherever it
   lives.
+
+## Phase 7 — aptitude, verbal and logical reasoning
+
+SPEC §0: *ask before inventing — implement the narrower reading and note it.*
+Every entry below is a reading of SPEC §5 that the spec does not settle, with
+the narrower choice this phase implements. None of them is a licence to widen
+later without a gated change.
+
+- **There is NO overall cutoff on a mock** (decided 2026-10-19). SPEC §5 lists
+  "per-section cutoff" and nothing else. A `MockPattern.overallCutoffPercent`
+  and a conjunction-of-gates rule on top of it would be an invented rule
+  deciding whether somebody clears a funnel, so `scoreMock()` passes a
+  candidate exactly when EVERY section clears its own cutoff and the column
+  does not exist. A candidate at 90% quant and 10% verbal still fails — that
+  part is the spec's, and it is the whole reason the placement cell wants the
+  round simulated. Widening this later is one column, one predicate and one
+  line of copy on the cover page; inventing it now would mean every candidate's
+  result depended on a threshold nobody published.
+- **An UNANSWERED question scores exactly zero, never a penalty** (decided
+  2026-10-19). Negative marking exists to discourage guessing. Penalising a
+  blank would punish running out of time instead, which is the opposite of
+  what a section timer is for, and every public description of the funnels
+  this phase models agrees. `gradeAnswer()` returns `0` and `isCorrect: null`
+  for an unanswered question, and the gate test asserts it across all six
+  seeded patterns.
+- **A partially correct MULTI_CHOICE answer scores zero, not a fraction**
+  (decided 2026-10-19). All-or-nothing on an exact set match, with the
+  negative mark applied ONCE for any wrong set however many options were
+  wrong. Partial credit needs a published formula a candidate can check their
+  own marks against; the alternatives (per-option credit, per-option penalty)
+  differ by recruiter and none is publicly documented. Widening it needs the
+  formula written down first, on the cover page, before the first question.
+- **A negative section total carries into the paper's total; the reported
+  percent is floored at zero** (decided 2026-10-19). None of the published
+  funnels states which. `MockAttempt.totalRaw` carries the true signed sum so
+  a total is honest, `percent` is clamped to `[0, 100]`, and `passedCutoff`
+  reads the floored percent — so a badly guessed section can never change
+  another section's OUTCOME, and no candidate is ever shown a negative
+  percentage. `CHECK MockAttempt_score_check` deliberately does not floor
+  `totalRaw`.
+- **A cutoff of zero is how "no cutoff" is said** (decided 2026-10-19). The
+  Accenture pattern's English section contributes to the total without gating.
+  A nullable `cutoffPercent` would make `passedCutoff` a three-valued answer
+  on every surface that reads it, including the student's own result page;
+  zero is cleared by every candidate, including one who scored nothing.
+- **`PASSAGE_GROUPED` answers exactly as single-choice** (decided
+  2026-10-19). SPEC §5 lists it as a KIND alongside single-choice and
+  multi-choice, which leaves the answering shape unstated. It takes exactly
+  one correct index (`CHECK AptitudeQuestion_single_answer`) and is the only
+  kind that may carry a `passageId` (`CHECK AptitudeQuestion_passage_kind`,
+  stated as an equality so the two directions cannot drift). A multi-choice
+  reading-comprehension item would need the partial-credit convention this
+  phase deliberately does not have. Widening it later is one CHECK and one
+  zod variant; revisit with the verbal authors.
+- **The seed patterns live in `@recx/shared`, not in
+  `apps/web/scripts/content/`** (decided 2026-10-19, and the gate decided
+  it). SPEC §5's gate test is "negative marking and per-section cutoffs
+  compute correctly across all seeded patterns". `packages/shared` declares
+  one dependency (zod) and its vitest config is "pure unit tests: no I/O", so
+  a test there cannot import `apps/web` — the gate test and the patterns have
+  to be in the same package, and the arithmetic is the half that cannot move.
+  `MOCK_PATTERN_SEEDS` is therefore in `packages/shared/src/mock-pattern.ts`
+  and the seed script reads it from there.
+- **A section carries a stable `key` as well as a `position`** (decided
+  2026-10-19). Not cosmetic: a seed script must upsert on something that
+  survives a renumbering, and `scoreMock()` indexes a candidate's answers by
+  section — keying that on a cuid would make a result unreadable in a dispute
+  and keying it on `position` would silently rebind a score if a pattern were
+  ever reordered.
+- **The 29 topic members, their spellings and their groupings are this
+  phase's choice** (recorded 2026-10-19). The spec lists them in prose.
+  `INTEREST` covers simple and compound; `AVERAGES_MIXTURES` is one topic;
+  `SERIES` covers number and letter series. Implemented exactly as written in
+  `packages/shared/src/aptitude-taxonomy.ts` and going to the placement cell
+  for confirmation, as the 14 problem topics did.
+- **A PUBLISHED question's key is frozen and its explanation is not**
+  (decided 2026-10-19, migration `20261019250000`). Students have already
+  been scored on that question, so rewriting its stem, options, key, kind,
+  area, topic or passage silently rescores the past — while improving the
+  wording of the worked solution harms nobody. A published question is
+  RETIRED, never unpublished and never deleted: answer rows reference it and
+  past percentiles must stay honest. `contentHash` deliberately excludes the
+  explanation, so a re-import that only improves the working reports
+  UNCHANGED rather than trying to create a second question.
+- **`AptitudeQuestionStat.timesServed` moves where the question is SERVED,
+  not at finalise** (decided 2026-10-19). Served and answered are different
+  events. Incrementing both at finalise would make `lastServedAt` a lie, make
+  `CHECK timesAnswered <= timesServed` vacuous rather than protective, and
+  record nothing at all for an abandoned attempt — so the dud-question
+  detection the table exists for ("99% correct, or 3% correct") would be
+  computed over a denominator biased by exactly the attempts that went badly.

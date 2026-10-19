@@ -2747,3 +2747,161 @@ model ProctorEvent {
   @@index([attemptId, severity])
   @@index([occurredAt])
 }
+
+// ── Aptitude, verbal and logical reasoning (Phase 7) ───────────────────
+// SPEC §5 opens this phase "This is MVP-tier, not a later phase": the
+// majority of REC's 5,000 students are screened by an aptitude round BEFORE
+// anyone reads their code. It gets its own schema rather than a Problem kind
+// because section timers, cutoffs and negative marking do not fit the judging
+// schema — an aptitude question has no test data, no language limits and no
+// verdict, and its scoring is a signed rational number rather than a
+// comparator outcome. The two schemas touch at exactly two points: the
+// Difficulty / ProblemStatus / ContentOrigin enums are reused, and XP lands in
+// the one existing ledger.
+//
+// No student code runs anywhere in Phase 7. It is a scoring phase.
+
+/// Mirrors APTITUDE_AREAS in @recx/shared (enum-parity.test.ts).
+enum AptitudeArea {
+  QUANTITATIVE
+  LOGICAL
+  VERBAL
+}
+
+/// The 29 topics, mirroring APTITUDE_TOPICS in @recx/shared in the same
+/// order. The topic → area mapping is immutable, so it is a CHECK on
+/// AptitudeQuestion rather than a trigger.
+enum AptitudeTopic {
+  // QUANTITATIVE (14)
+  PERCENTAGES
+  PROFIT_LOSS
+  TIME_SPEED_DISTANCE
+  TIME_AND_WORK
+  RATIO_PROPORTION
+  AVERAGES_MIXTURES
+  PERMUTATIONS_COMBINATIONS
+  PROBABILITY
+  NUMBER_SYSTEMS
+  INTEREST
+  AGES
+  CALENDARS_CLOCKS
+  MENSURATION
+  DATA_INTERPRETATION
+  // LOGICAL (9)
+  SERIES
+  BLOOD_RELATIONS
+  SYLLOGISMS
+  SEATING_ARRANGEMENT
+  PUZZLES
+  CODING_DECODING
+  DATA_SUFFICIENCY
+  DIRECTIONS
+  STATEMENT_CONCLUSION
+  // VERBAL (6)
+  READING_COMPREHENSION
+  SENTENCE_CORRECTION
+  PARA_JUMBLES
+  SYNONYMS_ANTONYMS
+  CLOZE
+  ERROR_SPOTTING
+}
+
+/// SPEC §5: "single-choice, multi-choice, numeric-entry, passage-grouped
+/// (one shared passage, N questions)". PASSAGE_GROUPED answers exactly as
+/// single-choice (docs/OPEN-QUESTIONS.md, the narrower reading) and is the
+/// only kind that may carry a passageId.
+enum AptitudeQuestionKind {
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  NUMERIC_ENTRY
+  PASSAGE_GROUPED
+}
+
+/// One shared passage for N questions. A passage shorter than 80 characters
+/// is a stem, not a passage (CHECK); a passage with fewer than two questions
+/// is a stem with extra steps, refused at publish.
+model AptitudePassage {
+  id         String            @id @default(cuid())
+  area       AptitudeArea
+  topic      AptitudeTopic
+  title      String
+  /// Markdown, sanitised server-side through the existing sanitize.ts.
+  body       String            @db.Text
+  wordCount  Int               @default(0)
+  sourceNote String
+  origin     ContentOrigin
+  authorId   String?
+  status     ProblemStatus     @default(DRAFT)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  questions  AptitudeQuestion[]
+
+  @@index([status, area, topic])
+}
+
+/// One aptitude question. A PUBLISHED row's KEY is frozen and its explanation
+/// is not (recx_refuse_published_question_change): students have already been
+/// scored on that question, so rewriting its key silently rescores the past,
+/// while improving the wording of the worked solution harms nobody. A RETIRED
+/// question is never deleted — answer rows reference it, and past percentiles
+/// must stay honest.
+model AptitudeQuestion {
+  id                   String               @id @default(cuid())
+  /// APT-00042, the Problem.displayCode convention.
+  displayCode          String               @unique
+  area                 AptitudeArea
+  topic                AptitudeTopic
+  kind                 AptitudeQuestionKind
+  difficulty           Difficulty
+  status               ProblemStatus        @default(DRAFT)
+  passageId            String?
+  passage              AptitudePassage?     @relation(fields: [passageId], references: [id])
+  stem                 String               @db.Text
+  options              String[]             @default([])
+  correctOptionIndexes Int[]                @default([])
+  numericAnswer        Decimal?             @db.Decimal(20, 6)
+  numericTolerance     Decimal?             @db.Decimal(20, 6)
+  numericUnit          String?
+  /// Mandatory at publish, enforced by CHECK as well as by zod (SPEC §5).
+  explanation          String               @db.Text @default("")
+  /// The authoring aid that tells a section author whether 25 questions fit
+  /// in 25 minutes.
+  expectedSeconds      Int
+  origin               ContentOrigin
+  sourceBatch          String?
+  authorId             String?
+  reviewedById         String?
+  publishedAt          DateTime?
+  retiredAt            DateTime?
+  /// sha256 of the normalised stem + options + key — the import's duplicate
+  /// detector. Excludes the explanation, so improving the working is not a
+  /// new question.
+  contentHash          String
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  stat AptitudeQuestionStat?
+
+  /// The only authoring/pool query shape.
+  @@index([status, area, topic])
+  /// The blueprint draw.
+  @@index([topic, difficulty, status])
+  @@index([contentHash])
+  @@index([passageId])
+}
+
+/// Per-question counters, maintained with { increment: n } and never computed
+/// on read (SPEC §4(d)'s rule generalised). It is how a dud question — 99%
+/// correct, or 3% correct — gets found and retired. timesServed moves where
+/// the question is SERVED, not at finalise, or the denominator is biased by
+/// every abandoned attempt.
+model AptitudeQuestionStat {
+  questionId    String           @id
+  question      AptitudeQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  timesServed   Int              @default(0)
+  timesAnswered Int              @default(0)
+  timesCorrect  Int              @default(0)
+  totalSeconds  Int              @default(0)
+  lastServedAt  DateTime?
+  updatedAt     DateTime         @updatedAt
+}
