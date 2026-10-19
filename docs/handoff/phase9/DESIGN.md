@@ -670,11 +670,276 @@ by `RECX_UPDATE_DOCS=1`, and `packages/shared/src/governance.ts`
 
 ---
 
-## Review findings — fix before implementing
+## Resolutions (settled 2026-10-20, before any Phase 9 code)
+
+An independent pass over this document returned **needs-revision**: seven
+contradictions and ten uncovered spec requirements, listed verbatim below.
+**All seventeen are settled here.** Where a resolution differs from the body
+above, the resolution wins.
+
+### R1 — the dependency claim is now true
+
+The review was right when it was written and is out of date now: Phases 7 and
+8 are built and **gated on both platforms**. `AptitudeUserTopicStat`,
+`MockAttempt`, `MockPattern`, `AccountRestriction`, `CalendarDay` and
+`LeaveException` are all in `packages/db/prisma/schema.prisma`, and the Phase
+7 and Phase 8 gate rows are in `docs/RUNBOOK.md` §3 with dates. So the 55 %
+of SERVICE and 20 % of PRODUCT that rest on aptitude have a real source. §0's
+claim stands as written; nothing was repaired by hedging, it was repaired by
+building them.
+
+### R2 — a dry run writes no snapshots at all
+
+`ReadinessRun.computedOn` stays the primary key, and the `dryRun` column is
+**deleted**. A dry run computes, reports and writes NOTHING — the same shape
+Phase 8c shipped and gated, and for the same reason: a dry run that wrote
+rows indistinguishable from live ones would be a dry run whose output nobody
+could trust, and a `dryRun` column plus a filter is an invitation to forget
+the filter in one query.
+
+So: `--dry-run` returns the report and the `SchedulerJobStatus` row, and the
+manual gate ("read its report, then run it live") reads that report. One
+primary key, one row per campus day, no filter to forget.
+
+### R3 — one component entry per TIER, not one per component
+
+The `components` JSON is keyed by tier and then by component:
+
+```json
+{"PRODUCT":{"TOPIC_BREADTH":{"state":"PRESENT","value":0.17,"limitingTopic":"GRAPHS","perTopicTarget":4}}}
+```
+
+`topicBreadth` is tier-specific — PRODUCT targets 4 unassisted per topic and
+TOP targets 8 — so a single `TOPIC_BREADTH` entry genuinely cannot hold both,
+and §4's whole purpose ("the disputed number must be recomputable years later
+from the stored component values and `rulesVersion`") fails without the tier
+key. The scalar columns `topicBreadthProduct` / `topicBreadthTop` and
+`limitingTopicProduct` / `limitingTopicTop` stay for indexing the heatmap;
+the JSON is the record of how each score was reached, and a test asserts the
+two agree.
+
+### R4 — the at-risk list orders by the snapshot's own column
+
+`ORDER BY lastActiveOn ASC` — the snapshot's `@db.Date` column, not
+`User.lastActiveAt`. The no-join claim was the right design and the ORDER BY
+was the mistake: an officer list that joined `User` for a sort column would
+join it for 5,000 rows on every page load, and `lastActiveOn` is copied into
+the snapshot precisely so the cohort pages never touch `User`.
+
+Snapshot-day granularity is also the honest unit here: an at-risk list is
+about days of silence, and a list that re-ordered itself between two page
+loads because somebody submitted at 11:58 would be a list nobody could work
+through.
+
+### R5 — every officer surface discloses `availableWeight`
+
+The review found the real hole: the design engineers "missing, never silently
+as zero" into the student card and the database, then drops it on the cohort
+dashboard, the drive count and the at-risk rule — where a 70 on a tier whose
+`mockInterviewScore` is permanently missing is a 70 **out of 85**.
+
+So, three changes:
+
+- `DISTRIBUTION_BUCKETS` are buckets of **`score / availableWeight`**, a
+  percentage of what was measurable, and every chart says so in its caption
+  and its `aria-label`;
+- the per-drive count takes a threshold on the same normalised figure, and
+  the page states the denominator next to the number ("214 students at
+  PRODUCT ≥ 70 % of measurable; `mockInterviewScore` unmeasured for all");
+- `AT_RISK_SERVICE_SCORE` is likewise normalised, and the at-risk row shows
+  both the raw score and the available weight.
+
+The alternative — comparing a raw 70 against an absolute 70 — would quietly
+mark a whole cohort as under-prepared because of a component nobody has
+built. That is the failure mode the spec's "show missing as missing" exists
+to prevent, and it does not stop at the student's own card.
+
+### R6 — `auditLog` is forbidden to READ on placement surfaces, and written
+only through `audit()`
+
+`PLACEMENT_FORBIDDEN_DELEGATES` is `Note`, `CodeDraft`, `SubmissionSource`,
+`SubmissionTestDetail`, **`Accommodation`** (see R-U7) and **`AuditLog`**.
+
+The read/write split the design owed: placement code may not call
+`db.auditLog.*` at all — not `findMany`, not `count`. It records a drill-down
+by calling `audit()`, which is the same helper every other sensitive
+mutation uses and which no placement module can read back. An officer who
+could read `AuditLog` could read other officers' `SENSITIVE` rows, which is
+both a privacy failure and a way to learn which students the placement cell
+is quietly worried about.
+
+### R7 — the eligibility guarantee is restated honestly
+
+The design claimed a NOT NULL actor plus an FK made an automatic eligibility
+row impossible. It does not: any job holding a staff user id satisfies both.
+
+What ships instead, and what is actually enforced:
+
+- `DriveEligibilityDecision.decidedById` NOT NULL with an FK, and
+  `char_length(btrim(reason)) >= 10` — so a row always names a person and a
+  reason;
+- a **deferred constraint trigger** `recx_refuse_eligibility_without_audit`
+  requiring, at commit, an `AuditLog` row for that decision in the same
+  transaction. That is the spec's "a human decision recorded in the audit
+  log" expressed where no code path can route around it — exactly the shape
+  Phase 8 used for `AccountRestriction_requires_event`;
+- and the honest sentence in the doc: the database cannot tell a human from
+  a job holding a human's id. What it can enforce is that the decision is
+  **attributable and audited**, and that is what it enforces.
+
+### R-U1 — the export reuses the LMS certificate pattern, named
+
+`ProfileExport` reuses the pattern, stated: a random public `code`, an
+`HMAC-SHA256` signature over a **canonical** payload, a `/verify/[code]`
+route that re-derives the signature server-side, and a `revokedAt` so a
+student can withdraw a link they have already sent. The secret is
+`EXPORT_SIGNING_SECRET`, separate from `AUTH_SECRET`, so a leaked verify
+secret cannot mint sessions.
+
+What it does NOT reuse is the LMS's database: §7's "do not share a database
+with the LMS" holds, and `ProfileExport` is a REC Code table. The reuse is of
+the SHAPE — code, signature, verify route, revocation — not of the storage.
+
+### R-U2 — SERVICE's coverage counts assisted solves, deliberately
+
+The spec names SERVICE's component `easyMediumCoverage` and the other two
+`mediumUnassistedCoverage` and `mediumHardUnassistedCoverage`. That omission
+is read as meaning what it says: **SERVICE counts a solve however it was
+reached**, and the two higher tiers count only unassisted ones.
+
+The reason it is the right reading: a service-tier interview asks whether you
+can write a loop and a string manipulation at all, and a student who got
+there with a hint can do that. A product or top interview asks whether you
+can get there alone. So `coverage()` takes an `unassisted: boolean` and the
+three tiers pass different values — one function, three configurations, and a
+test per tier asserting which one counts a hinted solve.
+
+### R-U3 — the per-difficulty unassisted counts, with their query
+
+`UserStats` carries one scalar `assistedSolves`, so it cannot answer "medium
+unassisted". The source is `UserProblemStatus × Problem`, in **one aggregate
+for the whole college** rather than one per student:
+
+```sql
+SELECT ups."userId", p."difficulty", ups."assisted", count(*)::int AS n
+  FROM "UserProblemStatus" ups
+  JOIN "Problem" p ON p."id" = ups."problemId"
+ WHERE ups."status" = 'SOLVED'
+ GROUP BY 1, 2, 3
+```
+
+One sequential pass, read once per nightly run and held in memory for the
+whole cohort. The design's "no new counter, no new denormalisation" survives;
+its "no join" did not, and the join is a single grouped scan rather than
+5,000 queries. An index on `UserProblemStatus(status)` is added for it.
+
+`topicBreadth` needs no join at all: `UserStats.topicSolved` and
+`topicAssisted` are already per-topic JSON maps, and unassisted-per-topic is
+their difference.
+
+### R-U4 — the next action names its points, and the format is a constant
+
+The spec gives a literal output: `"+9 points available: graphs, 6 unassisted
+mediums"`. So:
+
+- points available for a component = `weight × (1 − value) × 100`, rounded,
+  which is exactly how many of the tier's 100 points that component is
+  currently leaving on the table;
+- `nextAction()` returns `{ points, componentLabel, detail }` and the
+  renderer composes `+{points} points available: {detail}`;
+- the three largest gaps are ranked by that same points figure, so the
+  headline action and the gap list cannot disagree;
+- a test asserts the exact string for a seeded lopsided profile.
+
+Missing components contribute **no** points-available: a component with no
+source is not a gap the student can close, and telling them otherwise would
+send them to look for something that does not exist.
+
+### R-U5 — the TA_MENTOR badge is a Phase 9 constant, not a Phase 11 feature
+
+`mentor.doubts.answer` stays at `arrives: { phase: 11 }`, but the visible
+marker does not wait for it: `MENTOR_BADGE_LABEL` ("TA / mentor") and the
+`MentorBadge` component ship now, rendered beside a mentor on
+`/placement`'s at-risk routing and on the mentee list. The spec names the
+badge as part of the ROLE, and a role whose marker arrives two phases after
+the role is a role students cannot recognise.
+
+### R-U6 — the CSV carries assessment SCORES, as the spec says
+
+Open question 13 narrowed the declared set to a count of released assessment
+scores. Un-narrowed: the spec's allowlist is "solved counts, rating,
+readiness, assessment scores and activity dates", and it is the privacy
+boundary **in both directions** — narrowing a permitted field is as much a
+departure as widening a forbidden one. The CSV carries released assessment
+scores, and only released ones.
+
+### R-U7 — `Accommodation` is forbidden to placement surfaces
+
+§7: "Do not expose a disability label to a reviewer or invigilator." An
+officer explaining a low assessment score is exactly that reviewer, so
+`Accommodation` joins `PLACEMENT_FORBIDDEN_DELEGATES` and test 3's assertion
+list. The accommodation's EFFECT (extra time) is already invisible on the
+officer surfaces, which read scores and not attempt clocks.
+
+### R-U8 — "qualifying" is defined, and it is the spec's own word
+
+`consistency` = **active days** in the last 30 ÷ 30, where an active day is
+an `ActivityDay` row with `submissions + solved > 0`. The spec's parenthetical
+says "active days", `ActivityDay` is documented as "any activity", and the
+draft's silent substitution of "qualifying" is dropped.
+
+The one narrowing that IS taken, and noted: a day with an `ActivityDay` row
+but no submission and no solve — a student who opened a problem and left — is
+not an active day. Otherwise consistency measures browsing.
+
+### R-U9 — the unsatisfiable half of the Done-when test, said out loud
+
+"PLACEMENT_OFFICER cannot reach notes, drafts or **chat content** by any
+route": no model holding discussion drafts or assistant chat content exists
+(Phase 11+). Test 3 therefore asserts the models that DO exist — `Note`,
+`CodeDraft`, `SubmissionSource`, `SubmissionTestDetail`, `Accommodation`,
+`AuditLog` — and a second test asserts the CLASSIFICATION RULE: every model
+is either in the readable allowlist or the forbidden list, so a future
+`Discussion` or `AssistantMessage` model fails the fence the day it is added
+rather than the day somebody notices. That is how the other half is
+discharged, and the doc says so rather than implying the test is complete.
+
+### R-U10 — what `/placement` renders with no snapshot
+
+Three stated empty states, because "no readiness yet" has three different
+causes and only one of them is the student's to act on:
+
+- **no snapshot ever** (a new student, or before the first nightly run): the
+  page explains that readiness is computed overnight, shows what it will be
+  computed FROM, and links to practice. It does not show zeros.
+- **a snapshot older than 48 hours**: the figures render with the date they
+  were computed, and a line saying so. A stale number labelled stale is
+  useful; an unlabelled one is a lie.
+- **excluded** (`GRADUATED` / `ARCHIVED`): the page says the account is no
+  longer being assessed, and offers the signed profile export, which is the
+  thing a graduate actually wants.
+
+### And one thing the review did not raise
+
+`mockInterviewScore` is 10 % of SERVICE, 10 % of PRODUCT and **15 % of TOP**,
+and has no source in this plan at any phase — the mock-interview scheduler is
+Phase 11+. It is therefore permanently `MISSING / NO_SOURCE_YET` at launch,
+which R5 now makes visible everywhere rather than only on the student's card.
+
+Worth stating plainly in the doc because it is the single largest honesty
+risk in the phase: a TOP score is a score out of 85, computed from three
+components, and the fourth is not coming this year. The UI says that; the
+weights are not quietly renormalised to hide it, because renormalising would
+make a student with no interview practice look as ready as one who has had
+five.
+
+---
+
+## Review findings (verbatim, as received)
+
 An independent pass over this document against `docs/handoff/SPEC.md` and the
-actual repository returned **needs-revision**. Nothing below has been applied yet: this
-design is a DRAFT, and these are the items to settle first, when Phase 9 starts
-and the codebase is whatever it is by then. Each one was checkable against a
+actual repository returned **needs-revision**. These are the items as the
+reviewer wrote them; every one is settled above. Each was checkable against a
 file or a spec line when it was written (2026-10-19).
 
 ### Contradicts the spec or the codebase (7)
