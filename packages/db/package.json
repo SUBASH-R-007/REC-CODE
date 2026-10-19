@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Prisma schema, migrations and the guarded client for the recx database. Imported by apps/web and apps/scheduler only — never by apps/judge-worker.",
+  "description": "Prisma schema, migrations and the guarded client for the recx database. Imported by apps/web and apps/scheduler only \u2014 never by apps/judge-worker.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
@@ -11,7 +11,8 @@
     "./audit": "./src/audit.ts",
     "./audit-chain": "./src/audit-chain.ts",
     "./attempt": "./src/attempt.ts",
-    "./mock": "./src/mock.ts"
+    "./mock": "./src/mock.ts",
+    "./inactivity": "./src/inactivity.ts"
   },
   "scripts": {
     "generate": "prisma generate",

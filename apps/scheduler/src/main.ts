@@ -9,6 +9,7 @@ import { DailyChallengeJob } from "./daily-challenge";
 import { AttemptSweepJob } from "./attempt-sweep";
 import { IntegritySlaJob } from "./integrity-sla";
 import { MockSweepJob } from "./mock-sweep";
+import { InactivitySweepJob } from "./inactivity-sweep";
 import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
@@ -102,6 +103,7 @@ const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
 // Phase 6e: the review SLA and the appeal deadline, both student-favouring.
 const integritySla = new IntegritySlaJob({ db, log, dryRun });
 const mockSweep = new MockSweepJob({ db, log, dryRun });
+const inactivitySweep = new InactivitySweepJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -232,6 +234,18 @@ async function tick(): Promise<boolean> {
     await runJob("mockSweep", async () => {
       const report = await mockSweep.tick(now);
       if (report.autoSubmitted > 0 || report.patternsRestated > 0) log.info({ report }, "mock sweep tick");
+      return { ok: !report.failed, report };
+    }),
+  );
+  // Inactivity: a DRY RUN in this slice. It counts, applies the holdbacks and
+  // reports; it writes nothing to User, AccountRestriction or
+  // AccountStatusEvent. SPEC §5 asks for the dry run to ship first, and the
+  // manual gate is a human reading its output over seeded data before the
+  // job is allowed to write anything at all.
+  results.push(
+    await runJob("inactivitySweep", async () => {
+      const report = await inactivitySweep.tick(now);
+      if (report.ran) log.info({ report: { ...report, sample: report.sample.length } }, "inactivity sweep tick");
       return { ok: !report.failed, report };
     }),
   );

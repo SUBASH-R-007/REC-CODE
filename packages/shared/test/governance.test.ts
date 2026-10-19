@@ -75,6 +75,12 @@ describe("scheduler jobs", () => {
       // nightly, which is what decides whether the mock XP percentile term is
       // meaningful yet.
       "mockSweep",
+      // Phase 8c: the inactivity sweep. A DRY RUN in this slice — it counts,
+      // applies the holdbacks and reports, and writes nothing to User,
+      // AccountRestriction or AccountStatusEvent. It appears here so
+      // /super/jobs shows it and a tick that stops running is visible, which
+      // is the point of shipping the dry run first.
+      "inactivitySweep",
     ]);
   });
 });

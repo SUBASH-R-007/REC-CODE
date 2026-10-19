@@ -102,5 +102,6 @@ export const SCHEDULER_JOB_NAMES = [
   "attemptSweep",
   "integritySla",
   "mockSweep",
+  "inactivitySweep",
 ] as const;
 export type SchedulerJobName = (typeof SCHEDULER_JOB_NAMES)[number];
