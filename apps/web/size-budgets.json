@@ -11,7 +11,14 @@
     { "route": "/contests/[slug]/arena", "entry": "/(student)/contests/[slug]/arena/page", "maxKb": 135 },
     { "route": "/assessments", "entry": "/(student)/assessments/page", "maxKb": 130 },
     { "route": "/assessments/[slug]/readiness", "entry": "/(exam)/assessments/[slug]/readiness/page", "maxKb": 130 },
-    { "route": "/assessments/[slug]/attempt", "entry": "/(exam)/assessments/[slug]/attempt/page", "maxKb": 160 }
+    { "route": "/assessments/[slug]/attempt", "entry": "/(exam)/assessments/[slug]/attempt/page", "maxKb": 160 },
+    { "route": "/aptitude", "entry": "/(student)/aptitude/page", "maxKb": 140 },
+    { "route": "/aptitude/[topic]", "entry": "/(student)/aptitude/[topic]/page", "maxKb": 145 },
+    {
+      "route": "/aptitude/mock/attempt/[attemptId]",
+      "entry": "/(student)/aptitude/mock/attempt/[attemptId]/page",
+      "maxKb": 150
+    }
   ],
   "zeroJsSelfCheck": {
     "$comment": "A public App Router page served alongside the zero-JS routes: it MUST show script tags, or the HTML detector has gone blind.",
@@ -42,7 +49,15 @@
   },
   "monacoFree": {
     "$comment": "No Monaco module (the monaco-editor package or the editor's own Monaco loader/controller/theme) may appear in these routes' chunk graphs, first-load or lazy.",
-    "entries": ["/(student)/problems/page", "/(student)/dashboard/page", "/(student)/leaderboard/page", "/(public)/judge/page"],
+    "entries": [
+      "/(student)/problems/page",
+      "/(student)/dashboard/page",
+      "/(student)/leaderboard/page",
+      "/(public)/judge/page",
+      "/(student)/aptitude/page",
+      "/(student)/aptitude/[topic]/page",
+      "/(student)/aptitude/mock/attempt/[attemptId]/page"
+    ],
     "entryPrefixes": ["/admin/"]
   },
   "serverRendered": {

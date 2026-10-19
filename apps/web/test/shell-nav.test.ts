@@ -55,26 +55,33 @@ describe("shell navigation model", () => {
     },
   );
 
-  it("groups PRACTICE, COMPETE and ME as specified, in order", () => {
+  it("groups PRACTICE, COMPETE, ASSESS and ME as specified, in order", () => {
     const shown = visibleGroups().map((g) => [g.label, g.items.map((i) => i.href)]);
     expect(shown).toEqual([
       ["Practice", ["/problems", "/sheets", "/learn"]],
       // Contests arrived in Phase 5.
       ["Compete", ["/contests", "/leaderboard"]],
+      // ASSESS was reserved empty for Phases 6-7; aptitude is its first and,
+      // so far, only entry.
+      ["Assess", ["/aptitude"]],
       ["Me", ["/profile", "/bookmarks", "/notes", "/notifications"]],
     ]);
   });
 
   it("does not render a group that has no implemented entries", () => {
-    const assess = NAV_GROUPS.find((g) => g.id === "assess");
-    expect(assess?.items).toHaveLength(0);
-    expect(visibleGroups().some((g) => g.id === "assess")).toBe(false);
+    // Every group now has entries, so the rule is checked against a
+    // synthetic empty one — which is the rule itself, not an accident of
+    // which phase we are in.
     expect(visibleGroups([{ id: "compete", label: "Compete", items: [] }])).toEqual([]);
+    expect(NAV_GROUPS.every((group) => group.items.length > 0)).toBe(true);
   });
 
-  it("links contests (Phase 5) and not assessments (Phase 6) yet", () => {
+  it("links contests (Phase 5) and aptitude (Phase 7), and not assessments", () => {
     const hrefs = allNavItems().map((i) => i.href);
     expect(hrefs).toContain("/contests");
+    expect(hrefs).toContain("/aptitude");
+    // A proctored assessment is something a student is SENT to at a time,
+    // not something they browse to, so it has no nav entry at all.
     for (const item of allNavItems()) {
       expect(item.href.startsWith("/assessments")).toBe(false);
     }

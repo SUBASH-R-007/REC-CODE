@@ -256,6 +256,18 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
 
     it("honours the batch limit and takes the most overdue first", async () => {
+      /**
+       * This is the one test here that sweeps the WHOLE table rather than one
+       * id, so it is the one test that can be derailed by another suite's
+       * fixture: `recx_test` is shared, vitest runs files in parallel, and an
+       * overdue IN_PROGRESS sitting belonging to somebody else would be
+       * picked first and this assertion would be about their row.
+       *
+       * Draining first makes the ordering claim about THIS test's two rows.
+       * It cost a Linux gate to find, and the failure looked like a bug in
+       * the sweep's ORDER BY rather than what it was.
+       */
+      await autoSubmitExpired(db, { limit: 500 });
       const far = await attempt({ expiresInSec: -900 });
       const near = await attempt({ expiresInSec: -5 });
       const rows = await autoSubmitExpired(db, { limit: 1 });

@@ -934,6 +934,23 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ),
       status: [200],
     },
+    // Phase 7d. Both carry the answer key and the worked explanations in one
+    // direction or the other, so a student has to be refused before either
+    // reads a byte.
+    "api/admin/aptitude/import/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/admin/aptitude/import", {
+          method: "POST",
+          headers: { "content-type": "text/csv", "x-recx-file-name": "probe.csv" },
+          body: "type,text,explanation",
+        }),
+      ),
+      status: [403],
+    },
+    "api/admin/aptitude/export/route.ts#GET": {
+      call: call(() => studentRequest("/api/admin/aptitude/export")),
+      status: [403],
+    },
     "api/judge/blob/[sha256]/route.ts#GET": {
       call: call(() => studentRequest(`/api/judge/blob/${blobShas[2]}`), () => params({ sha256: blobShas[2]! })),
       status: JUDGE_REFUSED,
@@ -1047,6 +1064,18 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
     "problems#listCatalogCompanies": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalogCompanies!,
     "problems#getProblemWorkspace": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).getProblemWorkspace!,
+    // Phase 7. Every one reads through APTITUDE_PUBLIC_SELECT except the
+    // review, which checks `finalizedAt` in its WHERE before it selects.
+    "aptitude#topicProgressFor": async () => (await load(path.join(QUERIES_DIR, "aptitude.ts"))).topicProgressFor!,
+    "aptitude#patternCardsFor": async () => (await load(path.join(QUERIES_DIR, "aptitude.ts"))).patternCardsFor!,
+    "aptitude#patternCoverFor": async () => (await load(path.join(QUERIES_DIR, "aptitude.ts"))).patternCoverFor!,
+    "aptitude#nextPracticeQuestion": async () =>
+      (await load(path.join(QUERIES_DIR, "aptitude.ts"))).nextPracticeQuestion!,
+    "aptitude#practiceCountFor": async () => (await load(path.join(QUERIES_DIR, "aptitude.ts"))).practiceCountFor!,
+    "aptitude-sitting#sittingViewFor": async () =>
+      (await load(path.join(QUERIES_DIR, "aptitude-sitting.ts"))).sittingViewFor!,
+    "aptitude-sitting#sittingReviewFor": async () =>
+      (await load(path.join(QUERIES_DIR, "aptitude-sitting.ts"))).sittingReviewFor!,
     "profile#getOwnProfile": async () => (await load(path.join(QUERIES_DIR, "profile.ts"))).getOwnProfile!,
     "profile#findPublicProfile": async () => (await load(path.join(QUERIES_DIR, "profile.ts"))).findPublicProfile!,
     "profile#profileSettingsOf": async () => (await load(path.join(QUERIES_DIR, "profile.ts"))).profileSettingsOf!,
@@ -1067,6 +1096,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
     "announcements#getActiveAnnouncements": () => [[ids.user]],
     "dashboard#getDashboard": () => [[ids.user]],
+    "aptitude#topicProgressFor": () => [[ids.user]],
+    "aptitude#patternCardsFor": () => [[ids.user]],
+    "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
+    "aptitude#nextPracticeQuestion": () => [[{ userId: ids.user, topic: "PERCENTAGES" }]],
+    "aptitude#practiceCountFor": () => [["PERCENTAGES"]],
+    "aptitude-sitting#sittingViewFor": () => [[ids.mockAttempt, ids.user, new Date()]],
+    // The sitting is IN_PROGRESS, so the review returns null — which is the
+    // point: the key is unreachable until the paper is finalised.
+    "aptitude-sitting#sittingReviewFor": () => [[ids.mockAttempt, ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1123,6 +1161,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "aptitude-select#APTITUDE_POOL_SELECT": "column list: the least a seeded draw needs",
     "aptitude-select#APTITUDE_PASSAGE_SELECT": "column list: a passage, which carries no key at all",
     "aptitude-select#APTITUDE_ANSWER_KEY_FIELDS": "constant: the four fields that must never reach a student before they answer",
+    "aptitude#topicsByArea": "pure: groups rows this module already returned; no database access",
+    "aptitude-select#APTITUDE_IDENTITY_SELECT": "column list: just enough to recognise a question an import might be about",
     "judge-languages#LANGUAGE_CONFIG_TAG": "cache tag constant",
     "judge-languages#revalidateLanguageConfigs": "cache invalidation; returns nothing",
     "leaderboard#FULL_BOARD_CAP": "constant",
@@ -1199,6 +1239,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // canary in every hidden test, checker and reference solution. It starts
     // a sitting as a side effect, which the mocked cookie jar absorbs.
     "(exam)/assessments/[slug]/attempt/page.tsx": () => ({ params: { slug: ids.assessmentSlug } }),
+    // Phase 7e. The sitting page is the one that renders a whole paper, and
+    // the review is the only student page that may show an answer key — so
+    // both are swept, and the sitting's canary is the worked explanation.
+    "(student)/aptitude/page.tsx": () => ({}),
+    "(student)/aptitude/[topic]/page.tsx": () => ({ params: { topic: "percentages" } }),
+    "(student)/aptitude/mock/[slug]/page.tsx": () => ({ params: { slug: ids.aptitudePatternSlug } }),
+    "(student)/aptitude/mock/attempt/[attemptId]/page.tsx": () => ({ params: { attemptId: ids.mockAttempt } }),
+    "(student)/aptitude/mock/attempt/[attemptId]/review/page.tsx": () => ({
+      params: { attemptId: ids.mockAttempt },
+    }),
     "(student)/assessments/page.tsx": () => ({}),
     "(student)/sittings/[attemptId]/page.tsx": () => ({ params: { attemptId: ids.attempt } }),
     "(student)/contests/page.tsx": () => ({}),

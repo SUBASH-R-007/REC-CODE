@@ -16,6 +16,7 @@ export type NavIconKey =
   | "sheets"
   | "learn"
   | "contests"
+  | "aptitude"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -64,8 +65,23 @@ const NOTIFICATIONS = item("/notifications", "Notifications", "notifications", "
 export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
   { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, SHEETS, LEARN]) },
   { id: "compete", label: "Compete", items: Object.freeze([CONTESTS, LEADERBOARD]) },
-  // ASSESS (Phases 6-7): no implemented routes yet, so nothing is rendered.
-  { id: "assess", label: "Assess", items: Object.freeze([]) },
+  // ASSESS: Phase 7's aptitude surface. The group was reserved empty for
+  // Phases 6-7 and this is its first entry — Phase 6's assessments are
+  // reached from a sitting link rather than from the nav, because a
+  // proctored exam is something a student is sent to at a time, not
+  // something they browse to.
+  {
+    id: "assess",
+    label: "Assess",
+    items: Object.freeze([
+      item(
+        "/aptitude",
+        "Aptitude",
+        "aptitude",
+        "Quantitative, logical and verbal practice, and full mocks with worked explanations",
+      ),
+    ]),
+  },
   { id: "me", label: "Me", items: Object.freeze([PROFILE, BOOKMARKS, NOTES, NOTIFICATIONS]) },
 ]);
 

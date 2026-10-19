@@ -98,6 +98,20 @@ const TARGETS: readonly Target[] = [
     states: workspaceStates,
   },
   { path: "/leaderboard", as: "student", gating: true },
+  /**
+   * Phase 7, GATING. The aptitude surface is the one the largest number of
+   * students will ever use — SPEC §5 opens the phase by saying so — and a
+   * sizeable number of them use it on a phone, which is why the hub and
+   * topic practice are scanned at 375px as well as at 1366px.
+   *
+   * The timed mock SITTING is not in this list, and deliberately: it is
+   * hard-blocked below 768px (SPEC §7's "do not build a serious phone-based
+   * solving experience"), so a 375px scan would be scanning the block, and
+   * its desktop states need a live sitting that the e2e fixture does not
+   * seed. It is covered by the manual pass instead, which is recorded as a
+   * Phase 7 gate item in docs/RUNBOOK.md §3.
+   */
+  { path: "/aptitude", as: "student", gating: true },
   // Reported, not gating.
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },

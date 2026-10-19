@@ -75,6 +75,7 @@ import {
 import { BADGES } from "./content/badges";
 import { dailyChallengeIndex } from "./content/daily-challenge";
 import { AUTHORED_PROBLEMS, HELP_BY_SLUG, TOPICS_BY_SLUG } from "./content/index";
+import { syncSeededMockPatterns } from "./content/aptitude";
 import { syncSeededStudyPlans } from "./content/study-plans";
 import type { AuthoredProblem, HelpContent } from "./content/types";
 
@@ -916,6 +917,14 @@ async function main() {
         `study plan ${r.slug}: ${r.created ? "created, " : ""}${r.itemsTotal} items` +
           ` (+${r.added} −${r.removed}, ${r.moved} moved, ${r.enrollmentsUpdated} enrollments updated)`,
       );
+    }
+    // Phase 7: the six mock patterns. The QUESTIONS are a content programme
+    // with named owners (docs/OPEN-QUESTIONS.md, "Content is the binding
+    // constraint") and are imported from CSV rather than seeded — a pattern
+    // whose pool is short reports it as an authoring error on the pattern
+    // page, which is where somebody can act on it.
+    for (const r of await syncSeededMockPatterns(app.db, adminId)) {
+      log(`mock pattern ${r.slug}: ${r.action}, ${r.sections} sections`);
     }
     await seedDailyChallenge(app.db, adminId);
     await seedJudgeNode(app);

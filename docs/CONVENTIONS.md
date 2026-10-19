@@ -385,3 +385,19 @@ the default, and clamps `finishedAt` so it is never earlier — a clock stepping
 backwards mid-import (an NTP correction, a resumed laptop) must not cost the
 whole import report. The alternative, taking both from `now()` in SQL, works
 too and is better where nothing else needs the value.
+
+## A test that sweeps a shared table globally must drain it first
+
+`recx_test` is one database and vitest runs test files in parallel, so a
+suite that calls a sweeper with no id — `autoSubmitExpired(db, { limit: 1 })`
+— is asking a question about every row in the table, including fixtures
+another file created seconds ago. The assertion then silently becomes about
+somebody else's row.
+
+Phase 7d's Linux gate failed exactly this way, and the failure read as a bug
+in the sweeper's `ORDER BY` rather than as cross-suite interference. The fix
+is one line before the fixtures: sweep with a generous limit to drain whatever
+is already overdue, so the ordering claim is about the rows this test made.
+
+Prefer the scoped form (`{ attemptId }`) wherever the test does not
+specifically exist to prove the batching.

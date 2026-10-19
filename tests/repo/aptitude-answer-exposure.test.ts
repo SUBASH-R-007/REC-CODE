@@ -40,6 +40,10 @@ const MAY_SEE_THE_KEY: ReadonlyArray<{ readonly path: string; readonly why: stri
     path: "apps/web/src/lib/aptitude/practice.ts",
     why: "a practice answer is committed and THEN the working is returned, which is the whole point of the phase",
   },
+  {
+    path: "apps/web/src/server/queries/aptitude-sitting.ts",
+    why: "sittingReviewFor checks status and finalizedAt in the WHERE before it selects, so the gate is in the read rather than in a component",
+  },
 ];
 
 /**
