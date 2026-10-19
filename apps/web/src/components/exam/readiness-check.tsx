@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Check, X } from "lucide-react";
+import { DeviceCheck } from "@/components/exam/device-check";
 import { MONITORED_SIGNALS } from "@/components/exam/monitored-chip";
 
 /**
@@ -26,13 +27,14 @@ import { MONITORED_SIGNALS } from "@/components/exam/monitored-chip";
  * the moment a candidate's laptop turns out not to be.
  */
 
-type CheckId = "fullscreen" | "paste" | "network" | "sample";
+type CheckId = "fullscreen" | "paste" | "network" | "sample" | "device";
 
 const LABELS: Readonly<Record<CheckId, string>> = Object.freeze({
   fullscreen: "Full screen works on this machine",
   paste: "Pasting works, and is recorded rather than blocked",
   network: "This machine can reach the exam server",
   sample: "You can type an answer and read a question",
+  device: "Your registered device works",
 });
 
 export function ReadinessCheck({
@@ -51,6 +53,9 @@ export function ReadinessCheck({
     paste: false,
     network: false,
     sample: false,
+    // The device step reports whether it was even required; an assessment
+    // that needs no device passes it by answering that.
+    device: false,
   });
   const [consented, setConsented] = useState(false);
   const [scratch, setScratch] = useState("");
@@ -172,6 +177,13 @@ export function ReadinessCheck({
             className="mt-2 w-24 rounded-md border border-border bg-surface px-2 py-1 font-mono text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           />
         </li>
+        {/*
+          The device step (Phase 6d). It is HERE rather than in the arena
+          because the clock starts in the arena: a candidate must be able to
+          find out their key is not working while an invigilator still has
+          time to enrol the machine or issue a loaner.
+        */}
+        <DeviceCheck slug={slug} onVerified={() => pass("device")} />
       </ol>
 
       {/* The consent moment. */}

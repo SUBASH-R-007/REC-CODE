@@ -165,7 +165,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `pii.export` | super-admin | - | - | - | - | yes | 1 action, 1 route, 1 page |
 | `calendar.manage` | super-admin | - | - | - | - | yes | arrives in Phase 8 |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
-| `exam.device.enrol` | staff | - | - | yes | - | yes | 1 route |
+| `exam.device.enrol` | staff | - | - | yes | - | yes | 1 action, 1 route, 1 page |
 | `judge.operate` | staff | - | - | yes | - | yes | 3 actions, 1 page |
 | `students.view` | staff | - | - | yes | - | yes | 5 pages |
 | `students.signOut` | staff | - | - | yes | - | yes | 1 action, 1 page |

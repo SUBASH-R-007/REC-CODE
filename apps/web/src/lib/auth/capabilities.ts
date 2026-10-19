@@ -230,8 +230,9 @@ export const STAFF_CAPABILITIES = deepFreeze([
     // own device can enrol a friend's, which is the impersonation WebAuthn
     // is here to close.
     roles: ["ADMIN", "SUPER_ADMIN"],
-    actions: [],
+    actions: ["exam-devices#revokeExamDevice"],
     routes: ["app/api/exam/device/enrol/route.ts#POST"],
+    pages: ["app/admin/devices/page.tsx"],
   },
   {
     key: "judge.operate",
