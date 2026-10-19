@@ -64,7 +64,10 @@ describe("shell navigation model", () => {
       // ASSESS was reserved empty for Phases 6-7; aptitude is its first and,
       // so far, only entry.
       ["Assess", ["/aptitude"]],
-      ["Me", ["/profile", "/bookmarks", "/notes", "/notifications"]],
+      // Phase 8a put "Excused days" in ME rather than in ASSESS: it is about
+      // the student's own account, not about practising. Last in the group,
+      // because it is the entry nobody should need often.
+      ["Me", ["/profile", "/bookmarks", "/notes", "/notifications", "/account/leave"]],
     ]);
   });
 

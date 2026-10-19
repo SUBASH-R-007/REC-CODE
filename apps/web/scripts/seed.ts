@@ -76,6 +76,7 @@ import { BADGES } from "./content/badges";
 import { dailyChallengeIndex } from "./content/daily-challenge";
 import { AUTHORED_PROBLEMS, HELP_BY_SLUG, TOPICS_BY_SLUG } from "./content/index";
 import { syncSeededMockPatterns } from "./content/aptitude";
+import { syncSeededCalendar } from "./content/calendar";
 import { syncSeededStudyPlans } from "./content/study-plans";
 import type { AuthoredProblem, HelpContent } from "./content/types";
 
@@ -925,6 +926,13 @@ async function main() {
     // page, which is where somebody can act on it.
     for (const r of await syncSeededMockPatterns(app.db, adminId)) {
       log(`mock pattern ${r.slug}: ${r.action}, ${r.sections} sections`);
+    }
+    // Phase 8: an academic calendar. The inactivity counter escalates nobody
+    // while the calendar does not cover its window, so a dev database with no
+    // calendar is one where the whole policy engine is a silent no-op.
+    {
+      const cal = await syncSeededCalendar(app.db, adminId);
+      log(`calendar: ${cal.written} days, ${cal.from} to ${cal.to}`);
     }
     await seedDailyChallenge(app.db, adminId);
     await seedJudgeNode(app);

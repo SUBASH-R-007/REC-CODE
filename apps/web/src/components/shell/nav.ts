@@ -22,6 +22,7 @@ export type NavIconKey =
   | "bookmarks"
   | "notes"
   | "notifications"
+  | "leave"
   | "help"
   | "judge"
   | "accessibility";
@@ -61,6 +62,12 @@ const PROFILE = item("/profile", "Profile", "profile", "Your progress, badges an
 const BOOKMARKS = item("/bookmarks", "Bookmarks", "bookmarks", "Problems you saved for later");
 const NOTES = item("/notes", "Notes", "notes", "Your private Markdown notes");
 const NOTIFICATIONS = item("/notifications", "Notifications", "notifications", "Badges, streaks and announcements");
+const LEAVE = item(
+  "/account/leave",
+  "Excused days",
+  "leave",
+  "Tell us about days you were ill or away, so they are not counted as time you did not practise",
+);
 
 export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
   { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, SHEETS, LEARN]) },
@@ -82,7 +89,7 @@ export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
       ),
     ]),
   },
-  { id: "me", label: "Me", items: Object.freeze([PROFILE, BOOKMARKS, NOTES, NOTIFICATIONS]) },
+  { id: "me", label: "Me", items: Object.freeze([PROFILE, BOOKMARKS, NOTES, NOTIFICATIONS, LEAVE]) },
 ]);
 
 /** The five-item bottom bar below 1024 px. */

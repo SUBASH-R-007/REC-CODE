@@ -131,12 +131,14 @@ describe("the twelve SUPER_ADMIN capabilities", () => {
         expect(c.actions.length + (c.routes?.length ?? 0), c.key).toBeGreaterThan(0);
       }
     }
-    // ratings.manage was wired in Phase 5 (super-ratings#releaseContestRating)
-    // and integrity.overturn in Phase 6e (super-integrity#overturnIntegrityDecision),
-    // so neither is an arriving capability any more.
-    expect(SUPER_ADMIN_CAPABILITIES.filter((c) => c.arrives).map((c) => [c.key, c.arrives?.phase])).toEqual([
-      ["calendar.manage", 8],
-    ]);
+    // ratings.manage was wired in Phase 5 (super-ratings#releaseContestRating),
+    // integrity.overturn in Phase 6e (super-integrity#overturnIntegrityDecision)
+    // and calendar.manage in Phase 8a (super-calendar, /super/calendar), so
+    // none of the twelve is an arriving capability any more. An empty list
+    // here is the assertion, not an omission: every capability the spec names
+    // is now wired to a real guard, and a thirteenth declared with `arrives`
+    // would fail this line until its slice wires it too.
+    expect(SUPER_ADMIN_CAPABILITIES.filter((c) => c.arrives).map((c) => [c.key, c.arrives?.phase])).toEqual([]);
   });
 
   it.each(SUPER_ADMIN_CAPABILITIES.filter((c) => c.arrives).map((c) => [c.key, c.arrives!] as const))(

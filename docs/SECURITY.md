@@ -163,7 +163,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `users.impersonate` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `judge.rotateKeys` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `pii.export` | super-admin | - | - | - | - | yes | 1 action, 1 route, 1 page |
-| `calendar.manage` | super-admin | - | - | - | - | yes | arrives in Phase 8 |
+| `calendar.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `integrity.review` | staff | - | - | yes | - | yes | 2 actions, 2 pages |
 | `exam.invigilate` | staff | - | - | yes | - | yes | 4 actions, 1 route, 2 pages |
@@ -196,6 +196,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
+| `account.leave` | self-service | yes | yes | yes | yes | yes | 2 actions |
 
 Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`.
 <!-- capability-matrix:end -->

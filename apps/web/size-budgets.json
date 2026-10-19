@@ -18,6 +18,12 @@
       "route": "/aptitude/mock/attempt/[attemptId]",
       "entry": "/(student)/aptitude/mock/attempt/[attemptId]/page",
       "maxKb": 150
+    },
+    {
+      "$comment": "Phase 8a. A form and a list, and it must stay that: this is the page somebody opens on a phone from a hospital bed, and from Phase 8e it is part of the route out of an inactivity restriction.",
+      "route": "/account/leave",
+      "entry": "/(student)/account/leave/page",
+      "maxKb": 135
     }
   ],
   "zeroJsSelfCheck": {
@@ -56,7 +62,8 @@
       "/(public)/judge/page",
       "/(student)/aptitude/page",
       "/(student)/aptitude/[topic]/page",
-      "/(student)/aptitude/mock/attempt/[attemptId]/page"
+      "/(student)/aptitude/mock/attempt/[attemptId]/page",
+      "/(student)/account/leave/page"
     ],
     "entryPrefixes": ["/admin/"]
   },

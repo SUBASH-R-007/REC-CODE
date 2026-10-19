@@ -1059,6 +1059,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   const QUERY_CALLS: Record<string, () => Promise<unknown>> = {
     "announcements#getActiveAnnouncements": async () => (await load(path.join(QUERIES_DIR, "announcements.ts"))).getActiveAnnouncements!,
     "dashboard#getDashboard": async () => (await load(path.join(QUERIES_DIR, "dashboard.ts"))).getDashboard!,
+    "calendar#myLeaveRequests": async () => (await load(path.join(QUERIES_DIR, "calendar.ts"))).myLeaveRequests!,
     "judge-languages#getPublicLanguageRows": async () => (await load(path.join(QUERIES_DIR, "judge-languages.ts"))).getPublicLanguageRows!,
     "leaderboard#getLeaderboard": async () => (await load(path.join(QUERIES_DIR, "leaderboard.ts"))).getLeaderboard!,
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
@@ -1105,6 +1106,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // The sitting is IN_PROGRESS, so the review returns null — which is the
     // point: the key is unreachable until the paper is finalised.
     "aptitude-sitting#sittingReviewFor": () => [[ids.mockAttempt, ids.user]],
+    // Phase 8a. The row carries a medical reason in the student's own
+    // words. `userId` is a where clause rather than a parameter, so what is
+    // swept here is what the caller's OWN row renders; the page that shows
+    // it is swept too, in PAGE_CALLS.
+    "calendar#myLeaveRequests": () => [[ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1163,6 +1169,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "aptitude-select#APTITUDE_ANSWER_KEY_FIELDS": "constant: the four fields that must never reach a student before they answer",
     "aptitude#topicsByArea": "pure: groups rows this module already returned; no database access",
     "aptitude-select#APTITUDE_IDENTITY_SELECT": "column list: just enough to recognise a question an import might be about",
+    "calendar#dayToDate": "pure: a campus day as the UTC-midnight Date a @db.Date column holds",
+    "calendar#MY_LEAVE_LIMIT": "constant",
     "judge-languages#LANGUAGE_CONFIG_TAG": "cache tag constant",
     "judge-languages#revalidateLanguageConfigs": "cache invalidation; returns nothing",
     "leaderboard#FULL_BOARD_CAP": "constant",
@@ -1242,6 +1250,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // Phase 7e. The sitting page is the one that renders a whole paper, and
     // the review is the only student page that may show an answer key — so
     // both are swept, and the sitting's canary is the worked explanation.
+    // Phase 8a. Renders the caller's own leave reasons, which is exactly
+    // the kind of text that must not be somebody else's.
+    "(student)/account/leave/page.tsx": () => ({}),
     "(student)/aptitude/page.tsx": () => ({}),
     "(student)/aptitude/[topic]/page.tsx": () => ({ params: { topic: "percentages" } }),
     "(student)/aptitude/mock/[slug]/page.tsx": () => ({ params: { slug: ids.aptitudePatternSlug } }),
@@ -1396,6 +1407,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "appeals#submitAppeal": [
       () => [{ flagId: `${tag}-no-such-flag`, reason: "I wrote this myself and the timeline shows it." }],
     ],
+    // Phase 8a. Raising a leave for yourself, and calling it off. The
+    // cancel fixture names an id that is not the caller's, so the
+    // "not one of yours" path is the one exercised as S.
+    "account#requestLeaveException": [
+      () => [
+        {
+          kind: "MEDICAL",
+          startDate: "2026-10-01",
+          endDate: "2026-10-03",
+          reason: "Admitted with dengue; discharge summary with the health centre.",
+        },
+      ],
+    ],
+    "account#cancelLeaveException": [() => [{ leaveId: `${tag}-no-such-leave` }]],
     "bookmarks#toggleBookmark": [() => [{ problemId: ids.problem, bookmarked: false }], () => [{ problemId: ids.problem, bookmarked: true }]],
     "drafts#saveDraft": [() => [{ problemId: ids.problem, language: "py312", source: "print(input())\n", clientUpdatedAt: Date.now() }]],
     "help#revealHint": [() => [{ problemId: ids.problem, tier: 1 }], () => [{ problemId: ids.draftProblem, tier: 1 }]],

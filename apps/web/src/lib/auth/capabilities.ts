@@ -178,8 +178,22 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
     key: "calendar.manage",
     label: "Edit the academic calendar and approve MEDICAL leave",
     roles: SUPER_ONLY,
-    actions: [],
-    arrives: { phase: 8, models: ["CalendarDay", "LeaveException"] },
+    /**
+     * Wired in Phase 8a, in the same slice its two models appear — the
+     * capability test fails the moment CalendarDay and LeaveException exist
+     * with an empty action list, which is the right way round: a model that
+     * can be written by nobody-knows-whom is the thing to refuse.
+     *
+     * These rows decide whether a student's fortnight away counts against
+     * them, so the power to write them is the power to restrict an account at
+     * one remove. That is why it is SUPER_ADMIN and not staff.
+     */
+    actions: [
+      "super-calendar#upsertCalendarDay",
+      "super-calendar#markCalendarRange",
+      "super-calendar#decideLeaveException",
+    ],
+    pages: ["app/super/calendar/page.tsx"],
   },
   {
     key: "xp.void",
@@ -582,6 +596,20 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     label: "Edit my profile settings",
     roles: EVERY_SIGNED_IN_ROLE,
     actions: ["profile#saveProfileSettings"],
+  },
+  {
+    /**
+     * Phase 8a. A student asks for their own leave and calls off their own
+     * leave; a super-admin decides it, under `calendar.manage`.
+     *
+     * Self-service on purpose, and it must STAY self-service: from Phase 8e
+     * this surface is part of the route out of an inactivity restriction, and
+     * a route out that is itself behind the restriction is not a route out.
+     */
+    key: "account.leave",
+    label: "Ask for leave to be excused, and call off my own request",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["account#requestLeaveException", "account#cancelLeaveException"],
   },
 ] as const satisfies readonly Capability[]);
 
