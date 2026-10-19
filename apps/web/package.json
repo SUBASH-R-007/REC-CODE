@@ -32,6 +32,8 @@
     "@recx/db": "workspace:*",
     "@recx/design": "workspace:*",
     "@recx/shared": "workspace:*",
+    "@simplewebauthn/browser": "13.1.0",
+    "@simplewebauthn/server": "13.1.1",
     "@tanstack/react-virtual": "^3.10.0",
     "bullmq": "^5.56.0",
     "ioredis": "^5.7.0",

@@ -44,6 +44,10 @@ export const GUARD_FUNCTIONS = [
   // 20261019160000_phase6b_attempt_engine
   "recx_refuse_attempt_change",
   "recx_refuse_snapshot_change",
+  // 20261019220000_phase6d_containment
+  "recx_refuse_excess_device",
+  "recx_refuse_device_change",
+  "recx_refuse_challenge_reuse",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -72,6 +76,8 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019160000_phase6b_attempt_engine
   "AssessmentAttempt",
   "AttemptSnapshot",
+  // 20261019220000_phase6d_containment
+  "DeviceRegistration",
 ];
 
 export interface GuardTrigger {
@@ -206,6 +212,28 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_snapshot_change",
     level: "ROW",
   },
+  // 20261019220000_phase6d_containment
+  {
+    name: "DeviceRegistration_device_limit",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "DeviceRegistration",
+    fn: "recx_refuse_excess_device",
+    level: "ROW",
+  },
+  {
+    name: "DeviceRegistration_write_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "DeviceRegistration",
+    fn: "recx_refuse_device_change",
+    level: "ROW",
+  },
+  {
+    name: "WebAuthnChallenge_single_use",
+    timing: "BEFORE UPDATE",
+    table: "WebAuthnChallenge",
+    fn: "recx_refuse_challenge_reuse",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -224,7 +252,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019160000_phase6b_attempt_engine";
+export const CHECK_CATALOG_THROUGH = "20261019230000_phase6d_assertion_device";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -391,6 +419,29 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["Assessment_seed_secret_check", "Assessment"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019200000_phase6c_seed_secret" })),
+  ...(
+    [
+      // A credential id and a public key are handles, not payloads.
+      ["DeviceRegistration_credential_check", "DeviceRegistration"],
+      ["DeviceRegistration_public_key_check", "DeviceRegistration"],
+      ["DeviceRegistration_aaguid_check", "DeviceRegistration"],
+      ["DeviceRegistration_label_check", "DeviceRegistration"],
+      ["DeviceRegistration_sign_count_check", "DeviceRegistration"],
+      ["DeviceRegistration_loan_check", "DeviceRegistration"],
+      ["DeviceRegistration_revoked_check", "DeviceRegistration"],
+      ["DeviceRegistration_revoked_after_enrol_check", "DeviceRegistration"],
+      ["WebAuthnChallenge_challenge_check", "WebAuthnChallenge"],
+      ["WebAuthnChallenge_window_check", "WebAuthnChallenge"],
+      ["WebAuthnChallenge_consumed_check", "WebAuthnChallenge"],
+      ["AssessmentAttempt_seat_check", "AssessmentAttempt"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019220000_phase6d_containment" })),
+  ...(
+    [
+      // A device is recorded only on a challenge that was actually spent.
+      ["WebAuthnChallenge_device_check", "WebAuthnChallenge"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019230000_phase6d_assertion_device" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

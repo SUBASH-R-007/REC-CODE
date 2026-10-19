@@ -183,3 +183,31 @@ systems use:
 `tests/repo/design-tokens.test.ts` now fails on any colour utility whose
 suffix contains one of our token stems and does not resolve. Read
 `packages/design/theme.css` rather than guessing; it is the whole list.
+
+## A Postgres CHECK with a bad regex is created happily and fails on every insert
+
+Postgres' regex engine caps a bounded repetition at **255**, so
+`'^[A-Za-z0-9_-]{16,1024}$'` is an invalid regular expression. It parses the
+pattern **lazily**, at evaluation time — so
+
+```sql
+ADD CONSTRAINT "X_check" CHECK ("col" ~ '^[A-Za-z0-9_-]{16,1024}$')
+```
+
+is accepted by `ALTER TABLE`, recorded in `pg_constraint`, reported by
+`guard-state.db.test.ts` as present and correct, counted by
+`frozen-coverage.test.ts` in the migration SQL — and then raises
+`invalid regular expression: invalid repetition count(s)` on **every** insert
+that reaches it.
+
+Three of Phase 6d's constraints shipped like that (2026-10-19). Every catalog
+fence passed; `device-invariants.db.test.ts` caught it on its first run. The
+lesson is about the fences as much as the regex: a catalog fence proves a
+guard EXISTS, and only an invariant test proves it WORKS. A migration that
+adds a CHECK gets both.
+
+Write the character class and the length as separate conjuncts:
+
+```sql
+CHECK ("col" ~ '^[A-Za-z0-9_-]+$' AND length("col") BETWEEN 16 AND 1024)
+```

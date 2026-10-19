@@ -709,6 +709,21 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ),
       status: [200],
     },
+    "api/exam/device/assert/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/exam/device/assert", { method: "POST", json: { step: "options", slug: ids.assessmentSlug } }),
+      ),
+      // The fixture's assessment is ADVISORY, so no device is required: 200
+      // with { required: false }.
+      status: [200],
+    },
+    "api/exam/device/enrol/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/exam/device/enrol", { method: "POST", json: { step: "options", userId: ids.user } }),
+      ),
+      // A student may not enrol a device, not even their own.
+      status: [403],
+    },
     "api/exam/[attemptId]/hb/route.ts#POST": {
       call: call(
         () =>

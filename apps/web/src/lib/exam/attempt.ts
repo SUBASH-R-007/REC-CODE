@@ -13,6 +13,7 @@ import {
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { attemptTokenMatches, clearAttemptCookie, presentedAttemptToken } from "@/lib/exam/attempt-token";
+import { checkContainment } from "@/lib/exam/containment";
 
 /**
  * The attempt guard (Phase 6b): what every exam request goes through before
@@ -109,6 +110,12 @@ export async function guardAttempt(args: {
   readonly attemptId: string;
   readonly userId: string;
   readonly sessionId?: string | null;
+  /**
+   * Audit a containment refusal. False (the default) on the heartbeat, which
+   * runs every ten seconds; true on start and submit, where one row is the
+   * record a human reads.
+   */
+  readonly auditContainment?: boolean;
 }): Promise<AttemptGuardResult> {
   const now = new Date();
   const attempt = await db.assessmentAttempt.findUnique({ where: { id: args.attemptId } });
@@ -156,6 +163,36 @@ export async function guardAttempt(args: {
     return refuse("bad_token", now, attempt);
   }
 
+  // ── The hall (Phase 6d) ────────────────────────────────────────────────
+  // The network allowlist and, for a kiosk assessment, Safe Exam Browser.
+  // Re-checked HERE rather than only at start, so it runs on the heartbeat,
+  // every telemetry flush, every snapshot and submit — which is what makes
+  // SPEC §5's "leaving the lab network ends the session" true rather than a
+  // start-time formality.
+  //
+  // `audited: false` because this path runs every ten seconds: a candidate
+  // whose hall wifi drops out would otherwise write 360 SECURITY audit rows
+  // an hour. The refusal is audited once on the paths that are not the
+  // heartbeat (start, submit), which is where a human looks.
+  const containment = await checkContainment({
+    request: args.request,
+    attempt: attempt,
+    audited: args.auditContainment ?? false,
+  });
+  if (!containment.ok) {
+    const reason = containment.refusal ?? "outside_allowlist";
+    return {
+      ok: false,
+      reason,
+      // The containment check's own sentence, which says what to do about
+      // THIS refusal — "the network has changed" and "open the .seb file"
+      // send a candidate to different places.
+      message: containment.message ?? ATTEMPT_REVOKE_MESSAGES[reason],
+      attempt,
+      now,
+    };
+  }
+
   // ── The lazy expiry check ──────────────────────────────────────────────
   const left = msRemaining({ expiresAt: attempt.expiresAt, pausedMs: attempt.pausedMs, now });
   if (left === 0) {
@@ -201,7 +238,9 @@ export async function guardAttempt(args: {
  * is final, so a finished attempt stops carrying a credential in the browser.
  */
 export async function endAttemptSession(attemptId: string, reason: AttemptRevokeReason): Promise<void> {
-  if (reason === "session_revoked" || reason === "outside_allowlist") return; // Resumable: keep the token.
+  // Resumable: the candidate rejoins the hall network, or reopens the exam
+  // in the kiosk build, and carries on with the same sitting.
+  if (reason === "session_revoked" || reason === "outside_allowlist" || reason === "seb_required") return;
   await clearAttemptCookie(attemptId);
 }
 

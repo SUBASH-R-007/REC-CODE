@@ -23,6 +23,24 @@ export default defineConfig({
   esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
+    /**
+     * 20s, not vitest' 5s default.
+     *
+     * Several suites here exercise the REAL guards and the real server
+     * modules, so a single test can load a large module graph and run genuine
+     * compute (the capability matrix calls every route handler as every role;
+     * seed-content runs an independent implementation over every generated
+     * test of every authored problem). Those pass comfortably on their own
+     * and time out inside a full `pnpm test`, where the other packages'
+     * suites are competing for the same cores — a gate flake that says
+     * nothing about the code, and the worst kind, because it moves around.
+     *
+     * 20s is far above the slowest honest test here (~5s) and far below a
+     * hang, so a genuinely stuck test still fails rather than waiting out the
+     * gate. Seen 2026-10-19 on `seed-content`, `capability-matrix` and
+     * `impersonation-read-only`, each in a different run.
+     */
+    testTimeout: 20_000,
     // With projects, each project names its own files: a root `include` would
     // be concatenated into both of them (extends: true merges arrays).
     ...(RUN_DB_TESTS

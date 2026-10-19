@@ -165,6 +165,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `pii.export` | super-admin | - | - | - | - | yes | 1 action, 1 route, 1 page |
 | `calendar.manage` | super-admin | - | - | - | - | yes | arrives in Phase 8 |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
+| `exam.device.enrol` | staff | - | - | yes | - | yes | 1 route |
 | `judge.operate` | staff | - | - | yes | - | yes | 3 actions, 1 page |
 | `students.view` | staff | - | - | yes | - | yes | 5 pages |
 | `students.signOut` | staff | - | - | yes | - | yes | 1 action, 1 page |
@@ -182,6 +183,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
 | `exam.heartbeat` | self-service | yes | yes | yes | yes | yes | 4 routes |
+| `exam.device.assert` | self-service | yes | yes | yes | yes | yes | 1 route |
 | `notes.manage` | self-service | yes | yes | yes | yes | yes | 4 actions |
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |

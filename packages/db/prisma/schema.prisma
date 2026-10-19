@@ -401,6 +401,9 @@ model User {
   /// Sittings of an assessment (Phase 6).
   assessmentAttempts   AssessmentAttempt[]
 
+  deviceRegistrations DeviceRegistration[]
+  webAuthnChallenges  WebAuthnChallenge[]
+
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
 }
@@ -2322,31 +2325,36 @@ enum SnapshotTrigger {
 ///     documented exception);
 ///   - trigger AssessmentAttempt_no_truncate: TRUNCATE is refused.
 model AssessmentAttempt {
-  id                     String        @id @default(cuid())
+  id                     String              @id @default(cuid())
   assessmentId           String
-  assessment             Assessment    @relation(fields: [assessmentId], references: [id])
+  assessment             Assessment          @relation(fields: [assessmentId], references: [id])
   userId                 String
-  user                   User          @relation(fields: [userId], references: [id])
+  user                   User                @relation(fields: [userId], references: [id])
   examSessionId          String?
-  examSession            ExamSession?  @relation(fields: [examSessionId], references: [id])
-  attemptNumber          Int           @default(1)
-  status                 AttemptStatus @default(NOT_STARTED)
+  examSession            ExamSession?        @relation(fields: [examSessionId], references: [id])
+  attemptNumber          Int                 @default(1)
+  status                 AttemptStatus       @default(NOT_STARTED)
   /// Per-candidate randomisation seed. Stored so a disputed paper can be
   /// reproduced exactly as that candidate saw it.
   seed                   Int
-  startedAt              DateTime      @default(now())
+  startedAt              DateTime            @default(now())
   /// Server-computed. Never accepted from a client.
   expiresAt              DateTime
   /// Granted breaks. Extends the deadline rather than eating the clock.
-  pausedMs               Int           @default(0)
+  pausedMs               Int                 @default(0)
   submittedAt            DateTime?
-  totalScore             Float         @default(0)
-  maxScore               Float         @default(0)
+  totalScore             Float               @default(0)
+  maxScore               Float               @default(0)
   /// The question order and options this candidate saw, frozen at start.
   layout                 Json
   /// sha256 of the attempt token. The token itself is never stored.
   tokenHash              String
   deviceRegistrationId   String?
+  deviceRegistration     DeviceRegistration? @relation(fields: [deviceRegistrationId], references: [id])
+  /// The seat an invigilator put this candidate in (SPEC section 5,
+  /// LAB_SUPERVISED). Written at start and never changed: which seat a
+  /// sitting happened in is part of the record of it.
+  seatLabel              String?
   /// hashIp() only — never a raw IP, anywhere (SPEC section 4).
   ipHashFirst            String?
   ipHashLast             String?
@@ -2358,10 +2366,10 @@ model AssessmentAttempt {
   proctorMode            ProctorMode
   /// The accommodation kinds in force, for the invigilator and the report.
   /// A SCREEN_READER candidate's focus signals are exempt from penalty.
-  accommodationFlags     String[]      @default([])
+  accommodationFlags     String[]            @default([])
   /// One bit per heartbeatSlotSeconds. 180 minutes = 720 bits = 90 bytes.
   heartbeatBitmap        Bytes?
-  heartbeatSlotSeconds   Int           @default(15)
+  heartbeatSlotSeconds   Int                 @default(15)
   lastHeartbeatAt        DateTime?
   /// High-water mark of the client's own message sequence. The heartbeat
   /// carries it, so a run of numbers the server never saw is detectable as
@@ -2369,17 +2377,17 @@ model AssessmentAttempt {
   /// until the first client message. A gap is recorded for a human to read,
   /// never acted on (SPEC section 0).
   lastClientSeq          Int?
-  blurEventCount         Int           @default(0)
-  fullscreenExitCount    Int           @default(0)
-  pasteEventCount        Int           @default(0)
+  blurEventCount         Int                 @default(0)
+  fullscreenExitCount    Int                 @default(0)
+  pasteEventCount        Int                 @default(0)
   /// Server-computed from heartbeatBitmap, never reported by the client.
-  maxHeartbeatGapSeconds Int           @default(0)
+  maxHeartbeatGapSeconds Int                 @default(0)
   /// A review aid only. Never a gate, never an automatic consequence.
-  integrityScore         Int           @default(100)
+  integrityScore         Int                 @default(100)
   /// Optimistic concurrency for the attempt's own writes.
-  version                Int           @default(0)
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  version                Int                 @default(0)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   snapshots AttemptSnapshot[]
 
@@ -2398,6 +2406,91 @@ model AssessmentAttempt {
 ///   - CHECK AttemptSnapshot_content_check: content at most 64 KB;
 ///   - append-only by convention; the retention job removes them 180 days
 ///     after result release, or once every open IntegrityFlag is decided.
+/// A WebAuthn credential a student may start a device-bound sitting with
+/// (Phase 6d). Enrolled IN PERSON by a supervisor — never by the student —
+/// which is what closes the campus failure WebAuthn is really here for: a
+/// senior sitting an exam for a junior.
+///
+/// Deliberately NOT browser fingerprinting (SPEC section 5): unstable,
+/// trivially spoofed, and covert tracking is the wrong posture for a college
+/// asking students to trust it.
+model DeviceRegistration {
+  id                     String          @id @default(cuid())
+  userId                 String
+  user                   User            @relation(fields: [userId], references: [id])
+  /// Base64url, as the authenticator reports it.
+  credentialId           String          @unique
+  /// The COSE public key, base64url. Not a secret, and not usable to track.
+  publicKey              String
+  /// Authenticator model, 32 hex characters. All-zero for most platform keys.
+  aaguid                 String?
+  /// What the student calls it ("my laptop", "lab 3 loaner 7").
+  label                  String
+  attestationKind        AttestationKind @default(NONE)
+  /// Signature counter. A counter that goes BACKWARDS is the only hint
+  /// WebAuthn gives that a credential may have been cloned; many
+  /// authenticators report zero always, so zero-to-zero is not a regression.
+  signCount              Int             @default(0)
+  /// A supervised single-use loan, so a broken laptop never stops a student
+  /// sitting an exam. Does not count towards the two-device limit.
+  isLoaner               Boolean         @default(false)
+  /// Set when a loaner has served its sitting. A consumption and a
+  /// revocation are different facts; a reviewer may need both.
+  loanConsumedAt         DateTime?
+  /// The staff member who stood there and enrolled it.
+  enrolledBySupervisorId String
+  enrolledAt             DateTime        @default(now())
+  /// Withdrawn rather than deleted: a registration is never hard-deleted
+  /// (trigger), because which device sat an exam has to stay answerable.
+  revokedAt              DateTime?
+  revokedById            String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  attempts AssessmentAttempt[]
+
+  @@index([userId, revokedAt])
+  @@index([enrolledBySupervisorId])
+}
+
+/// One WebAuthn challenge, outstanding. Single-use and short-lived: a
+/// challenge that can be replayed is not a challenge.
+model WebAuthnChallenge {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Base64url random. Unique, so a replay cannot create a second row.
+  challenge    String          @unique
+  purpose      WebAuthnPurpose
+  /// The sitting this challenge is for, when asserting to start one.
+  assessmentId String?
+  expiresAt    DateTime
+  /// Written once, by the verification that spends it.
+  consumedAt   DateTime?
+  /// Which device signed it, written by the verification that spends the
+  /// challenge. This row IS the evidence that a fresh assertion happened:
+  /// the attempt-start path reads it instead of trusting a cookie, so
+  /// there is no signed value to forge and no second place to expire.
+  deviceRegistrationId String?
+  createdAt    DateTime        @default(now())
+
+  @@index([userId, purpose, expiresAt])
+  @@index([expiresAt])
+}
+
+enum WebAuthnPurpose {
+  ENROL
+  ASSERT
+}
+
+enum AttestationKind {
+  NONE
+  SELF
+  BASIC
+  ATTCA
+  ANONCA
+}
+
 model AttemptSnapshot {
   id          String            @id @default(cuid())
   attemptId   String

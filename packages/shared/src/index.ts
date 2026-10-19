@@ -19,6 +19,9 @@ export * from "./exam-palette";
 export * from "./exam-telemetry";
 export * from "./exam-snapshot";
 export * from "./exam-randomise";
+export * from "./cidr";
+export * from "./seb";
+export * from "./device";
 export * from "./roster";
 export * from "./governance";
 export {

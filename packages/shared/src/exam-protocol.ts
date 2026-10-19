@@ -87,6 +87,8 @@ export const ATTEMPT_REVOKE_REASONS = [
   "session_revoked",
   /** The request came from outside the hall's allowlist (Phase 6d). */
   "outside_allowlist",
+  /** A kiosk assessment, and Safe Exam Browser could not be verified (Phase 6d). */
+  "seb_required",
   /** The token did not match this attempt. */
   "bad_token",
 ] as const;
@@ -99,6 +101,8 @@ export const ATTEMPT_REVOKE_MESSAGES: Readonly<Record<AttemptRevokeReason, strin
   terminated: "An invigilator has ended this sitting. Speak to them before leaving the hall.",
   session_revoked: "You have been signed out. Sign in again to resume this attempt.",
   outside_allowlist: "This attempt can only be sat from the exam hall network. Tell your invigilator.",
+  seb_required:
+    "This assessment must be sat in Safe Exam Browser. Open it from the .seb file your department gave you.",
   bad_token: "This attempt could not be verified in this browser. Reopen it from your assessment list.",
 });
 

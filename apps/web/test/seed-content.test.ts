@@ -614,27 +614,38 @@ describe("Phase 4 seeds: independent mirrors", () => {
       expect(def, `${slug} is not in AUTHORED_PROBLEMS`).toBeDefined();
     });
 
-    it.runIf(def !== undefined)("expects what an independent implementation expects (or the checker's rule accepts)", () => {
-      for (const t of def!.generateTests()) {
-        const args = functionArgs(def!, t);
-        const expected = functionResult(def!, t);
-        if (mirror.expected) expect(expected).toEqual(mirror.expected(args));
-        if (mirror.accepts) expect(mirror.accepts(args, expected), "the jury answer must satisfy the checker's rule").toBe(true);
-      }
-    });
-
-    it.runIf(def !== undefined)("catches every deliberately-wrong reference, mirrored in JS", () => {
-      const tests = def!.generateTests();
-      for (const r of def!.references.filter((x) => x.expected === "WA")) {
-        const wrong = mirror.wrong[r.label];
-        expect(wrong, `no JS mirror for "${r.label}"`).toBeDefined();
-        const caught = tests.filter((t) => {
+    // The 20s suite-wide timeout in vitest.config.ts covers these two: they
+    // run an independent implementation over every generated test of every
+    // authored problem, which is real compute.
+    it.runIf(def !== undefined)(
+      "expects what an independent implementation expects (or the checker's rule accepts)",
+      () => {
+        for (const t of def!.generateTests()) {
           const args = functionArgs(def!, t);
-          const out = wrong!(args);
-          return mirror.accepts ? !mirror.accepts(args, out) : JSON.stringify(out) !== JSON.stringify(functionResult(def!, t));
-        });
-        expect(caught.length, r.label).toBeGreaterThanOrEqual(1);
-      }
-    });
+          const expected = functionResult(def!, t);
+          if (mirror.expected) expect(expected).toEqual(mirror.expected(args));
+          if (mirror.accepts) expect(mirror.accepts(args, expected), "the jury answer must satisfy the checker's rule").toBe(true);
+        }
+      },
+      30_000,
+    );
+
+    it.runIf(def !== undefined)(
+      "catches every deliberately-wrong reference, mirrored in JS",
+      () => {
+        const tests = def!.generateTests();
+        for (const r of def!.references.filter((x) => x.expected === "WA")) {
+          const wrong = mirror.wrong[r.label];
+          expect(wrong, `no JS mirror for "${r.label}"`).toBeDefined();
+          const caught = tests.filter((t) => {
+            const args = functionArgs(def!, t);
+            const out = wrong!(args);
+            return mirror.accepts ? !mirror.accepts(args, out) : JSON.stringify(out) !== JSON.stringify(functionResult(def!, t));
+          });
+          expect(caught.length, r.label).toBeGreaterThanOrEqual(1);
+        }
+      },
+      30_000,
+    );
   });
 });

@@ -224,6 +224,16 @@ export const SUPER_ADMIN_SUPPORTING_PAGES: readonly PageRef[] = Object.freeze([
  */
 export const STAFF_CAPABILITIES = deepFreeze([
   {
+    key: "exam.device.enrol",
+    label: "Enrol a student's exam device, in person",
+    // SPEC §5: "supervised in-lab enrolment". A student who can enrol their
+    // own device can enrol a friend's, which is the impersonation WebAuthn
+    // is here to close.
+    roles: ["ADMIN", "SUPER_ADMIN"],
+    actions: [],
+    routes: ["app/api/exam/device/enrol/route.ts#POST"],
+  },
+  {
     key: "judge.operate",
     label: "Operate the judge (drain nodes, rejudge one submission, toggle languages)",
     roles: STAFF,
@@ -426,6 +436,15 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       "app/api/exam/[attemptId]/snapshot/route.ts#POST",
       "app/api/exam/[attemptId]/submit/route.ts#POST",
     ],
+  },
+  {
+    key: "exam.device.assert",
+    label: "Verify my registered device before an assessment",
+    // The candidate's own route: they hold the authenticator. Enrolment is a
+    // supervisor's (exam.device.enrol), which is what closes impersonation.
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: [],
+    routes: ["app/api/exam/device/assert/route.ts#POST"],
   },
   {
     key: "notes.manage",

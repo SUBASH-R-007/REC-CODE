@@ -6,6 +6,7 @@ import {
   acceptsWork,
   computeExpiresAt,
   isFinished,
+  requiresDeviceAssertion,
   resolveLayout,
   type AccommodationKind,
   type AttemptLayout,
@@ -15,6 +16,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
 import { attemptLayoutOf } from "@/lib/exam/layout";
+import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
 import { hashUserAgent, requestIpHash } from "@/lib/ip";
 
 /**
@@ -44,7 +46,8 @@ export type StartRefusal =
   | "not_your_audience"
   | "no_attempts_left"
   | "finished"
-  | "needs_lab_session";
+  | "needs_lab_session"
+  | "needs_device";
 
 export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Object.freeze({
   not_found: "That assessment does not exist.",
@@ -54,6 +57,8 @@ export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Ob
   finished: "You have already finished this assessment.",
   needs_lab_session:
     "This assessment is sat in a supervised lab. Your invigilator will seat you in an exam session first.",
+  needs_device:
+    "This assessment needs a registered device. Verify yours before starting — or ask your invigilator, who can enrol this machine or issue a loaner.",
 });
 
 export type StartResult =
@@ -138,6 +143,8 @@ export async function startOrResumeAttempt(args: {
   readonly slug: string;
   readonly userId: string;
   readonly sessionId: string | null;
+  /** The seat an invigilator put this candidate in (LAB_SUPERVISED). */
+  readonly seatLabel?: string | null;
 }): Promise<StartResult> {
   const now = new Date();
 
@@ -215,6 +222,16 @@ export async function startOrResumeAttempt(args: {
     if (!session) return refuse("needs_lab_session");
   }
 
+  // ── A fresh device assertion (Phase 6d) ────────────────────────────────
+  // SPEC §5 requires one to START a REMOTE_MONITORED or LAB_SUPERVISED
+  // attempt. The assertion happened in its own request; a short-lived signed
+  // cookie scoped to this assessment carries the result here.
+  let device: { deviceId: string; isLoaner: boolean } | null = null;
+  if (requiresDeviceAssertion(assessment.proctorMode)) {
+    device = await freshAssertionFor({ userId: args.userId, assessmentId: assessment.id });
+    if (!device) return refuse("needs_device");
+  }
+
   const accommodation = await accommodationFor(args.userId, now);
   const expiry = computeExpiresAt({
     startedAt: now,
@@ -256,10 +273,17 @@ export async function startOrResumeAttempt(args: {
       ipHashLast: ipHash,
       uaHash: userAgent ? hashUserAgent(userAgent) : null,
       lockSessionId: args.sessionId,
+      // Which machine sat this exam, answerable from the row long after the
+      // assertion cookie is gone.
+      deviceRegistrationId: device?.deviceId ?? null,
+      seatLabel: args.seatLabel ?? null,
     },
   });
 
   await setAttemptCookie(row.id, token.token, expiry.grantedSec);
+  // A loan is spent only now, after the sitting exists: a candidate who
+  // asserted and then failed a later check has not burned their loaner.
+  if (device?.isLoaner) await consumeLoaner(device.deviceId);
 
   await audit({
     actorId: args.userId,
@@ -279,6 +303,8 @@ export async function startOrResumeAttempt(args: {
       cappedByClose: expiry.cappedByClose,
       accommodated: accommodation !== null,
       questions: layout.questions.length,
+      deviceBound: device !== null,
+      onLoaner: device?.isLoaner ?? false,
     },
   });
 
