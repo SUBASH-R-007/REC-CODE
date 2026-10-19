@@ -195,8 +195,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     checkerSrc: `CHECKER-SRC-${tag}`,
     draftStmt: `DRAFT-STMT-${tag}`,
     sampleIn: `SAMPLE-IN-${tag}`,
+    // Phase 7: the worked explanation is the aptitude answer key's twin. A
+    // student may read it only AFTER they have committed an answer, so it is
+    // a secret everywhere the canary sweep goes.
+    aptExplain: `APT-EXPLAIN-${tag}`,
   };
-  const SECRETS = [C.hiddenIn, C.hiddenOut, C.hiddenBig, C.refSrc, C.checkerSrc, C.draftStmt];
+  const SECRETS = [C.hiddenIn, C.hiddenOut, C.hiddenBig, C.refSrc, C.checkerSrc, C.draftStmt, C.aptExplain];
 
   let db: (typeof import("@/lib/db"))["db"];
   let boardModel: typeof import("@/components/leaderboard/model");
@@ -227,6 +231,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     attempt: "",
     submitAttempt: "",
     cpp20Config: "",
+    aptitudeQuestion: "",
+    aptitudePattern: "",
+    aptitudePatternSlug: `${tag}-mock`,
+    aptitudeSection: "",
+    mockAttempt: "",
   };
   /**
    * The attempt token S holds, so the heartbeat's AUTHENTICATED path is the
@@ -245,6 +254,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     return text ?? "";
   };
   const leaks = (text: string) => SECRETS.filter((s) => text.includes(s));
+
+  /**
+   * The ONE place a student may legitimately meet the worked explanation: the
+   * practice action, on the same round trip in which it committed their
+   * answer. SPEC §5's design is "the explanation enters the DOM only after
+   * the answer is committed", and an action that has just written the answer
+   * is exactly that moment — the check lives in the write rather than in a
+   * later read that would have to re-establish it.
+   *
+   * Recorded here rather than exempted, so the sweep ALSO fails if the
+   * explanation stops being returned. A positive control is stronger than a
+   * hole.
+   */
+  const EXPLANATION_CARRIER = "action aptitude#answerPractice";
 
   beforeAll(async () => {
     if (!new URL(TEST_URL).pathname.endsWith("_test")) {
@@ -484,6 +507,111 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     });
     ids.assessmentProblem = assessmentProblem.id;
 
+    // Phase 7: a PUBLISHED aptitude question whose worked explanation is a
+    // canary, and a PUBLISHED pattern whose single section draws on it. The
+    // explanation and the answer key are the phase's student-unreachable
+    // data, and this is the live half of
+    // tests/repo/aptitude-answer-exposure.test.ts: the static fence proves no
+    // student-reachable module SELECTS the key, and this one proves nothing a
+    // student can actually call hands it back.
+    const aptitudeQuestion = await db.aptitudeQuestion.create({
+      data: {
+        displayCode: `APT-${String(Math.floor(Math.random() * 90_000) + 10_000)}0001`,
+        area: "QUANTITATIVE",
+        topic: "PERCENTAGES",
+        kind: "SINGLE_CHOICE",
+        difficulty: "EASY",
+        status: "PUBLISHED",
+        publishedAt: new Date(now.getTime() - 60_000),
+        stem: "What is 10% of 250?",
+        options: ["25", "20", "30", "35"],
+        correctOptionIndexes: [0],
+        explanation: `${C.aptExplain} — ten percent is one tenth, so 250 divided by ten is 25.`,
+        expectedSeconds: 45,
+        origin: "FACULTY",
+        contentHash: createHash("sha256").update(`${tag}-apt`).digest("hex"),
+      },
+      select: { id: true },
+    });
+    ids.aptitudeQuestion = aptitudeQuestion.id;
+    const aptitudePattern = await db.mockPattern.create({
+      data: {
+        slug: ids.aptitudePatternSlug,
+        name: `Mock ${tag}`,
+        funnelLabel: "A canary-sweep funnel",
+        sourceNote: "Written for the student-exposure canary sweep, 2026.",
+        description: "A pattern the canary sweep sits; it models no company at all.",
+      },
+      select: { id: true },
+    });
+    ids.aptitudePattern = aptitudePattern.id;
+    const aptitudeSection = await db.aptitudeSection.create({
+      data: {
+        patternId: aptitudePattern.id,
+        position: 1,
+        key: "quantitative",
+        label: "Quantitative aptitude",
+        area: "QUANTITATIVE",
+        topicMix: [{ topic: "PERCENTAGES", count: 1 }],
+        questionCount: 1,
+        timeLimitSec: 600,
+        cutoffPercent: 50,
+        // Back navigation OFF, so the sweep exercises the restricted path.
+        allowBackNavigation: false,
+      },
+      select: { id: true },
+    });
+    ids.aptitudeSection = aptitudeSection.id;
+    await db.mockPattern.update({ where: { id: aptitudePattern.id }, data: { status: "PUBLISHED" } });
+
+    // A sitting IN PROGRESS for S, so the four mock actions run against a
+    // real paper instead of being refused before they read anything. A
+    // refusal proves nothing: it never reaches the question. `startMock` is
+    // idempotent, so the canary sweep's call RESUMES this one — which also
+    // exercises the resume path.
+    const mockStartedAt = new Date(now.getTime() - 60_000);
+    const mockAttempt = await db.mockAttempt.create({
+      data: {
+        patternId: aptitudePattern.id,
+        userId: user.id,
+        attemptNumber: 1,
+        seed: 20_261_019,
+        startedAt: mockStartedAt,
+        expiresAt: new Date(mockStartedAt.getTime() + 600_000),
+        currentSectionPosition: 1,
+        layout: {
+          v: 1,
+          sections: [
+            {
+              sectionId: aptitudeSection.id,
+              key: "quantitative",
+              position: 1,
+              questions: [
+                {
+                  questionId: aptitudeQuestion.id,
+                  index: 0,
+                  topic: "PERCENTAGES",
+                  optionOrder: [0, 1, 2, 3],
+                  passageId: null,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    ids.mockAttempt = mockAttempt.id;
+    await db.mockSectionState.create({
+      data: {
+        attemptId: mockAttempt.id,
+        sectionId: aptitudeSection.id,
+        position: 1,
+        startedAt: mockStartedAt,
+        endsAt: new Date(mockStartedAt.getTime() + 600_000),
+      },
+    });
+
     // A hall, so the invigilator SSE route has a session to be refused for.
     const examSession = await db.examSession.create({
       data: {
@@ -598,6 +726,34 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         raw(`DELETE FROM "public"."ExamSession" WHERE "id" = $1`, ids.examSession),
         raw(`DELETE FROM "public"."Assessment" WHERE "id" = $1`, ids.assessment),
         raw(`ALTER TABLE "public"."Assessment" ENABLE TRIGGER "Assessment_published_immutable"`),
+        // Phase 7 aptitude fixture. A finalised sitting refuses DELETE by
+        // trigger (its result and its XP are permanent), a sat pattern
+        // refuses edits, and a published question refuses both — so all
+        // three guards come off for the teardown and go back on after.
+        raw(`ALTER TABLE "public"."MockAttempt" DISABLE TRIGGER "MockAttempt_written_once"`),
+        raw(`ALTER TABLE "public"."MockAttemptAnswer" DISABLE TRIGGER "MockAttemptAnswer_closed_section"`),
+        raw(`ALTER TABLE "public"."AptitudeSection" DISABLE TRIGGER "AptitudeSection_pattern_frozen"`),
+        raw(`ALTER TABLE "public"."MockPattern" DISABLE TRIGGER "MockPattern_scoring_frozen"`),
+        raw(`ALTER TABLE "public"."AptitudeQuestion" DISABLE TRIGGER "AptitudeQuestion_published_immutable"`),
+        raw(
+          `DELETE FROM "public"."MockAttemptAnswer" WHERE "attemptId" IN (SELECT "id" FROM "public"."MockAttempt" WHERE "userId" = ANY($1::text[]))`,
+          userIds,
+        ),
+        raw(
+          `DELETE FROM "public"."MockSectionState" WHERE "attemptId" IN (SELECT "id" FROM "public"."MockAttempt" WHERE "userId" = ANY($1::text[]))`,
+          userIds,
+        ),
+        raw(`DELETE FROM "public"."MockAttempt" WHERE "userId" = ANY($1::text[])`, userIds),
+        raw(`DELETE FROM "public"."AptitudeUserTopicStat" WHERE "userId" = ANY($1::text[])`, userIds),
+        raw(`DELETE FROM "public"."AptitudeQuestionStat" WHERE "questionId" = $1`, ids.aptitudeQuestion),
+        raw(`DELETE FROM "public"."AptitudeSection" WHERE "patternId" = $1`, ids.aptitudePattern),
+        raw(`DELETE FROM "public"."MockPattern" WHERE "id" = $1`, ids.aptitudePattern),
+        raw(`DELETE FROM "public"."AptitudeQuestion" WHERE "id" = $1`, ids.aptitudeQuestion),
+        raw(`ALTER TABLE "public"."AptitudeQuestion" ENABLE TRIGGER "AptitudeQuestion_published_immutable"`),
+        raw(`ALTER TABLE "public"."MockPattern" ENABLE TRIGGER "MockPattern_scoring_frozen"`),
+        raw(`ALTER TABLE "public"."AptitudeSection" ENABLE TRIGGER "AptitudeSection_pattern_frozen"`),
+        raw(`ALTER TABLE "public"."MockAttemptAnswer" ENABLE TRIGGER "MockAttemptAnswer_closed_section"`),
+        raw(`ALTER TABLE "public"."MockAttempt" ENABLE TRIGGER "MockAttempt_written_once"`),
         raw(`DELETE FROM "public"."StudyPlan" WHERE "slug" = ANY($1::text[])`, [ids.sheetSlug, ids.trackSlug]),
         raw(`DELETE FROM "public"."ProblemStat" WHERE "problemId" = ANY($1::text[])`, problemIds),
         ...["TestCase", "ReferenceSolution", "Hint", "Editorial", "StarterCode", "Subtask", "ProblemLanguageLimit"].map((t) =>
@@ -760,6 +916,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
             json: { clientSeq: 0 },
           }),
         () => params({ attemptId: ids.attempt }),
+      ),
+      status: [200],
+    },
+    // Phase 7: the section clock. A student's own sitting, so it answers 200
+    // — and what it answers is a clock and a status, never a question.
+    "api/aptitude/attempts/[attemptId]/clock/route.ts#GET": {
+      call: call(
+        () => studentRequest(`/api/aptitude/attempts/${ids.mockAttempt}/clock`),
+        () => params({ attemptId: ids.mockAttempt }),
       ),
       status: [200],
     },
@@ -942,6 +1107,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   };
   /** Exports that read nothing problem-scoped, with the reason. */
   const NOT_PROBLEM_SCOPED: Record<string, string> = {
+    // Phase 7's select vocabulary. Not queries: they are the column lists the
+    // queries select THROUGH, and tests/repo/aptitude-answer-exposure.test.ts
+    // asserts what each one may and may not name. Keeping them beside the
+    // queries they govern is the point — a select constant in lib/ is a
+    // select constant nobody looks at when adding a query here.
+    "aptitude-select#APTITUDE_PUBLIC_SELECT": "column list: everything needed to ASK a question and nothing needed to answer it",
+    "aptitude-select#APTITUDE_ANSWER_SELECT": "column list: the key and the working, for a student who has already answered",
+    "aptitude-select#APTITUDE_POOL_SELECT": "column list: the least a seeded draw needs",
+    "aptitude-select#APTITUDE_PASSAGE_SELECT": "column list: a passage, which carries no key at all",
+    "aptitude-select#APTITUDE_ANSWER_KEY_FIELDS": "constant: the four fields that must never reach a student before they answer",
     "judge-languages#LANGUAGE_CONFIG_TAG": "cache tag constant",
     "judge-languages#revalidateLanguageConfigs": "cache invalidation; returns nothing",
     "leaderboard#FULL_BOARD_CAP": "constant",
@@ -1194,6 +1369,55 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "plans#enrollInPlan": [() => [{ planId: ids.track }]],
     "plans#leavePlan": [() => [{ planId: ids.track }]],
     "plans#changeEnrollment": [() => [null, form({ planId: ids.track, intent: "enroll" })]],
+    /**
+     * Phase 7: a student practising aptitude and sitting a mock. All seven
+     * are self-service, so all seven are called AS S and every answer has to
+     * be canary-clean — which for this phase means it must not carry the
+     * worked explanation or the answer key.
+     *
+     * `startMock` really starts a sitting (the pattern is PUBLISHED and its
+     * one section draws on the one published question), so `serveMockQuestion`
+     * and `saveMockAnswer` run against a real paper rather than being refused
+     * before they read anything. A refusal proves nothing here: it never
+     * reaches the question.
+     */
+    "aptitude#startMock": [() => [{ slug: ids.aptitudePatternSlug }]],
+    "aptitude#serveMockQuestion": [() => [{ attemptId: ids.mockAttempt, index: 0 }]],
+    "aptitude#saveMockAnswer": [
+      () => [
+        {
+          attemptId: ids.mockAttempt,
+          questionId: ids.aptitudeQuestion,
+          shownIndexes: [0],
+          numericValue: null,
+          markedForReview: false,
+          seenAtMs: 0,
+          answeredAtMs: 1_000,
+        },
+      ],
+    ],
+    // One section, so advancing is refused for having nowhere to go — still a
+    // non-Forbidden answer, and still has to be canary-clean.
+    "aptitude#advanceMockSection": [() => [{ attemptId: ids.mockAttempt }]],
+    // Finalising returns the student's own result. The explanation is NOT
+    // part of it: the review page is the only student path that may select
+    // the key, and only once finalizedAt is set.
+    "aptitude#finaliseMockAttempt": [() => [{ attemptId: ids.mockAttempt }]],
+    // Topic practice commits an answer and THEN returns the working, so this
+    // one legitimately carries the explanation. It is the single exception,
+    // and it is asserted as a POSITIVE control below rather than exempted.
+    "aptitude#answerPractice": [
+      () => [
+        {
+          questionId: ids.aptitudeQuestion,
+          selectedIndexes: [0],
+          numericValue: null,
+          seenAtMs: 0,
+          answeredAtMs: 2_000,
+        },
+      ],
+    ],
+    "aptitude#recordPracticeQuestionServed": [() => [{ questionId: ids.aptitudeQuestion }]],
     "profile#saveProfileSettings": [
       () => [null, form({ handle: ids.handle, visibility: "PUBLIC", bio: "", fontSize: "14", tabSize: "4", keymap: "default" })],
     ],
@@ -1232,8 +1456,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
               const created = result as { ok: boolean; data?: { id: string } };
               if (created.ok && created.data) createdNoteIds.push(created.data.id);
             }
-            const leaked = leaks(text);
+            const leaked = leaks(text).filter(
+              (secret) => !(secret === C.aptExplain && `action ${key}` === EXPLANATION_CARRIER),
+            );
             if (leaked.length > 0) problems.push(`${key}: leaked ${leaked.join(", ")}`);
+            if (`action ${key}` === EXPLANATION_CARRIER && !text.includes(C.aptExplain)) {
+              problems.push(
+                `${key}: positive control — a committed practice answer must return the worked explanation, which is the point of the phase`,
+              );
+            }
           }
           continue;
         }
@@ -1273,8 +1504,17 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
 
   it("no output collected anywhere carries a secret canary", () => {
     expect(outputs.length).toBeGreaterThan(80);
-    const leaked = outputs.flatMap((o) => leaks(o.text).map((s) => `${o.where}: ${s}`));
+    const leaked = outputs.flatMap((o) =>
+      leaks(o.text)
+        .filter((secret) => !(secret === C.aptExplain && o.where === EXPLANATION_CARRIER))
+        .map((s) => `${o.where}: ${s}`),
+    );
     expect(leaked).toEqual([]);
+    // The carrier really ran, so the exclusion above is not excusing silence.
+    expect(
+      outputs.some((o) => o.where === EXPLANATION_CARRIER && o.text.includes(C.aptExplain)),
+      "positive control: the practice action returned the worked explanation",
+    ).toBe(true);
   });
 
   it("canary self-check: the fixture really holds every secret where only staff and judges may read it", async () => {

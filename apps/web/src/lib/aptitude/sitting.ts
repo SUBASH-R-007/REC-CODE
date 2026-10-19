@@ -206,24 +206,21 @@ export async function saveAnswer(input: SaveAnswerInput, now: Date): Promise<{ s
   const selectedIndexes = mapSelectionToOriginal(input.shownIndexes, served.optionOrder);
   // One response shape per answer; the CHECK says the same.
   const numericValue = selectedIndexes.length > 0 ? null : input.numericValue;
-  const firstSeenAtMs = Math.max(0, Math.floor(input.seenAtMs));
-  const answeredAtMs =
-    input.answeredAtMs === null ? null : Math.max(firstSeenAtMs, Math.floor(input.answeredAtMs));
+  // `firstSeenAtMs` was written when the question was served, and is not
+  // the client's to restate. The answer time is clamped to it so a clock
+  // glitch cannot produce a row `MockAttemptAnswer_timing_check` refuses.
+  const floorMs = Math.max(0, Math.floor(input.seenAtMs));
+  const answeredAtMs = input.answeredAtMs === null ? null : Math.max(floorMs, Math.floor(input.answeredAtMs));
 
-  await db.mockAttemptAnswer.upsert({
-    where: { attemptId_questionId: { attemptId: input.attemptId, questionId: input.questionId } },
-    create: {
-      attemptId: input.attemptId,
-      sectionStateId: current.stateId,
-      questionId: input.questionId,
-      position: served.index,
-      selectedIndexes,
-      numericValue,
-      markedForReview: input.markedForReview,
-      firstSeenAtMs,
-      answeredAtMs,
-    },
-    update: {
+  // An UPDATE, never an upsert: the answer row comes into existence when the
+  // server SERVES the question, and a candidate cannot answer a question the
+  // server never served them. Creating it here instead would mean an answer
+  // existed for a question with no recorded serving, which breaks
+  // `AptitudeQuestionStat_counts_check` (timesAnswered <= timesServed) at
+  // finalise — the live canary sweep found exactly that.
+  const updated = await db.mockAttemptAnswer.updateMany({
+    where: { attemptId: input.attemptId, questionId: input.questionId },
+    data: {
       selectedIndexes,
       numericValue,
       markedForReview: input.markedForReview,
@@ -233,6 +230,7 @@ export async function saveAnswer(input: SaveAnswerInput, now: Date): Promise<{ s
       changeCount: { increment: 1 },
     },
   });
+  if (updated.count !== 1) throw new ForbiddenError(ANSWER_REFUSAL_MESSAGE.not_yet_served);
 
   return { saved: true as const, index: served.index };
 }

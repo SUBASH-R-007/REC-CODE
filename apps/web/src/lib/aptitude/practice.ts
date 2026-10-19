@@ -146,6 +146,12 @@ export async function answerPracticeQuestion(args: {
       },
     });
 
+    // Practice serves and answers in ONE round trip — the candidate asks for
+    // a question, answers it, and is shown the working — so both counters
+    // move together here. That keeps
+    // `AptitudeQuestionStat_counts_check` (timesAnswered <= timesServed)
+    // true without needing the client to have called the serve action first,
+    // which a mock sitting does and practice does not.
     await tx.aptitudeQuestionStat.upsert({
       where: { questionId: question.id },
       create: {
@@ -157,9 +163,11 @@ export async function answerPracticeQuestion(args: {
         lastServedAt: args.at,
       },
       update: {
+        timesServed: { increment: 1 },
         timesAnswered: { increment: 1 },
         timesCorrect: { increment: correct ? 1 : 0 },
         totalSeconds: { increment: seconds },
+        lastServedAt: args.at,
       },
     });
 

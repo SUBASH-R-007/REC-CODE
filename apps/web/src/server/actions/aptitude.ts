@@ -45,6 +45,16 @@ export async function startMock(input: unknown): Promise<ActionResult<{ attemptI
   }, "startMock");
 }
 
+const serveSchema = z.object({ attemptId, index: z.number().int().min(0).max(199) }).strict();
+
+export async function serveMockQuestion(input: unknown): Promise<ActionResult<{ highWaterIndex: number }>> {
+  return runAction(async () => {
+    const user = await requireActionUser();
+    const parsed = serveSchema.parse(input);
+    return serveIndex({ ...parsed, userId: user.id });
+  }, "serveMockQuestion");
+}
+
 const answerSchema = z
   .object({
     attemptId,
@@ -64,16 +74,6 @@ export async function saveMockAnswer(input: unknown): Promise<ActionResult<{ sav
     const parsed = answerSchema.parse(input);
     return saveAnswer({ ...parsed, userId: user.id }, new Date());
   }, "saveMockAnswer");
-}
-
-const serveSchema = z.object({ attemptId, index: z.number().int().min(0).max(199) }).strict();
-
-export async function serveMockQuestion(input: unknown): Promise<ActionResult<{ highWaterIndex: number }>> {
-  return runAction(async () => {
-    const user = await requireActionUser();
-    const parsed = serveSchema.parse(input);
-    return serveIndex({ ...parsed, userId: user.id });
-  }, "serveMockQuestion");
 }
 
 const advanceSchema = z.object({ attemptId }).strict();
