@@ -306,3 +306,41 @@ Two things follow:
 A stale `.next/types` directory also reports phantom `TS2307` errors for a
 route that has just been moved. Rebuild before believing them:
 `rm -rf apps/web/.next && npx pnpm@9.15.9 build`.
+
+## Fixing a migration means rolling it back in BOTH databases
+
+There are two: the dev database (`packages/db/.env`'s `DATABASE_URL`, `recx`)
+and the test database the `.db.test.ts` suites use (`recx_test`, applied by
+`applyMigrations()` in `packages/db/test/support/test-db.ts`). Prisma records a
+checksum per applied migration, so an already-applied migration that is then
+edited cannot simply be re-deployed — it has to be rolled back and re-applied,
+and that is **per database**.
+
+Rolling back only one of them produces a confusing failure: the fix is proven
+by hand against the dev database while the suite, which runs against
+`recx_test`, keeps exercising the old definition and keeps failing. It cost
+three rounds of "but I just fixed that" in Phase 7b. The rollback script takes
+the target as an explicit argument for exactly this reason, and the suite's own
+`expect(current?.name).toBe(dbName)` is what tells you which database you are
+actually looking at.
+
+While you are there: `prisma migrate reset` is refused in this environment
+("Prisma Migrate detected that it was invoked by Claude Code"), so a targeted
+rollback script is the only route. Drop exactly what the migration created,
+delete its `_prisma_migrations` row, then `migrate deploy`.
+
+## An edit script that does not assert is an edit script that silently did nothing
+
+Several files here are edited with short Python or `sed` scripts because
+heredocs fight TypeScript quoting. A `str.replace` whose needle does not match
+returns the string unchanged and exits 0, and `sed -i` with a pattern that
+matches nothing does the same — so the edit reports success, the next command
+runs against the old file, and the resulting failure points anywhere but at the
+cause. In Phase 7b a regex-escaping slip meant a "roll back the TEST database"
+script rolled back the dev database a second time, and the real target was
+never touched.
+
+Every edit script in this repository therefore asserts its needle was found
+(`assert old in s` before the replace), and anything that picks a target prints
+it (`console.log("target:", …)`) so the output says what was done rather than
+that something was done.

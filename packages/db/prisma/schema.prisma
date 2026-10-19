@@ -2905,3 +2905,85 @@ model AptitudeQuestionStat {
   lastServedAt  DateTime?
   updatedAt     DateTime         @updatedAt
 }
+
+/// Mirrors MOCK_PATTERN_STATUSES in @recx/shared.
+enum MockPatternStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// A recruiter funnel, encoded declaratively (SPEC §5): ordered sections,
+/// per-section time limit, question count, per-section cutoff, negative
+/// marking fraction, allowBackNavigation. There is deliberately no overall
+/// cutoff column — the spec lists per-section cutoffs and nothing else
+/// (docs/OPEN-QUESTIONS.md).
+///
+/// A pattern that has been SAT is frozen (recx_refuse_used_pattern_change,
+/// added with MockAttempt in 7c): a score must mean what it meant when the
+/// candidate sat it, and a cohort percentile is only honest if everyone sat
+/// the same blueprint.
+model MockPattern {
+  id                    String            @id @default(cuid())
+  slug                  String            @unique
+  name                  String
+  funnelLabel           String
+  /// The provenance, in words. A pattern with no stated source is a pattern
+  /// nobody can check.
+  sourceNote            String
+  /// False for the generic pattern, which models nobody and therefore
+  /// carries GENERIC_PATTERN_NOTICE instead of MODELLED_ON_NOTICE.
+  modelledOnCompany     Boolean           @default(false)
+  description           String
+  status                MockPatternStatus @default(DRAFT)
+  /// Maintained by recx_sync_pattern_totals; never aggregated on read.
+  totalQuestions        Int               @default(0)
+  totalTimeSec          Int               @default(0)
+  /// Maintained by the nightly pattern-stats job (Phase 7c).
+  finalizedAttemptCount Int               @default(0)
+  medianPercent         Float?
+  createdById           String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  sections AptitudeSection[]
+
+  @@index([status, slug])
+}
+
+/// One section of a pattern. `topicMix` is the blueprint — [{topic, count}]
+/// summing to questionCount, held by a CHECK as well as by zod, because
+/// buildMockLayout() draws from it and a blueprint that does not sum is a
+/// short paper for a candidate.
+model AptitudeSection {
+  id                   String        @id @default(cuid())
+  patternId            String
+  pattern              MockPattern   @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  /// 1-based.
+  position             Int
+  /// A stable, readable identity within the pattern — "verbal", "numerical".
+  /// A seed script upserts on it, and a result indexes answers by it.
+  key                  String
+  label                String
+  /// Null = a deliberately mixed section.
+  area                 AptitudeArea?
+  topicMix             Json
+  questionCount        Int
+  timeLimitSec         Int
+  /// Zero is how "no cutoff" is said: cleared by every candidate, and the
+  /// section still counts toward the total.
+  cutoffPercent        Float         @default(0)
+  marksPerCorrect      Float         @default(1)
+  /// A FRACTION of marksPerCorrect in [0, 1], never an absolute mark: a
+  /// 2-mark penalty on a 1-mark question makes a mock strictly harsher than
+  /// the funnel it claims to model.
+  negativeMarkFraction Float         @default(0)
+  allowBackNavigation  Boolean       @default(true)
+  shuffleQuestions     Boolean       @default(true)
+  shuffleOptions       Boolean       @default(true)
+  createdAt            DateTime      @default(now())
+
+  @@unique([patternId, position])
+  @@unique([patternId, key])
+  @@unique([patternId, label])
+}

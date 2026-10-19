@@ -94,6 +94,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019250000_phase7a_question_bank
   "AptitudePassage",
   "AptitudeQuestion",
+  // 20261019250100_phase7b_patterns
+  "MockPattern",
+  "AptitudeSection",
 ];
 
 export interface GuardTrigger {
@@ -309,10 +312,22 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
  * "AdminScope_touch" that rewrites NEW before the guard sees it) fails both
  * fences until it is reviewed and listed.
  */
-export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
+export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [
+  /**
+   * 20261019250100_phase7b_patterns. The one non-guard trigger in the
+   * database: it MAINTAINS MockPattern's denormalised totals rather than
+   * refusing a write, so a listing page never aggregates to render (SPEC
+   * §4(d)'s rule generalised) and the totals cannot drift from the sections
+   * they summarise. It is listed here rather than in GUARD_TRIGGERS because
+   * a guard function must raise, and this one never does — `patternTotals()`
+   * in @recx/shared is the same arithmetic, and the live invariant test
+   * asserts the two agree on all six seeded patterns.
+   */
+  { name: "AptitudeSection_totals_sync", table: "AptitudeSection" },
+];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019250000_phase7a_question_bank";
+export const CHECK_CATALOG_THROUGH = "20261019250100_phase7b_patterns";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -560,6 +575,30 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AptitudeQuestionStat_counts_check", "AptitudeQuestionStat"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019250000_phase7a_question_bank" })),
+  ...(
+    [
+      ["MockPattern_slug_check", "MockPattern"],
+      ["MockPattern_source_note_check", "MockPattern"],
+      ["MockPattern_description_check", "MockPattern"],
+      ["MockPattern_totals_check", "MockPattern"],
+      // A published pattern a student can open has a paper behind it, which
+      // also refuses deleting the last section of a live one.
+      ["MockPattern_published_has_paper", "MockPattern"],
+      ["AptitudeSection_position_check", "AptitudeSection"],
+      ["AptitudeSection_key_check", "AptitudeSection"],
+      ["AptitudeSection_label_check", "AptitudeSection"],
+      ["AptitudeSection_count_check", "AptitudeSection"],
+      ["AptitudeSection_time_check", "AptitudeSection"],
+      // Below twenty seconds a question the timer is the test.
+      ["AptitudeSection_pace_check", "AptitudeSection"],
+      ["AptitudeSection_cutoff_check", "AptitudeSection"],
+      ["AptitudeSection_marks_check", "AptitudeSection"],
+      // The negative mark is a fraction, never an absolute mark.
+      ["AptitudeSection_negative_check", "AptitudeSection"],
+      // The blueprint draws exactly as many questions as the section is long.
+      ["AptitudeSection_topic_mix_check", "AptitudeSection"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019250100_phase7b_patterns" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
