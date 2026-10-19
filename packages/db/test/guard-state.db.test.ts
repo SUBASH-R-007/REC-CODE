@@ -163,7 +163,14 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
          FROM pg_constraint co
          JOIN pg_class cl ON cl.oid = co.conrelid
          JOIN pg_namespace n ON n.oid = cl.relnamespace
-        WHERE co.contype = 'c' AND co.conname = $1 AND n.nspname = 'public'`,
+        WHERE co.contype = 'c' AND co.conname = $1 AND n.nspname = 'public'
+          -- Only the constraint AS DECLARED on its own table. A CHECK on a
+          -- partitioned table (ProctorEvent, since 20261019160000) is
+          -- inherited by every partition under the SAME name, so without
+          -- this the query returns 1 + one row per partition and the
+          -- assertion below reads a correctly-applied constraint as missing.
+          -- coninhcount = 0 is exactly "not inherited from a parent".
+          AND co.coninhcount = 0`,
       name,
     );
     expect(rows, `${name} is missing`).toEqual([{ table: c.table, validated: true }]);
