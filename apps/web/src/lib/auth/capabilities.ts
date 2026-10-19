@@ -640,9 +640,21 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
      * a route out that is itself behind the restriction is not a route out.
      */
     key: "account.leave",
-    label: "Ask for leave to be excused, and call off my own request",
+    label: "Ask for leave to be excused, call off my own request, restore my own account",
     roles: EVERY_SIGNED_IN_ROLE,
-    actions: ["account#requestLeaveException", "account#cancelLeaveException"],
+    /**
+     * `account#selfClearRestriction` is `requireActionUser()` and NOTHING
+     * stronger, on purpose. SPEC §7: "do not require admin approval to clear
+     * a soft restriction" — because approval turns a ten-day lapse into a
+     * permanent exit, the administrator being busy and the student giving up.
+     * Anybody who later moves it to a staff guard will have removed the route
+     * out of a restriction.
+     */
+    actions: [
+      "account#requestLeaveException",
+      "account#cancelLeaveException",
+      "account#selfClearRestriction",
+    ],
   },
 ] as const satisfies readonly Capability[]);
 

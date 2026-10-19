@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { LeaveKind, LeaveStatus } from "@recx/shared";
+import { calendarLookup, termKeyFor, type LeaveKind, type LeaveStatus } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -23,6 +23,25 @@ function dayOf(date: Date): string {
 /** A campus day as the UTC-midnight Date a @db.Date column holds. */
 export function dayToDate(day: string): Date {
   return new Date(`${day}T00:00:00.000Z`);
+}
+
+/**
+ * The academic term a day falls in, for the self-clear gate (Phase 8e).
+ *
+ * Derived from `SEMESTER_BREAK` days: the spec gates self-service on "once
+ * per semester" without defining a semester, and storing the term the count
+ * belongs to is what makes the reset real rather than a cron guess. With no
+ * break rows the key falls back to the academic year, which allows FEWER
+ * self-clears and is therefore the stricter reading.
+ */
+export async function termKeyOn(day: string): Promise<string> {
+  const rows = await db.calendarDay.findMany({
+    where: { kind: "SEMESTER_BREAK", date: { lte: dayToDate(day) } },
+    orderBy: { date: "desc" },
+    take: 1,
+    select: { date: true, kind: true, isWorkingDay: true },
+  });
+  return termKeyFor(day, calendarLookup(rows.map((row) => ({ ...row, date: dayOf(row.date) }))));
 }
 
 export interface MyLeaveRow {

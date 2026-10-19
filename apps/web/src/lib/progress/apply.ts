@@ -1,5 +1,6 @@
 import "server-only";
 import { Prisma, type DbTx, type XpEventKind } from "@recx/db";
+import { clearRestrictionOnSolve } from "@recx/db/inactivity";
 import { XP_KEYS, isRestrictedStatus, makesSolveAssisted, type StreakState, type Verdict } from "@recx/shared";
 import { loadXpRules } from "./xp-config";
 import {
@@ -265,6 +266,24 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
    * a badge awarded during a pause would make the pause look like nothing.
    */
   const badges = restricted ? [] : await awardBadges(tx, userId, badgesCrossed(before, after), input.now);
+
+  /**
+   * The cheapest exit from an inactivity restriction: doing the thing the
+   * policy wanted (Phase 8e).
+   *
+   * SPEC §5: "Solving one problem clears NUDGED / WARNED / SOFT_RESTRICTED
+   * automatically." Inside THIS transaction, so the solve and the
+   * restoration either both happen or neither does — a student told to solve
+   * a problem, who solved one, and who is still paused, would be the worst
+   * possible outcome of a feature meant to be reassuring.
+   *
+   * Only on a FIRST solve: an accepted resubmission of a problem they had
+   * already solved is not new work, and clearing on it would make the
+   * restriction trivial to shrug off.
+   */
+  if (plan.firstSolve) {
+    await clearRestrictionOnSolve(tx, { userId, problemId, now: input.now });
+  }
   if (milestone !== null && streakAward) {
     await tx.notification.create({
       data: {

@@ -6,6 +6,9 @@ import {
   INACTIVITY_STAGES,
   MENTOR_EMAIL_KIND,
   buildInactivityEvidence,
+  canSelfClear,
+  selfClearCounters,
+  stageForCountedDays,
   calendarLookup,
   campusDay,
   countInactiveDays,
@@ -789,5 +792,264 @@ async function recordHold(
       policyVersion: decision.policy?.version ?? null,
       ...(plan.raisesAdminReview ? { adminReviewOpenedAt: options.now, adminReviewClearedAt: null } : {}),
     },
+  });
+}
+
+// ── Restoration (Phase 8e) ───────────────────────────────────────────────
+
+export interface ClearedRestriction {
+  readonly cleared: boolean;
+  readonly fromStage: RestrictionStage;
+  readonly statusRestored: boolean;
+}
+
+const NOT_CLEARED: ClearedRestriction = { cleared: false, fromStage: "NONE", statusRestored: false };
+
+/**
+ * Clear a restriction because the student did the thing the policy wanted.
+ *
+ * SPEC §5: "Solving one problem clears NUDGED / WARNED / SOFT_RESTRICTED
+ * automatically." The cheapest possible exit from a restriction is doing the
+ * work, and it needs no approval — anything requiring an admin turns a
+ * ten-day lapse into a permanent exit, because the admin is busy and the
+ * student gives up.
+ *
+ * Called INSIDE the submission's own transaction, so the solve and the
+ * restoration either both happen or neither does. A student whose solve
+ * committed and whose restoration did not would be a student told to solve a
+ * problem, who solved one, and who is still paused.
+ *
+ * `DISABLED` is NOT cleared here. A disabled account cannot sign in, so it
+ * cannot reach this path at all — but the guard is explicit anyway, because
+ * `AccountStatusEvent_undisable_check` would refuse the row and a silent
+ * refusal inside a submission transaction would lose the submission.
+ */
+export async function clearRestrictionOnSolve(
+  tx: DbTx,
+  input: { readonly userId: string; readonly problemId: string; readonly now: Date },
+): Promise<ClearedRestriction> {
+  const current = await tx.accountRestriction.findUnique({
+    where: { userId: input.userId },
+    select: { stage: true, ownsAccountStatus: true, adminReviewOpenedAt: true },
+  });
+  if (!current || current.stage === "NONE" || current.stage === "DISABLED") return NOT_CLEARED;
+
+  const user = await tx.user.findUnique({ where: { id: input.userId }, select: { status: true } });
+  if (!user) return NOT_CLEARED;
+
+  await tx.accountStatusEvent.create({
+    data: {
+      userId: input.userId,
+      fromStage: current.stage,
+      toStage: "NONE",
+      fromStatus: user.status,
+      toStatus: current.ownsAccountStatus ? "ACTIVE" : user.status,
+      source: "AUTO_CLEAR_ON_SOLVE",
+      evidence: { clearedBy: input.problemId, clearedAt: input.now.toISOString() },
+      triggeredBySystem: true,
+      // One clock for both, since the deferred trigger compares this against
+      // `stageEnteredAt` below.
+      createdAt: input.now,
+    },
+  });
+
+  await tx.accountRestriction.update({
+    where: { userId: input.userId },
+    data: {
+      stage: "NONE",
+      stageEnteredAt: input.now,
+      graceEndsAt: null,
+      countedInactiveDays: 0,
+      ownsAccountStatus: false,
+      lastEvaluatedAt: input.now,
+      // A student who fixed it themselves closes the review item: a human
+      // asked to look at somebody who is working again is a human whose time
+      // was wasted.
+      adminReviewClearedAt: current.adminReviewOpenedAt ? input.now : null,
+    },
+  });
+
+  if (current.ownsAccountStatus) {
+    await tx.user.update({ where: { id: input.userId }, data: { status: "ACTIVE" } });
+  }
+
+  return { cleared: true, fromStage: current.stage, statusRestored: current.ownsAccountStatus };
+}
+
+/**
+ * Clear a restriction because the student asked, once per term, with no
+ * approval at all.
+ *
+ * SPEC §7 says plainly "do not require admin approval to clear a soft
+ * restriction", and the reason is the one above: approval turns a lapse into
+ * an exit. So this is one button, acting only on the caller's own row.
+ *
+ * It carries the student as its ACTOR, which is true and is what their own
+ * history should show — the only non-system source that is not a member of
+ * staff.
+ */
+export async function selfClearRestriction(
+  tx: DbTx,
+  input: {
+    readonly userId: string;
+    readonly termKey: string;
+    readonly now: Date;
+  },
+): Promise<ClearedRestriction & { readonly refusal?: string }> {
+  const current = await tx.accountRestriction.findUnique({
+    where: { userId: input.userId },
+    select: {
+      stage: true,
+      ownsAccountStatus: true,
+      selfClearedCount: true,
+      selfClearedTermKey: true,
+      adminReviewOpenedAt: true,
+    },
+  });
+  if (!current) return { ...NOT_CLEARED, refusal: "Nothing is paused." };
+
+  const allowed = canSelfClear({
+    stage: current.stage,
+    selfClearedCount: current.selfClearedCount,
+    selfClearedTermKey: current.selfClearedTermKey,
+    termKey: input.termKey,
+  });
+  if (!allowed.allowed) return { ...NOT_CLEARED, fromStage: current.stage, refusal: allowed.reason };
+
+  const user = await tx.user.findUnique({ where: { id: input.userId }, select: { status: true } });
+  if (!user) return NOT_CLEARED;
+
+  await tx.accountStatusEvent.create({
+    data: {
+      userId: input.userId,
+      fromStage: current.stage,
+      toStage: "NONE",
+      fromStatus: user.status,
+      toStatus: current.ownsAccountStatus ? "ACTIVE" : user.status,
+      source: "SELF_CLEAR",
+      evidence: { clearedBy: "self", clearedAt: input.now.toISOString(), termKey: input.termKey },
+      triggeredBySystem: false,
+      actorId: input.userId,
+      createdAt: input.now,
+    },
+  });
+
+  const counters = selfClearCounters({
+    stage: current.stage,
+    selfClearedCount: current.selfClearedCount,
+    selfClearedTermKey: current.selfClearedTermKey,
+    termKey: input.termKey,
+  });
+
+  await tx.accountRestriction.update({
+    where: { userId: input.userId },
+    data: {
+      stage: "NONE",
+      stageEnteredAt: input.now,
+      graceEndsAt: null,
+      countedInactiveDays: 0,
+      ownsAccountStatus: false,
+      lastEvaluatedAt: input.now,
+      selfClearedCount: counters.selfClearedCount,
+      selfClearedTermKey: counters.selfClearedTermKey,
+      adminReviewClearedAt: current.adminReviewOpenedAt ? input.now : null,
+    },
+  });
+
+  if (current.ownsAccountStatus) {
+    await tx.user.update({ where: { id: input.userId }, data: { status: "ACTIVE" } });
+  }
+
+  return { cleared: true, fromStage: current.stage, statusRestored: current.ownsAccountStatus };
+}
+
+/**
+ * Reverse a restriction because a leave approved after the fact proves the
+ * days should never have been counted.
+ *
+ * This is the one path that may take an account out of DISABLED without a
+ * super-admin, and that is deliberate: the student did not become inactive
+ * retroactively — the platform was wrong about them, and a correction that
+ * needed a second human to approve it would mean the platform's mistake cost
+ * the student a wait.
+ *
+ * It recounts rather than assuming: an approved leave that does not actually
+ * bring the count below the threshold reverses nothing, and says so.
+ */
+export async function reverseForLeave(
+  db: Db,
+  input: {
+    readonly userId: string;
+    readonly leaveId: string;
+    readonly now: Date;
+    readonly evaluationDay: string;
+    readonly count: InactivityCount;
+    readonly policy: InactivityPolicyShape;
+  },
+): Promise<ClearedRestriction & { readonly refusal?: string }> {
+  return db.$transaction(async (tx) => {
+    const current = await tx.accountRestriction.findUnique({
+      where: { userId: input.userId },
+      select: { stage: true, ownsAccountStatus: true, adminReviewOpenedAt: true },
+    });
+    if (!current || current.stage === "NONE") {
+      return { ...NOT_CLEARED, refusal: "Nothing was restricted." };
+    }
+
+    const deserved = stageForCountedDays(input.policy, input.count.countedInactiveDays);
+    if (stageIndexOf(deserved) >= stageIndexOf(current.stage)) {
+      // The leave does not change the outcome. Said rather than silently
+      // doing nothing, so the approver learns that the days they excused
+      // were not the days that counted.
+      return {
+        ...NOT_CLEARED,
+        fromStage: current.stage,
+        refusal: `Those days were excused, but ${input.count.countedInactiveDays} counted days remain, which is still ${deserved}.`,
+      };
+    }
+
+    const user = await tx.user.findUnique({ where: { id: input.userId }, select: { status: true } });
+    if (!user) return NOT_CLEARED;
+
+    await tx.accountStatusEvent.create({
+      data: {
+        userId: input.userId,
+        fromStage: current.stage,
+        toStage: "NONE",
+        fromStatus: user.status,
+        toStatus: current.ownsAccountStatus ? "ACTIVE" : user.status,
+        source: "LEAVE_REVERSAL",
+        evidence: {
+          clearedBy: input.leaveId,
+          clearedAt: input.now.toISOString(),
+          countedInactiveDays: input.count.countedInactiveDays,
+          excludedDates: input.count.excludedDates,
+          excludedReason: input.count.excludedReason,
+          policyVersion: input.policy.version,
+        },
+        triggeredBySystem: true,
+        createdAt: input.now,
+      },
+    });
+
+    await tx.accountRestriction.update({
+      where: { userId: input.userId },
+      data: {
+        stage: "NONE",
+        stageEnteredAt: input.now,
+        graceEndsAt: null,
+        countedInactiveDays: 0,
+        ownsAccountStatus: false,
+        lastEvaluatedAt: input.now,
+        policyVersion: input.policy.version,
+        adminReviewClearedAt: current.adminReviewOpenedAt ? input.now : null,
+      },
+    });
+
+    if (current.ownsAccountStatus) {
+      await tx.user.update({ where: { id: input.userId }, data: { status: "ACTIVE" } });
+    }
+
+    return { cleared: true, fromStage: current.stage, statusRestored: current.ownsAccountStatus };
   });
 }

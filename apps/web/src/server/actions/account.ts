@@ -2,13 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { LEAVE_KINDS, campusDay, daysInclusive } from "@recx/shared";
+import { INACTIVITY_AUDIT_ACTIONS, LEAVE_KINDS, campusDay, daysInclusive } from "@recx/shared";
+import { selfClearRestriction as clearOwnRestriction } from "@recx/db/inactivity";
 import { requireActionUser } from "@/lib/auth/guards";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { ConflictError, NotFoundError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
+import {
+  ConflictError,
+  NotFoundError,
+  RateLimitError,
+  ValidationError,
+  runAction,
+  type ActionResult,
+} from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
-import { dayToDate } from "@/server/queries/calendar";
+import { hitRateLimit } from "@/lib/rate-limit";
+import { dayToDate, termKeyOn } from "@/server/queries/calendar";
 
 /**
  * A student's own account: asking for a leave, and calling one off (Phase 8a).
@@ -168,4 +177,58 @@ export async function cancelLeaveException(input: unknown): Promise<ActionResult
     revalidatePath("/super/calendar");
     return { id: leave.id };
   }, "cancelLeaveException");
+}
+
+/**
+ * Restore your own account — one click, no approval (Phase 8e).
+ *
+ * SPEC §7 says plainly: "do not require admin approval to clear a soft
+ * restriction." The reason matters more than the rule — anything requiring
+ * approval turns a ten-day lapse into a permanent exit, because the
+ * administrator is busy and the student gives up.
+ *
+ * So the guard is `requireActionUser()` and NOTHING stronger, and it acts
+ * only on the caller's own row: the id is never a parameter. If somebody
+ * later "hardens" this to a staff guard they will have removed the route out
+ * of a restriction, which is the one thing this phase must not do.
+ *
+ * Rate-limited, because it is still a write path reachable by anybody signed
+ * in. Clicking twice is fine: the second call is an ordinary no-op.
+ */
+export async function selfClearRestriction(): Promise<ActionResult<{ cleared: boolean; message: string }>> {
+  return runAction(async () => {
+    const user = await requireActionUser();
+    const hit = await hitRateLimit(`self-clear:${user.id}`, { limit: 5, windowMs: 60_000 });
+    if (!hit.allowed) throw new RateLimitError();
+
+    const now = new Date();
+    const termKey = await termKeyOn(campusDay(now));
+    const result = await db.$transaction(async (tx) =>
+      clearOwnRestriction(tx, { userId: user.id, termKey, now }),
+    );
+
+    if (!result.cleared) {
+      /**
+       * Not an error. "You have already restored it once this term" and
+       * "nothing is paused" are both ordinary answers, and a red failure
+       * banner for either would read as a punishment for asking.
+       */
+      return { cleared: false, message: result.refusal ?? "Nothing is paused." };
+    }
+
+    await audit({
+      actorId: user.id,
+      action: INACTIVITY_AUDIT_ACTIONS.selfCleared,
+      entityType: "AccountRestriction",
+      entityId: user.id,
+      targetUserId: user.id,
+      sensitivity: "SENSITIVE",
+      metadata: { fromStage: result.fromStage, termKey, statusRestored: result.statusRestored },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath("/account/reactivate");
+    revalidatePath("/dashboard");
+    return { cleared: true, message: "Done. Your account is active and you are back on the leaderboard." };
+  }, "selfClearRestriction");
 }

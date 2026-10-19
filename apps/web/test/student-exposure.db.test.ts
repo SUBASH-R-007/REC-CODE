@@ -1067,6 +1067,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "announcements#getActiveAnnouncements": async () => (await load(path.join(QUERIES_DIR, "announcements.ts"))).getActiveAnnouncements!,
     "dashboard#getDashboard": async () => (await load(path.join(QUERIES_DIR, "dashboard.ts"))).getDashboard!,
     "calendar#myLeaveRequests": async () => (await load(path.join(QUERIES_DIR, "calendar.ts"))).myLeaveRequests!,
+    "calendar#termKeyOn": async () => (await load(path.join(QUERIES_DIR, "calendar.ts"))).termKeyOn!,
+    "account#myStanding": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStanding!,
+    "account#myStatusHistory": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStatusHistory!,
     "judge-languages#getPublicLanguageRows": async () => (await load(path.join(QUERIES_DIR, "judge-languages.ts"))).getPublicLanguageRows!,
     "leaderboard#getLeaderboard": async () => (await load(path.join(QUERIES_DIR, "leaderboard.ts"))).getLeaderboard!,
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
@@ -1118,6 +1121,13 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // swept here is what the caller's OWN row renders; the page that shows
     // it is swept too, in PAGE_CALLS.
     "calendar#myLeaveRequests": () => [[ids.user]],
+    "calendar#termKeyOn": () => [["2026-10-20"]],
+    // Phase 8e. The standing and the history are the student's own account,
+    // and the history deliberately does NOT return the evidence JSON — that
+    // carries excluded dates a human reviewing a dispute needs and a student
+    // does not want rendered as a wall of dates.
+    "account#myStanding": () => [[ids.user]],
+    "account#myStatusHistory": () => [[ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1260,6 +1270,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // Phase 8a. Renders the caller's own leave reasons, which is exactly
     // the kind of text that must not be somebody else's.
     "(student)/account/leave/page.tsx": () => ({}),
+    // Phase 8e. The route OUT of a restriction, and the page that renders a
+    // student's own status history.
+    "(student)/account/reactivate/page.tsx": () => ({}),
     "(student)/aptitude/page.tsx": () => ({}),
     "(student)/aptitude/[topic]/page.tsx": () => ({ params: { topic: "percentages" } }),
     "(student)/aptitude/mock/[slug]/page.tsx": () => ({ params: { slug: ids.aptitudePatternSlug } }),
@@ -1428,6 +1441,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ],
     ],
     "account#cancelLeaveException": [() => [{ leaveId: `${tag}-no-such-leave` }]],
+    // Takes no argument at all: there is no id to tamper with, which is the
+    // point of a self-service action.
+    "account#selfClearRestriction": [() => []],
     "bookmarks#toggleBookmark": [() => [{ problemId: ids.problem, bookmarked: false }], () => [{ problemId: ids.problem, bookmarked: true }]],
     "drafts#saveDraft": [() => [{ problemId: ids.problem, language: "py312", source: "print(input())\n", clientUpdatedAt: Date.now() }]],
     "help#revealHint": [() => [{ problemId: ids.problem, tier: 1 }], () => [{ problemId: ids.draftProblem, tier: 1 }]],

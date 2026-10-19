@@ -2,7 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { CALENDAR_DAY_KINDS, campusDay, daysInclusive } from "@recx/shared";
+import {
+  CALENDAR_DAY_KINDS,
+  INACTIVITY_AUDIT_ACTIONS,
+  campusDay,
+  countInactiveDays,
+  daysInclusive,
+} from "@recx/shared";
+import {
+  activityInWindow,
+  approvedLeavesInWindow,
+  calendarWindow,
+  activePolicies,
+  reverseForLeave,
+  SWEEP_WINDOW_DAYS,
+} from "@recx/db/inactivity";
+import { calendarLookup, resolveInactivityPolicy } from "@recx/shared";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -202,7 +217,7 @@ export async function markCalendarRange(
  */
 export async function decideLeaveException(
   input: unknown,
-): Promise<ActionResult<{ id: string; status: "APPROVED" | "REJECTED" }>> {
+): Promise<ActionResult<{ id: string; status: "APPROVED" | "REJECTED"; reversal: string | null }>> {
   return runAction(async () => {
     const actor = await requireSuperAdmin();
     const parsed = decisionSchema.parse(input);
@@ -258,8 +273,111 @@ export async function decideLeaveException(
       ipHash: await requestIpHash(),
     });
 
+    /**
+     * A leave approved after the fact may undo a restriction (Phase 8e).
+     *
+     * SPEC §5 asks for exactly this: a retroactive approved leave reverses a
+     * disable, the counted days drop below the threshold, the account returns
+     * to its prior status, and a reversal event is written citing the leave.
+     *
+     * It RECOUNTS rather than assuming. A leave covering days that were not
+     * the days that counted reverses nothing, and says so — so the approver
+     * learns that the student is still over the threshold rather than
+     * believing they have fixed it. And it is the one path besides a
+     * super-admin that may take an account out of DISABLED, deliberately:
+     * the student did not become inactive retroactively, the platform was
+     * wrong about them, and a correction needing a second approval would mean
+     * the platform's mistake cost them a wait.
+     *
+     * Outside the decision transaction on purpose. The approval is the
+     * decision and must commit; the reversal is a consequence of it, and a
+     * recount that failed must not undo somebody's approval.
+     */
+    let reversal: string | null = null;
+    if (parsed.decision === "APPROVED") {
+      reversal = await reverseIfLeaveClears(leave.userId, leave.id, decidedAt);
+    }
+
     revalidatePath("/super/calendar");
     revalidatePath("/account/leave");
-    return { id: leave.id, status: parsed.decision };
+    revalidatePath("/dashboard");
+    return { id: leave.id, status: parsed.decision, reversal };
   }, "decideLeaveException");
+}
+
+/**
+ * Recount a student after a leave is approved, and reverse their restriction
+ * if the excused days take them back under the threshold.
+ *
+ * Returns a sentence for the approver, or null when there was nothing to
+ * reverse. Never throws: the approval has already committed, and a failed
+ * recount must not be reported as a failed approval.
+ */
+async function reverseIfLeaveClears(userId: string, leaveId: string, now: Date): Promise<string | null> {
+  try {
+    const restriction = await db.accountRestriction.findUnique({
+      where: { userId },
+      select: { stage: true },
+    });
+    if (!restriction || restriction.stage === "NONE") return null;
+
+    const student = await db.user.findUnique({
+      where: { id: userId },
+      select: { batchYear: true, departmentCode: true, lastActiveAt: true },
+    });
+    if (!student) return null;
+
+    const policy = resolveInactivityPolicy(await activePolicies(db), {
+      batchYear: student.batchYear,
+      departmentCode: student.departmentCode,
+    });
+    if (!policy) return null;
+
+    const evaluationDay = campusDay(now);
+    const start = new Date(`${evaluationDay}T00:00:00.000Z`);
+    start.setUTCDate(start.getUTCDate() - SWEEP_WINDOW_DAYS);
+    const windowStartDay = start.toISOString().slice(0, 10);
+
+    const [days, leaves, activity] = await Promise.all([
+      calendarWindow(db, windowStartDay, evaluationDay),
+      approvedLeavesInWindow(db, [userId], windowStartDay, evaluationDay),
+      activityInWindow(db, [userId], windowStartDay, evaluationDay),
+    ]);
+
+    const count = countInactiveDays({
+      lastActiveDay: student.lastActiveAt ? campusDay(student.lastActiveAt) : null,
+      evaluationDay,
+      cal: calendarLookup(days),
+      leaves: leaves.get(userId) ?? [],
+      activity: activity.get(userId) ?? [],
+      policy,
+      windowStartDay,
+    });
+
+    const result = await reverseForLeave(db, { userId, leaveId, now, evaluationDay, count, policy });
+    if (!result.cleared) return result.refusal ?? null;
+
+    await audit({
+      actorId: null,
+      action: INACTIVITY_AUDIT_ACTIONS.leaveReversed,
+      entityType: "LeaveException",
+      entityId: leaveId,
+      targetUserId: userId,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        fromStage: result.fromStage,
+        countedInactiveDays: count.countedInactiveDays,
+        excludedDays: count.excludedDates.length,
+        policyVersion: policy.version,
+        statusRestored: result.statusRestored,
+      },
+    });
+
+    return `Their restriction has been lifted: ${count.countedInactiveDays} counted days remain, which is under the threshold.`;
+  } catch (cause) {
+    // The approval stands. Logged loudly, because a reversal that silently
+    // did not happen is a student still restricted for days somebody excused.
+    console.error("[inactivity] a leave approval did not reverse a restriction", { userId, leaveId }, cause);
+    return null;
+  }
 }

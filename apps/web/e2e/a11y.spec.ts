@@ -113,6 +113,7 @@ const TARGETS: readonly Target[] = [
    */
   { path: "/aptitude", as: "student", gating: true },
   { path: "/account/leave", as: "student", gating: true },
+  { path: "/account/reactivate", as: "student", gating: true },
   // Reported, not gating.
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { greetingForHour, pluralize } from "@recx/design";
 import { requireUser } from "@/lib/auth/guards";
 import { getDashboard } from "@/server/queries/dashboard";
+import { myStanding } from "@/server/queries/account";
+import { DormancyChip } from "@/components/account/dormancy-chip";
 import { getActiveAnnouncements } from "@/server/queries/announcements";
 import { campusHour } from "@/components/dashboard/model";
 import { AnnouncementBanner } from "@/components/dashboard/announcement-banner";
@@ -21,7 +23,15 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const user = await requireUser();
   const now = new Date();
-  const [data, announcements] = await Promise.all([getDashboard(user.id, now), getActiveAnnouncements(user.id, now)]);
+  const [data, announcements, standing] = await Promise.all([
+    getDashboard(user.id, now),
+    getActiveAnnouncements(user.id, now),
+    // Phase 8e. Its own read rather than a field on the dashboard model: the
+    // chip is about the account, not about progress, and a restricted student
+    // must see it even on a day when nothing else on this page has anything
+    // to say.
+    myStanding(user.id, now),
+  ]);
 
   const summary =
     data.solvedTotal === 0
@@ -36,6 +46,12 @@ export default async function DashboardPage() {
         </h1>
         <p className="mt-1 text-sm text-text-secondary">{summary}</p>
       </header>
+
+      {/* Before the announcements and before the cards: SPEC §5's rule is
+          that the restriction explanation sits ahead of the page's content in
+          DOM order, so a screen-reader user meets it first. It is also never
+          a toast — a message that disappears is not an explanation. */}
+      <DormancyChip chip={standing.chip} />
 
       <AnnouncementBanner announcements={announcements} />
 

@@ -24,6 +24,12 @@
       "route": "/account/leave",
       "entry": "/(student)/account/leave/page",
       "maxKb": 135
+    },
+    {
+      "$comment": "Phase 8e. The route OUT of an inactivity restriction: one button and two lists. It must stay small, because the student who needs it most is the one on the worst connection.",
+      "route": "/account/reactivate",
+      "entry": "/(student)/account/reactivate/page",
+      "maxKb": 135
     }
   ],
   "zeroJsSelfCheck": {
@@ -63,7 +69,8 @@
       "/(student)/aptitude/page",
       "/(student)/aptitude/[topic]/page",
       "/(student)/aptitude/mock/attempt/[attemptId]/page",
-      "/(student)/account/leave/page"
+      "/(student)/account/leave/page",
+      "/(student)/account/reactivate/page"
     ],
     "entryPrefixes": ["/admin/"]
   },
