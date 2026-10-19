@@ -1093,6 +1093,17 @@ model ActivityDay {
   /// XP from Easy first solves that day (the 600/day Easy cap).
   xpEasy        Int      @default(0)
   activeSeconds Int      @default(0)
+  /// Aptitude questions answered in topic practice that day (Phase 7). A row
+  /// has to exist for a student who only does aptitude, or Phase 8's nightly
+  /// job cannot see them and the heatmap shows an empty year.
+  aptitudeAnswers Int    @default(0)
+  /// Full mocks finalised that day (Phase 7).
+  mocksFinalised  Int    @default(0)
+  /// XP from aptitude topic practice that day (the 200/day aptitude cap).
+  /// Maintained here for the same reason xpEasy is: SPEC §4(d) forbids
+  /// aggregating XpEvent on a request, and a cap that needs today's total
+  /// needs it from a maintained row.
+  xpAptitude      Int    @default(0)
 
   @@id([userId, date])
   @@index([date])

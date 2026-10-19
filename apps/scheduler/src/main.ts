@@ -8,6 +8,7 @@ import { describeDatabaseUrl, loadConfig, loadDevEnvFile, withSingleConnection }
 import { DailyChallengeJob } from "./daily-challenge";
 import { AttemptSweepJob } from "./attempt-sweep";
 import { IntegritySlaJob } from "./integrity-sla";
+import { MockSweepJob } from "./mock-sweep";
 import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
@@ -100,6 +101,7 @@ const contestRank = new ContestRankJob({ db, log, dryRun });
 const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
 // Phase 6e: the review SLA and the appeal deadline, both student-favouring.
 const integritySla = new IntegritySlaJob({ db, log, dryRun });
+const mockSweep = new MockSweepJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -219,6 +221,17 @@ async function tick(): Promise<boolean> {
     await runJob("integritySla", async () => {
       const report = await integritySla.tick(now);
       if (report.autoCleared > 0 || report.appealsOverturned > 0) log.warn({ report }, "integrity SLA tick");
+      return { ok: !report.failed, report };
+    }),
+  );
+  // Aptitude: finalise a mock whose deadline has passed, and restate each
+  // pattern's cohort statistics nightly. The first is what makes
+  // AUTO_SUBMITTED reachable at all; the second is what decides whether the
+  // mock XP percentile term is meaningful yet.
+  results.push(
+    await runJob("mockSweep", async () => {
+      const report = await mockSweep.tick(now);
+      if (report.autoSubmitted > 0 || report.patternsRestated > 0) log.info({ report }, "mock sweep tick");
       return { ok: !report.failed, report };
     }),
   );

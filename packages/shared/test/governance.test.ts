@@ -70,6 +70,11 @@ describe("scheduler jobs", () => {
       // Phase 6e: the 72-hour review SLA and the 7-day appeal deadline, both
       // of which resolve in the student's favour.
       "integritySla",
+      // Phase 7c: finalise a mock whose deadline has passed — the only path
+      // to AUTO_SUBMITTED — and restate each pattern's cohort statistics
+      // nightly, which is what decides whether the mock XP percentile term is
+      // meaningful yet.
+      "mockSweep",
     ]);
   });
 });

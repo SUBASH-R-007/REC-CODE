@@ -186,6 +186,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
 | `exam.heartbeat` | self-service | yes | yes | yes | yes | yes | 4 routes |
 | `exam.device.assert` | self-service | yes | yes | yes | yes | yes | 1 route |
+| `aptitude.sit` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `integrity.appeal` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notes.manage` | self-service | yes | yes | yes | yes | yes | 4 actions |
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |

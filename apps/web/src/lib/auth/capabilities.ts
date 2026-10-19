@@ -475,6 +475,33 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     routes: ["app/api/exam/device/assert/route.ts#POST"],
   },
   {
+    key: "aptitude.sit",
+    label: "Practise aptitude and sit a mock",
+    // Every signed-in role, because the capability is not "be a student": a
+    // staff member practising is a candidate too. Every action scopes by
+    // userId in a `where` clause, and the sitting row is what decides whose
+    // paper this is.
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: [
+      "aptitude#startMock",
+      "aptitude#saveMockAnswer",
+      "aptitude#serveMockQuestion",
+      "aptitude#advanceMockSection",
+      "aptitude#finaliseMockAttempt",
+      "aptitude#answerPractice",
+      "aptitude#recordPracticeQuestionServed",
+    ],
+    // The clock route (GET /api/aptitude/attempts/[attemptId]/clock) is NOT
+    // listed. `capabilities.test.ts` requires a binding for the admin and
+    // super trees and for every MUTATING api route, and refuses a binding for
+    // anything else — so listing a plain student GET fails the fence as
+    // stale. It guards with requireActionUser() plus an ownership `where`,
+    // and returns only this candidate's own clock. Widening the fence to
+    // cover student GETs is recorded in docs/OPEN-QUESTIONS.md and is not a
+    // change to make inside a slice.
+    routes: [],
+  },
+  {
     key: "integrity.appeal",
     label: "Read my own sitting report and appeal a decision",
     roles: EVERY_SIGNED_IN_ROLE,

@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./audit": "./src/audit.ts",
     "./audit-chain": "./src/audit-chain.ts",
-    "./attempt": "./src/attempt.ts"
+    "./attempt": "./src/attempt.ts",
+    "./mock": "./src/mock.ts"
   },
   "scripts": {
     "generate": "prisma generate",
@@ -21,10 +22,10 @@
     "build": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "6.16.2"
+    "@prisma/client": "6.16.2",
+    "@recx/shared": "workspace:*"
   },
   "devDependencies": {
-    "@recx/shared": "workspace:*",
     "@types/node": "^22.18.0",
     "prisma": "6.16.2",
     "typescript": "^5.9.2",
