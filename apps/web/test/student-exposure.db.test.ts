@@ -217,6 +217,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     contestProblem: "",
     assessment: "",
     assessmentSlug: `${tag}-exam`,
+    assessmentProblem: "",
     attempt: "",
     cpp20Config: "",
   };
@@ -466,9 +467,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       select: { id: true },
     });
     ids.assessment = assessment.id;
-    await db.assessmentProblem.create({
+    const assessmentProblem = await db.assessmentProblem.create({
       data: { assessmentId: assessment.id, problemVersionId: ids.live, position: 1, points: 1 },
+      select: { id: true },
     });
+    ids.assessmentProblem = assessmentProblem.id;
     const attempt = await db.assessmentAttempt.create({
       data: {
         assessmentId: assessment.id,
@@ -628,6 +631,30 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       call: call(() =>
         studentRequest("/api/drafts", { method: "POST", json: { problemId: ids.problem, language: "cpp20", source: "// draft\n", clientUpdatedAt: Date.now() } }),
       ),
+    },
+    "api/exam/[attemptId]/events/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.attempt}/events`, {
+            method: "POST",
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            json: { events: [{ kind: "COPY", clientSeq: 1, atMs: 0 }] },
+          }),
+        () => params({ attemptId: ids.attempt }),
+      ),
+      status: [200],
+    },
+    "api/exam/[attemptId]/snapshot/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.attempt}/snapshot`, {
+            method: "POST",
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            json: { questionId: ids.assessmentProblem, language: "cpp20", source: "int main(){}", trigger: "TICK", atMs: 1000 },
+          }),
+        () => params({ attemptId: ids.attempt }),
+      ),
+      status: [200],
     },
     "api/exam/[attemptId]/hb/route.ts#POST": {
       call: call(

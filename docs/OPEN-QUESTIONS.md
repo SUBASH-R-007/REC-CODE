@@ -1314,3 +1314,61 @@ Each is the narrower reading, implemented as described.
   — `now()` in the same statement — rather than for the test to be retimed.
   Not changed here: it is Phase 4 and Phase 5 code, outside this slice, and
   changing a guard's inputs deserves its own gated change.
+
+## Phase 6c — the exam surface (server side)
+
+- **Snapshot deltas are a compact line patch, not literal `diff -u` text**
+  (decided 2026-10-19). SPEC §5 says "the rest as unified diffs,
+  reconstructed on read". The operative requirement is the reconstruction,
+  and a JSON array of keep/drop/insert ops round-trips EXACTLY by
+  construction — no hunk headers to generate or parse, no ambiguity about a
+  trailing newline, and `applyLinePatch(from, diffLines(from, to)) === to` is
+  a property a test can assert over arbitrary input (it does, over 200
+  seeded rounds). The stored `contentHash` of every version is the
+  independent check, and `readSnapshotTimeline` reports per version whether
+  the rebuilt text matched it rather than presenting a reconstruction as
+  fact. If a later phase needs real unified-diff text (to show a reviewer a
+  patch, say), it can be rendered from this at read time.
+- **A snapshot is stored whole whenever the delta would not be smaller**
+  (decided 2026-10-19). For a small file the JSON patch envelope exceeds the
+  text itself, so "whole" is genuinely the smaller option; the writer
+  measures rather than following a rule about file size. It also re-bases the
+  chain, which is how a question whose stored timeline cannot be rebuilt
+  still records the candidate's current work instead of failing their save.
+- **`SNAPSHOT_JUMP`'s token count is a coarse, language-agnostic scan**
+  (decided 2026-10-19). The signal is a RATIO between two snapshots of the
+  same file in the same language, not a parse, so identifiers/numbers count
+  as one token each, a string literal counts as one however long, and
+  comments are not stripped — which is conservative in the right direction (a
+  pasted commented block counts MORE, and the threshold is about code
+  appearing, not about how good it is). The proper web-tree-sitter lexing
+  SPEC §5 specifies is for similarity detection, which is a different job
+  with a different budget.
+- **A candidate's exempt signals are derived from the accommodation KINDS
+  frozen onto the attempt, not from `Accommodation.exemptSignals`** (decided
+  2026-10-19, and the narrower reading is recorded here rather than silently
+  taken). `AssessmentAttempt.accommodationFlags` freezes the kinds at start —
+  correctly, because what counts against a candidate must not change
+  mid-sitting — and Phase 6c derives the exempt list from them with Phase 4's
+  `suggestedExemptSignals`. A super-admin who hand-edits
+  `Accommodation.exemptSignals` beyond the suggestion is therefore NOT
+  honoured during the sitting. The derivation errs towards exempting, which
+  is the right way for this to be wrong, but it is a real gap: the fix is to
+  freeze the resolved signal list onto the attempt at start (one column, one
+  migration) and should land with slice 6e, which is where a reviewer reads
+  the exemption.
+- **An exempt signal does not count towards the focus-warning limit at all**
+  (decided 2026-10-19). Exempting it from *acting* while still counting it
+  would end a screen-reader candidate's sitting at warning three anyway,
+  which is the bug the exemption exists to prevent. The events are still
+  recorded and the attempt's counters still move, so a reviewer sees the
+  whole timeline next to the note that these signals are discounted — SPEC §5
+  requires the evidence both ways.
+- **The focus-limit auto-submit is a second auto-submit, distinct from the
+  deadline one** (noted 2026-10-19). The deadline sweeper records
+  `submittedAt` at the deadline; this one records it at the moment the limit
+  was reached, because the clock has not run out. Both are audited as
+  `assessment.attempt.auto_submitted` with a `by` of `sweeper`,
+  `lazy_guard` or `focus_limit`. Neither voids, scores or flags: the
+  `IntegrityFlag` a human then reviews arrives with slice 6e, and until it
+  exists the audit row is the record.

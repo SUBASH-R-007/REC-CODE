@@ -420,7 +420,11 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     // is. The route's own guard checks ownership and the attempt token.
     roles: EVERY_SIGNED_IN_ROLE,
     actions: [],
-    routes: ["app/api/exam/[attemptId]/hb/route.ts#POST"],
+    routes: [
+      "app/api/exam/[attemptId]/hb/route.ts#POST",
+      "app/api/exam/[attemptId]/events/route.ts#POST",
+      "app/api/exam/[attemptId]/snapshot/route.ts#POST",
+    ],
   },
   {
     key: "notes.manage",

@@ -14,6 +14,10 @@ export * from "./accommodation";
 export * from "./assessment";
 export * from "./attempt-clock";
 export * from "./exam-protocol";
+export * from "./exam-timer";
+export * from "./exam-palette";
+export * from "./exam-telemetry";
+export * from "./exam-snapshot";
 export * from "./roster";
 export * from "./governance";
 export {

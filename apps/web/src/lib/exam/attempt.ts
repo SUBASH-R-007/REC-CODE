@@ -223,3 +223,51 @@ export function attemptDeadline(args: {
     accommodation: { extraTimePercent: args.extraTimePercent ?? 0, extraTimeMinutes: args.extraTimeMinutes ?? 0 },
   });
 }
+
+/**
+ * Submit a sitting because the focus-warning limit was reached (Phase 6c).
+ *
+ * A SECOND auto-submit, distinct from the deadline one in @recx/db/attempt:
+ * the clock has not run out, so `submittedAt` is now rather than the
+ * deadline, and the reason is a policy the assessment set rather than time
+ * passing. SPEC §5: "On limit, auto-submit and flag for human review — never
+ * auto-void. A wifi drop or an OS notification produces false positives;
+ * auto-submit plus review is defensible, voiding is not."
+ *
+ * So this ends the sitting and records why. It does not void, does not score
+ * and does not touch `integrityScore`. The flag a human then reviews is
+ * `IntegrityFlag` (slice 6e); until that exists the audit row is the record.
+ */
+export async function autoSubmitOnFocusLimit(args: {
+  readonly attemptId: string;
+  readonly userId: string;
+  readonly warnings: number;
+  readonly maxWarnings: number;
+  readonly now: Date;
+}): Promise<boolean> {
+  const moved = await db.assessmentAttempt.updateMany({
+    // Conditional on a status that still accepts work, so a sitting the
+    // deadline sweeper has already finalised is not re-finalised here.
+    where: { id: args.attemptId, status: { in: ["IN_PROGRESS", "DISCONNECTED"] } },
+    data: { status: "AUTO_SUBMITTED", submittedAt: args.now, version: { increment: 1 } },
+  });
+  if (moved.count !== 1) return false;
+
+  await audit({
+    actorId: null,
+    action: "assessment.attempt.auto_submitted",
+    entityType: "AssessmentAttempt",
+    entityId: args.attemptId,
+    targetUserId: args.userId,
+    metadata: {
+      by: "focus_limit",
+      warnings: args.warnings,
+      maxWarnings: args.maxWarnings,
+      at: args.now.toISOString(),
+      // Stated in the row itself, because this is the one automatic
+      // consequence a candidate is most likely to appeal.
+      note: "Submitted at the assessment's focus-warning limit. Not a finding; a human review decides what it means.",
+    },
+  });
+  return true;
+}
