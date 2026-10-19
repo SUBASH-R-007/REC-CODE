@@ -138,6 +138,7 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
     // super-admin may not uphold harder than the reviewers already could.
     roles: SUPER_ONLY,
     actions: ["super-integrity#overturnIntegrityDecision"],
+    pages: ["app/super/integrity/page.tsx"],
   },
   {
     key: "audit.readFull",
@@ -224,6 +225,31 @@ export const SUPER_ADMIN_SUPPORTING_PAGES: readonly PageRef[] = Object.freeze([
  * AdminScope (lib/auth/scope.ts), which is data, not role.
  */
 export const STAFF_CAPABILITIES = deepFreeze([
+  {
+    key: "integrity.review",
+    label: "Review a flagged sitting and record a verdict",
+    // College-level, not departmental: SPEC §5 needs two INDEPENDENT
+    // reviewers at HIGH, and a department with one administrator could not
+    // supply them (tests/repo/admin-scope.test.ts carries the reason).
+    roles: ["ADMIN", "SUPER_ADMIN"],
+    actions: ["integrity#recordVerdict", "integrity#decideAppeal"],
+    pages: ["app/admin/integrity/page.tsx", "app/admin/integrity/[flagId]/page.tsx"],
+  },
+  {
+    key: "exam.invigilate",
+    label: "Invigilate a hall: message, grant time, end a sitting",
+    // Every action here carries a written reason and an audit row, and
+    // terminate takes a SECOND staff member (a CHECK, not a route).
+    roles: ["ADMIN", "SUPER_ADMIN"],
+    actions: [
+      "invigilate#messageCandidate",
+      "invigilate#grantExtraTime",
+      "invigilate#requestTermination",
+      "invigilate#confirmTermination",
+    ],
+    routes: ["app/api/admin/invigilate/[sessionId]/live/route.ts#GET"],
+    pages: ["app/admin/invigilate/page.tsx", "app/admin/invigilate/[sessionId]/page.tsx"],
+  },
   {
     key: "exam.device.enrol",
     label: "Enrol a student's exam device, in person",
@@ -447,6 +473,12 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     roles: EVERY_SIGNED_IN_ROLE,
     actions: [],
     routes: ["app/api/exam/device/assert/route.ts#POST"],
+  },
+  {
+    key: "integrity.appeal",
+    label: "Read my own sitting report and appeal a decision",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["appeals#submitAppeal"],
   },
   {
     key: "notes.manage",

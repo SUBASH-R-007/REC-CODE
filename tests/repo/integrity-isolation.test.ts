@@ -58,9 +58,14 @@ const FORBIDDEN_IMPORTS: ReadonlyArray<{ readonly pattern: RegExp; readonly why:
 /** Where the integrity code lives. */
 const INTEGRITY_UNDER = [
   "apps/web/src/lib/integrity",
-  "apps/web/src/server/queries/integrity",
-  "apps/web/src/server/actions/integrity",
   "packages/shared/src/triage.ts",
+  // Named with the admin- prefix the repo's convention requires for a staff
+  // query module (docs/CONVENTIONS.md, "Sensitive paths"), which is also what
+  // keeps them out of student-exposure.db.test.ts's student sweep.
+  "apps/web/src/server/queries/admin-integrity.ts",
+  "apps/web/src/server/actions/integrity.ts",
+  "apps/web/src/server/actions/appeals.ts",
+  "apps/web/src/server/queries/sitting-report.ts",
 ];
 
 function integrityFiles(): string[] {

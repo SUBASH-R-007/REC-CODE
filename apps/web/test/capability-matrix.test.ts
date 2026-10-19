@@ -219,6 +219,12 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
     }),
     { params: Promise.resolve({ attemptId: "att_1" }) },
   ],
+  "app/api/admin/invigilate/[sessionId]/live/route.ts#GET": () => [
+    new Request("http://localhost:3100/api/admin/invigilate/sess_1/live", {
+      headers: { host: "localhost:3100" },
+    }),
+    { params: Promise.resolve({ sessionId: "sess_1" }) },
+  ],
   "app/api/exam/device/assert/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/device/assert", {
       method: "POST",

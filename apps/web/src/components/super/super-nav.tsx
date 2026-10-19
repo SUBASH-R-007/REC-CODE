@@ -12,6 +12,7 @@ import {
   Palette,
   Plug,
   ScrollText,
+  ShieldAlert,
   ShieldCheck,
   UserCog,
   Users,
@@ -31,6 +32,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   "/super/audit": ScrollText,
   "/super/impersonate": UserCog,
   "/super/flags": Flag,
+  "/super/integrity": ShieldAlert,
   "/super/jobs": Activity,
   "/super/data": Database,
 };

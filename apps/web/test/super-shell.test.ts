@@ -54,7 +54,7 @@ describe("super strip", () => {
 });
 
 describe("super navigation", () => {
-  it("lists the twelve spec routes", () => {
+  it("lists the spec routes, in order", () => {
     expect(SUPER_NAV.map((i) => i.href)).toEqual([
       "/super",
       "/super/users",
@@ -66,6 +66,10 @@ describe("super navigation", () => {
       "/super/audit",
       "/super/impersonate",
       "/super/flags",
+      // Phase 6e: overturn rates per signal. SPEC §5 calls the retune loop
+      // and overturn-rate reporting "load-bearing, not nice-to-haves", so it
+      // is a nav entry and not a page somebody has to know the URL of.
+      "/super/integrity",
       "/super/jobs",
       "/super/data",
     ]);
@@ -87,8 +91,9 @@ describe("super navigation", () => {
 describe("every /super layout and page guards itself", () => {
   const pages = files(SUPER_DIR, /^(page|layout)\.tsx$/);
 
-  it("finds the layout and the twelve pages", () => {
-    expect(pages.length).toBe(13);
+  it("finds the layout and the thirteen pages", () => {
+    // 13 pages + the layout. /super/integrity arrived with Phase 6e.
+    expect(pages.length).toBe(14);
   });
 
   it.each(pages.map((p) => [path.relative(SUPER_DIR, p)]))("%s calls requireSuperAdminPage()", (rel) => {

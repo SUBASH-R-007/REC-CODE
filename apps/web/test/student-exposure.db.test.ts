@@ -223,6 +223,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     assessment: "",
     assessmentSlug: `${tag}-exam`,
     assessmentProblem: "",
+    examSession: "",
     attempt: "",
     submitAttempt: "",
     cpp20Config: "",
@@ -482,6 +483,19 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       select: { id: true },
     });
     ids.assessmentProblem = assessmentProblem.id;
+
+    // A hall, so the invigilator SSE route has a session to be refused for.
+    const examSession = await db.examSession.create({
+      data: {
+        assessmentId: assessment.id,
+        label: `${tag}-hall`,
+        startsAt: new Date(now.getTime() - 30 * 60_000),
+        endsAt: new Date(now.getTime() + 2 * 60 * 60_000),
+        createdById: user.id,
+      },
+      select: { id: true },
+    });
+    ids.examSession = examSession.id;
     const attempt = await db.assessmentAttempt.create({
       data: {
         assessmentId: assessment.id,
@@ -581,6 +595,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         raw(`ALTER TABLE "public"."AssessmentAttempt" ENABLE TRIGGER "AssessmentAttempt_machine"`),
         raw(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`),
         raw(`DELETE FROM "public"."AssessmentProblem" WHERE "assessmentId" = $1`, ids.assessment),
+        raw(`DELETE FROM "public"."ExamSession" WHERE "id" = $1`, ids.examSession),
         raw(`DELETE FROM "public"."Assessment" WHERE "id" = $1`, ids.assessment),
         raw(`ALTER TABLE "public"."Assessment" ENABLE TRIGGER "Assessment_published_immutable"`),
         raw(`DELETE FROM "public"."StudyPlan" WHERE "slug" = ANY($1::text[])`, [ids.sheetSlug, ids.trackSlug]),
@@ -694,6 +709,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         () => params({ attemptId: ids.attempt }),
       ),
       status: [200],
+    },
+    "api/admin/invigilate/[sessionId]/live/route.ts#GET": {
+      call: call(
+        () => studentRequest(`/api/admin/invigilate/${ids.examSession}/live`),
+        () => params({ sessionId: ids.examSession }),
+      ),
+      // A student may not watch an invigilator's hall. The route answers
+      // 403 rather than redirecting: an EventSource cannot follow a redirect
+      // into a login page.
+      status: [403],
     },
     "api/exam/[attemptId]/submit/route.ts#POST": {
       call: call(
@@ -860,6 +885,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getStudentView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getStudentView!,
     "submissions#recentSubmissions": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).recentSubmissions!,
     "assessments#listMyAssessments": async () => (await load(path.join(QUERIES_DIR, "assessments.ts"))).listMyAssessments!,
+    "sitting-report#getStudentReport": async () => (await load(path.join(QUERIES_DIR, "sitting-report.ts"))).getStudentReport!,
     "exam#getExamPaper": async () => (await load(path.join(QUERIES_DIR, "exam.ts"))).getExamPaper!,
     "contests#listContests": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).listContests!,
     "contests#getContest": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getContest!,
@@ -896,6 +922,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "assessments#listMyAssessments": () => [
       [{ id: ids.user, batchYear: 2027, departmentCode: "CSE", section: null }],
     ],
+    // The student's own report on their own sitting. Never a band, never a
+    // points total — the fence over the student tree checks for both.
+    "sitting-report#getStudentReport": () => [[{ attemptId: ids.attempt, userId: ids.user }]],
     // The paper for the fixture's own attempt, which pins the canary-bearing
     // frozen version: this is the query that would leak a hidden test if the
     // exam surface ever read more of a ProblemVersion than it needs.
@@ -990,6 +1019,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // a sitting as a side effect, which the mocked cookie jar absorbs.
     "(exam)/assessments/[slug]/attempt/page.tsx": () => ({ params: { slug: ids.assessmentSlug } }),
     "(student)/assessments/page.tsx": () => ({}),
+    "(student)/sittings/[attemptId]/page.tsx": () => ({ params: { attemptId: ids.attempt } }),
     "(student)/contests/page.tsx": () => ({}),
     "(student)/contests/[slug]/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
     "(student)/contests/[slug]/analysis/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
@@ -1129,6 +1159,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   /** `<module>#<export>` → fixture calls as S, in order (later calls may use earlier results). */
   const SELF_SERVICE_CALLS: Record<string, Array<() => unknown[]>> = {
     "auth#logout": [() => []],
+    // A student appealing their own decision. The fixture flag does not
+    // exist, so the action refuses with "not found" — which is the right
+    // answer and still exercises the path as S.
+    "appeals#submitAppeal": [
+      () => [{ flagId: `${tag}-no-such-flag`, reason: "I wrote this myself and the timeline shows it." }],
+    ],
     "bookmarks#toggleBookmark": [() => [{ problemId: ids.problem, bookmarked: false }], () => [{ problemId: ids.problem, bookmarked: true }]],
     "drafts#saveDraft": [() => [{ problemId: ids.problem, language: "py312", source: "print(input())\n", clientUpdatedAt: Date.now() }]],
     "help#revealHint": [() => [{ problemId: ids.problem, tier: 1 }], () => [{ problemId: ids.draftProblem, tier: 1 }]],

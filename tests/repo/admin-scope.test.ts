@@ -450,6 +450,60 @@ const EXEMPTIONS: readonly Exemption[] = [
       "roster key lookup (conflicts with accounts outside the scope must be detected; selects keys and cohort only, an out-of-scope match becomes OUTSIDE_SCOPE without detail) and the global handle-uniqueness lookup",
   },
   {
+    file: "apps/web/src/server/queries/admin-invigilator.ts",
+    rule: "R1",
+    call: "assessmentAttempt.findMany",
+    count: 1,
+    reason:
+      "an exam hall is a physical room: the invigilator standing in it has to see EVERY candidate seated there, and a hall scoped to one department's grant would show them half the room. The boundary here is the ExamSession, which the query filters on, not the AdminScope grant. The page is behind requireAdminScopePage() and the view returns no band, no points and no photograph",
+  },
+  {
+    file: "apps/web/src/server/actions/invigilate.ts",
+    rule: "R1",
+    call: "assessmentAttempt.findUnique",
+    count: 1,
+    reason:
+      "the same room: an invigilator acts on the candidate in front of them. Every action writes a reason and an audit row, and terminate takes a second staff member (a CHECK)",
+  },
+  {
+    file: "apps/web/src/server/actions/invigilate.ts",
+    rule: "R1",
+    call: "assessmentAttempt.updateMany",
+    count: 2,
+    reason:
+      "granting time (pausedMs, never expiresAt) and ending a sitting, both on a candidate in the invigilator's own hall; both audited with a written reason",
+  },
+  {
+    file: "apps/web/src/server/actions/integrity.ts",
+    rule: "R4",
+    call: "integrityReview.create",
+    count: 1,
+    reason:
+      "integrity review is a COLLEGE-level function, not a departmental one: SPEC section 5 requires two INDEPENDENT reviewers at the HIGH band, and a department with one administrator could not supply them. The row is keyed by the flag, the reviewer is the signed-in staff member, and the verdict carries a written rationale the student reads",
+  },
+  {
+    file: "apps/web/src/server/actions/integrity.ts",
+    rule: "R1",
+    call: "integrityAppeal.findUnique",
+    count: 1,
+    reason: "the appeal being decided, read by flag; the same college-level reviewer pool as above",
+  },
+  {
+    file: "apps/web/src/server/actions/integrity.ts",
+    rule: "R1",
+    call: "integrityAppeal.findUniqueOrThrow",
+    count: 1,
+    reason: "re-reading the two recorded verdicts to decide the appeal, after the second one is written",
+  },
+  {
+    file: "apps/web/src/server/actions/integrity.ts",
+    rule: "R1",
+    call: "integrityAppeal.updateMany",
+    count: 2,
+    reason:
+      "recording one decider's verdict, then the appeal's outcome; both conditional on outcome = PENDING, and the two-deciders-are-different rule is a CHECK",
+  },
+  {
     file: "apps/web/src/lib/admin/roster.ts",
     rule: "R4",
     call: "user.createManyAndReturn",

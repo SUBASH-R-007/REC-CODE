@@ -276,3 +276,33 @@ Seen 2026-10-19: Phase 6e's migration was applied to `recx_test` while Phase
 6d's Linux gate was still on its services step. Nothing was wrong with either
 slice. Start the next slice's migrations after the gate reports, or gate the
 two slices together.
+
+## `next build` succeeding is not the same as the app routing
+
+Next refuses two different dynamic slug NAMES at the same path position, and
+it does not say so at build time. Phase 6e added
+`/assessments/[attemptId]/report` while the exam group already owned
+`/assessments/[slug]/attempt`:
+
+```
+✓ Compiled successfully in 66s
+…
+[Error: You cannot use different slug names for the same dynamic path ('attemptId' !== 'slug').]
+```
+
+The build passed. `pnpm typecheck` passed. `pnpm test` passed. The error only
+appeared under `pnpm size`, because that script **serves the production build
+and asks it for a page** — and every page answered 500.
+
+Two things follow:
+
+- give the same path position the same slug name everywhere, or put the route
+  somewhere else (the report moved to `/sittings/[attemptId]`, which is also
+  what the codebase calls an attempt);
+- `pnpm size` is not only a size check. It is the only gate that proves the
+  built app can serve a request, so a red `size` with a routing error in it is
+  a real failure and not a budget problem.
+
+A stale `.next/types` directory also reports phantom `TS2307` errors for a
+route that has just been moved. Rebuild before believing them:
+`rm -rf apps/web/.next && npx pnpm@9.15.9 build`.

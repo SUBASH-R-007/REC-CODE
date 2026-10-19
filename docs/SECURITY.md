@@ -158,13 +158,15 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 4 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
-| `integrity.overturn` | super-admin | - | - | - | - | yes | 1 action |
+| `integrity.overturn` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `audit.readFull` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `users.impersonate` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `judge.rotateKeys` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `pii.export` | super-admin | - | - | - | - | yes | 1 action, 1 route, 1 page |
 | `calendar.manage` | super-admin | - | - | - | - | yes | arrives in Phase 8 |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
+| `integrity.review` | staff | - | - | yes | - | yes | 2 actions, 2 pages |
+| `exam.invigilate` | staff | - | - | yes | - | yes | 4 actions, 1 route, 2 pages |
 | `exam.device.enrol` | staff | - | - | yes | - | yes | 1 action, 1 route, 1 page |
 | `judge.operate` | staff | - | - | yes | - | yes | 3 actions, 1 page |
 | `students.view` | staff | - | - | yes | - | yes | 5 pages |
@@ -184,6 +186,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
 | `exam.heartbeat` | self-service | yes | yes | yes | yes | yes | 4 routes |
 | `exam.device.assert` | self-service | yes | yes | yes | yes | yes | 1 route |
+| `integrity.appeal` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notes.manage` | self-service | yes | yes | yes | yes | yes | 4 actions |
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |

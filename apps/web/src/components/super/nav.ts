@@ -20,6 +20,7 @@ export const SUPER_NAV: readonly SuperNavItem[] = Object.freeze([
   { href: "/super/audit", label: "Audit log" },
   { href: "/super/impersonate", label: "Impersonate" },
   { href: "/super/flags", label: "Flags" },
+  { href: "/super/integrity", label: "Integrity calibration" },
   { href: "/super/jobs", label: "Jobs" },
   { href: "/super/data", label: "Data" },
 ]);
