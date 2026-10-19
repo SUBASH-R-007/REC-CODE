@@ -56,6 +56,11 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_termination_change",
   // 20261019250000_phase7a_question_bank
   "recx_refuse_published_question_change",
+  // 20261019250200_phase7c_sitting
+  "recx_refuse_mock_attempt_change",
+  "recx_refuse_section_clock_change",
+  "recx_refuse_closed_section_write",
+  "recx_refuse_used_pattern_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -97,6 +102,10 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019250100_phase7b_patterns
   "MockPattern",
   "AptitudeSection",
+  // 20261019250200_phase7c_sitting
+  "MockAttempt",
+  "MockSectionState",
+  "MockAttemptAnswer",
 ];
 
 export interface GuardTrigger {
@@ -297,6 +306,44 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_published_question_change",
     level: "ROW",
   },
+  // 20261019250200_phase7c_sitting
+  {
+    name: "MockAttempt_written_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "MockAttempt",
+    fn: "recx_refuse_mock_attempt_change",
+    level: "ROW",
+  },
+  {
+    name: "MockSectionState_clock_written_once",
+    timing: "BEFORE UPDATE",
+    table: "MockSectionState",
+    fn: "recx_refuse_section_clock_change",
+    level: "ROW",
+  },
+  // SPEC section 5's gate, in the data: allowBackNavigation: false enforced
+  // server-side and not just in the UI.
+  {
+    name: "MockAttemptAnswer_closed_section",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "MockAttemptAnswer",
+    fn: "recx_refuse_closed_section_write",
+    level: "ROW",
+  },
+  {
+    name: "AptitudeSection_pattern_frozen",
+    timing: "BEFORE INSERT OR UPDATE OR DELETE",
+    table: "AptitudeSection",
+    fn: "recx_refuse_used_pattern_change",
+    level: "ROW",
+  },
+  {
+    name: "MockPattern_scoring_frozen",
+    timing: "BEFORE UPDATE",
+    table: "MockPattern",
+    fn: "recx_refuse_used_pattern_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -327,7 +374,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019250100_phase7b_patterns";
+export const CHECK_CATALOG_THROUGH = "20261019250200_phase7c_sitting";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -599,6 +646,33 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AptitudeSection_topic_mix_check", "AptitudeSection"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019250100_phase7b_patterns" })),
+  ...(
+    [
+      ["MockAttempt_window_check", "MockAttempt"],
+      ["MockAttempt_number_check", "MockAttempt"],
+      ["MockAttempt_section_position_check", "MockAttempt"],
+      // totalRaw is NOT floored at zero: the honest total of a negatively
+      // marked paper can be negative, and it is percent that is clamped.
+      ["MockAttempt_score_check", "MockAttempt"],
+      ["MockAttempt_finalised_check", "MockAttempt"],
+      ["MockAttempt_version_check", "MockAttempt"],
+      ["MockAttempt_layout_check", "MockAttempt"],
+      ["MockSectionState_position_check", "MockSectionState"],
+      ["MockSectionState_window_check", "MockSectionState"],
+      // A section cannot close before it opens.
+      ["MockSectionState_started_check", "MockSectionState"],
+      ["MockSectionState_index_check", "MockSectionState"],
+      ["MockSectionState_counts_check", "MockSectionState"],
+      ["MockAttemptAnswer_position_check", "MockAttemptAnswer"],
+      ["MockAttemptAnswer_shape_check", "MockAttemptAnswer"],
+      ["MockAttemptAnswer_timing_check", "MockAttemptAnswer"],
+      ["MockAttemptAnswer_graded_check", "MockAttemptAnswer"],
+      // An unanswered question scores exactly zero, never a penalty — stated
+      // in the data as well as in gradeAnswer().
+      ["MockAttemptAnswer_blank_not_penalised", "MockAttemptAnswer"],
+      ["AptitudeUserTopicStat_counts_check", "AptitudeUserTopicStat"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019250200_phase7c_sitting" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

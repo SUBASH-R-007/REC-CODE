@@ -578,6 +578,10 @@ model User {
   integrityReviews IntegrityReview[]
   integrityAppeals IntegrityAppeal[] @relation("AppealStudent")
 
+  /// Aptitude practice and full mocks (Phase 7).
+  mockAttempts       MockAttempt[]
+  aptitudeTopicStats AptitudeUserTopicStat[]
+
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
 }
@@ -2880,7 +2884,8 @@ model AptitudeQuestion {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
-  stat AptitudeQuestionStat?
+  stat    AptitudeQuestionStat?
+  answers MockAttemptAnswer[]
 
   /// The only authoring/pool query shape.
   @@index([status, area, topic])
@@ -2947,6 +2952,7 @@ model MockPattern {
   updatedAt             DateTime          @updatedAt
 
   sections AptitudeSection[]
+  attempts MockAttempt[]
 
   @@index([status, slug])
 }
@@ -2983,7 +2989,149 @@ model AptitudeSection {
   shuffleOptions       Boolean       @default(true)
   createdAt            DateTime      @default(now())
 
+  sectionStates MockSectionState[]
+
   @@unique([patternId, position])
   @@unique([patternId, key])
   @@unique([patternId, label])
+}
+
+/// No TERMINATED, no VOIDED: a practice mock has no invigilator, and an enum
+/// with no voiding value is an enum no future code path and no future UI can
+/// void from. Mirrors MOCK_ATTEMPT_STATUSES in @recx/shared.
+enum MockAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_SUBMITTED
+  ABANDONED
+}
+
+/// One candidate's sitting of one pattern. The clock, the seed and the layout
+/// are written ONCE at insert (recx_refuse_mock_attempt_change), so a paper
+/// cannot be re-rolled and a deadline cannot be moved.
+model MockAttempt {
+  id                     String            @id @default(cuid())
+  patternId              String
+  pattern                MockPattern       @relation(fields: [patternId], references: [id])
+  userId                 String
+  user                   User              @relation(fields: [userId], references: [id])
+  attemptNumber          Int               @default(1)
+  status                 MockAttemptStatus @default(IN_PROGRESS)
+  /// Per-candidate randomisation seed. Stored so a disputed paper can be
+  /// reproduced exactly as that candidate saw it.
+  seed                   Int
+  startedAt              DateTime          @default(now())
+  expiresAt              DateTime
+  currentSectionPosition Int               @default(1)
+  /// The paper as served: MockLayout, versioned (v: 1).
+  layout                 Json
+  /// Which accommodation terms applied, for the report. Never a kind.
+  accommodationFlags     String[]          @default([])
+  /// The TRUE signed total. Deliberately not floored at zero: the honest
+  /// total of a negatively marked paper can be negative, and it is percent
+  /// that is clamped (docs/OPEN-QUESTIONS.md).
+  totalRaw               Float             @default(0)
+  totalMax               Float             @default(0)
+  percent                Float             @default(0)
+  sectionsPassed         Int               @default(0)
+  passedOverall          Boolean?
+  percentileAtFinalise   Float?
+  finalizedAt            DateTime?
+  /// Optimistic concurrency for finalise.
+  version                Int               @default(0)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  sectionStates MockSectionState[]
+  answers       MockAttemptAnswer[]
+
+  @@unique([patternId, userId, attemptNumber])
+  @@index([userId, startedAt(sort: Desc)])
+  /// The auto-finalise sweeper.
+  @@index([status, expiresAt])
+  /// The nightly pattern-stats job.
+  @@index([patternId, percent(sort: Desc)])
+}
+
+/// One section of one sitting. A row rather than a jsonb blob on the attempt:
+/// it is the authoritative gate every answer write reads, and a
+/// read-modify-write of a jsonb document is the wrong concurrency shape for
+/// that.
+model MockSectionState {
+  id              String          @id @default(cuid())
+  attemptId       String
+  attempt         MockAttempt     @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  sectionId       String
+  section         AptitudeSection @relation(fields: [sectionId], references: [id])
+  position        Int
+  startedAt       DateTime?
+  /// Written once on entry and never moved: a section clock a later write can
+  /// extend is not a section clock.
+  endsAt          DateTime?
+  submittedAt     DateTime?
+  /// The furthest question the server has served. The client cannot move it
+  /// backwards, which is half of enforcing allowBackNavigation: false.
+  highWaterIndex  Int             @default(0)
+  correctCount    Int             @default(0)
+  wrongCount      Int             @default(0)
+  unansweredCount Int             @default(0)
+  rawScore        Float           @default(0)
+  maxScore        Float           @default(0)
+  percent         Float           @default(0)
+  passedCutoff    Boolean?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  answers MockAttemptAnswer[]
+
+  @@unique([attemptId, sectionId])
+  @@unique([attemptId, position])
+}
+
+/// One answered — or seen and left blank — question. Selections are stored in
+/// the question's OWN option order, never the shown one, so re-grading after
+/// a shuffle change is still correct and an answer row is readable without
+/// the layout.
+model MockAttemptAnswer {
+  id              String           @id @default(cuid())
+  attemptId       String
+  attempt         MockAttempt      @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  sectionStateId  String
+  sectionState    MockSectionState @relation(fields: [sectionStateId], references: [id], onDelete: Cascade)
+  questionId      String
+  question        AptitudeQuestion @relation(fields: [questionId], references: [id])
+  /// Index within the section as served.
+  position        Int
+  selectedIndexes Int[]            @default([])
+  numericValue    Decimal?         @db.Decimal(20, 6)
+  markedForReview Boolean          @default(false)
+  isCorrect       Boolean?
+  awarded         Float?
+  firstSeenAtMs   Int
+  answeredAtMs    Int?
+  changeCount     Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([attemptId, questionId])
+  @@unique([attemptId, sectionStateId, position])
+  /// The stat roll-up.
+  @@index([questionId])
+}
+
+/// Per user, per topic. What Phase 8's aptitudePercentile, verbalPercentile
+/// and "aptitude section-level gaps" read, and what makes the department
+/// weakness view an index scan rather than a scan over answers.
+model AptitudeUserTopicStat {
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic           AptitudeTopic
+  attempted       Int           @default(0)
+  correct         Int           @default(0)
+  totalSeconds    Int           @default(0)
+  lastAttemptedAt DateTime?
+  updatedAt       DateTime      @updatedAt
+
+  @@id([userId, topic])
+  @@index([topic, correct])
 }

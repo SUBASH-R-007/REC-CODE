@@ -38,7 +38,76 @@ export const XP_KEYS = Object.freeze({
   contestParticipation: (contestId: string, userId: string) => `contest:${contestId}:${userId}:participation`,
   daily: (userId: string, day: string) => `daily:${userId}:${day}`,
   reversal: (eventId: bigint | number) => `reversal:${eventId}`,
+  /**
+   * Topic practice pays ONCE per question, ever, on the first correct answer
+   * — so a re-sit cannot farm it. The ledger itself is the enforcement:
+   * XpEvent.idempotencyKey is unique.
+   */
+  aptitude: (userId: string, questionId: string) => `aptitude:${userId}:${questionId}`,
+  /** One payment per finalise, idempotent under a retried finalise. */
+  mock: (mockAttemptId: string) => `mock:${mockAttemptId}`,
 });
+
+/**
+ * How many finalised attempts a pattern needs before its percentile term is
+ * meaningful.
+ *
+ * XP_RULES.mock is "base 100 + 1 per percentile above median", which needs a
+ * cohort. A percentile over four attempts is noise and an XpEvent is
+ * permanent, so below this only the base is awarded and the result page says
+ * the percentile is not meaningful yet. The spec's own reasoning about contest
+ * ratings ("not meaningful before ~8-12 contests") applied to a ledger row.
+ */
+export const MOCK_PERCENTILE_MIN_ATTEMPTS = 30;
+
+/**
+ * XP for one correct answer in TOPIC PRACTICE.
+ *
+ * Not inside a mock: a 120-question mock would otherwise pay up to 1,200 XP
+ * through the per-correct rule AND XP_RULES.mock, and the 200/day aptitude cap
+ * would silently become the real number — exactly the Easy-grinding failure
+ * the caps exist to prevent (docs/OPEN-QUESTIONS.md).
+ */
+export function aptitudeXp(args: {
+  readonly correct: boolean;
+  readonly alreadyPaidForQuestion: boolean;
+  /** XP already paid under the aptitude cap today. */
+  readonly awardedToday: number;
+  readonly rules?: Pick<XpRules, "aptitude">;
+}): { xp: number; cappedBy: "none" | "already_paid" | "daily_cap" } {
+  const rules = args.rules ?? XP_RULES;
+  if (!args.correct) return { xp: 0, cappedBy: "none" };
+  if (args.alreadyPaidForQuestion) return { xp: 0, cappedBy: "already_paid" };
+  const room = Math.max(0, rules.aptitude.dailyCap - Math.max(0, args.awardedToday));
+  const xp = Math.min(rules.aptitude.perCorrect, room);
+  return { xp, cappedBy: xp < rules.aptitude.perCorrect ? "daily_cap" : "none" };
+}
+
+/**
+ * XP for finalising a mock.
+ *
+ * The base is unconditional — sitting a full mock honestly is the behaviour
+ * the phase wants, and a candidate who scores badly learns the most from it.
+ * The percentile term is added only once the pattern has a cohort, and only
+ * for the part ABOVE the median: it rewards doing better than the room, not
+ * simply being in it.
+ */
+export function mockXp(args: {
+  readonly percent: number;
+  readonly medianPercent: number | null;
+  readonly finalizedAttemptCount: number;
+  readonly rules?: Pick<XpRules, "mock">;
+}): { xp: number; percentileCounted: boolean; aboveMedian: number } {
+  const rules = args.rules ?? XP_RULES;
+  const enoughCohort = args.finalizedAttemptCount >= MOCK_PERCENTILE_MIN_ATTEMPTS && args.medianPercent !== null;
+  if (!enoughCohort) return { xp: rules.mock.base, percentileCounted: false, aboveMedian: 0 };
+  const aboveMedian = Math.max(0, Math.round(args.percent - (args.medianPercent ?? 0)));
+  return {
+    xp: rules.mock.base + aboveMedian * rules.mock.perPercentileAboveMedian,
+    percentileCounted: true,
+    aboveMedian,
+  };
+}
 
 export type DifficultyKey = keyof typeof XP_RULES.firstSolve;
 

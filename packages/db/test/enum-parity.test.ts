@@ -20,6 +20,7 @@ import {
   APTITUDE_TOPICS,
   APTITUDE_QUESTION_KINDS,
   MOCK_PATTERN_STATUSES,
+  MOCK_ATTEMPT_STATUSES,
 } from "@recx/shared";
 import { CONTENT_ORIGINS } from "@recx/shared/authoring";
 import { describe, expect, it } from "vitest";
@@ -113,6 +114,7 @@ const MIRRORS: Array<[prismaEnum: string, sharedName: string, shared: readonly s
   ["AptitudeTopic", "APTITUDE_TOPICS", APTITUDE_TOPICS],
   ["AptitudeQuestionKind", "APTITUDE_QUESTION_KINDS", APTITUDE_QUESTION_KINDS],
   ["MockPatternStatus", "MOCK_PATTERN_STATUSES", MOCK_PATTERN_STATUSES],
+  ["MockAttemptStatus", "MOCK_ATTEMPT_STATUSES", MOCK_ATTEMPT_STATUSES],
   // Difficulty keys the XP table; the Prisma enum must offer exactly those.
   ["Difficulty", "the keys of XP_RULES.firstSolve", Object.keys(XP_RULES.firstSolve)],
 ];
