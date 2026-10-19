@@ -332,12 +332,17 @@ describe("a failing tick is reported, not thrown", () => {
   });
 });
 
-describe("THIS SLICE WRITES NOTHING", () => {
+describe("A DRY RUN WRITES NOTHING", () => {
   /**
-   * The assertion that makes "dry run shipped first" a property of the code
-   * rather than an intention. The fake database records every property the
-   * job touches; a mutation added later shows up here before it shows up in
-   * somebody's account.
+   * What makes "dry run shipped first" a property of the code rather than an
+   * intention. The fake database records every property the job touches; a
+   * mutation that reached the dry-run path later would show up here before it
+   * showed up in somebody's account.
+   *
+   * Slice 8c shipped this job writing nothing at all, with its own gate.
+   * Slice 8d added the writes, so the contract is now narrower and sharper:
+   * `--dry-run` reports and writes nothing, and the live path is tested
+   * against a real database in `packages/db/test/inactivity-apply.db.test.ts`.
    */
   const MUTATIONS = [
     "create",
@@ -363,25 +368,43 @@ describe("THIS SLICE WRITES NOTHING", () => {
     ] as never);
 
     await job.tick(AT_0200_IST);
+    // One of each kind went through the planner: escalate, hold-with-review
+    // and clear. If a write were going to leak, it would be on one of these.
     for (const mutation of MUTATIONS) {
       expect(touched, `the sweep touched ${mutation}`).not.toContain(mutation);
     }
   });
 
-  it("says of itself that it does not write", () => {
+  it("says of itself whether it writes", () => {
     const { db } = recordingDb();
-    expect(new InactivitySweepJob({ db, log, dryRun: false }).writes).toBe(false);
+    expect(new InactivitySweepJob({ db, log, dryRun: true }).writes).toBe(false);
+    expect(new InactivitySweepJob({ db, log, dryRun: false }).writes).toBe(true);
   });
 
-  it("writes nothing even when the scheduler was NOT started with --dry-run", async () => {
-    // The point of the slice: the job is a dry run by construction, not by
-    // flag. A flag nobody read the output of would not be the gate the spec
-    // asks for.
+  it("still COUNTS everything it would do, so the report is worth reading", async () => {
+    // A dry run that reported nothing would be a dry run nobody could use as
+    // the manual gate the spec asks for.
+    const { db } = recordingDb();
+    const job = new InactivitySweepJob({ db, log, dryRun: true });
+    sweepCandidates.mockResolvedValue([
+      candidate(),
+      candidate({ userId: "u2", stage: "WARNED", lastActiveAt: new Date("2026-10-19T04:00:00.000Z") }),
+    ] as never);
+
+    const report = await job.tick(AT_0200_IST);
+    expect(report).toMatchObject({ considered: 2, wouldEscalate: 1, wouldClear: 1 });
+    // And nothing was actually done.
+    expect(report).toMatchObject({ escalated: 0, cleared: 0 });
+  });
+
+  it("reaches the write path when it is NOT a dry run — so the block above proves something", async () => {
+    // Without this, "touched no mutation" could pass because the job never
+    // tries to write at all, and the dry-run assertion would be vacuous.
     const { db, touched } = recordingDb();
     const job = new InactivitySweepJob({ db, log, dryRun: false });
     sweepCandidates.mockResolvedValue([candidate()] as never);
     await job.tick(AT_0200_IST);
-    for (const mutation of MUTATIONS) expect(touched).not.toContain(mutation);
+    expect(touched).toContain("$transaction");
   });
 
   it("mutation check: the recorder really would catch a write", async () => {

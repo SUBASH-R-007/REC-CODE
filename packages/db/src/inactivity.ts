@@ -1,5 +1,10 @@
 import {
   ACCOUNT_STATUS_FOR_STAGE,
+  CANCELLED_LANES_ON_RESTRICT,
+  INACTIVITY_AUDIT_ACTIONS,
+  INACTIVITY_NOTIFICATION_KIND,
+  INACTIVITY_STAGES,
+  MENTOR_EMAIL_KIND,
   buildInactivityEvidence,
   calendarLookup,
   campusDay,
@@ -14,10 +19,13 @@ import {
   type InactivityPolicyShape,
   type LeaveRow,
   type RestrictionStage,
+  mentorMessage,
+  stageMessage,
   type StagePlan,
   type SweepHoldback,
 } from "@recx/shared";
-import type { Db } from "./index";
+import { appendAuditEntriesInTx } from "./audit";
+import type { Db, DbTx } from "./index";
 
 /**
  * Reading everything the inactivity sweep needs, and deciding what it means
@@ -413,3 +421,373 @@ const FALLBACK_POLICY: InactivityPolicyShape = {
   notifyMentor: false,
   notifyParentEmail: false,
 };
+
+// ── Performing a decision ────────────────────────────────────────────────
+
+export interface AppliedDecision {
+  readonly userId: string;
+  readonly fromStage: RestrictionStage;
+  readonly toStage: RestrictionStage;
+  readonly eventId: bigint | null;
+  /** Contest-lane submissions cancelled, for the job's best-effort queue removal. */
+  readonly cancelledSubmissionIds: string[];
+  readonly notifiedMentor: boolean;
+  readonly adminReviewOpened: boolean;
+  /** Set when another writer got there first, or the state moved underneath. */
+  readonly skipped?: "already-moved" | "nothing-to-do" | "no-evidence";
+}
+
+/**
+ * Perform one decision, in ONE transaction.
+ *
+ * What goes in it, and why each thing has to be inside rather than beside:
+ *
+ *   - the `AccountStatusEvent`, because `AccountRestriction_requires_event`
+ *     is a deferred constraint trigger: at commit the stage must have its
+ *     explanation, and a two-step write would leave a window where it does
+ *     not;
+ *   - `User.status`, because the already-shipped contest refusal reads it
+ *     and a restriction whose status write landed separately would bite a
+ *     moment late or not at all;
+ *   - the `Notification`, because a student restricted with no message is a
+ *     student who finds out by failing to enter a contest;
+ *   - the `AuditLog` row, through `appendAuditEntriesInTx` so it joins the
+ *     day's hash chain under the same advisory lock as every other audit
+ *     write;
+ *   - the contest-lane cancellation, because judge capacity spent on a lane
+ *     the student may not enter is capacity taken from somebody who can.
+ *
+ * The Redis removal is NOT in here. It cannot be: a Redis call inside a
+ * database transaction cannot be rolled back, and an unremoved job is
+ * harmless anyway — the row is CANCELLED and the reconciler leaves it alone.
+ * The job does it afterwards, best-effort, as every other enqueue in this
+ * codebase does.
+ *
+ * Safe with two scheduler instances: an advisory lock on the user id
+ * serialises them, and the stage is re-read inside the transaction, so the
+ * second one finds the work done and reports `already-moved` rather than
+ * writing a second rung. The per-day unique index is the backstop.
+ */
+export async function applyDecision(
+  db: Db,
+  decision: SweepDecision,
+  options: { readonly now: Date; readonly evaluationDay: string },
+): Promise<AppliedDecision> {
+  const { candidate, plan } = decision;
+  const base: AppliedDecision = {
+    userId: candidate.userId,
+    fromStage: candidate.stage,
+    toStage: plan.toStage,
+    eventId: null,
+    cancelledSubmissionIds: [],
+    notifiedMentor: false,
+    adminReviewOpened: false,
+  };
+
+  if (plan.kind === "hold") {
+    // Nothing moves — but the review item and the counters are still worth
+    // writing, so `/admin/inactivity` is current and the dormancy chip can
+    // show a count before anything has happened to the student.
+    await recordHold(db, decision, options);
+    return { ...base, skipped: "nothing-to-do", adminReviewOpened: plan.raisesAdminReview };
+  }
+  if (decision.evidence === null) return { ...base, skipped: "no-evidence" };
+
+  const evidence = decision.evidence;
+  const policy = decision.policy;
+  const toStatus = decision.toStatus;
+
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`inactivity:${candidate.userId}`}))`;
+
+    const live = await tx.user.findUnique({
+      where: { id: candidate.userId },
+      select: {
+        id: true,
+        status: true,
+        firstName: true,
+        lastName: true,
+        collegeId: true,
+        batchYear: true,
+        departmentCode: true,
+        restriction: { select: { stage: true, ownsAccountStatus: true, adminReviewOpenedAt: true } },
+      },
+    });
+    if (!live) return { ...base, skipped: "nothing-to-do" };
+
+    const liveStage = live.restriction?.stage ?? "NONE";
+    if (liveStage !== candidate.stage) {
+      // Another instance, a solve, or a staff member moved them between the
+      // read and now. Their decision stands; ours was computed from a stale
+      // snapshot and is not reapplied.
+      return { ...base, skipped: "already-moved" };
+    }
+
+    const event = await tx.accountStatusEvent.create({
+      data: {
+        userId: candidate.userId,
+        fromStage: candidate.stage,
+        toStage: plan.toStage,
+        fromStatus: live.status,
+        toStatus: engineOwns(live.restriction?.ownsAccountStatus ?? false, live.status) ? toStatus : live.status,
+        source: "INACTIVITY_SWEEP",
+        policyVersion: policy?.version ?? null,
+        evidence: evidence as never,
+        triggeredBySystem: true,
+        evaluationDate: new Date(`${options.evaluationDay}T00:00:00.000Z`),
+        notifiedAt: options.now,
+        /**
+         * Written explicitly, from the SAME clock as `stageEnteredAt` below.
+         *
+         * `recx_refuse_restriction_without_event` requires an event with
+         * `createdAt >= stageEnteredAt`. Leaving `createdAt` to the database
+         * default compares the DATABASE clock against the APPLICATION clock,
+         * and on this development machine the two drift by a few hundred
+         * milliseconds in either direction — so a perfectly correct write
+         * would be refused whenever the app clock ran ahead. In production
+         * the app and the database are different machines, so this is not a
+         * development artefact. The fifth time this trap has been sprung in
+         * this repository (docs/CONVENTIONS.md).
+         */
+        createdAt: options.now,
+      },
+      select: { id: true },
+    });
+
+    const clearing = plan.toStage === "NONE";
+    await tx.accountRestriction.upsert({
+      where: { userId: candidate.userId },
+      create: {
+        userId: candidate.userId,
+        stage: plan.toStage,
+        stageEnteredAt: options.now,
+        graceEndsAt: clearing ? null : plan.graceEndsAt,
+        countedInactiveDays: clearing ? 0 : decision.count.countedInactiveDays,
+        lastEvaluatedAt: options.now,
+        policyVersion: policy?.version ?? null,
+        ownsAccountStatus: !clearing && toStatus !== "ACTIVE",
+        adminReviewOpenedAt: plan.raisesAdminReview ? options.now : null,
+      },
+      update: {
+        stage: plan.toStage,
+        stageEnteredAt: options.now,
+        graceEndsAt: clearing ? null : plan.graceEndsAt,
+        countedInactiveDays: clearing ? 0 : decision.count.countedInactiveDays,
+        lastEvaluatedAt: options.now,
+        policyVersion: policy?.version ?? null,
+        ownsAccountStatus: !clearing && toStatus !== "ACTIVE",
+        // A clear closes the review item; an escalation that wants one opens
+        // it, and one already open stays open.
+        adminReviewOpenedAt: clearing
+          ? live.restriction?.adminReviewOpenedAt ?? null
+          : plan.raisesAdminReview
+            ? live.restriction?.adminReviewOpenedAt ?? options.now
+            : live.restriction?.adminReviewOpenedAt ?? null,
+        adminReviewClearedAt: clearing && live.restriction?.adminReviewOpenedAt ? options.now : null,
+      },
+    });
+
+    /**
+     * `User.status`, and ONLY while the engine owns it.
+     *
+     * An account a human suspended for something else must never be
+     * un-suspended by a clear-on-solve, and an account already DISABLED by a
+     * human must not be quietly downgraded to SOFT_RESTRICTED by a sweep. So
+     * the engine writes the status when it is moving into a restricted state
+     * from ACTIVE, or when it is clearing one it put there itself.
+     */
+    const mayWriteStatus = engineOwns(live.restriction?.ownsAccountStatus ?? false, live.status);
+    if (mayWriteStatus && toStatus !== live.status) {
+      await tx.user.update({ where: { id: candidate.userId }, data: { status: toStatus } });
+    }
+
+    const message = stageMessage(plan.toStage, decision.count.countedInactiveDays);
+    await tx.notification.create({
+      data: {
+        userId: candidate.userId,
+        kind: INACTIVITY_NOTIFICATION_KIND,
+        title: message.title,
+        body: message.body,
+        link: message.link,
+        createdAt: options.now,
+      },
+    });
+
+    // Judge capacity is never spent on a lane the student may not enter.
+    // CONTEST only: practice is not locked, and a practice solve is the
+    // documented way out (docs/OPEN-QUESTIONS.md).
+    let cancelledSubmissionIds: string[] = [];
+    if (toStatus !== "ACTIVE") {
+      const queued = await tx.submission.findMany({
+        where: {
+          userId: candidate.userId,
+          lane: { in: [...CANCELLED_LANES_ON_RESTRICT] },
+          status: { in: ["QUEUED", "JUDGING"] },
+        },
+        select: { id: true },
+      });
+      if (queued.length > 0) {
+        await tx.submission.updateMany({
+          where: { id: { in: queued.map((row) => row.id) } },
+          data: { status: "CANCELLED" },
+        });
+        cancelledSubmissionIds = queued.map((row) => row.id);
+      }
+    }
+
+    // The named human. The spec's point is that non-progress is visible to
+    // somebody who can intervene, so this must never silently go nowhere:
+    // the student's TA_MENTOR by cohort, and failing that the department
+    // ADMIN rather than nobody.
+    let notifiedMentor = false;
+    if (policy?.notifyMentor && !clearing && stageIndexOf(plan.toStage) >= stageIndexOf("WARNED")) {
+      const mentorId = await findMentor(tx, {
+        batchYear: live.batchYear,
+        departmentCode: live.departmentCode,
+      });
+      if (mentorId) {
+        const mail = mentorMessage({
+          collegeId: live.collegeId,
+          name: `${live.firstName} ${live.lastName}`.trim(),
+          stage: plan.toStage,
+          countedDays: decision.count.countedInactiveDays,
+        });
+        await tx.emailOutbox.create({
+          data: {
+            kind: MENTOR_EMAIL_KIND,
+            toUserId: mentorId,
+            subject: mail.subject,
+            bodyText: mail.body,
+            entityType: "AccountStatusEvent",
+            entityId: String(event.id),
+          },
+        });
+        notifiedMentor = true;
+      }
+    }
+
+    await appendAuditEntriesInTx(
+      tx,
+      [
+        {
+          actorId: null,
+          action: clearing ? INACTIVITY_AUDIT_ACTIONS.cleared : INACTIVITY_AUDIT_ACTIONS.escalated,
+          entityType: "AccountStatusEvent",
+          entityId: String(event.id),
+          targetUserId: candidate.userId,
+          sensitivity: "SENSITIVE",
+          metadata: {
+            fromStage: candidate.stage,
+            toStage: plan.toStage,
+            countedInactiveDays: decision.count.countedInactiveDays,
+            policyVersion: policy?.version ?? null,
+            evaluationDate: options.evaluationDay,
+            statusWritten: mayWriteStatus && toStatus !== live.status ? toStatus : null,
+            cancelledContestSubmissions: cancelledSubmissionIds.length,
+            notifiedMentor,
+            raisesAdminReview: plan.raisesAdminReview,
+          },
+        },
+      ],
+      options.now,
+    );
+
+    return {
+      ...base,
+      fromStage: candidate.stage,
+      eventId: event.id,
+      cancelledSubmissionIds,
+      notifiedMentor,
+      adminReviewOpened: plan.raisesAdminReview,
+    };
+  });
+}
+
+/**
+ * May the engine write `User.status` for this account?
+ *
+ * True when it already owns it, and true when the account is plainly ACTIVE
+ * so there is nothing of anybody else's to overwrite. False for an account a
+ * human put into SOFT_RESTRICTED or DISABLED — that status is theirs, and
+ * the engine neither raises nor lowers it.
+ */
+function engineOwns(ownsAccountStatus: boolean, liveStatus: string): boolean {
+  return ownsAccountStatus || liveStatus === "ACTIVE";
+}
+
+function stageIndexOf(stage: RestrictionStage): number {
+  return INACTIVITY_STAGES.indexOf(stage);
+}
+
+/**
+ * A student's named human: their TA_MENTOR by cohort, else the department
+ * ADMIN, else nobody — and "nobody" is reported rather than assumed, so a
+ * college with no mentors can see that the notification went nowhere.
+ *
+ * Most specific scope first, the same shape as policy resolution: a mentor
+ * scoped to this department AND batch outranks one scoped to either alone.
+ */
+async function findMentor(
+  tx: DbTx,
+  cohort: { batchYear: number | null; departmentCode: string | null },
+): Promise<string | null> {
+  const rows = await tx.adminScope.findMany({
+    where: {
+      revokedAt: null,
+      OR: [{ departmentCode: null }, { departmentCode: cohort.departmentCode ?? undefined }],
+      AND: [{ OR: [{ batchYear: null }, { batchYear: cohort.batchYear ?? undefined }] }],
+      admin: { role: { in: ["TA_MENTOR", "ADMIN"] }, status: "ACTIVE" },
+    },
+    select: { adminId: true, departmentCode: true, batchYear: true, admin: { select: { role: true } } },
+  });
+  if (rows.length === 0) return null;
+  const score = (row: (typeof rows)[number]) =>
+    (row.admin.role === "TA_MENTOR" ? 100 : 0) +
+    (row.departmentCode !== null ? 10 : 0) +
+    (row.batchYear !== null ? 1 : 0);
+  return rows.reduce((best, row) => (score(row) > score(best) ? row : best)).adminId;
+}
+
+/**
+ * A hold still updates the counters and the review item.
+ *
+ * Without this, a student at eight counted days would have no count recorded
+ * anywhere, so the dormancy chip could not warn them before the rung they
+ * are heading for — and `/admin/inactivity` would only ever show students the
+ * job had already acted on, which is the opposite of a review queue.
+ *
+ * No event row: nothing moved, and `AccountStatusEvent_change_check` refuses
+ * a no-op anyway.
+ */
+async function recordHold(
+  db: Db,
+  decision: SweepDecision,
+  options: { readonly now: Date; readonly evaluationDay: string },
+): Promise<void> {
+  const { candidate, plan } = decision;
+  const stage = candidate.stage;
+  // A NONE row may carry no count (AccountRestriction_none_check), so a
+  // student at NONE with nothing counted gets no row at all rather than a
+  // row the constraint would refuse.
+  if (stage === "NONE" && decision.count.countedInactiveDays === 0 && !plan.raisesAdminReview) return;
+
+  await db.accountRestriction.upsert({
+    where: { userId: candidate.userId },
+    create: {
+      userId: candidate.userId,
+      stage,
+      stageEnteredAt: candidate.stageEnteredAt ?? options.now,
+      countedInactiveDays: stage === "NONE" ? 0 : decision.count.countedInactiveDays,
+      graceEndsAt: stage === "NONE" ? null : candidate.graceEndsAt,
+      lastEvaluatedAt: options.now,
+      policyVersion: decision.policy?.version ?? null,
+      adminReviewOpenedAt: plan.raisesAdminReview ? options.now : null,
+    },
+    update: {
+      countedInactiveDays: stage === "NONE" ? 0 : decision.count.countedInactiveDays,
+      lastEvaluatedAt: options.now,
+      policyVersion: decision.policy?.version ?? null,
+      ...(plan.raisesAdminReview ? { adminReviewOpenedAt: options.now, adminReviewClearedAt: null } : {}),
+    },
+  });
+}

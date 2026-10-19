@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma, type DbTx, type XpEventKind } from "@recx/db";
-import { XP_KEYS, makesSolveAssisted, type StreakState, type Verdict } from "@recx/shared";
+import { XP_KEYS, isRestrictedStatus, makesSolveAssisted, type StreakState, type Verdict } from "@recx/shared";
 import { loadXpRules } from "./xp-config";
 import {
   PROGRESS_NOTIFICATION_KIND,
@@ -101,7 +101,23 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
   const { userId, problemId } = input;
   const xp = await loadXpRules(tx);
 
-  const [priorStatus, priorStats] = await Promise.all([
+  /**
+   * Is this account paused for inactivity (Phase 8d)?
+   *
+   * SPEC §5: what SOFT_RESTRICTED blocks is "leaderboard visibility, new XP
+   * accrual (events still recorded, flagged `meta.restricted`), rewards" —
+   * and what it does NOT block is "signing in, reading problems, solving".
+   * So this read changes nothing about whether the solve is accepted or
+   * recorded. It changes only whether the solve MOVES anything public.
+   *
+   * Read at the START of the transaction on purpose. Phase 8e clears the
+   * restriction inside this same transaction when a student solves, so a
+   * state read afterwards would always say "not restricted" and the spec's
+   * `meta.restricted` would be unreachable. The cost to the student is one
+   * solve's worth of board movement; everything they earned is in the ledger
+   * and nothing has to be re-awarded (`docs/OPEN-QUESTIONS.md`).
+   */
+  const [priorStatus, priorStats, restricted] = await Promise.all([
     tx.userProblemStatus.findUnique({
       where: { userId_problemId: { userId, problemId } },
       select: { status: true, firstAttemptAt: true, lastAttemptAt: true },
@@ -117,6 +133,9 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
         solvedHard: true,
       },
     }),
+    tx.user
+      .findUnique({ where: { id: userId }, select: { status: true } })
+      .then((row) => (row ? isRestrictedStatus(row.status) : false)),
   ]);
   const streakBefore: StreakState = {
     current: priorStats?.currentStreak ?? 0,
@@ -160,7 +179,7 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
       problemId: null,
       submissionId: input.submissionId,
       occurredAt: input.submittedAt,
-      meta: { milestone, capped: award.capped, uncapped: award.uncapped, day: plan.day },
+      meta: { milestone, capped: award.capped, uncapped: award.uncapped, day: plan.day, restricted },
     });
     if (inserted) {
       streakAward = award;
@@ -196,6 +215,7 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
         uncapped: award.uncapped,
         dailyChallenge: solve.dailyChallenge,
         day: plan.day,
+        restricted,
       },
     });
     if (inserted) solveXp = award.amount;
@@ -209,7 +229,15 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
   await upsertActivityDay(tx, userId, dayDate, plan, { xp: xpTotal, xpEasy });
   const solved = solvedIncrements(solve?.difficulty ?? "EASY", plan.firstSolve);
   await upsertUserStats(tx, input, plan, solve, solved, xpTotal);
-  if (xpTotal > 0 || plan.firstSolve) {
+  /**
+   * The boards do not move while the account is paused.
+   *
+   * XP is WITHHELD, never destroyed: the XpEvent above is written either way,
+   * carrying `restricted: true`, so nothing has to be re-awarded when the
+   * restriction lifts and no compensating row is ever needed. The ledger is
+   * append-only and this is the whole reason that matters.
+   */
+  if (!restricted && (xpTotal > 0 || plan.firstSolve)) {
     await upsertBuckets(tx, userId, cohort, input.submittedAt, input.now, xpTotal, solved);
   }
   if (plan.firstSolve) await advanceStudyPlans(tx, userId, problemId, input.now);
@@ -226,7 +254,17 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
     solvedHard: before.solvedHard + solved.solvedHard,
     longestStreak: plan.streak?.after.longest ?? before.longestStreak,
   };
-  const badges = await awardBadges(tx, userId, badgesCrossed(before, after), input.now);
+  /**
+   * Rewards are the fourth thing SPEC §5 lists among what a restriction
+   * blocks, and `awardBadges` is where rewards happen — so a paused account
+   * crosses a badge threshold without being given the badge.
+   *
+   * Not lost: `badgesCrossed` is computed from the counters, which keep
+   * moving, so the badge is awarded the next time they cross it with the
+   * account active. A badge nobody saw arrive is a badge nobody will miss;
+   * a badge awarded during a pause would make the pause look like nothing.
+   */
+  const badges = restricted ? [] : await awardBadges(tx, userId, badgesCrossed(before, after), input.now);
   if (milestone !== null && streakAward) {
     await tx.notification.create({
       data: {

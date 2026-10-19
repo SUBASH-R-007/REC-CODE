@@ -103,7 +103,7 @@ const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
 // Phase 6e: the review SLA and the appeal deadline, both student-favouring.
 const integritySla = new IntegritySlaJob({ db, log, dryRun });
 const mockSweep = new MockSweepJob({ db, log, dryRun });
-const inactivitySweep = new InactivitySweepJob({ db, log, dryRun });
+const inactivitySweep = new InactivitySweepJob({ db, log, dryRun, queues });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────

@@ -311,6 +311,28 @@ export const STAFF_CAPABILITIES = deepFreeze([
     ],
   },
   {
+    /**
+     * Phase 8d. The review queue the inactivity sweep hands to a human, and
+     * the two things a human can do with an item.
+     *
+     * Staff and scoped: an ADMIN acts only on students their AdminScope
+     * covers. Clearing is a DE-ESCALATION only — there is no staff action
+     * here that restricts anybody, because the sweep restricts from the
+     * policy with evidence, and a staff member who wants somebody restricted
+     * sooner changes the policy rather than reaching past it.
+     *
+     * `DISABLED` is refused to staff three times over: the pure
+     * `canStaffClear()`, the action, and
+     * `AccountStatusEvent_undisable_check`. The spec makes
+     * DISABLED → ACTIVE super-admin only.
+     */
+    key: "inactivity.review",
+    label: "Review and lift an inactivity restriction for an in-scope student",
+    roles: STAFF,
+    actions: ["admin-inactivity#clearRestriction", "admin-inactivity#dismissReviewItem"],
+    pages: ["app/admin/inactivity/page.tsx"],
+  },
+  {
     key: "students.signOut",
     label: "Sign an in-scope student out everywhere",
     roles: STAFF,

@@ -15,6 +15,7 @@ export type AdminNavIcon =
   | "students"
   | "cohorts"
   | "accommodations"
+  | "inactivity"
   | "problems"
   | "aptitude"
   | "sheets"
@@ -51,6 +52,10 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = Object.freeze([
       item("/admin/students", "Students", "students"),
       item("/admin/cohorts", "Cohorts", "cohorts"),
       item("/admin/accommodations", "Accommodations", "accommodations"),
+      // Phase 8d. In PEOPLE rather than OPERATIONS on purpose: the queue is
+      // a list of students who may need somebody to ask them a question, not
+      // a system to administer.
+      item("/admin/inactivity", "Inactivity", "inactivity"),
     ]),
   },
   {

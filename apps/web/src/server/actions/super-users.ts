@@ -57,7 +57,18 @@ async function applyStatus(
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ANY(${ids}::text[]) ORDER BY id FOR UPDATE`;
     const users = await tx.user.findMany({
       where: { id: { in: ids } },
-      select: { id: true, role: true, status: true, collegeId: true },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+        collegeId: true,
+        // Phase 8d: the stage this account is on, so the status event the
+        // loop writes names it. A manual status change does not move the
+        // inactivity stage — it is a different decision by a different kind
+        // of actor — so from and to are the same rung and the status is what
+        // differs.
+        restriction: { select: { stage: true } },
+      },
     });
     if (users.length !== ids.length) throw new NotFoundError("One or more of those accounts no longer exist.");
     let activeSuperAdmins = await tx.user.count({ where: { role: "SUPER_ADMIN", status: "ACTIVE" } });
@@ -81,6 +92,37 @@ async function applyStatus(
       });
       if (moved.count !== 1) refused.push(`${target.collegeId}: changed a moment ago`);
       if (plan.endsSessions) endSessions.push(target.id);
+
+      /**
+       * The status history (Phase 8d).
+       *
+       * Every change of `User.status` goes in `AccountStatusEvent`, not only
+       * the automatic ones — otherwise a student reading their own history
+       * sees the sweep's decisions and a silent gap where a human made one,
+       * which is exactly the shape that makes "the system did this to me"
+       * unanswerable.
+       *
+       * `MANUAL_SUPER` because this file is `requireSuperAdmin()` throughout,
+       * and it is the one source permitted to take an account OUT of
+       * DISABLED (`AccountStatusEvent_undisable_check`). The stage is
+       * unchanged; `AccountStatusEvent_change_check` is satisfied by the
+       * status differing, which `planStatusChange` has already guaranteed.
+       */
+      const stage = target.restriction?.stage ?? "NONE";
+      await tx.accountStatusEvent.create({
+        data: {
+          userId: target.id,
+          fromStage: stage,
+          toStage: stage,
+          fromStatus: plan.from,
+          toStatus,
+          source: "MANUAL_SUPER",
+          evidence: { note: reason, via, actedBy: actorId },
+          triggeredBySystem: false,
+          actorId,
+          reason,
+        },
+      });
       entries.push({
         actorId,
         action: "account.status_changed",

@@ -24,7 +24,10 @@ describe("admin navigation", () => {
   it("groups the sections as designed", () => {
     expect(ADMIN_NAV_GROUPS.map((g) => [g.label, g.items.map((i) => i.href)])).toEqual([
       ["Overview", ["/admin"]],
-      ["People", ["/admin/students", "/admin/cohorts", "/admin/accommodations"]],
+      // Phase 8d put the inactivity review queue in PEOPLE rather than
+      // OPERATIONS: it is a list of students who may need somebody to ask
+      // them a question, not a system to administer.
+      ["People", ["/admin/students", "/admin/cohorts", "/admin/accommodations", "/admin/inactivity"]],
       // Contests joined Content in Phase 5; the aptitude bank in Phase 7,
       // next to Problems because an author moves between the two.
       [

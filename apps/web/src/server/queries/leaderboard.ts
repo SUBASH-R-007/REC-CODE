@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { Prisma, type ProfileVisibility, type Role } from "@recx/db";
-import { periodKey, type XpPeriod } from "@recx/shared";
+import { RESTRICTED_STATUSES, isRestrictedStatus, periodKey, type XpPeriod } from "@recx/shared";
 import { publicName } from "@recx/design";
 import { db } from "@/lib/db";
 import {
@@ -39,8 +39,18 @@ import {
 /** A hard ceiling for the virtualised full board (the college is ~5,000 students). */
 export const FULL_BOARD_CAP = 10_000;
 
-/** Peers never see these rows: opted-out students, and staff accounts. */
-const HIDDEN = Prisma.sql`(u."leaderboardOptOut" OR u."role" <> 'STUDENT'::"Role")`;
+/**
+ * Peers never see these rows: opted-out students, staff accounts, and — from
+ * Phase 8 — a student whose account is paused for inactivity.
+ *
+ * "Leaderboard visibility" is the first thing SPEC §5 lists among what
+ * SOFT_RESTRICTED blocks, and this one SQL fragment is the whole mechanism:
+ * it is what every board, every "my rank" and every peer view reads through.
+ * Nothing is deleted and no XP is lost — the row simply is not shown, and it
+ * reappears the moment the restriction lifts.
+ */
+const HIDDEN = Prisma.sql`(u."leaderboardOptOut" OR u."role" <> 'STUDENT'::"Role"
+  OR u."status" = ANY (${RESTRICTED_STATUSES as unknown as string[]}::"AccountStatus"[]))`;
 
 const ROW_COLUMNS = Prisma.sql`b."userId", b."xp", b."lastXpAt",
   (b."solvedEasy" + b."solvedMedium" + b."solvedHard")::int AS "solved",
@@ -214,6 +224,7 @@ async function snapshotRows(period: XpPeriod, key: string, filter: ScopeFilter):
       visibility: true,
       leaderboardOptOut: true,
       role: true,
+      status: true,
     },
   });
   const byId = new Map(users.map((u) => [u.id, u]));
@@ -232,8 +243,12 @@ async function snapshotRows(period: XpPeriod, key: string, filter: ScopeFilter):
     .sort((a, b) => b.xp - a.xp || a.lastXpAt.getTime() - b.lastXpAt.getTime());
 }
 
-export function isHidden(user: { leaderboardOptOut: boolean; role: Role }): boolean {
-  return user.leaderboardOptOut || user.role !== "STUDENT";
+export function isHidden(user: { leaderboardOptOut: boolean; role: Role; status?: string }): boolean {
+  if (user.leaderboardOptOut || user.role !== "STUDENT") return true;
+  // `status` is optional so a caller that genuinely has no status (a frozen
+  // snapshot row) still type-checks — but every live caller passes it, and
+  // the SQL fragment above is the real gate for the board itself.
+  return user.status !== undefined && isRestrictedStatus(user.status);
 }
 
 // ── The page model ─────────────────────────────────────────────────────
@@ -244,6 +259,8 @@ export interface LeaderboardViewer {
   lastName: string;
   role: Role;
   leaderboardOptOut: boolean;
+  /** Phase 8: a paused account is not ranked, and is told why. */
+  status?: string;
 }
 
 export interface LeaderboardStanding {

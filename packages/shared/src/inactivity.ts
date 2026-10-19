@@ -465,6 +465,22 @@ export const RESTRICTION_EFFECTS = {
  * so cancelling it would kill the exit route. Recorded in
  * `docs/OPEN-QUESTIONS.md`.
  */
+/**
+ * The account statuses a restriction puts somebody into.
+ *
+ * One list, read by the leaderboard query, the XP apply path and the student
+ * copy — because "is this student restricted?" answered three ways is three
+ * answers that drift. GRADUATED and ARCHIVED are deliberately NOT here: they
+ * are end states, and whatever the boards do about them is not this phase's
+ * business to change.
+ */
+export const RESTRICTED_STATUSES = ["SOFT_RESTRICTED", "DISABLED"] as const;
+export type RestrictedStatus = (typeof RESTRICTED_STATUSES)[number];
+
+export function isRestrictedStatus(status: string): boolean {
+  return (RESTRICTED_STATUSES as readonly string[]).includes(status);
+}
+
 export const CANCELLED_LANES_ON_RESTRICT = ["CONTEST"] as const;
 
 // ── Self-service clearing ────────────────────────────────────────────────
