@@ -211,6 +211,14 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
     }),
     { params: Promise.resolve({ attemptId: "att_1" }) },
   ],
+  "app/api/exam/[attemptId]/submit/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/exam/att_1/submit", {
+      method: "POST",
+      headers: { host: "localhost:3100", origin: "http://localhost:3100", "content-type": "application/json" },
+      body: JSON.stringify({ answers: [] }),
+    }),
+    { params: Promise.resolve({ attemptId: "att_1" }) },
+  ],
   "app/api/exam/[attemptId]/hb/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/att_1/hb", {
       method: "POST",

@@ -149,6 +149,22 @@ const createCodeMirror: CreateEditor = (host, options) => {
           if (!update.docChanged) return;
           if (update.transactions.some((tr) => tr.annotation(External))) return;
           options.onChange(update.state.doc.toString());
+
+          // Exam telemetry (Phase 6c). One report per transaction, carrying
+          // CM6's own `userEvent` — "input.type" for typing, "input.paste"
+          // for a paste, and ABSENT for a change nothing announced, which is
+          // what an extension writing into the document looks like.
+          const report = options.onInsertion;
+          if (!report) return;
+          for (const tr of update.transactions) {
+            if (!tr.docChanged) continue;
+            let inserted = 0;
+            tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, text) => {
+              inserted += text.length;
+            });
+            if (inserted === 0) continue;
+            report({ chars: inserted, origin: tr.annotation(Transaction.userEvent) ?? null });
+          }
         }),
       ],
     }),

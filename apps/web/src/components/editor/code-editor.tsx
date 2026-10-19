@@ -69,6 +69,8 @@ export function CodeEditor({
   label,
   describedBy,
   onKind,
+  onInsertion,
+  forceKind,
   occludedBottom = 0,
   className,
 }: {
@@ -82,6 +84,18 @@ export function CodeEditor({
   describedBy?: string;
   /** Which editor this mount chose (for the keyboard note). */
   onKind?: (kind: EditorKind) => void;
+  /**
+   * Exam telemetry (Phase 6c): inserted characters and CodeMirror's own
+   * account of their origin. Only the CodeMirror controller reports it.
+   */
+  onInsertion?: (change: { chars: number; origin: string | null }) => void;
+  /**
+   * Pin the editor rather than choosing by viewport width. The exam passes
+   * "codemirror" because its transaction annotations are the telemetry SPEC
+   * §5 requires, and Monaco has no equivalent — a wide screen must not buy a
+   * nicer editor at the cost of the signal.
+   */
+  forceKind?: EditorKind;
   /** CSS px at the bottom of the editor covered by an overlay (the console drawer); 0 = none. */
   occludedBottom?: number;
   className?: string;
@@ -90,22 +104,26 @@ export function CodeEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<EditorController | null>(null);
-  const latest = useRef({ value, onChange, language, label, onKind });
+  const latest = useRef({ value, onChange, language, label, onKind, onInsertion, forceKind });
   const [ready, setReady] = useState(false);
   const [kind, setKind] = useState<EditorKind | null>(null);
 
   // Synced in the commit itself, so an editor created between a commit and
   // its passive effects compares against what is actually on screen.
   useLayoutEffect(() => {
-    latest.current = { value, onChange, language, label, onKind };
+    latest.current = { value, onChange, language, label, onKind, onInsertion, forceKind };
   });
 
   // Choose and load the editor once per mount; hand the textarea over to it.
   useEffect(() => {
     let disposed = false;
     let controller: EditorController | null = null;
+    // Read once per mount, like the viewport check beside it: the choice is
+    // deliberately not reactive, because swapping editors mid-sitting would
+    // throw away the candidate's undo history.
     const chosen: EditorKind =
-      typeof window.matchMedia === "function" && !window.matchMedia(MEDIA.monaco).matches ? "codemirror" : "monaco";
+      latest.current.forceKind ??
+      (typeof window.matchMedia === "function" && !window.matchMedia(MEDIA.monaco).matches ? "codemirror" : "monaco");
     setKind(chosen);
     latest.current.onKind?.(chosen);
 
@@ -130,6 +148,7 @@ export function CodeEditor({
           language: latest.current.language,
           label: latest.current.label,
           onChange: (next) => latest.current.onChange(next),
+          onInsertion: (change) => latest.current.onInsertion?.(change),
         });
         controller = created;
         controllerRef.current = created;

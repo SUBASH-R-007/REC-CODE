@@ -152,7 +152,12 @@ vi.mock("@/lib/judge/queue", () => ({
 }));
 vi.mock("@/lib/testdata/store", () => ({ getTestDataStore: () => h.store }));
 vi.mock("@/lib/audit", () => ({ audit: async () => undefined, auditMany: async () => undefined }));
-vi.mock("@/lib/ip", () => ({ requestIp: async () => null, requestIpHash: async () => null, hashIp: () => "x" }));
+vi.mock("@/lib/ip", () => ({
+  requestIp: async () => null,
+  requestIpHash: async () => null,
+  hashIp: () => "x",
+  hashUserAgent: () => "ua",
+}));
 
 const SRC = path.resolve(__dirname, "../src");
 const APP = path.join(SRC, "app");
@@ -219,6 +224,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     assessmentSlug: `${tag}-exam`,
     assessmentProblem: "",
     attempt: "",
+    submitAttempt: "",
     cpp20Config: "",
   };
   /**
@@ -462,6 +468,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         opensAt: new Date(now.getTime() - 30 * 60_000),
         closesAt: new Date(now.getTime() + 4 * 60 * 60_000),
         durationSec: 3_600,
+        // Room for three sittings: the heartbeat sweep's, the submit sweep's
+        // (submitting finalises one), and the one the attempt PAGE starts when
+        // the canary sweep renders it.
+        maxAttempts: 5,
         createdById: user.id,
       },
       select: { id: true },
@@ -488,6 +498,27 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       select: { id: true },
     });
     ids.attempt = attempt.id;
+
+    // A SECOND sitting, for the submit sweep alone. Submitting finalises an
+    // attempt — correctly: a candidate who presses "Submit test" having
+    // written nothing has submitted — so the sweep must not be pointed at
+    // the attempt the heartbeat sweep needs live.
+    const submitAttempt = await db.assessmentAttempt.create({
+      data: {
+        assessmentId: assessment.id,
+        userId: user.id,
+        attemptNumber: 2,
+        seed: 2,
+        startedAt: new Date(now.getTime() - 10 * 60_000),
+        expiresAt: new Date(now.getTime() + 50 * 60_000),
+        layout: { v: 1, questions: [] },
+        tokenHash: createHash("sha256").update(ATTEMPT_TOKEN).digest("hex"),
+        proctorMode: "ADVISORY",
+        status: "IN_PROGRESS",
+      },
+      select: { id: true },
+    });
+    ids.submitAttempt = submitAttempt.id;
   }, 120_000);
 
   afterAll(async () => {
@@ -536,9 +567,17 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         // (it is the record of a sitting), and a published assessment refuses
         // UPDATE, so both guards come off for the delete.
         raw(`ALTER TABLE "public"."AssessmentAttempt" DISABLE TRIGGER "AssessmentAttempt_machine"`),
-        raw(`DELETE FROM "public"."ProctorEvent" WHERE "attemptId" = $1`, ids.attempt),
-        raw(`DELETE FROM "public"."AttemptSnapshot" WHERE "attemptId" = $1`, ids.attempt),
-        raw(`DELETE FROM "public"."AssessmentAttempt" WHERE "id" = $1`, ids.attempt),
+        // By user, not by id: the attempt page's own sweep starts a further
+        // sitting whose id this fixture never learns.
+        raw(
+          `DELETE FROM "public"."ProctorEvent" WHERE "attemptId" IN (SELECT "id" FROM "public"."AssessmentAttempt" WHERE "userId" = ANY($1::text[]))`,
+          userIds,
+        ),
+        raw(
+          `DELETE FROM "public"."AttemptSnapshot" WHERE "attemptId" IN (SELECT "id" FROM "public"."AssessmentAttempt" WHERE "userId" = ANY($1::text[]))`,
+          userIds,
+        ),
+        raw(`DELETE FROM "public"."AssessmentAttempt" WHERE "userId" = ANY($1::text[])`, userIds),
         raw(`ALTER TABLE "public"."AssessmentAttempt" ENABLE TRIGGER "AssessmentAttempt_machine"`),
         raw(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`),
         raw(`DELETE FROM "public"."AssessmentProblem" WHERE "assessmentId" = $1`, ids.assessment),
@@ -653,6 +692,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
             json: { questionId: ids.assessmentProblem, language: "cpp20", source: "int main(){}", trigger: "TICK", atMs: 1000 },
           }),
         () => params({ attemptId: ids.attempt }),
+      ),
+      status: [200],
+    },
+    "api/exam/[attemptId]/submit/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.submitAttempt}/submit`, {
+            method: "POST",
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            // No answers: the canary sweep must not finalise the fixture's
+            // sitting, which the heartbeat row above still needs live.
+            json: { answers: [] },
+          }),
+        () => params({ attemptId: ids.submitAttempt }),
       ),
       status: [200],
     },
@@ -791,6 +844,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getRunView!,
     "submissions#getStudentView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getStudentView!,
     "submissions#recentSubmissions": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).recentSubmissions!,
+    "assessments#listMyAssessments": async () => (await load(path.join(QUERIES_DIR, "assessments.ts"))).listMyAssessments!,
+    "exam#getExamPaper": async () => (await load(path.join(QUERIES_DIR, "exam.ts"))).getExamPaper!,
     "contests#listContests": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).listContests!,
     "contests#getContest": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getContest!,
     "contests#getStandings": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getStandings!,
@@ -823,6 +878,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": () => [[ids.run, viewer()]],
     "submissions#getStudentView": () => [["submission", ids.submission, viewer()], ["run", ids.run, viewer()]],
     "submissions#recentSubmissions": () => [[ids.user, ids.problem]],
+    "assessments#listMyAssessments": () => [
+      [{ id: ids.user, batchYear: 2027, departmentCode: "CSE", section: null }],
+    ],
+    // The paper for the fixture's own attempt, which pins the canary-bearing
+    // frozen version: this is the query that would leak a hidden test if the
+    // exam surface ever read more of a ProblemVersion than it needs.
+    "exam#getExamPaper": () => [
+      [{ v: 1, questions: [{ questionId: ids.assessmentProblem, problemVersionId: ids.live, sourcePosition: 1, points: 1, seed: 1 }] }],
+    ],
     "contests#listContests": () => [[{ id: ids.user, batchYear: 2027, departmentCode: "CSE" }]],
     "contests#getContest": () => [[ids.contestSlug, { id: ids.user, batchYear: 2027, departmentCode: "CSE" }]],
     "contests#getStandings": () => [
@@ -903,6 +967,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "(student)/accessibility/page.tsx": () => ({}),
     "(student)/bookmarks/page.tsx": () => ({}),
     "(student)/dashboard/loading.tsx": () => ({}),
+    "(exam)/layout.tsx": () => ({}),
+    "(exam)/assessments/[slug]/readiness/page.tsx": () => ({ params: { slug: ids.assessmentSlug }, searchParams: {} }),
+    // The single most important leak surface in Phase 6: it renders the
+    // candidate's whole paper from a frozen ProblemVersion that carries a
+    // canary in every hidden test, checker and reference solution. It starts
+    // a sitting as a side effect, which the mocked cookie jar absorbs.
+    "(exam)/assessments/[slug]/attempt/page.tsx": () => ({ params: { slug: ids.assessmentSlug } }),
+    "(student)/assessments/page.tsx": () => ({}),
     "(student)/contests/page.tsx": () => ({}),
     "(student)/contests/[slug]/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
     "(student)/contests/[slug]/analysis/page.tsx": () => ({ params: { slug: ids.contestSlug } }),

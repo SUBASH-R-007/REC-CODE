@@ -4,20 +4,12 @@ import { Badge } from "@recx/design";
 
 /** Small server-rendered pieces shared by the /super pages. */
 
-const IST = new Intl.DateTimeFormat("en-IN", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-  timeZone: "Asia/Kolkata",
-});
-
-/** "10 Oct 2026, 14:05 IST" */
-export function formatIst(date: Date | null | undefined): string {
-  return date ? `${IST.format(date)} IST` : "—";
-}
+/**
+ * "10 Oct 2026, 14:05 IST". Re-exported from @recx/shared so the /super
+ * pages, the student pages and the exam shell cannot drift apart on how a
+ * campus time is written.
+ */
+export { formatCampusTime as formatIst } from "@recx/shared";
 
 export function PageHeader({ title, description, action }: { title: string; description: React.ReactNode; action?: React.ReactNode }) {
   return (

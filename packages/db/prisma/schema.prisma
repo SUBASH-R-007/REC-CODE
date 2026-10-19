@@ -2194,6 +2194,12 @@ model Assessment {
   onLimit                     FocusLimitAction @default(AUTOSUBMIT)
   /// Stricter client guards (fullscreen required, readiness check enforced).
   strictMode                  Boolean          @default(false)
+  /// Per-assessment secret for per-candidate randomisation:
+  /// seed = HMAC-SHA256(seedSecret, attemptId) (SPEC section 5). Per
+  /// assessment, not platform-wide, so one leaked secret cannot be used to
+  /// precompute papers for every assessment. Never sent to a client, never
+  /// logged, never in an audit row.
+  seedSecret                  String           @default(dbgenerated("(gen_random_uuid())::text"))
   /// Audience; null = every value of that dimension.
   audienceBatchYear           Int?
   audienceDepartmentCode      String?

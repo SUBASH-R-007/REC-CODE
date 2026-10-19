@@ -12,6 +12,23 @@ export interface EditorOptions {
   label: string;
   /** Called with the full text after every edit made in the editor. */
   onChange: (value: string) => void;
+  /**
+   * Exam telemetry (Phase 6c). Called once per document-changing transaction
+   * with the number of characters inserted and the editor's OWN account of
+   * where they came from.
+   *
+   * SPEC §5: "Capture editor telemetry through CodeMirror 6 transaction
+   * annotations (updateListener + transactionFilter), not DOM events. CM6
+   * tells you the exact inserted character count and whether the origin was
+   * input.type, input.paste or programmatic; a DOM paste listener tells you
+   * almost nothing and is silenced by one addEventListener override."
+   *
+   * Implemented by the CodeMirror controller only. Monaco has no equivalent
+   * that distinguishes typed from programmatic input, which is why the exam
+   * forces `kind: "codemirror"` rather than accepting a weaker signal on
+   * wide screens (docs/OPEN-QUESTIONS.md).
+   */
+  onInsertion?: (change: { chars: number; origin: string | null }) => void;
 }
 
 export interface EditorController {

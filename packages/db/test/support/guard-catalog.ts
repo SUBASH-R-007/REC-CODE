@@ -385,6 +385,12 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AssessmentAttempt_client_seq_check", "AssessmentAttempt"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019180000_phase6b_heartbeat" })),
+  ...(
+    [
+      // The per-assessment randomisation secret must be a real secret.
+      ["Assessment_seed_secret_check", "Assessment"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019200000_phase6c_seed_secret" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

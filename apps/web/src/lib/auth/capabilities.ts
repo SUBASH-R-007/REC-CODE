@@ -424,6 +424,7 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       "app/api/exam/[attemptId]/hb/route.ts#POST",
       "app/api/exam/[attemptId]/events/route.ts#POST",
       "app/api/exam/[attemptId]/snapshot/route.ts#POST",
+      "app/api/exam/[attemptId]/submit/route.ts#POST",
     ],
   },
   {

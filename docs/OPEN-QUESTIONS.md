@@ -1372,3 +1372,65 @@ Each is the narrower reading, implemented as described.
   `lazy_guard` or `focus_limit`. Neither voids, scores or flags: the
   `IntegrityFlag` a human then reviews arrives with slice 6e, and until it
   exists the audit row is the record.
+
+## Phase 6c — the exam surface (client side)
+
+- **The attempt seed comes from the sitting's natural key, not its id**
+  (decided 2026-10-19, and the database decided it). SPEC §5 writes
+  `seed = HMAC-SHA256(assessment.secret, attemptId)`. The attempt id is
+  assigned on insert, so seeding from it means creating the row and then
+  writing `seed` and `layout` into it — and both are in the tuple
+  `recx_refuse_attempt_change()` freezes, so Postgres refused that second
+  write. It refused the first draft of `startOrResumeAttempt` with exactly
+  the message the trigger exists to give.
+  The seed is now `HMAC-SHA256(seedSecret, "assessmentId:userId:attemptNumber")`
+  — the sitting's `@@unique` key, known BEFORE the insert, so the row is
+  created complete and the write-once guard needs no exception carved into
+  it. No weaker: the key is unique per sitting, the secret is per-assessment
+  and never leaves the server, and a dispute can now reproduce the paper from
+  the key it would quote rather than from an opaque cuid.
+- **`Assessment.seedSecret` is per assessment, with a database default**
+  (migration `20261019200000`). Per assessment rather than platform-wide so
+  one leaked secret cannot precompute papers for every assessment in the
+  college. Note the schema must spell the default the way Postgres STORES it
+  — `(gen_random_uuid())::text`, parenthesised — or `prisma migrate diff`
+  reports drift on every run and `migrate dev` generates a no-op migration
+  for it. It did: the generated migration's timestamp sorted BEFORE the
+  hand-written one, so a fresh `migrate deploy` ran an
+  `ALTER COLUMN "seedSecret" SET DEFAULT` against a table that did not have
+  the column yet, and failed. Removed, resolved as rolled back, and the
+  schema's literal corrected.
+- **Question SELECTION against an `AssessmentBlueprint` is not built**
+  (recorded 2026-10-19). SPEC §5 wants "2×EASY + 2×MEDIUM + 1×HARD from pools
+  ≥5× the needed count" and a prepare-time refusal of "any pool whose
+  historical per-problem acceptance rates span more than 25 percentage points
+  inside one difficulty band". That needs a model that does not exist. Phase
+  6c randomises ORDER and derives a per-question seed, which is the half that
+  costs the honest student nothing and has no bypass. `AttemptLayout` is
+  versioned (`v: 1`) so adding selection later changes what goes into
+  `questions` and nothing about the stored shape.
+- **The exam pins CodeMirror even on a wide screen** (decided 2026-10-19).
+  SPEC §5 requires editor telemetry from "CodeMirror 6 transaction
+  annotations (updateListener + transactionFilter), not DOM events", because
+  CM6 reports the exact inserted character count and whether the origin was
+  `input.type`, `input.paste` or programmatic. Monaco has no equivalent that
+  distinguishes typed from programmatic input, so the practice workspace's
+  width-based choice would buy a nicer editor at the cost of the signal.
+  `CodeEditor` gained a `forceKind` prop for this; the exam passes
+  `"codemirror"` and says why at the call site.
+- **The readiness check's network test round-trips the page, not the
+  attempt** (decided 2026-10-19). The obvious implementation beats the
+  heartbeat, but no sitting exists yet and it must not — the clock starts
+  when the candidate starts, not when they test their wifi. A `HEAD` of the
+  readiness URL proves the same path: this machine, this network, this
+  server, this session.
+- **A mutating route outside `app/api/` is bound by no fence** (found and
+  closed 2026-10-19). The submit route was first written at
+  `app/(exam)/assessments/[slug]/attempt/submit/route.ts`, where
+  `capabilities.test.ts` does not require it to be bound to a capability or
+  to call a guard — its `required` list covers `app/api/**` (non-GET),
+  `app/api/admin/**` and `app/super/**`. It passed every gate. Moved to
+  `app/api/exam/[attemptId]/submit`, which is covered and is where the other
+  three exam routes live. The fence's scope is still worth widening: any
+  `route.ts` exporting a mutating method should have to be bound wherever it
+  lives.

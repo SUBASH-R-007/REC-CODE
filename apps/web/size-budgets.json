@@ -8,7 +8,10 @@
     { "route": "/problems/[slug] shell", "entry": "/(student)/problems/[slug]/page", "maxKb": 220 },
     { "route": "/judge", "entry": "/(public)/judge/page", "maxKb": 125, "shared": false },
     { "route": "/contests", "entry": "/(student)/contests/page", "maxKb": 130 },
-    { "route": "/contests/[slug]/arena", "entry": "/(student)/contests/[slug]/arena/page", "maxKb": 135 }
+    { "route": "/contests/[slug]/arena", "entry": "/(student)/contests/[slug]/arena/page", "maxKb": 135 },
+    { "route": "/assessments", "entry": "/(student)/assessments/page", "maxKb": 130 },
+    { "route": "/assessments/[slug]/readiness", "entry": "/(exam)/assessments/[slug]/readiness/page", "maxKb": 130 },
+    { "route": "/assessments/[slug]/attempt", "entry": "/(exam)/assessments/[slug]/attempt/page", "maxKb": 160 }
   ],
   "zeroJsSelfCheck": {
     "$comment": "A public App Router page served alongside the zero-JS routes: it MUST show script tags, or the HTML detector has gone blind.",

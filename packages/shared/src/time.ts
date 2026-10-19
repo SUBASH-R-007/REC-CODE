@@ -5,6 +5,29 @@
  */
 export const CAMPUS_TIME_ZONE = "Asia/Kolkata";
 
+/**
+ * "10 Oct 2026, 14:05 IST" — the one campus-time formatter.
+ *
+ * Every date a student or a staff member reads is in campus time, and it is
+ * written with the zone named, because an exam window read in the wrong zone
+ * is the Phase 5 datetime-local bug all over again (docs/OPEN-QUESTIONS.md).
+ * 24-hour, because "2 PM" and "2 AM" are one keystroke apart in a form and
+ * one glance apart on a seat slip.
+ */
+const CAMPUS_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: CAMPUS_TIME_ZONE,
+});
+
+export function formatCampusTime(date: Date | null | undefined): string {
+  return date ? `${CAMPUS_FORMAT.format(date)} IST` : "—";
+}
+
 const dayFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: CAMPUS_TIME_ZONE,
   year: "numeric",
