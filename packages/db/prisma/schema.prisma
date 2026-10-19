@@ -398,6 +398,8 @@ model User {
   contestStandings     ContestStanding[]
   ratingChanges        RatingChange[]
   rating               UserRating?
+  /// Sittings of an assessment (Phase 6).
+  assessmentAttempts   AssessmentAttempt[]
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -2176,7 +2178,7 @@ model Assessment {
   title                       String
   /// Markdown, sanitised server-side. Shown before the attempt starts.
   instructions                String           @db.Text
-  status                      AssessmentStatus    @default(DRAFT)
+  status                      AssessmentStatus @default(DRAFT)
   proctorMode                 ProctorMode      @default(NONE)
   /// THE HARD RULE: true requires proctorMode = LAB_SUPERVISED.
   affectsPlacementEligibility Boolean          @default(false)
@@ -2202,6 +2204,8 @@ model Assessment {
 
   problems AssessmentProblem[]
   sessions ExamSession[]
+  /// Candidates' sittings.
+  attempts AssessmentAttempt[]
 
   @@index([status, opensAt(sort: Desc)])
   @@index([opensAt])
@@ -2247,24 +2251,216 @@ model AssessmentProblem {
 ///     would be a lab-proctored session with nothing proctoring it;
 ///   - trigger ExamSession_no_truncate: TRUNCATE is refused.
 model ExamSession {
-  id                   String     @id @default(cuid())
+  id                   String              @id @default(cuid())
   assessmentId         String
-  assessment           Assessment @relation(fields: [assessmentId], references: [id])
+  assessment           Assessment          @relation(fields: [assessmentId], references: [id])
   label                String
   /// The room, as students will read it on their seat slip.
   room                 String?
   startsAt             DateTime
   endsAt               DateTime
-  capacity             Int        @default(60)
+  capacity             Int                 @default(60)
   /// CIDR blocks this session may be sat from. Re-checked on every heartbeat
   /// for LAB_SUPERVISED. Never a raw IP anywhere else — hashIp() only.
-  allowedCidrs         String[]   @default([])
+  allowedCidrs         String[]            @default([])
   /// Optional: require a college-managed device (Verified Access). Strictly
   /// optional — the platform is fully functional without it.
-  requireManagedDevice Boolean    @default(false)
+  requireManagedDevice Boolean             @default(false)
   createdById          String
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  /// Candidates sitting in this hall.
+  attempts             AssessmentAttempt[]
 
   @@index([assessmentId, startsAt])
+}
+
+// ── The attempt engine (Phase 6b) ──────────────────────────────────────
+
+/// What produced an editor snapshot.
+enum SnapshotTrigger {
+  TICK
+  RUN
+  SUBMIT
+  PASTE
+}
+
+/// One candidate's sitting of one assessment. SERVER-AUTHORITATIVE: the
+/// clock, the layout and the score are the server's, and nothing here is
+/// accepted from a client.
+///
+/// `expiresAt` is computed by computeExpiresAt() in @recx/shared from the
+/// assessment's duration, the candidate's granted Accommodation and the
+/// sitting's close time — never from client input (SPEC section 5).
+///
+/// Enforced by the database (migration 20261019160000; a refusal raises
+/// check_violation):
+///   - unique (assessmentId, userId, attemptNumber);
+///   - CHECK AssessmentAttempt_number_check: attemptNumber >= 1;
+///   - CHECK AssessmentAttempt_window_check: expiresAt > startedAt;
+///   - CHECK AssessmentAttempt_paused_check: pausedMs >= 0;
+///   - CHECK AssessmentAttempt_counts_check: the four event counters and
+///     maxHeartbeatGapSeconds are not negative;
+///   - CHECK AssessmentAttempt_score_check: totalScore between 0 and
+///     maxScore, and maxScore >= 0;
+///   - CHECK AssessmentAttempt_integrity_check: integrityScore 0-100. It is
+///     a REVIEW AID, never a gate: SPEC section 0 caps the automatic
+///     consequence at flag-and-withhold, so no code may branch on it;
+///   - CHECK AssessmentAttempt_slot_check: heartbeatSlotSeconds 1-60;
+///   - CHECK AssessmentAttempt_submitted_check: a SUBMITTED or
+///     AUTO_SUBMITTED attempt carries submittedAt, and no other status does;
+///   - trigger AssessmentAttempt_machine: the status machine of
+///     canTransition() in @recx/shared, plus "the clock is written once":
+///     startedAt, expiresAt, seed, layout and tokenHash never change after
+///     the row is created (a resume rotates tokenHash, which is the one
+///     documented exception);
+///   - trigger AssessmentAttempt_no_truncate: TRUNCATE is refused.
+model AssessmentAttempt {
+  id                     String        @id @default(cuid())
+  assessmentId           String
+  assessment             Assessment    @relation(fields: [assessmentId], references: [id])
+  userId                 String
+  user                   User          @relation(fields: [userId], references: [id])
+  examSessionId          String?
+  examSession            ExamSession?  @relation(fields: [examSessionId], references: [id])
+  attemptNumber          Int           @default(1)
+  status                 AttemptStatus @default(NOT_STARTED)
+  /// Per-candidate randomisation seed. Stored so a disputed paper can be
+  /// reproduced exactly as that candidate saw it.
+  seed                   Int
+  startedAt              DateTime      @default(now())
+  /// Server-computed. Never accepted from a client.
+  expiresAt              DateTime
+  /// Granted breaks. Extends the deadline rather than eating the clock.
+  pausedMs               Int           @default(0)
+  submittedAt            DateTime?
+  totalScore             Float         @default(0)
+  maxScore               Float         @default(0)
+  /// The question order and options this candidate saw, frozen at start.
+  layout                 Json
+  /// sha256 of the attempt token. The token itself is never stored.
+  tokenHash              String
+  deviceRegistrationId   String?
+  /// hashIp() only — never a raw IP, anywhere (SPEC section 4).
+  ipHashFirst            String?
+  ipHashLast             String?
+  uaHash                 String?
+  /// The Session row that holds this attempt, so an admin force-logout ends it.
+  lockSessionId          String?
+  /// Copied from the assessment at start: what a result MEANS must not
+  /// change under a candidate mid-sitting.
+  proctorMode            ProctorMode
+  /// The accommodation kinds in force, for the invigilator and the report.
+  /// A SCREEN_READER candidate's focus signals are exempt from penalty.
+  accommodationFlags     String[]      @default([])
+  /// One bit per heartbeatSlotSeconds. 180 minutes = 720 bits = 90 bytes.
+  heartbeatBitmap        Bytes?
+  heartbeatSlotSeconds   Int           @default(15)
+  lastHeartbeatAt        DateTime?
+  blurEventCount         Int           @default(0)
+  fullscreenExitCount    Int           @default(0)
+  pasteEventCount        Int           @default(0)
+  /// Server-computed from heartbeatBitmap, never reported by the client.
+  maxHeartbeatGapSeconds Int           @default(0)
+  /// A review aid only. Never a gate, never an automatic consequence.
+  integrityScore         Int           @default(100)
+  /// Optimistic concurrency for the attempt's own writes.
+  version                Int           @default(0)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  snapshots AttemptSnapshot[]
+
+  @@unique([assessmentId, userId, attemptNumber])
+  @@index([status, expiresAt])
+  @@index([assessmentId, integrityScore])
+  @@index([examSessionId, status])
+  @@index([userId, startedAt(sort: Desc)])
+}
+
+/// Editor snapshots — "the most probative artefact" (SPEC section 5), and
+/// the one that survives client tampering, because the answer has to reach
+/// the server to be graded.
+/// Enforced by the database:
+///   - CHECK AttemptSnapshot_atMs_check: atMs >= 0;
+///   - CHECK AttemptSnapshot_content_check: content at most 64 KB;
+///   - append-only by convention; the retention job removes them 180 days
+///     after result release, or once every open IntegrityFlag is decided.
+model AttemptSnapshot {
+  id          String            @id @default(cuid())
+  attemptId   String
+  attempt     AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  /// The AssessmentProblem this snapshot belongs to.
+  questionId  String
+  atMs        Int
+  language    String
+  /// The first snapshot per question is stored whole; later ones are
+  /// unified diffs, reconstructed on read.
+  content     String            @db.Text
+  contentHash String
+  isDiff      Boolean           @default(false)
+  trigger     SnapshotTrigger
+  createdAt   DateTime          @default(now())
+
+  @@index([attemptId, questionId, atMs])
+}
+
+/// Proctor telemetry. PARTITIONED MONTHLY on occurredAt from day one
+/// (SPEC section 4, Partitioning): "a college-wide exam adds millions of rows
+/// that must be dropped wholesale by DETACH PARTITION at the retention
+/// boundary". Retrofitting partitioning afterwards is the expensive path.
+///
+/// Prisma cannot model a partitioned table, so migration 20261019160000
+/// replaces its generated CREATE TABLE with a PARTITION BY RANGE one plus
+/// its first partitions. The columns are identical, so `prisma migrate diff`
+/// still reports no drift.
+///
+/// The partition key must join the primary key, hence @@id([id, occurredAt])
+/// rather than a bare id — the same shape the spec pre-writes for Submission.
+///
+/// Event SHAPE only (SPEC section 5): kind, time, duration, byte size,
+/// sha256, cadence statistics. NEVER clipboard text, NEVER keystroke
+/// content.
+///
+/// Enforced by the database:
+///   - unique (attemptId, clientSeq): the monotonic client sequence is what
+///     makes suppression detectable — an extension that filters events
+///     leaves a hole the server records as SEQUENCE_GAP;
+///   - CHECK ProctorEvent_atMs_check: atMs >= 0 (the route clamps it to
+///     [0, elapsed + 5000] before insert; the CHECK is the floor);
+///   - CHECK ProctorEvent_size_check: size >= 0 and at most 64 KB;
+///   - CHECK ProctorEvent_duration_check: durationMs >= 0;
+///   - CHECK ProctorEvent_client_seq_check: a CLIENT event carries a
+///     clientSeq and a SERVER or INVIGILATOR event does not — only the
+///     client has a sequence to keep.
+model ProctorEvent {
+  id         BigInt           @default(autoincrement())
+  attemptId  String
+  kind       ProctorEventKind
+  source     EventSource
+  severity   Severity         @default(INFO)
+  /// Monotonic per attempt, client events only.
+  clientSeq  Int?
+  /// Milliseconds from the attempt's start, server-clamped.
+  atMs       Int
+  durationMs Int?
+  /// Byte size of a paste or copy — never its text.
+  size       Int?
+  /// sha256 of the pasted or copied text — never the text.
+  hash       String?
+  meta       Json             @default("{}")
+  occurredAt DateTime         @default(now())
+
+  @@id([id, occurredAt])
+  /// Postgres requires a unique index on a partitioned table to include
+  /// every partition column, so occurredAt joins it. The practical defence
+  /// against a replayed or duplicated event is the per-attempt high-water
+  /// clientSeq the server already tracks to derive SEQUENCE_GAP; this index
+  /// is belt-and-braces, and its guarantee is per-partition — an attempt can
+  /// straddle a month boundary only by running across midnight on the 1st
+  /// (docs/OPEN-QUESTIONS.md).
+  @@unique([attemptId, clientSeq, occurredAt])
+  @@index([attemptId, atMs])
+  @@index([attemptId, severity])
+  @@index([occurredAt])
 }

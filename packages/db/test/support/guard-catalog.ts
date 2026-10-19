@@ -41,6 +41,9 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_published_assessment_change",
   "recx_refuse_unfrozen_assessment_problem",
   "recx_refuse_lab_session_without_allowlist",
+  // 20261019160000_phase6b_attempt_engine
+  "recx_refuse_attempt_change",
+  "recx_refuse_snapshot_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -66,6 +69,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019140000_phase6a_assessments
   "Assessment",
   "ExamSession",
+  // 20261019160000_phase6b_attempt_engine
+  "AssessmentAttempt",
+  "AttemptSnapshot",
 ];
 
 export interface GuardTrigger {
@@ -185,6 +191,21 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_lab_session_without_allowlist",
     level: "ROW",
   },
+  // 20261019160000_phase6b_attempt_engine
+  {
+    name: "AssessmentAttempt_machine",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "AssessmentAttempt",
+    fn: "recx_refuse_attempt_change",
+    level: "ROW",
+  },
+  {
+    name: "AttemptSnapshot_append_only",
+    timing: "BEFORE UPDATE",
+    table: "AttemptSnapshot",
+    fn: "recx_refuse_snapshot_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -203,7 +224,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019140000_phase6a_assessments";
+export const CHECK_CATALOG_THROUGH = "20261019160000_phase6b_attempt_engine";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -335,6 +356,29 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ExamSession_label_check", "ExamSession"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019140000_phase6a_assessments" })),
+  ...(
+    [
+      // ProctorEvent stores event SHAPE only; the size cap and the sha256
+      // pattern are the structural half of "never clipboard text".
+      ["ProctorEvent_atMs_check", "ProctorEvent"],
+      ["ProctorEvent_size_check", "ProctorEvent"],
+      ["ProctorEvent_duration_check", "ProctorEvent"],
+      ["ProctorEvent_client_seq_check", "ProctorEvent"],
+      ["ProctorEvent_client_seq_range_check", "ProctorEvent"],
+      ["ProctorEvent_hash_check", "ProctorEvent"],
+      ["AssessmentAttempt_number_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_window_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_paused_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_counts_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_score_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_integrity_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_slot_check", "AssessmentAttempt"],
+      ["AssessmentAttempt_submitted_check", "AssessmentAttempt"],
+      ["AttemptSnapshot_atMs_check", "AttemptSnapshot"],
+      ["AttemptSnapshot_content_check", "AttemptSnapshot"],
+      ["AttemptSnapshot_hash_check", "AttemptSnapshot"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019160000_phase6b_attempt_engine" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
