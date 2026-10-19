@@ -344,3 +344,23 @@ Every edit script in this repository therefore asserts its needle was found
 (`assert old in s` before the replace), and anything that picks a target prints
 it (`console.log("target:", …)`) so the output says what was done rather than
 that something was done.
+
+## "Tests N passed" does not mean the suite passed
+
+Vitest reports a `beforeAll` or `afterAll` failure as a failed test FILE while
+still printing every assertion that ran as passed:
+
+```
+ Test Files  1 failed | 119 passed (120)
+      Tests  3293 passed (3293)
+```
+
+A Phase 7c teardown tripped `MockPattern_published_has_paper` — deleting the
+only section of a PUBLISHED pattern drives its totals to zero, which is
+exactly the write that CHECK exists to refuse — and a grep for `×` and
+`Tests ` reported a clean run twice before the Linux gate caught it. Always
+read the **Test Files** line, and prefer the process exit code to any line of
+output.
+
+The teardown fix is also the rule: bring a fixture's status DOWN before
+deleting what the status depends on.

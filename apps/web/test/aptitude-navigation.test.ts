@@ -24,8 +24,10 @@ import { ANSWER_REFUSAL_MESSAGE } from "@recx/shared";
  */
 
 /** The answer write: an UPDATE of the row the serve created, never an upsert. */
-const answerUpdateMany = vi.fn();
+const answerUpdate = vi.fn();
 const sectionUpdateMany = vi.fn();
+/** The served row the write updates. Null means the question was never served. */
+let servedRow: { id: string; firstSeenAtMs: number } | null = { id: "ans1", firstSeenAtMs: 4_000 };
 
 /** One sitting, one section, one question, with whatever is under test overridden. */
 function fixture(over: {
@@ -90,8 +92,8 @@ function fixture(over: {
 
 async function saveWith(over: Parameters<typeof fixture>[0], questionId = "q0") {
   const data = fixture(over);
-  answerUpdateMany.mockReset();
-  answerUpdateMany.mockResolvedValue({ count: 1 });
+  answerUpdate.mockReset();
+  servedRow = { id: "ans1", firstSeenAtMs: 4_000 };
   sectionUpdateMany.mockReset();
 
   vi.resetModules();
@@ -99,7 +101,7 @@ async function saveWith(over: Parameters<typeof fixture>[0], questionId = "q0") 
     db: {
       mockAttempt: { findFirst: vi.fn(async () => data.attempt) },
       mockSectionState: { findMany: vi.fn(async () => [data.sectionState]), updateMany: sectionUpdateMany },
-      mockAttemptAnswer: { updateMany: answerUpdateMany },
+      mockAttemptAnswer: { findFirst: vi.fn(async () => servedRow), update: answerUpdate },
     },
   }));
   vi.doMock("@/lib/aptitude/accommodation", () => ({
@@ -115,8 +117,6 @@ async function saveWith(over: Parameters<typeof fixture>[0], questionId = "q0") 
       shownIndexes: [0],
       numericValue: null,
       markedForReview: false,
-      seenAtMs: 0,
-      answeredAtMs: 1_000,
     },
     data.now,
   );
@@ -129,7 +129,7 @@ describe("the answer action enforces allowBackNavigation: false", () => {
     );
     // The assertion that matters: the guard ran BEFORE the write, so there is
     // no write to undo.
-    expect(answerUpdateMany).not.toHaveBeenCalled();
+    expect(answerUpdate).not.toHaveBeenCalled();
   });
 
   it("allows the question the candidate is on", async () => {
@@ -137,7 +137,7 @@ describe("the answer action enforces allowBackNavigation: false", () => {
       saved: true,
       index: 5,
     });
-    expect(answerUpdateMany).toHaveBeenCalledTimes(1);
+    expect(answerUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("allows an earlier question when back navigation IS allowed", async () => {
@@ -151,14 +151,14 @@ describe("the answer action enforces allowBackNavigation: false", () => {
     await expect(saveWith({ allowBackNavigation: true, submittedAt: new Date() })).rejects.toThrow(
       ANSWER_REFUSAL_MESSAGE.section_closed,
     );
-    expect(answerUpdateMany).not.toHaveBeenCalled();
+    expect(answerUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a write to a section whose clock has run out", async () => {
     await expect(
       saveWith({ allowBackNavigation: true, endsAt: new Date("2026-10-19T09:50:00.000Z") }),
     ).rejects.toThrow(ANSWER_REFUSAL_MESSAGE.section_closed);
-    expect(answerUpdateMany).not.toHaveBeenCalled();
+    expect(answerUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a write after the paper's deadline, and says THAT rather than back navigation", async () => {
@@ -174,13 +174,41 @@ describe("the answer action enforces allowBackNavigation: false", () => {
 
   it("refuses a write to a finished sitting", async () => {
     await expect(saveWith({ status: "SUBMITTED" })).rejects.toThrow(ANSWER_REFUSAL_MESSAGE.attempt_finished);
-    expect(answerUpdateMany).not.toHaveBeenCalled();
+    expect(answerUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses a question the server never served, and writes nothing", async () => {
+    // The answer row comes into existence at SERVE time. No row means the
+    // candidate is answering something they were never shown, which is the
+    // same refusal as reaching past the high-water mark.
+    const data = fixture({ allowBackNavigation: true });
+    answerUpdate.mockReset();
+    servedRow = null;
+    vi.resetModules();
+    vi.doMock("@/lib/db", () => ({
+      db: {
+        mockAttempt: { findFirst: vi.fn(async () => data.attempt) },
+        mockSectionState: { findMany: vi.fn(async () => [data.sectionState]), updateMany: sectionUpdateMany },
+        mockAttemptAnswer: { findFirst: vi.fn(async () => servedRow), update: answerUpdate },
+      },
+    }));
+    vi.doMock("@/lib/aptitude/accommodation", () => ({
+      extraTimeFor: vi.fn(async () => ({ extra: { extraTimePercent: 0, extraTimeMinutes: 0 }, flags: [] })),
+    }));
+    const { saveAnswer } = await import("@/lib/aptitude/sitting");
+    await expect(
+      saveAnswer(
+        { attemptId: "att1", userId: "u1", questionId: "q0", shownIndexes: [0], numericValue: null, markedForReview: false },
+        data.now,
+      ),
+    ).rejects.toThrow(ANSWER_REFUSAL_MESSAGE.not_yet_served);
+    expect(answerUpdate).not.toHaveBeenCalled();
   });
 
   it("refuses a question that is not on this candidate's paper", async () => {
     // Not an error to explain: it is a request about somebody else's paper.
     await expect(saveWith({ allowBackNavigation: true }, "q-not-mine")).rejects.toThrow(/not on your paper/);
-    expect(answerUpdateMany).not.toHaveBeenCalled();
+    expect(answerUpdate).not.toHaveBeenCalled();
   });
 });
 
@@ -190,20 +218,20 @@ describe("what the action stores", () => {
     // option stores [2]. Stored in the question's OWN order, so re-grading
     // after a shuffle change is still correct.
     await saveWith({ allowBackNavigation: true });
-    const call = answerUpdateMany.mock.calls[0]![0] as { data: { selectedIndexes: number[] } };
+    const call = answerUpdate.mock.calls[0]![0] as { data: { selectedIndexes: number[] } };
     expect(call.data.selectedIndexes).toEqual([2]);
   });
 
   it("keeps one response shape, dropping a numeric value alongside a choice", async () => {
     const data = fixture({ allowBackNavigation: true });
-    answerUpdateMany.mockReset();
-    answerUpdateMany.mockResolvedValue({ count: 1 });
+    answerUpdate.mockReset();
+    servedRow = { id: "ans1", firstSeenAtMs: 0 };
     vi.resetModules();
     vi.doMock("@/lib/db", () => ({
       db: {
         mockAttempt: { findFirst: vi.fn(async () => data.attempt) },
         mockSectionState: { findMany: vi.fn(async () => [data.sectionState]), updateMany: sectionUpdateMany },
-        mockAttemptAnswer: { updateMany: answerUpdateMany },
+        mockAttemptAnswer: { findFirst: vi.fn(async () => servedRow), update: answerUpdate },
       },
     }));
     vi.doMock("@/lib/aptitude/accommodation", () => ({
@@ -218,26 +246,24 @@ describe("what the action stores", () => {
         shownIndexes: [1],
         numericValue: 42,
         markedForReview: true,
-        seenAtMs: 0,
-        answeredAtMs: 500,
       },
       data.now,
     );
-    const call = answerUpdateMany.mock.calls[0]![0] as { data: { selectedIndexes: number[]; numericValue: number | null } };
+    const call = answerUpdate.mock.calls[0]![0] as { data: { selectedIndexes: number[]; numericValue: number | null } };
     expect(call.data.selectedIndexes).toEqual([0]);
     expect(call.data.numericValue).toBeNull();
   });
 
-  it("clamps an answer timed before it was seen rather than storing it", async () => {
+  it("floors the answer time at the served row's firstSeenAtMs", async () => {
     const data = fixture({ allowBackNavigation: true });
-    answerUpdateMany.mockReset();
-    answerUpdateMany.mockResolvedValue({ count: 1 });
+    answerUpdate.mockReset();
+    servedRow = { id: "ans1", firstSeenAtMs: 0 };
     vi.resetModules();
     vi.doMock("@/lib/db", () => ({
       db: {
         mockAttempt: { findFirst: vi.fn(async () => data.attempt) },
         mockSectionState: { findMany: vi.fn(async () => [data.sectionState]), updateMany: sectionUpdateMany },
-        mockAttemptAnswer: { updateMany: answerUpdateMany },
+        mockAttemptAnswer: { findFirst: vi.fn(async () => servedRow), update: answerUpdate },
       },
     }));
     vi.doMock("@/lib/aptitude/accommodation", () => ({
@@ -252,16 +278,14 @@ describe("what the action stores", () => {
         shownIndexes: [0],
         numericValue: null,
         markedForReview: false,
-        seenAtMs: 5_000,
-        answeredAtMs: 1_000,
       },
       data.now,
     );
-    const call = answerUpdateMany.mock.calls[0]![0] as { data: { answeredAtMs: number } };
+    const call = answerUpdate.mock.calls[0]![0] as { data: { answeredAtMs: number } };
     // `MockAttemptAnswer_timing_check` would refuse a row answered before it
-    // was seen; clamping gives the candidate's answer a home rather than
-    // losing it to a clock glitch. `firstSeenAtMs` is not restated — it was
-    // written when the question was served, and is not the client's to move.
-    expect(call.data.answeredAtMs).toBe(5_000);
+    // was seen. Both times are server-derived from the section's own start,
+    // and the answer time is floored at the SERVED row's `firstSeenAtMs` —
+    // here 0, so the measured elapsed time stands.
+    expect(call.data.answeredAtMs).toBeGreaterThanOrEqual(0);
   });
 });

@@ -63,9 +63,10 @@ const answerSchema = z
     shownIndexes: z.array(z.number().int().min(0).max(7)).max(8).default([]),
     numericValue: z.number().finite().nullable().default(null),
     markedForReview: z.boolean().default(false),
-    seenAtMs: millis,
-    answeredAtMs: millis.nullable().default(null),
   })
+  // No timestamps. Both are server-derived from the section's own start —
+  // when the question was served, and when this request arrived — because a
+  // graded row must not carry a time the client chose.
   .strict();
 
 export async function saveMockAnswer(input: unknown): Promise<ActionResult<{ saved: true; index: number }>> {
@@ -106,6 +107,15 @@ export async function finaliseMockAttempt(input: unknown): Promise<ActionResult<
   }, "finaliseMockAttempt");
 }
 
+/**
+ * Practice DOES take the client's elapsed time, unlike a mock answer.
+ *
+ * A mock has a server-written section clock to measure against; practice has
+ * none — the candidate asks for a question and answers it in one sitting with
+ * no server-side start to subtract. `secondsOn` bounds it to half an hour, and
+ * the only thing it feeds is the candidate's own pacing average, so a student
+ * who inflates it misleads nobody but themselves. Nothing graded reads it.
+ */
 const practiceSchema = z
   .object({
     questionId,

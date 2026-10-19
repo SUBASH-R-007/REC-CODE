@@ -1,22 +1,32 @@
-import { ROSTER_COLUMNS, ROSTER_IMPORT_LIMITS, rosterRowSchema, type RosterRow } from "@recx/shared";
+import {
+  ROSTER_COLUMNS,
+  ROSTER_IMPORT_LIMITS,
+  csvByteLength,
+  rosterRowSchema,
+  splitCsvText,
+  stripBom,
+  type CsvIssue,
+  type CsvLine,
+  type RosterRow,
+} from "@recx/shared";
 
 /**
- * The roster CSV reader (RFC 4180): quoted fields, doubled quotes, commas and
- * line breaks inside quotes, CRLF or LF line ends, a UTF-8 byte-order mark.
- * The header must be exactly ROSTER_COLUMNS, in order. No dependency.
- * Pure: unit-tested in test/roster-csv.test.ts.
+ * The roster CSV reader. The header must be exactly ROSTER_COLUMNS, in order.
+ *
+ * The RFC 4180 record splitter this used to carry privately — quoted fields,
+ * doubled quotes, commas and line breaks inside quotes, CRLF or LF, a UTF-8
+ * byte-order mark — moved to `packages/shared/src/csv.ts` when Phase 7 needed
+ * the same reader for the aptitude question bank. The tests in
+ * `test/roster-csv.test.ts` are untouched, which is what proves the move
+ * changed no behaviour.
+ *
+ * The roster's header rule stays HERE rather than going to the shared reader:
+ * it is stricter than the aptitude importer's (exact, in order, nothing
+ * optional), and the message an operator reads names the roster's own
+ * columns. Pure.
  */
 
-export interface CsvLine {
-  /** 1-based line number in the file where the record starts. */
-  line: number;
-  cells: Record<string, string>;
-}
-
-export interface CsvIssue {
-  line: number;
-  message: string;
-}
+export type { CsvIssue, CsvLine };
 
 export interface ParsedRosterCsv {
   header: string[];
@@ -25,95 +35,17 @@ export interface ParsedRosterCsv {
   errors: CsvIssue[];
 }
 
-interface RawRecord {
-  line: number;
-  fields: string[];
-}
-
-/** Split CSV text into records. Unterminated quotes are reported, not guessed. */
-function records(text: string): { records: RawRecord[]; errors: CsvIssue[] } {
-  const out: RawRecord[] = [];
-  const errors: CsvIssue[] = [];
-  let fields: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  let line = 1;
-  let recordLine = 1;
-  let fieldStarted = false;
-  let quotedField = false;
-
-  const endField = () => {
-    fields.push(field);
-    field = "";
-    fieldStarted = false;
-    quotedField = false;
-  };
-  const endRecord = () => {
-    endField();
-    // A completely empty line is skipped (not a record).
-    if (!(fields.length === 1 && fields[0] === "")) out.push({ line: recordLine, fields });
-    fields = [];
-  };
-
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i]!;
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        if (c === "\n") line++;
-        field += c;
-      }
-      continue;
-    }
-    if (c === '"') {
-      if (fieldStarted && !quotedField) {
-        errors.push({ line, message: "A quote appears inside an unquoted field. Quote the whole field." });
-      }
-      inQuotes = true;
-      quotedField = true;
-      fieldStarted = true;
-      continue;
-    }
-    if (c === ",") {
-      endField();
-      continue;
-    }
-    if (c === "\r" || c === "\n") {
-      if (c === "\r" && text[i + 1] === "\n") i++;
-      endRecord();
-      line++;
-      recordLine = line;
-      continue;
-    }
-    if (quotedField) {
-      errors.push({ line, message: "Text follows a closing quote. Quote the whole field." });
-      quotedField = false;
-    }
-    field += c;
-    fieldStarted = true;
-  }
-  if (inQuotes) errors.push({ line: recordLine, message: "A quoted field is never closed." });
-  if (field !== "" || fields.length > 0 || fieldStarted) endRecord();
-  return { records: out, errors };
-}
-
 export function parseRosterCsv(input: string): ParsedRosterCsv {
-  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
+  const text = stripBom(input);
   const errors: CsvIssue[] = [];
-  if (Buffer.byteLength(input, "utf8") > ROSTER_IMPORT_LIMITS.maxBytes) {
+  if (csvByteLength(input) > ROSTER_IMPORT_LIMITS.maxBytes) {
     return {
       header: [],
       rows: [],
       errors: [{ line: 0, message: `The file is larger than ${Math.round(ROSTER_IMPORT_LIMITS.maxBytes / 1024)} KB.` }],
     };
   }
-  const split = records(text);
+  const split = splitCsvText(text);
   errors.push(...split.errors);
   const [head, ...body] = split.records;
   if (!head) return { header: [], rows: [], errors: [{ line: 1, message: "The file is empty." }, ...errors] };

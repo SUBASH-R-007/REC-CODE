@@ -164,9 +164,6 @@ export interface SaveAnswerInput {
   readonly shownIndexes: readonly number[];
   readonly numericValue: number | null;
   readonly markedForReview: boolean;
-  /** Milliseconds from the section's start, clamped server-side. */
-  readonly seenAtMs: number;
-  readonly answeredAtMs: number | null;
 }
 
 /**
@@ -206,20 +203,37 @@ export async function saveAnswer(input: SaveAnswerInput, now: Date): Promise<{ s
   const selectedIndexes = mapSelectionToOriginal(input.shownIndexes, served.optionOrder);
   // One response shape per answer; the CHECK says the same.
   const numericValue = selectedIndexes.length > 0 ? null : input.numericValue;
-  // `firstSeenAtMs` was written when the question was served, and is not
-  // the client's to restate. The answer time is clamped to it so a clock
-  // glitch cannot produce a row `MockAttemptAnswer_timing_check` refuses.
-  const floorMs = Math.max(0, Math.floor(input.seenAtMs));
-  const answeredAtMs = input.answeredAtMs === null ? null : Math.max(floorMs, Math.floor(input.answeredAtMs));
 
-  // An UPDATE, never an upsert: the answer row comes into existence when the
-  // server SERVES the question, and a candidate cannot answer a question the
-  // server never served them. Creating it here instead would mean an answer
-  // existed for a question with no recorded serving, which breaks
-  // `AptitudeQuestionStat_counts_check` (timesAnswered <= timesServed) at
-  // finalise — the live canary sweep found exactly that.
-  const updated = await db.mockAttemptAnswer.updateMany({
+  /**
+   * The row exists because the server SERVED this question, and a candidate
+   * cannot answer a question the server never served them — so this is an
+   * UPDATE of that row, never an upsert. Creating it here would mean an
+   * answer existed for a question with no recorded serving, and
+   * `AptitudeQuestionStat_counts_check` (timesAnswered <= timesServed) would
+   * refuse the whole finalise. The live canary sweep found exactly that.
+   */
+  const existing = await db.mockAttemptAnswer.findFirst({
     where: { attemptId: input.attemptId, questionId: input.questionId },
+    select: { id: true, firstSeenAtMs: true },
+  });
+  if (!existing) throw new ForbiddenError(ANSWER_REFUSAL_MESSAGE.not_yet_served);
+
+  /**
+   * BOTH timestamps are server-derived, from the section's own start.
+   *
+   * `firstSeenAtMs` was written when the question was served. The answer time
+   * is "now, measured on the same clock", floored at it — the client's idea
+   * of when it answered is neither needed nor trustworthy on a graded row,
+   * and the first draft clamped against the CLIENT's number, which let a row
+   * through with answeredAtMs 1,000 against a stored firstSeenAtMs of 66,718.
+   * `MockAttemptAnswer_timing_check` refused it, as it should have.
+   */
+  const sinceSectionStart =
+    current.startedAt === null ? existing.firstSeenAtMs : Math.max(0, now.getTime() - current.startedAt.getTime());
+  const answeredAtMs = Math.min(Math.max(existing.firstSeenAtMs, sinceSectionStart), 24 * 3_600_000);
+
+  await db.mockAttemptAnswer.update({
+    where: { id: existing.id },
     data: {
       selectedIndexes,
       numericValue,
@@ -230,7 +244,6 @@ export async function saveAnswer(input: SaveAnswerInput, now: Date): Promise<{ s
       changeCount: { increment: 1 },
     },
   });
-  if (updated.count !== 1) throw new ForbiddenError(ANSWER_REFUSAL_MESSAGE.not_yet_served);
 
   return { saved: true as const, index: served.index };
 }

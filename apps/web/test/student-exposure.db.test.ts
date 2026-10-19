@@ -746,6 +746,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         raw(`DELETE FROM "public"."MockAttempt" WHERE "userId" = ANY($1::text[])`, userIds),
         raw(`DELETE FROM "public"."AptitudeUserTopicStat" WHERE "userId" = ANY($1::text[])`, userIds),
         raw(`DELETE FROM "public"."AptitudeQuestionStat" WHERE "questionId" = $1`, ids.aptitudeQuestion),
+        // The status comes DOWN before the section goes: deleting the only
+        // section of a PUBLISHED pattern drives totalQuestions to zero and
+        // `MockPattern_published_has_paper` refuses it — which is the CHECK
+        // doing its job, since that write would otherwise turn something a
+        // student can open into an empty page.
+        raw(`UPDATE "public"."MockPattern" SET "status" = 'DRAFT' WHERE "id" = $1`, ids.aptitudePattern),
         raw(`DELETE FROM "public"."AptitudeSection" WHERE "patternId" = $1`, ids.aptitudePattern),
         raw(`DELETE FROM "public"."MockPattern" WHERE "id" = $1`, ids.aptitudePattern),
         raw(`DELETE FROM "public"."AptitudeQuestion" WHERE "id" = $1`, ids.aptitudeQuestion),
@@ -1391,8 +1397,6 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
           shownIndexes: [0],
           numericValue: null,
           markedForReview: false,
-          seenAtMs: 0,
-          answeredAtMs: 1_000,
         },
       ],
     ],
