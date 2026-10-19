@@ -110,7 +110,7 @@ Data the counter reads
   leave exception excludes days from a counter. Do not merge them.
 - **`ProctorEventKind`** — all 25 kinds, `schema.prisma:265`. Untouched.
 - **Assessment, `AssessmentAttempt`, `ExamSession`, `AttemptStatus`** (Phase
-  6a/6b, `schema.prisma:2142`, `:2318`, `:2253`, `:2099`). The never-sweep
+  6a/6b, `schema.prisma:2175`, `:2318`, `:2253`, `:2099`). The never-sweep
   guards read these; Phase 8 adds no column to them.
 
 Fences every new migration and page must satisfy
@@ -225,10 +225,15 @@ model.
     An unremoved Redis job is harmless — the row is `CANCELLED` and the
     reconciler leaves it alone — so the Redis call is best-effort and outside
     the transaction, as every other enqueue in this codebase is.
-14. **"Disabled" never appears in student-facing copy.** The day-5 state reads
-    "restricted for inactivity" in administrative reporting, which satisfies the
-    policy's wording, and reads as a dormancy countdown to the student. A copy
-    test asserts no new student-facing string contains the word.
+14. **"Disabled" never appears in student-facing copy**, at any rung. On the
+    shipped defaults, counted day 5 is `WARNED` — the mentor is notified and the
+    student sees a dormancy countdown; `SOFT_RESTRICTED` arrives at day 10 and
+    `DISABLED` is unreachable while `autoDisableEnabled` is false. The college's
+    literal "5 days then disabled" is therefore **not** what ships, and this
+    design does not claim otherwise: it ships the configurable ladder the spec
+    asks for, and a super-admin who wants day 5 to restrict sets
+    `softRestrictAfterDays = 5` with no deploy (resolution 6, recorded in
+    `docs/OPEN-QUESTIONS.md`).
 15. **Never a hard delete.** No student row is removed by anything in this
     phase; `DISABLED` is a state, and `GRADUATED`/`ARCHIVED` plus anonymisation
     remain the only end states (§4 retention).
@@ -272,9 +277,14 @@ enum LeaveStatus      { REQUESTED APPROVED REJECTED CANCELLED }
 `createdAt`.
 
 - CHECK `CalendarDay_label_check`: `char_length(label) between 1 and 120`.
-- CHECK `CalendarDay_regular_is_working_check`:
-  `kind = 'REGULAR' OR "isWorkingDay" = false` — a non-regular day never
-  claims to be a working day. A `REGULAR` day may still be false (a Sunday).
+- **No CHECK tying `kind` to `isWorkingDay`.** They answer different questions
+  and the counter reads them separately: `kind <> 'REGULAR'` is a structural
+  exclusion (nobody owes work during a semester break) and always excludes,
+  while `isWorkingDay = false` is the weekend/Sunday exclusion that
+  `excludeNonWorkingDays` switches off. An `EXAM_WEEK` or `PLACEMENT_WEEK` is a
+  working week and may truthfully say so. Forcing every non-regular day to
+  `isWorkingDay = false` would leave the spec's `excludeNonWorkingDays` toggle
+  with nothing to switch (resolution 7).
 - trigger `recx_refuse_past_calendar_day_change` →
   `CalendarDay_past_immutable`: UPDATE or DELETE of a `date < current_date` is
   refused. Evidence rows already cite those days; a correction to history goes
@@ -332,11 +342,22 @@ Exactly the spec's field list (`version Int @unique @default(autoincrement())`,
 - CHECK `InactivityPolicy_min_activity_check`:
   `"minActivityPerDay" between 1 and 20`.
 - CHECK `InactivityPolicy_auto_disable_check`: `NOT "autoDisableEnabled" OR
-  ("disableAfterDays" IS NOT NULL AND "disableAfterDays" >= 14)` — if a human
-  deliberately turns the switch on, the database still refuses a disable
-  threshold short enough to catch a fortnight's illness.
+  "disableAfterDays" IS NOT NULL` — coherence only: a switch that is on with no
+  threshold is a policy that cannot be evaluated. **There is no numeric floor in
+  the database.** The spec requires every threshold to be configurable without a
+  deploy, and a constant in a CHECK is a constant that needs a migration. The
+  fortnight argument lands instead in `super-inactivity#saveInactivityPolicy`:
+  saving `disableAfterDays < 14` requires the typed confirmation
+  `I ACCEPT THIS THRESHOLD`, audits at `SECURITY`, and the argument against it is
+  on the screen above the field (resolution 1).
 - CHECK `InactivityPolicy_scope_check`: `"departmentCode" IS NULL OR
   char_length("departmentCode") between 2 and 16`.
+- CHECK `InactivityPolicy_parent_email_check`: `NOT "notifyParentEmail"`. The
+  column exists because the spec's field list has it, and the database refuses
+  to let it be true: a parent address is third-party PII and the consent record
+  it needs is not built in any phase of this plan. The switch renders disabled
+  with that sentence as its reason, and the CHECK is dropped by the migration of
+  whatever phase builds consent — not by a flag flip (resolution 8).
 - partial unique index `InactivityPolicy_active_scope_key` on
   `(coalesce("batchYear", -1), coalesce("departmentCode", ''))
   WHERE "isActive"` — at most one active policy per scope, nulls treated as
@@ -453,8 +474,12 @@ live in the job or in a component.
 **`packages/shared/src/inactivity-policy.ts`** (8b)
 
 - `INACTIVITY_STAGES` (the ladder), `stageIndex(stage)`,
-  `nextStage(stage)`, `RESTRICTION_STAGE_LABEL` (student-facing copy, with no
-  use of the word "disabled" below `DISABLED` itself).
+  `nextStage(stage)`, and **two** label maps with the same key set:
+  `RESTRICTION_STAGE_LABEL` — student-facing, and the word "disabled" appears at
+  no rung, `DISABLED` included ("Account paused — the placement cell can reopen
+  it") — and `RESTRICTION_STAGE_ADMIN_LABEL`, for administrative reporting, where
+  "Disabled" is the accurate word. The copy test scans student surfaces only; a
+  second test asserts the two maps have identical key sets (resolution 2).
 - `resolveInactivityPolicy(policies, { batchYear, departmentCode })` —
   most specific scope first: department+batch > batch > department > global,
   tie-broken on highest `version`. Total: returns `null` only when no active
@@ -667,11 +692,207 @@ implement the narrower reading and note it").
 
 ---
 
-## Review findings — fix before implementing
+## Resolutions (settled 2026-10-19, before any Phase 8 code)
+
 An independent pass over this document against `docs/handoff/SPEC.md` and the
-actual repository returned **needs-revision**. Nothing below has been applied yet: this
-design is a DRAFT, and these are the items to settle first, when Phase 8 starts
-and the codebase is whatever it is by then. Each one was checkable against a
+actual repository returned **needs-revision**: nine contradictions and eight
+uncovered spec requirements, listed verbatim below. **All seventeen are now
+settled.** Where a resolution differs from the body of this document, the
+resolution wins and the body has been edited to match; the six short edits are
+marked inline as "(resolution N)". The structural ones are written out here
+because they add material the draft did not have.
+
+### R5 — the event source, which is what makes restoration writable
+
+The draft's constraint set made the two restoration paths the spec requires
+(auto-clear on solve, retroactive-leave reversal) unwritable: both are stage
+moves with no human actor, so both were "system" rows that would have had to
+manufacture sweep evidence inside a submission transaction and would have
+collided with the sweep's own row on the per-day unique index. Marked manual
+instead, they failed the actor and typed-reason CHECKs. The draft never
+reconciled this and nothing tested a same-day escalate-then-clear.
+
+The fix is one column. `AccountStatusEvent` gains:
+
+```prisma
+enum AccountStatusSource { INACTIVITY_SWEEP AUTO_CLEAR_ON_SOLVE SELF_CLEAR LEAVE_REVERSAL MANUAL_ADMIN MANUAL_SUPER }
+```
+
+`source AccountStatusSource` — not nullable, no default, because a row whose
+origin is a guess is a row an appeal cannot read. Every constraint in §3's
+`AccountStatusEvent` block is then scoped to the sources it is actually about:
+
+- `AccountStatusEvent_actor_check`: `"triggeredBySystem" = ("actorId" IS NULL)`
+  **and** `"triggeredBySystem" = (source IN ('INACTIVITY_SWEEP','AUTO_CLEAR_ON_SOLVE','LEAVE_REVERSAL'))`.
+  `SELF_CLEAR` therefore carries the student as its actor, which is true and is
+  what the student's own history should show.
+- `AccountStatusEvent_manual_reason_check`: `source NOT IN ('MANUAL_ADMIN','MANUAL_SUPER')
+  OR char_length(reason) >= 10`. A student clicking one button types no reason;
+  a staff member changing somebody else's status always does.
+- `AccountStatusEvent_system_policy_check` and `_system_evidence_check`: both
+  scoped to `source = 'INACTIVITY_SWEEP'`. That is the row a disputed lockout
+  reads, and it is the only row with a policy version and an evaluation window
+  to cite. Every other source still carries an evidence object —
+  `jsonb_typeof(evidence) = 'object'` holds for all rows — and the clear paths
+  carry `_clear_evidence_check`: `source NOT IN ('AUTO_CLEAR_ON_SOLVE','SELF_CLEAR','LEAVE_REVERSAL')
+  OR evidence ?& array['clearedBy','clearedAt']`, where `clearedBy` is the
+  solved problem id, the word `self`, or the leave id. The reversal can be
+  explained months later too.
+- `AccountStatusEvent_evaluation_date_check`:
+  `("evaluationDate" IS NOT NULL) = (source = 'INACTIVITY_SWEEP')`.
+- unique index `AccountStatusEvent_sweep_once_per_day` on `("userId","evaluationDate")
+  WHERE source = 'INACTIVITY_SWEEP'`. Idempotence per campus day is preserved
+  exactly, and a student escalated at 02:00 who solves a problem at 09:00 the
+  same day gets both rows, which is the history that actually happened.
+- `recx_refuse_system_disable` keys on `source = 'INACTIVITY_SWEEP'`;
+  `recx_refuse_stage_jump` keeps the single-rung rule for every escalating
+  source and allows a drop to `NONE` from any of them;
+  `recx_refuse_sweep_with_open_attempt` keys on `source = 'INACTIVITY_SWEEP'`
+  (a clear during an attempt is a kindness, not a sweep).
+
+Gating test added: **a same-day escalate-then-clear writes two events and ends
+at `NONE`**, which is the case the draft's constraints made impossible.
+
+### R3 — what is cancelled, and in which lane
+
+Decision 13 as drafted contradicted decisions 3 and 10: it killed the very
+submission that was the student's exit route. The spec's sentence is "cancel
+queued and in-flight submissions for an account that has just been restricted,
+so judge capacity is never spent on a locked lane", and the reason clause is
+load-bearing — the lane `SOFT_RESTRICTED` locks is the **contest** lane.
+Practice is not locked; decision 10 permits solving and decision 3 makes it the
+exit. So: the transaction cancels that user's `QUEUED` and `JUDGING`
+submissions **in the contest lane only**, leaves practice and assessment lanes
+untouched, and `queues.remove` is best-effort outside the transaction as every
+other enqueue in this codebase is. Recorded in `docs/OPEN-QUESTIONS.md`.
+
+### R4 — the pending appeal needs no provider: the models are already here
+
+**The finding is wrong on its facts, and checking it is what settled it.**
+`model IntegrityFlag` is at `packages/db/prisma/schema.prisma:277` and
+`model IntegrityAppeal` at `:334`, both shipped in Phase 6; `User` already
+carries `integrityAppeals IntegrityAppeal[] @relation("AppealStudent")`. The
+reviewer found `enum FlagStatus` at `:2302` — an orphan enum nothing references
+— and concluded the model was absent. So the holdback is not a parameter
+waiting for a later slice; it is SQL that runs today:
+
+```sql
+AND NOT EXISTS (SELECT 1 FROM "IntegrityAppeal" ap
+                WHERE ap."studentId" = u.id AND ap.outcome = 'PENDING')
+AND NOT EXISTS (SELECT 1 FROM "IntegrityFlag" f
+                JOIN "AssessmentAttempt" t ON t.id = f."attemptId"
+                WHERE t."userId" = u.id AND f.status = 'OPEN')
+```
+
+Note `IntegrityFlag` has no `studentId`: it hangs off `AssessmentAttempt`, and
+its status enum is `IntegrityStatus` (`OPEN CLEARED UPHELD AUTO_CLEARED
+OVERTURNED`), not `FlagStatus`.
+
+The second fragment is **broader than the spec's words**, which say only "a
+pending appeal". An `OPEN` flag is not yet an appeal, but it is a student
+waiting on a human decision about their integrity, and sweeping them while they
+wait is the exact combination this platform must never produce. Over-holding
+costs the institution a few days of enforcement; under-holding costs a student
+their account while they are already arguing for it. Recorded in
+`docs/OPEN-QUESTIONS.md` as the broader reading, deliberately taken.
+
+`sweepHoldback` still takes `pendingAppeal: boolean` so the pure planner stays
+pure, and gating test 3 exercises both fragments against real rows rather than
+a stub. The draft's injected provider is not built — there is nothing to inject
+around.
+
+### R-U1, R-U2 — the four configurable fields the draft left dead
+
+`isCountedDay(day, cal, { excludeNonWorkingDays })`: `kind <> 'REGULAR'` always
+excludes; `isWorkingDay = false` excludes only when the toggle is on.
+`countInactiveDays` takes `excludeApprovedLeave` and skips `leaveCoveredDays`
+entirely when it is false. And the activity mapping is stated, not implied:
+
+| `countsAsActivity` key | Source | Phase 8 behaviour |
+|---|---|---|
+| `submission` | `ActivityDay.submissions` | counted when true |
+| `solve` | `ActivityDay.solved` | counted when true |
+| `login` | none — `ActivityDay` has no login column, and `User.lastActiveAt` is the window's own start, so counting it would make the counter self-referential | accepted, ignored, evidence records `loginSignalAvailable: false`; the settings page says so beside the switch |
+| `lesson` | none — lessons live in the LMS | accepted, ignored, evidence records `lessonSignalAvailable: false` |
+
+`minActivityPerDay` counts **the sum of the enabled signals' counts for that
+day** — `(submission ? submissions : 0) + (solve ? solved : 0)` — and a day at
+or above it is excluded with reason `ACTIVE`. Tested at the boundary.
+
+### R-U3 — DISABLED to ACTIVE is super-admin only, in the database
+
+CHECK `AccountStatusEvent_undisable_check`: `NOT ('DISABLED' IN ("fromStage","fromStatus"))
+OR source IN ('MANUAL_SUPER','LEAVE_REVERSAL')`. A department ADMIN cannot
+de-escalate a disabled account by any path, and the pure floor
+`canStaffClear(stage)` returns false for `DISABLED` so the action refuses before
+it tries.
+
+### R-U4 — the stage-to-status mapping, and who owns `User.status`
+
+`ACCOUNT_STATUS_FOR_STAGE` in `@recx/shared`: `NONE`/`NUDGED`/`WARNED` to
+`ACTIVE`, `SOFT_RESTRICTED` to `SOFT_RESTRICTED`, `DISABLED` to `DISABLED`. The
+sweep transaction writes `User.status` — without it the already-shipped contest
+refusal at `apps/web/src/server/actions/contests.ts:50` reads nothing and the
+restriction bites nothing. `NUDGED` and `WARNED` never touch `User.status`.
+
+`AccountRestriction` gains `ownsAccountStatus Boolean @default(false)`: the
+engine sets it when it moves `User.status`, and may move that status back only
+while it is true. An account a human suspended for another reason is never
+un-suspended by a clear-on-solve.
+
+### R-U5 — rewards, with a file and a line
+
+The reward paths exist and are named: `awardBadges()` at
+`apps/web/src/lib/progress/apply.ts:530` and the streak-milestone awards in
+`XP_RULES.streakMilestones` (`packages/shared/src/xp.ts:31`). While restricted,
+`apply.ts` passes no badge keys and awards no milestone — the `XpEvent` is
+still written with `meta.restricted`, nothing is destroyed, and nothing is
+re-awarded on restoration. Gating test 10 is extended to assert a restricted
+student crossing a badge threshold earns no `UserBadge` row, and earns it on the
+next crossing after the clear.
+
+### R-U6 — the admin review item is a row, not a word
+
+`AccountRestriction` gains `adminReviewOpenedAt DateTime?` and
+`adminReviewClearedAt DateTime?`, with CHECK
+`AccountRestriction_review_check`: `"adminReviewClearedAt" IS NULL OR
+("adminReviewOpenedAt" IS NOT NULL AND "adminReviewClearedAt" >= "adminReviewOpenedAt")`.
+`/admin/inactivity` reads `adminReviewOpenedAt IS NOT NULL AND
+adminReviewClearedAt IS NULL`, scoped by `AdminScope`. No new model, and the
+queue page has a stated source row.
+
+### R-U7 — "an assessment in the next 72 hours", resolved
+
+`Assessment` carries `audienceBatchYear`, `audienceDepartmentCode`,
+`audienceSection` (null = every value) and `opensAt`, so the fragment is:
+
+```sql
+NOT EXISTS (
+  SELECT 1 FROM "Assessment" a
+  WHERE a.status IN ('PUBLISHED','OPEN')
+    AND a."opensAt" >= $1 AND a."opensAt" < $1 + interval '72 hours'
+    AND (a."audienceBatchYear"      IS NULL OR a."audienceBatchYear"      = u."batchYear")
+    AND (a."audienceDepartmentCode" IS NULL OR a."audienceDepartmentCode" = u."departmentCode")
+    AND (a."audienceSection"        IS NULL OR a."audienceSection"        = u."section")
+)
+```
+
+A cohort assessment counts as scheduled for every student in the cohort, which
+over-holds rather than under-holds — the correct direction.
+
+### R-U8 — the capability array
+
+Slice 8a's edit list adds the hard-coded array at
+`apps/web/test/capabilities.test.ts:136`, which becomes `[]` once
+`calendar.manage` is wired. 8a cannot go green without it.
+
+---
+
+## Review findings (verbatim, as received)
+
+An independent pass over this document against `docs/handoff/SPEC.md` and the
+actual repository returned **needs-revision**. These are the items as the
+reviewer wrote them; every one is settled above. Each was checkable against a
 file or a spec line when it was written (2026-10-19).
 
 ### Contradicts the spec or the codebase (9)
