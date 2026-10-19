@@ -34,6 +34,22 @@ export const PROCTOR_EVENT_KINDS = [
   "SUBMISSION_RATE_ANOMALY",
   "CLIENT_SCRIPT_ERROR",
   "INVIGILATOR_NOTE",
+  /**
+   * Server-derived, added in Phase 6 (Phase 4 declared the other 24 and left
+   * this one open). One 30-second snapshot interval introduces >= 60% of the
+   * final solution's tokens with no paste or programmatic-insert event — code
+   * appeared while the instrumentation was blind, which is the footprint of a
+   * suppressed-telemetry paste.
+   *
+   * It is a KIND rather than a report-only derivation for two reasons: it is
+   * an event about an attempt with a time and a severity, exactly like the
+   * other server-derived kinds (HEARTBEAT_GAP, SEQUENCE_GAP, IP_CHANGED);
+   * and `Accommodation.exemptSignals` is ProctorEventKind[], so anything
+   * that is not a kind cannot be exempted. A SPEECH_INPUT candidate
+   * legitimately inserts large blocks of text, and would otherwise be
+   * flagged systematically with no way to grant relief.
+   */
+  "SNAPSHOT_JUMP",
 ] as const;
 
 export type ProctorEventKind = (typeof PROCTOR_EVENT_KINDS)[number];
@@ -69,4 +85,5 @@ export const PROCTOR_EVENT_LABELS: Readonly<Record<ProctorEventKind, string>> = 
   SUBMISSION_RATE_ANOMALY: "Unusual submission rate",
   CLIENT_SCRIPT_ERROR: "Page script error",
   INVIGILATOR_NOTE: "Invigilator note",
+  SNAPSHOT_JUMP: "Code appeared without a matching paste",
 });

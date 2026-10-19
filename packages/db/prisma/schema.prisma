@@ -287,6 +287,10 @@ enum ProctorEventKind {
   SUBMISSION_RATE_ANOMALY
   CLIENT_SCRIPT_ERROR
   INVIGILATOR_NOTE
+  /// Server-derived (Phase 6). Also exemptable, which is why it is a kind:
+  /// Accommodation.exemptSignals is ProctorEventKind[], and a SPEECH_INPUT
+  /// candidate legitimately inserts large blocks of text.
+  SNAPSHOT_JUMP
 }
 
 enum RosterImportStatus {
@@ -615,6 +619,7 @@ model ProblemVersion {
   validationRuns     ValidationRun[]
   /// Contests that pin this (frozen) version — Phase 5.
   contestProblems    ContestProblem[]
+  AssessmentProblem  AssessmentProblem[]
 
   @@unique([problemId, revision])
 }
@@ -2067,4 +2072,199 @@ model UserRating {
   updatedAt     DateTime  @updatedAt
 
   @@index([rating(sort: Desc)])
+}
+
+// ── Assessments and proctoring (Phase 6) ───────────────────────────────
+// SPEC section 5 opens this phase "Read this section as written. It is the
+// part most likely to be built wrong." The rules below are the reason: the
+// hard rule that only a lab-proctored result may feed placement, and the
+// rule that no signal ever auto-penalises.
+//
+// Slice 6a: the assessment itself, its pinned problems and the exam session.
+// The attempt engine, the proctor events and the review surface follow in
+// 6b-6e (docs/handoff/phase6/DESIGN.md).
+
+/// How closely an attempt is watched. NONE and ADVISORY are practice-grade;
+/// only LAB_SUPERVISED may feed placement eligibility (see Assessment).
+enum ProctorMode {
+  NONE
+  ADVISORY
+  REMOTE_MONITORED
+  KIOSK_SEB
+  LAB_SUPERVISED
+}
+
+enum AttemptStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DISCONNECTED
+  SUBMITTED
+  AUTO_SUBMITTED
+  EXPIRED
+  TERMINATED
+  VOIDED
+}
+
+enum FlagStatus {
+  OPEN
+  REVIEWING
+  UPHELD
+  DISMISSED
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EventSource {
+  CLIENT
+  SERVER
+  INVIGILATOR
+}
+
+/// What happens when a candidate reaches maxFocusWarnings.
+/// There is deliberately NO value that voids a result: SPEC section 0 fixes
+/// the maximum automatic consequence at "flag for review and withhold from
+/// the public leaderboard", so a future UI cannot offer voiding by picking an
+/// enum value. Voiding is only ever a recorded human verdict.
+enum FocusLimitAction {
+  AUTOSUBMIT
+  FLAG_ONLY
+}
+
+/// Lifecycle of an assessment. Deliberately NOT ContestStatus: a test is
+/// never "RATED", and reusing that enum would offer a meaningless value.
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+/// A test a cohort sits. Problems are pinned at frozen revisions, as in a
+/// contest, so editing a problem later cannot rescore anybody.
+///
+/// THE HARD RULE (SPEC section 5): affectsPlacementEligibility may be true
+/// only when proctorMode = LAB_SUPERVISED. It is enforced three times — a
+/// zod refinement at the server boundary, the CHECK
+/// Assessment_placement_requires_lab, and this comment — because the
+/// predictable drift is an admin flipping a Friday quiz into a shortlisting
+/// criterion because it was convenient. A CHECK means that cannot happen
+/// even by raw SQL.
+///
+/// Enforced by the database (migration 20261019140000; a refusal raises
+/// check_violation):
+///   - CHECK Assessment_placement_requires_lab: affectsPlacementEligibility
+///     implies proctorMode = LAB_SUPERVISED;
+///   - CHECK Assessment_window_check: closesAt > opensAt;
+///   - CHECK Assessment_duration_check: durationSec between 60 and 6 hours;
+///   - CHECK Assessment_warnings_check: maxFocusWarnings 1-10;
+///   - CHECK Assessment_attempts_check: maxAttempts 1-5;
+///   - CHECK Assessment_title_check: title 1-160 characters;
+///   - trigger Assessment_published_window_immutable: once a non-DRAFT
+///     assessment exists, its window, duration, proctor mode and placement
+///     flag never change — a candidate's result must mean what it meant when
+///     they sat it;
+///   - trigger Assessment_no_truncate: TRUNCATE is refused.
+model Assessment {
+  id                          String           @id @default(cuid())
+  slug                        String           @unique
+  title                       String
+  /// Markdown, sanitised server-side. Shown before the attempt starts.
+  instructions                String           @db.Text
+  status                      AssessmentStatus    @default(DRAFT)
+  proctorMode                 ProctorMode      @default(NONE)
+  /// THE HARD RULE: true requires proctorMode = LAB_SUPERVISED.
+  affectsPlacementEligibility Boolean          @default(false)
+  opensAt                     DateTime
+  closesAt                    DateTime
+  /// The clock a candidate gets, before accommodations are applied. The
+  /// attempt's expiresAt is computed server-side and never accepted from a
+  /// client (slice 6b).
+  durationSec                 Int
+  maxAttempts                 Int              @default(1)
+  /// Focus-loss / fullscreen-exit warnings before onLimit applies.
+  maxFocusWarnings            Int              @default(3)
+  onLimit                     FocusLimitAction @default(AUTOSUBMIT)
+  /// Stricter client guards (fullscreen required, readiness check enforced).
+  strictMode                  Boolean          @default(false)
+  /// Audience; null = every value of that dimension.
+  audienceBatchYear           Int?
+  audienceDepartmentCode      String?
+  audienceSection             String?
+  createdById                 String
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+
+  problems AssessmentProblem[]
+  sessions ExamSession[]
+
+  @@index([status, opensAt(sort: Desc)])
+  @@index([opensAt])
+}
+
+/// One problem in an assessment, at a PINNED frozen version — never
+/// Problem.liveVersionId (SPEC section 4a). In FROZEN_EXEMPT_MODELS for the
+/// same reason as ContestProblem: it references a frozen version without
+/// being version content.
+/// Enforced by the database:
+///   - CHECK AssessmentProblem_points_check: points > 0;
+///   - unique (assessmentId, position) and (assessmentId, problemVersionId);
+///   - trigger AssessmentProblem_frozen_version: the pinned version is
+///     frozen at INSERT, and assessmentId, problemVersionId and position
+///     never change afterwards.
+model AssessmentProblem {
+  id               String         @id @default(cuid())
+  assessmentId     String
+  assessment       Assessment     @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  problemVersionId String
+  problemVersion   ProblemVersion @relation(fields: [problemVersionId], references: [id])
+  /// 1-based order in the question palette.
+  position         Int
+  points           Float          @default(1)
+  createdAt        DateTime       @default(now())
+
+  @@unique([assessmentId, position])
+  @@unique([assessmentId, problemVersionId])
+  @@index([problemVersionId])
+}
+
+/// One sitting of an assessment: a hall, a window, and the network it is
+/// allowed from. LAB_SUPERVISED enforces the CIDR allowlist on attempt start
+/// and on every heartbeat, so leaving the lab network ends the session
+/// (SPEC section 5).
+/// Enforced by the database:
+///   - CHECK ExamSession_window_check: endsAt > startsAt;
+///   - CHECK ExamSession_capacity_check: capacity 1-2000 (a hall larger than
+///     that is sharded into sub-sessions, as the invigilator dashboard caps
+///     a session view at 300 virtualised rows);
+///   - CHECK ExamSession_lab_allowlist: a LAB_SUPERVISED session names at
+///     least one CIDR — the allowlist IS the enforcement, so an empty one
+///     would be a lab-proctored session with nothing proctoring it;
+///   - trigger ExamSession_no_truncate: TRUNCATE is refused.
+model ExamSession {
+  id                   String     @id @default(cuid())
+  assessmentId         String
+  assessment           Assessment @relation(fields: [assessmentId], references: [id])
+  label                String
+  /// The room, as students will read it on their seat slip.
+  room                 String?
+  startsAt             DateTime
+  endsAt               DateTime
+  capacity             Int        @default(60)
+  /// CIDR blocks this session may be sat from. Re-checked on every heartbeat
+  /// for LAB_SUPERVISED. Never a raw IP anywhere else — hashIp() only.
+  allowedCidrs         String[]   @default([])
+  /// Optional: require a college-managed device (Verified Access). Strictly
+  /// optional — the platform is fully functional without it.
+  requireManagedDevice Boolean    @default(false)
+  createdById          String
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  @@index([assessmentId, startsAt])
 }

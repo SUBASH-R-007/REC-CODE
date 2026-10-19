@@ -11,6 +11,7 @@ export * from "./help";
 export * from "./progress";
 export * from "./proctor";
 export * from "./accommodation";
+export * from "./assessment";
 export * from "./roster";
 export * from "./governance";
 export {

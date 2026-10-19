@@ -37,6 +37,10 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_contest_rating_rewrite",
   "recx_refuse_unfrozen_contest_problem",
   "recx_refuse_rating_change_write",
+  // 20261019140000_phase6a_assessments
+  "recx_refuse_published_assessment_change",
+  "recx_refuse_unfrozen_assessment_problem",
+  "recx_refuse_lab_session_without_allowlist",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -59,6 +63,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "ContestProblemAttempt",
   "ContestStanding",
   "RatingChange",
+  // 20261019140000_phase6a_assessments
+  "Assessment",
+  "ExamSession",
 ];
 
 export interface GuardTrigger {
@@ -156,6 +163,28 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_rating_change_write",
     level: "ROW",
   },
+  // 20261019140000_phase6a_assessments
+  {
+    name: "Assessment_published_immutable",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "Assessment",
+    fn: "recx_refuse_published_assessment_change",
+    level: "ROW",
+  },
+  {
+    name: "AssessmentProblem_frozen_version",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_unfrozen_assessment_problem",
+    level: "ROW",
+  },
+  {
+    name: "ExamSession_lab_allowlist",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "ExamSession",
+    fn: "recx_refuse_lab_session_without_allowlist",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -174,7 +203,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019120000_phase5_contests";
+export const CHECK_CATALOG_THROUGH = "20261019140000_phase6a_assessments";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -286,6 +315,26 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["UserRating_values_check", "UserRating"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019120000_phase5_contests" })),
+  ...(
+    [
+      // THE HARD RULE (SPEC §5): a placement-bearing assessment must be
+      // lab-proctored, enforced in the data and not only in the code path.
+      ["Assessment_placement_requires_lab", "Assessment"],
+      ["Assessment_window_check", "Assessment"],
+      ["Assessment_duration_check", "Assessment"],
+      ["Assessment_warnings_check", "Assessment"],
+      ["Assessment_attempts_check", "Assessment"],
+      ["Assessment_title_check", "Assessment"],
+      ["Assessment_instructions_check", "Assessment"],
+      ["Assessment_slug_check", "Assessment"],
+      ["Assessment_audience_check", "Assessment"],
+      ["AssessmentProblem_points_check", "AssessmentProblem"],
+      ["AssessmentProblem_position_check", "AssessmentProblem"],
+      ["ExamSession_window_check", "ExamSession"],
+      ["ExamSession_capacity_check", "ExamSession"],
+      ["ExamSession_label_check", "ExamSession"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019140000_phase6a_assessments" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
