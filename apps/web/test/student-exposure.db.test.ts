@@ -695,6 +695,13 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
           "Submission",
           "RunRequest",
           "Session",
+          // Phase 8a. `account#requestLeaveException` is exercised as S, so
+          // the fixture user owns a leave row by the time this runs — and
+          // LeaveException_userId_fkey is RESTRICT, because a student is
+          // never hard-deleted in production. Without this line every test
+          // in the file passes and the SUITE fails in teardown, which is the
+          // failure mode docs/CONVENTIONS.md warns about by name.
+          "LeaveException",
         ].map((t) => raw(`DELETE FROM "public"."${t}" WHERE "userId" = ANY($1::text[])`, userIds)),
         // Phase 5 contest fixture. ContestProblem_frozen_version refuses an
         // UPDATE but not a DELETE, so only the contest's own guards come off.

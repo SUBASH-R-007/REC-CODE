@@ -1598,3 +1598,191 @@ later without a gated change.
   `xpEvent.count()` for the "has this question been paid" pre-check, which
   was right twice: the ledger's unique `idempotencyKey` IS that check, so the
   insert is conditional on it and the pre-check is gone.
+
+---
+
+## Phase 8 — inactivity as a policy engine
+
+Every entry here is a place where the spec, or the college's own ask, could be
+read more than one way. The rule is §0's: **implement the narrower reading and
+write it down**, where "narrower" means the reading that does less to a
+student.
+
+### The college asked for five days then disabled. That is not what ships.
+
+The ask, verbatim in the brief, was "five days of inactivity, then the account
+is disabled". The shipped defaults are nudge 3, warn 5, pause 10, and
+automatic disabling **off**, so day five is a warning to the student and their
+mentor and no account is ever closed by a job.
+
+This is a real gap and not a reading of the words, so it is recorded rather
+than smoothed over. Two reasons it is the right gap:
+
+- The spec itself says the maximum automatic consequence in the system is a
+  flag or a pause, and that hard disabling is "only ever a manual, reasoned,
+  audit-logged admin action". A five-day cron-driven lockout contradicts the
+  document that asked for it.
+- Every threshold is a row, and the settings page writes new versions, so the
+  college can have day five restrict — `softRestrictAfterDays: 5` — the
+  afternoon they decide to, with no deploy and an audit row naming who chose
+  it. That is the spec's own answer to the mismatch.
+
+An earlier draft of the design claimed the day-five state "reads restricted in
+administrative reporting, which satisfies the policy's wording". That was
+arithmetically false against its own default row, and it is the kind of claim
+worth catching: the honest version is above.
+
+### There is no floor on the auto-disable threshold in the database.
+
+A draft had `disableAfterDays >= 14` inside
+`InactivityPolicy_auto_disable_check`, justified as refusing a threshold short
+enough to catch a fortnight's illness. Dropped, because it contradicted the
+spec clause three sentences away: *every threshold is configurable without a
+deploy*, and a constant in a CHECK is a constant that needs a migration — the
+college's own stated wish would have become unreachable by the one mechanism
+the spec protects.
+
+*Narrower reading, and what ships:* the fortnight argument is product copy.
+`AUTO_DISABLE_FLOOR_REASON` renders above the field, a threshold under 14 days
+needs `I ACCEPT THIS THRESHOLD` typed, and the save audits at `SECURITY`. A
+database that refuses the college's policy is not safer than one that makes
+somebody sign for it.
+
+### What `SOFT_RESTRICTED` cancels, and in which lane.
+
+The spec: "cancel queued and in-flight submissions for an account that has
+just been restricted, so judge capacity is never spent on a locked lane."
+Taken literally against every lane, that kills the very submission that is the
+documented way out of the restriction — the spec also says solving is not
+blocked, and one solve clears the stage automatically.
+
+*Narrower reading:* the lane `SOFT_RESTRICTED` locks is the **contest** lane,
+so that is the only lane cancelled. Practice and assessment submissions run to
+completion. The reason clause in the spec's own sentence is what settles it.
+
+### A pending integrity appeal holds the sweep back — and so does an open flag.
+
+The spec says "never sweep a student with … a pending appeal". `IntegrityFlag`
+(`schema.prisma:277`) and `IntegrityAppeal` (`:334`) both shipped in Phase 6,
+so this is SQL rather than a parameter waiting for a later slice.
+
+*Broader reading, deliberately taken:* the sweep also holds back a student with
+an `OPEN` IntegrityFlag, which is not yet an appeal. A student waiting on a
+human decision about their integrity, who is then swept by a job for being
+quiet while they wait, is the exact combination this platform must never
+produce. Over-holding costs the institution a few days of enforcement;
+under-holding costs a student their account while they are already arguing for
+it.
+
+### `countsAsActivity` has four keys and two of them cannot fire.
+
+`submission` reads `ActivityDay.submissions` and `solve` reads
+`ActivityDay.solved`. The other two have no source: `ActivityDay` has no login
+column (and `User.lastActiveAt` is the counting window's own start, so reading
+it would make the counter self-referential), and lessons live in the LMS,
+where REC Code never creates a student record.
+
+*Narrower reading:* accept both keys, ignore them, and record
+`loginSignalAvailable: false` / `lessonSignalAvailable: false` in the evidence,
+so nobody later reads a missing signal as inactivity. The settings page renders
+both as disabled controls with the reason beside them — a toggle that silently
+does nothing is worse than one that says so. `login` stays false by default on
+the spec's own argument: a policy counting logins teaches a daily one-minute
+login that pollutes the engagement data worse than inactivity does.
+
+### `kind` and `isWorkingDay` are read separately, and the toggle switches one.
+
+A draft CHECK forced every non-`REGULAR` calendar day to `isWorkingDay =
+false`. That collapsed the two columns into one for the counter and left the
+spec's `excludeNonWorkingDays` toggle with nothing to switch off.
+
+*What ships:* no CHECK ties them. `kind <> 'REGULAR'` is a structural
+exclusion and always applies — nobody owes practice during a semester break.
+`isWorkingDay = false` is the weekend and the declared closure, and that is the
+one `excludeNonWorkingDays` controls. An exam week is a working week and the
+calendar may truthfully say so.
+
+### An empty or sparse calendar is the counter's harshest reading, so it stops the engine.
+
+A day with no `CalendarDay` row counts. A college that had not entered its
+holidays would therefore restrict students for being away over Pongal.
+
+*Narrower reading, and recommended:* the sweep refuses to escalate **anybody**
+while the calendar does not cover the evaluation window, reports
+`calendarIncomplete` and raises an administrative item instead.
+`/super/calendar` leads with how many days are unentered for this reason —
+otherwise an empty queue reads as "nothing to do" when it means "the engine is
+reaching nobody".
+
+### A past calendar day is immutable, so a mis-entered holiday is corrected elsewhere.
+
+Evidence rows cite days by date. Editing one rewrites the explanation of a
+decision already taken, so `CalendarDay_past_immutable` refuses UPDATE and
+DELETE of a day before today (and refuses moving a future day into the past).
+
+*Narrower reading:* a day that was counted wrongly is put right by approving a
+retroactive `LeaveException` covering it, which is the spec's own reversal
+mechanism. A super-admin override would need its own
+`PrivilegedOperationKind`, which Phase 8 does not add.
+
+### "Once per semester" self-clearing needs a definition of semester.
+
+The spec gates student self-service on `selfClearedCount < 1` and calls it
+"once per semester" without saying what a semester is.
+
+*Narrower reading:* `termKeyFor()` derives the term from `SEMESTER_BREAK`
+boundaries in the calendar — "the term that began after the break ending 18 May
+2026". While the calendar holds no break rows the key falls back to the
+academic year (June to May), which spans longer than a semester and therefore
+allows **fewer** self-clears. The stricter reading is the one to ship when the
+data is missing. Revisit once a real calendar is loaded.
+
+### `notifyParentEmail` cannot be turned on at all.
+
+A draft said it "stays false, needs a SUPER_ADMIN flip and a recorded
+`ConsentRecord`". `ConsentRecord` is in the spec's model inventory but is in no
+phase of this plan, so that precondition had no owner.
+
+*What ships:* CHECK `InactivityPolicy_parent_email_check` refuses `true`
+outright. The column exists because the spec's field list has it; a parent
+address is third-party personal data. The CHECK is dropped by the migration of
+whatever phase builds consent, never by a flag flip, and the switch renders
+disabled with that sentence as its reason.
+
+### Who the "named human" is when no mentor resolves.
+
+The spec's point is that non-progress must be visible to a named human who can
+intervene, so the notification must never silently go nowhere.
+
+*Narrower reading:* the student's `TA_MENTOR` by cohort; when none resolves,
+the department `ADMIN` rather than nobody; and the evidence records which was
+notified, so "we told somebody" is checkable rather than assumed.
+
+### Restoring withheld XP: there is nothing to restore.
+
+*Narrower reading:* nothing was lost. The ledger is append-only and events are
+written with `meta.restricted`, so a reversal clears that flag's effect on
+bucket visibility and writes no compensating row and no re-award.
+
+### Who may reopen a closed account.
+
+The spec: "DISABLED → ACTIVE is Super-admin only." A draft gave the staff
+clearing action `requireAdminScopeAction()` with no floor, which would have let
+a department ADMIN de-escalate a disabled account.
+
+*What ships:* enforced three times — the pure `canStaffClear()` returns false
+for `DISABLED`, the action refuses before it tries, and CHECK
+`AccountStatusEvent_undisable_check` requires a row leaving `DISABLED` to come
+from `MANUAL_SUPER` or `LEAVE_REVERSAL`.
+
+### "Every student must make progress" cannot be enforced by software.
+
+The spec asks for this to be recorded honestly, so it is its own entry. What
+the platform can do: make the next action unambiguous (one Continue card, not
+a wall of choices), keep the weekly goal small (three problems, not thirty),
+make non-progress visible to a named human who can intervene, and make
+progress legible to the student. The honest promise is **"nobody falls through
+unnoticed and nobody is ever unsure what to do next"** — not "everyone
+progresses". A platform that claimed the second would be lying, and the lie
+would be load-bearing: it is exactly the claim that justifies closing an
+account for silence.

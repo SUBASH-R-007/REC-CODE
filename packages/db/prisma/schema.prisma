@@ -3309,3 +3309,81 @@ model LeaveException {
   @@index([userId, status, startDate])
   @@index([status, startDate])
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 8b — the inactivity policy, versioned and immutable
+//
+// SPEC §5: "Every threshold is a Super-admin-configurable, audit-logged
+// setting rather than a constant, so the policy can be tightened without a
+// deploy." So the numbers live in rows — and because an AccountStatusEvent
+// cites the version it was decided under, those rows can never be edited.
+// Changing a threshold writes a new version; the old one stays, so the
+// explanation of a decision taken months ago still reads true.
+//
+// `autoDisableEnabled` defaults FALSE, and the database refuses a system
+// DISABLED event unless the cited version has it true (Phase 8c). That is
+// §0's "no account is hard-disabled by a cron job" expressed where no code
+// path can route around it.
+// ─────────────────────────────────────────────────────────────────────────
+
+enum RestrictionStage {
+  NONE
+  NUDGED
+  WARNED
+  SOFT_RESTRICTED
+  DISABLED
+}
+
+/// One version of the policy. The primary key IS the version: an event cites
+/// it by number, and a surrogate id would let two rows claim one version.
+///
+/// Scope is most-specific-first — department+batch, then batch, then
+/// department, then global — resolved by `resolveInactivityPolicy()` in
+/// @recx/shared, with a partial unique index making at most one row active
+/// per scope so the resolution is always single-valued.
+model InactivityPolicy {
+  version       Int     @id @default(autoincrement())
+  isActive      Boolean @default(true)
+  /// null = every batch.
+  batchYear     Int?
+  /// null = every department.
+  departmentCode String?
+
+  /// A null threshold means that rung never fires. Non-decreasing up the
+  /// ladder, by CHECK.
+  nudgeAfterDays        Int?
+  warnAfterDays         Int?
+  softRestrictAfterDays Int?
+  disableAfterDays      Int?
+
+  /// FALSE by default, and the top rung is unreachable while it is. Turning
+  /// it on is a SECURITY-audited act that emails every super-admin.
+  autoDisableEnabled Boolean @default(false)
+  /// Days between notifying a student and acting on the next rung.
+  graceDays          Int     @default(2)
+
+  /// {submission, solve, login, lesson}. `login` and `lesson` have no source
+  /// in this database: they are accepted, ignored, and the evidence row
+  /// records that they were unavailable, so a missing signal is never read
+  /// as inactivity (docs/OPEN-QUESTIONS.md).
+  countsAsActivity Json @default("{\"submission\":true,\"solve\":true,\"login\":false,\"lesson\":true}")
+  /// The sum of the enabled signals' counts a day needs to be excluded.
+  minActivityPerDay Int  @default(1)
+
+  /// Switches the `isWorkingDay` exclusion. The `kind <> REGULAR` exclusion
+  /// is structural and is not switchable.
+  excludeNonWorkingDays Boolean @default(true)
+  excludeApprovedLeave  Boolean @default(true)
+
+  /// A named human who can intervene. The spec's point is that non-progress
+  /// must be visible to somebody, so this never silently goes nowhere.
+  notifyMentor     Boolean @default(true)
+  /// Refused by CHECK until the phase that builds a consent record drops it:
+  /// a parent address is third-party personal data.
+  notifyParentEmail Boolean @default(false)
+
+  createdById String
+  createdAt   DateTime @default(now())
+
+  @@index([isActive, version(sort: Desc)])
+}

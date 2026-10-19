@@ -766,6 +766,94 @@ reconciler intervals without a finished tick.
 start. The browser lands on the user's home with a banner; nothing can be
 changed until "End impersonation" (or 15 minutes, or sign-out).
 
+### Inactivity: a policy engine, not a kill switch (Phase 8)
+
+**Read this before touching the thresholds, and before anybody asks you to
+turn on automatic disabling.** The same paragraphs are rendered on
+`/super/settings/inactivity`, above the switch, so the argument is wherever
+the decision is made.
+
+A student who stops submitting has usually not stopped caring. They are ill,
+or sitting university exams, or at home for a bereavement, or stuck on a
+problem and too embarrassed to say so. A system that reads silence as
+misconduct and closes the account has not identified a problem; it has
+created one, and it has taught everybody watching that the platform is
+something to be afraid of.
+
+So: the purpose is to make non-progress **visible to a named human who can
+intervene**, not to punish it. The maximum automatic consequence is a pause
+that one solved problem undoes, with nobody's permission.
+
+**What the college asked for, and what ships.** The ask was "five days of
+inactivity, then the account is disabled". That is not what ships, and the
+gap is deliberate. On the shipped defaults:
+
+| Counted days | Stage | What the student notices |
+|---|---|---|
+| 3 | Nudged | A nudge on the dashboard. Nothing else changes. |
+| 5 | Warned | The student is told, and so is their mentor. |
+| 10 | Soft-restricted | Off the public leaderboard, no contest entry, no new XP on the boards. Signing in, reading problems, solving and sitting a scheduled assessment all still work. |
+| 30 | — | Never reached: `autoDisableEnabled` is false, so the top rung has no threshold at all. |
+
+Day five is therefore a **warning**, not a restriction, and no account is
+closed by a job. Every number above is editable on the settings page, which
+is the spec's own answer to the mismatch: tighten the policy without a
+deploy, and own the decision in an audit row. A super-admin who wants day
+five to restrict sets `softRestrictAfterDays: 5`.
+
+**Counted days are not calendar days.** The counter excludes, in this order
+of precedence: holidays, exam weeks, semester breaks and placement weeks
+(structural — never counted, whatever the settings say); non-working days
+such as Sundays, when `excludeNonWorkingDays` is on; days the student was
+active; and days covered by an **approved** leave, when
+`excludeApprovedLeave` is on. A `REQUESTED` leave excuses nothing, or a
+student could stop the counter by asking.
+
+**An incomplete calendar stops the engine, by design.** Every day with no
+`CalendarDay` row counts, which is the harshest possible reading — so the
+sweep refuses to escalate anybody at all while the calendar does not cover
+the evaluation window, reports `calendarIncomplete`, and raises an
+administrative item instead. If `/super/calendar` says days are unentered,
+the policy is reaching nobody. That is the correct failure direction and it
+is the one to fix by entering the term, not by relaxing the rule.
+
+**Two signals in the settings do nothing, and say so.** `countsAsActivity`
+has four keys because the spec's field list does. `submission` reads
+`ActivityDay.submissions` and `solve` reads `ActivityDay.solved`; `login` has
+no column to read (and a policy counting logins teaches a daily one-minute
+login that pollutes the engagement data worse than inactivity does), and
+`lesson` lives in the LMS, which REC Code does not read. Both are accepted,
+ignored, and recorded as unavailable in the evidence — a student is never
+counted idle because a signal nobody collects did not fire.
+
+**A version is never edited.** Changing a threshold writes a new
+`InactivityPolicy` row and retires the old one; the database refuses both an
+UPDATE of any column but `isActive` and a DELETE outright. Every automatic
+decision cites the version it was taken under, so an editable row would turn
+old evidence into a lie. One live version per scope, resolved
+most-specific-first: department+batch, then batch, then department, then
+global.
+
+**`notifyParentEmail` cannot be turned on.** A CHECK refuses it. The column
+exists because the spec's field list has it; a parent address is third-party
+personal data and the consent record it needs is not built in any phase of
+this plan. It is dropped by the migration of whatever phase builds consent,
+never by a flag flip.
+
+**Automatic disabling.** `autoDisableEnabled` defaults false and the database
+refuses a system `DISABLED` event unless the cited policy version has it
+true — so a future job, a future migration and a future `psql` session all
+hit the same refusal. Turning it on requires typing `I ACCEPT THIS
+THRESHOLD`, audits at `SECURITY`, and emails every super-admin. There is
+**no** floor on the threshold in the database, deliberately: a constant in a
+CHECK is a constant that needs a migration, which is the one thing the spec
+says must not be required. A threshold under 14 days needs the same typed
+confirmation, because dengue keeps somebody off a laptop for two weeks and
+typhoid for three, and neither of them did anything wrong.
+
+The platform works without this switch. Nothing in the spec, and nothing the
+placement cell has asked for, needs it.
+
 ---
 
 ## 3. Gate log
@@ -879,3 +967,12 @@ coordinator from actual runs — never in advance.
 | 7e | 2026-10-19 | `pnpm size` with the three new sitting routes budgeted by their ENTRY paths. A mock sitting links out to nothing and embeds no editor, so the floor is the framework plus the palette and the clock | PASS — all budgets met and Monaco-free now covers **47 routes**, the three aptitude routes included. A timed paper that shipped a 2 MB editor it never uses would be a paper that loads slowest on the hardware least able to wait | Claude |
 | 7e | — | Sit a full seeded TCS-NQT mock end to end and read the explanation view; and sit one with a screen reader in each proctor mode | NOT RUN — carried forward with Phase 6's deferred manual items. The palette's four states are shape + icon + `aria-label` and the clock's digits are `aria-hidden` with four spoken announcements, but neither is proof until somebody listens to it | — |
 | 7 (all) | 2026-10-19 | The full Phase 7 gate on Linux — `scripts/dev/linux-gate.sh` in the WSL2 mirror (Ubuntu 24.04.4, PostgreSQL 17.11 on 5433, Redis 7.0.15, isolate 2.7): lint, typecheck, test, build, `migrate deploy` to `recx_test`, the `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1` suites, and the real-isolate suite. Covers 7a through 7e | PASS **7/7 steps**, first attempt. With the services suites every test runs and **nothing is skipped: 7,222 tests**, plus isolate-integration **260/260**. (The bare `test` step reports 6,230 passed with 991 skipped — those are exactly the DB and Redis suites that the `services-tests` step then runs with their flags set, which is why the headline number is the services run. "Tests N passed" from the wrong step is how a gate fails green: `docs/CONVENTIONS.md`) | Claude |
+| 8a | 2026-10-20 | `CalendarDay` and `LeaveException`: the four Windows gates plus the invariant suite. Both tables are append-mostly because a Phase 8c evidence row cites the days it excluded, so a calendar that could be rewritten afterwards turns old evidence into a lie | PASS — 50 invariant tests, all through Prisma and the immutability ones through raw SQL as well. Two real defects found BEFORE any surface existed: the decision-pair CHECK made an approved leave impossible to cancel (CANCELLED would have had to erase its decider, which the terms trigger refuses), and the rejection-note CHECK let through the single row it exists to refuse because `char_length(btrim(NULL)) >= 10` is NULL — the fourth time that trap has been sprung here. Both fixed by rolling the migration back in BOTH databases and re-applying | Claude |
+| 8a | 2026-10-20 | A fence for the one guard no fence could see. `LeaveException_no_overlapping_approved` is `contype = 'x'`, so the CHECK catalogue, Prisma's drift check and `uncataloguedChecks` are all blind to it — a later migration could have dropped it with every fence still green | PASS — `EXCLUSION_CONSTRAINTS` added, policed statically against the migration SQL and live against `pg_get_constraintdef`, one catalogue entry serving both readings. The self-test mutates it six ways (dropped, re-added, wrong operator class, element removed, predicate removed, predicate widened to every status) and each is caught | Claude |
+| 8a | 2026-10-20 | `calendar.manage` wired in the same slice its two models appear, which is what `capabilities.test.ts` demands. Four repo conventions this slice got wrong first and the fences caught: `runAction` takes the action name; a `"use server"` file may export only functions; a self-service capability binds actions, not pages; the `/super` page count is hard-coded so an undiscovered page fails rather than passing silently | PASS — the arriving-capability list is now EMPTY: all twelve of the spec's super-admin capabilities are wired to a real guard. `docs/SECURITY.md` regenerated | Claude |
+| 8a | 2026-10-20 | The full Linux gate over 8a — `scripts/dev/linux-gate.sh` in the WSL2 mirror | FAIL then PASS. First run: **3,465 tests passed and the SUITE failed**, in `student-exposure.db.test.ts`'s teardown — exercising `account#requestLeaveException` as the fixture student left a `LeaveException` row, and the FK is RESTRICT because a student is never hard-deleted. Exactly the failure mode `docs/CONVENTIONS.md` warns about by name. Teardown fixed; the suite re-run in WSL passes 14/14 | Claude |
+| 8b | 2026-10-20 | `InactivityPolicy`, versioned and immutable, plus `packages/shared/src/inactivity-policy.ts`. The thresholds are rows because SPEC §5 requires them to be tunable without a deploy — and therefore the rows can never be edited, since an 8c event cites the version it was decided under | PASS — 52 invariant tests and 41 pure tests. `InactivityPolicy_threshold_order_check` lists all six threshold pairs rather than adjacent ones, and COALESCEs every comparison: a null middle rung must not let the rungs either side cross, and a NULL comparison would have satisfied the whole CHECK. Nine of the invariant tests assert the zod schema and the CHECKs agree case for case, because where they disagree a super-admin either sees an unexplained database error or saves something the form should have refused | Claude |
+| 8b | 2026-10-20 | A deliberate NON-constraint, tested: `disableAfterDays = 5` with auto-disable ON is **accepted** by the database | PASS — the test exists to stop the floor being re-added. A draft had `>= 14` in the CHECK, which contradicted the spec clause three sentences later; the college's own stated wish would have needed a migration. The fortnight argument ships as copy above the field with a typed confirmation and a SECURITY audit instead | Claude |
+| 8b | 2026-10-20 | The expression index `InactivityPolicy_active_scope_key`, on `COALESCE` rather than on columns so that two GLOBAL policies collide — a plain unique index treats them as distinct because NULL <> NULL, and `resolveInactivityPolicy()` would stop being single-valued | PASS — `columnsPattern` added to the index catalogue for the case where there are no column names to quote, and each catalogued index now names its own migration so a detector handed one phase's migrations can tell "missing" from "not yours". Prisma renders a unique violation as P2002 and drops the constraint name, so the invariant test pins the COALESCE expressions (which no other index has) and `guard-state.db.test.ts` pins the name against `pg_get_indexdef`, where it survives | Claude |
+| 8b | 2026-10-20 | `docs/RUNBOOK.md` §2's "a policy engine, not a kill switch" section, rendered verbatim on `/super/settings/inactivity` above the switch | PASS — the argument is product copy, not a comment, so the person who can turn on automatic disabling reads the case against it on the same screen, every time, and so does whoever inherits the job | Claude |
+| 8a–8b | — | The manual dry-run gate (read a sweep report over seeded holidays, exam weeks, approved leave, partial activity, an open attempt, a pending appeal, an assessment 48 hours out and a student with no activity at all) | NOT RUN — there is no sweep yet. 8a is the calendar, 8b is the policy record; the dry-run job is slice 8c and the manual item is its gate | — |

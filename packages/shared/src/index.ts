@@ -51,3 +51,4 @@ export * from "./csv";
 export * from "./aptitude-csv";
 export * from "./aptitude-import";
 export * from "./calendar";
+export * from "./inactivity-policy";

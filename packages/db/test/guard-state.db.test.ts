@@ -192,7 +192,16 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     expect(live).toMatchObject({ table: idx.table, unique: true, valid: true, ready: true, nnd: idx.nullsNotDistinct });
     // pg_get_indexdef quotes only identifiers that need it (status, but "revokedAt"): compare without quotes.
     const def = live.def.replace(/"/g, "");
-    expect(def).toContain(`(${idx.columns.join(", ")})`);
+    if ("columnsPattern" in idx && idx.columnsPattern) {
+      // An expression index: every column it is built FROM must still appear,
+      // and the expression itself must match the catalogued pattern. Checking
+      // only the column names would accept an index that had quietly lost its
+      // COALESCE and so stopped treating two global policies as one.
+      for (const column of idx.columns) expect(def, `${name} no longer reads ${column}`).toContain(column);
+      expect(def, `${name}: expression changed`).toMatch(new RegExp(idx.columnsPattern.replace(/"\?/g, ""), "i"));
+    } else {
+      expect(def).toContain(`(${idx.columns.join(", ")})`);
+    }
     expect(def).toMatch(new RegExp(String.raw`WHERE\s+\(*\s*${idx.where.replace(/"/g, "")}`, "i"));
   });
 

@@ -91,13 +91,14 @@ describe("super navigation", () => {
 describe("every /super layout and page guards itself", () => {
   const pages = files(SUPER_DIR, /^(page|layout)\.tsx$/);
 
-  it("finds the layout and the fourteen pages", () => {
-    // 14 pages + the layout. /super/integrity arrived with Phase 6e and
-    // /super/calendar with Phase 8a. The count is deliberately hard-coded:
+  it("finds the layout and the fifteen pages", () => {
+    // 15 pages + the layout. /super/integrity arrived with Phase 6e,
+    // /super/calendar with Phase 8a and /super/settings/inactivity with 8b.
+    // The count is deliberately hard-coded:
     // the per-page assertion below only checks the pages it FINDS, so
     // without this a new /super page that forgot its guard would be caught
     // and a new /super page that was never discovered would not.
-    expect(pages.length).toBe(15);
+    expect(pages.length).toBe(16);
   });
 
   it.each(pages.map((p) => [path.relative(SUPER_DIR, p)]))("%s calls requireSuperAdminPage()", (rel) => {

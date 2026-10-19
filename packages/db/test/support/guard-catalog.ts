@@ -64,6 +64,8 @@ export const GUARD_FUNCTIONS = [
   // 20261019260000_phase8a_calendar
   "recx_refuse_past_calendar_day_change",
   "recx_refuse_leave_terms_change",
+  // 20261019260100_phase8b_policy
+  "recx_refuse_inactivity_policy_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -115,6 +117,8 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019260000_phase8a_calendar
   "CalendarDay",
   "LeaveException",
+  // 20261019260100_phase8b_policy
+  "InactivityPolicy",
 ];
 
 export interface GuardTrigger {
@@ -370,6 +374,14 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
    * citing it would still cite it.
    */
   { name: "LeaveException_terms_immutable", timing: "BEFORE UPDATE", table: "LeaveException", fn: "recx_refuse_leave_terms_change", level: "ROW" },
+  /**
+   * 20261019260100_phase8b_policy. Every column but `isActive` is frozen and
+   * DELETE is refused outright, because a Phase 8c event cites
+   * `policyVersion` as the rules it was decided under. If the cited row could
+   * be edited the evidence would quietly become a lie — the strongest
+   * possible version of "the system disabled me and nobody can say why".
+   */
+  { name: "InactivityPolicy_version_immutable", timing: "BEFORE UPDATE OR DELETE", table: "InactivityPolicy", fn: "recx_refuse_inactivity_policy_change", level: "ROW" },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -400,7 +412,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019260000_phase8a_calendar";
+export const CHECK_CATALOG_THROUGH = "20261019260100_phase8b_policy";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -724,6 +736,17 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["LeaveException_two_person_check", "LeaveException"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019260000_phase8a_calendar" })),
+  ...(
+    [
+      ["InactivityPolicy_threshold_order_check", "InactivityPolicy"],
+      ["InactivityPolicy_grace_check", "InactivityPolicy"],
+      ["InactivityPolicy_min_activity_check", "InactivityPolicy"],
+      ["InactivityPolicy_auto_disable_check", "InactivityPolicy"],
+      ["InactivityPolicy_scope_check", "InactivityPolicy"],
+      ["InactivityPolicy_counts_as_activity_check", "InactivityPolicy"],
+      ["InactivityPolicy_parent_email_check", "InactivityPolicy"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019260100_phase8b_policy" })),
 ];
 
 /**
@@ -755,11 +778,20 @@ export const EXCLUSION_CONSTRAINTS = [
   },
 ] as const;
 
-/** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
+/**
+ * The partial unique indexes Prisma cannot model (the drift check cannot see
+ * them either).
+ *
+ * Each names the migration that creates it, so a detector handed a SUBSET of
+ * the migrations can tell "this index is missing" from "this index belongs to
+ * a migration you did not give me" — without that, every self-test over one
+ * phase's migrations fails the moment a later phase adds an index.
+ */
 export const PARTIAL_UNIQUE_INDEXES = [
   {
     name: "AdminScope_active_grant_key",
     table: "AdminScope",
+    migration: "20261010100000_phase4_admin_authoring",
     columns: ["adminId", "departmentCode", "batchYear"],
     nullsNotDistinct: true,
     where: String.raw`"revokedAt"\s+IS\s+NULL`,
@@ -767,6 +799,7 @@ export const PARTIAL_UNIQUE_INDEXES = [
   {
     name: "Accommodation_one_approved_per_user",
     table: "Accommodation",
+    migration: "20261010100000_phase4_admin_authoring",
     columns: ["userId"],
     nullsNotDistinct: false,
     where: String.raw`"status"\s*=\s*'APPROVED'`,
@@ -774,8 +807,25 @@ export const PARTIAL_UNIQUE_INDEXES = [
   {
     name: "Accommodation_one_open_request_per_user",
     table: "Accommodation",
+    migration: "20261010100000_phase4_admin_authoring",
     columns: ["userId"],
     nullsNotDistinct: false,
     where: String.raw`"status"\s*=\s*'REQUESTED'`,
+  },
+  /**
+   * 20261019260100_phase8b_policy. On EXPRESSIONS, not columns, so that two
+   * GLOBAL policies collide: a plain unique index treats them as distinct
+   * because NULL <> NULL, and `resolveInactivityPolicy()` would stop being
+   * single-valued. `columnsPattern` exists for exactly this: there are no
+   * column names here to quote.
+   */
+  {
+    name: "InactivityPolicy_active_scope_key",
+    table: "InactivityPolicy",
+    migration: "20261019260100_phase8b_policy",
+    columns: ["batchYear", "departmentCode"],
+    columnsPattern: String.raw`\(\s*COALESCE\(\s*"?batchYear"?\s*,\s*[^)]+\)\s*,\s*COALESCE\(\s*"?departmentCode"?\s*,\s*[^)]+\)\s*\)`,
+    nullsNotDistinct: false,
+    where: String.raw`"?isActive"?`,
   },
 ] as const;

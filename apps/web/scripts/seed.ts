@@ -77,6 +77,7 @@ import { dailyChallengeIndex } from "./content/daily-challenge";
 import { AUTHORED_PROBLEMS, HELP_BY_SLUG, TOPICS_BY_SLUG } from "./content/index";
 import { syncSeededMockPatterns } from "./content/aptitude";
 import { syncSeededCalendar } from "./content/calendar";
+import { syncSeededInactivityPolicy } from "./content/inactivity";
 import { syncSeededStudyPlans } from "./content/study-plans";
 import type { AuthoredProblem, HelpContent } from "./content/types";
 
@@ -933,6 +934,12 @@ async function main() {
     {
       const cal = await syncSeededCalendar(app.db, adminId);
       log(`calendar: ${cal.written} days, ${cal.from} to ${cal.to}`);
+    }
+    {
+      const pol = await syncSeededInactivityPolicy(app.db, adminId);
+      log(
+        `inactivity policy: ${pol.action}, version ${pol.version}, auto-disable ${pol.autoDisableEnabled ? "ON" : "off"}`,
+      );
     }
     await seedDailyChallenge(app.db, adminId);
     await seedJudgeNode(app);

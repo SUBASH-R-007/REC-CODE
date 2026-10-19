@@ -154,7 +154,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | Capability | Tier | STUDENT | TA_MENTOR | ADMIN | PLACEMENT_OFFICER | SUPER_ADMIN | Bound to |
 | --- | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `roles.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
-| `settings.write` | super-admin | - | - | - | - | yes | 4 actions, 3 pages |
+| `settings.write` | super-admin | - | - | - | - | yes | 7 actions, 4 pages |
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 5 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |

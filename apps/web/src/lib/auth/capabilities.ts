@@ -102,8 +102,19 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       "super-settings#setLegalHold",
       "super-flags#setFeatureFlag",
       "super-branding#saveBrandTheme",
+      // Phase 8b. The inactivity thresholds are settings, not constants —
+      // SPEC §5 requires them to be tunable without a deploy. The one that
+      // can end in a lockout, setAutoDisableEnabled, audits at SECURITY.
+      "super-inactivity#saveInactivityPolicy",
+      "super-inactivity#activateInactivityPolicy",
+      "super-inactivity#setAutoDisableEnabled",
     ],
-    pages: ["app/super/settings/policy/page.tsx", "app/super/flags/page.tsx", "app/super/settings/branding/page.tsx"],
+    pages: [
+      "app/super/settings/policy/page.tsx",
+      "app/super/flags/page.tsx",
+      "app/super/settings/branding/page.tsx",
+      "app/super/settings/inactivity/page.tsx",
+    ],
   },
   {
     key: "accounts.status",

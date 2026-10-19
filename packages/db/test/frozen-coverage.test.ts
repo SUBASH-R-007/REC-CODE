@@ -330,12 +330,23 @@ function uncataloguedTriggerProblems(sql: string): string[] {
 function partialIndexProblems(migs: readonly Migration[]): string[] {
   const problems: string[] = [];
   const all = migs.map((m) => m.sql).join("\n");
+  const given = new Set(migs.map((m) => m.dir));
   for (const idx of PARTIAL_UNIQUE_INDEXES) {
+    // Not judgeable from migrations that were not handed over.
+    if (!given.has(idx.migration)) continue;
     const creates = [...all.matchAll(new RegExp(String.raw`CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"${escape(idx.name)}"[^;]*;`, "gi"))].map((m) => m[0]);
     const expected = new RegExp(
       [
         String.raw`^CREATE\s+UNIQUE\s+INDEX\s+"${escape(idx.name)}"\s+ON\s+(?:"public"\.)?"${escape(idx.table)}"\s*`,
-        String.raw`\(\s*${idx.columns.map((c) => `"${escape(c)}"`).join(String.raw`\s*,\s*`)}\s*\)\s*`,
+        // An index on EXPRESSIONS has no column names to quote, so it brings
+        // its own pattern for the whole parenthesised list. Without this the
+        // quoted-name construction below would never match
+        // `(COALESCE("batchYear", -1), …)` and the index would be passed over
+        // as "definition changed" — or, worse, silently accepted by a looser
+        // detector.
+        "columnsPattern" in idx && idx.columnsPattern
+          ? String.raw`${idx.columnsPattern}\s*`
+          : String.raw`\(\s*${idx.columns.map((c) => `"${escape(c)}"`).join(String.raw`\s*,\s*`)}\s*\)\s*`,
         idx.nullsNotDistinct ? String.raw`NULLS\s+NOT\s+DISTINCT\s+` : "",
         String.raw`WHERE\s+\(?\s*${idx.where}\s*\)?\s*;$`,
       ].join(""),
@@ -670,6 +681,29 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
       expect(partialIndexProblems(noPredicate)).not.toEqual([]);
       const nullsDistinct = intact.map((m) => ({ ...m, sql: m.sql.replace(/NULLS\s+NOT\s+DISTINCT/, "") }));
       expect(partialIndexProblems(nullsDistinct)).not.toEqual([]);
+    });
+
+    it("flags an EXPRESSION index that loses its COALESCE, a column, or its predicate", () => {
+      // The one index built on expressions rather than columns. Its COALESCE
+      // is what makes two GLOBAL policies collide — without it NULL <> NULL
+      // and both stay active, which would make resolveInactivityPolicy()
+      // stop being single-valued. A detector that only matched column names
+      // would not notice it going.
+      const intact = migrations.filter((m) => /_phase8b_policy$/.test(m.dir));
+      expect(partialIndexProblems(intact)).toEqual([]);
+      const mutate = (fn: (sql: string) => string) => intact.map((m) => ({ ...m, sql: fn(m.sql) }));
+      expect(partialIndexProblems(mutate((sql) => sql.replace(/COALESCE\("batchYear", -1\)/, '"batchYear"')))).not.toEqual([]);
+      expect(
+        partialIndexProblems(mutate((sql) => sql.replace(/COALESCE\("departmentCode", ''\)/, '"departmentCode"'))),
+      ).not.toEqual([]);
+      expect(partialIndexProblems(mutate((sql) => sql.replace(/,\s*COALESCE\("departmentCode", ''\)/, "")))).not.toEqual([]);
+      expect(partialIndexProblems(mutate((sql) => sql.replace(/\s*WHERE "isActive"/, "")))).not.toEqual([]);
+      expect(
+        partialIndexProblems([
+          ...intact,
+          { dir: "29990101000000_mutant", sql: 'DROP INDEX "public"."InactivityPolicy_active_scope_key";' },
+        ]),
+      ).not.toEqual([]);
     });
   });
 
