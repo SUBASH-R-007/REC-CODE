@@ -1525,3 +1525,76 @@ later without a gated change.
   record nothing at all for an abandoned attempt — so the dud-question
   detection the table exists for ("99% correct, or 3% correct") would be
   computed over a denominator biased by exactly the attempts that went badly.
+
+### Phase 7c/7d — the sitting engine and the pipeline
+
+- **A full mock sitting keeps the 768px floor; practice does not** (decided
+  2026-10-19). SPEC §7's DO NOT list says plainly "Do not build a serious
+  phone-based solving experience", with no arena or proctoring qualifier. The
+  Phase 7 design read that as applying only to proctored attempts and made
+  the sitting page a *gating* 375px accessibility row, which is a serious
+  phone sitting experience built as a gate. **Narrower reading:** `/aptitude`
+  and `/aptitude/[topic]` are fully supported at 375px — browsing a topic and
+  answering one question with the working shown is the one thing a phone is
+  genuinely good at, and the students who most need the aptitude round are
+  the likeliest to be on one — while `/aptitude/mock/attempt/[id]`, a timed
+  multi-section paper, is hard-blocked below 768px with an explanation, the
+  same floor the contest arena has. Widening it later is a design decision
+  with a named owner, not a CSS change.
+- **A re-imported edit to a PUBLISHED question fails the ROW, not the file**
+  (decided 2026-10-19). The design never said what happens here, and it is
+  the single most likely real use of the export round trip: an operator
+  exports the bank, corrects a stem, and uploads it again.
+  `recx_refuse_published_question_change` would refuse that write and roll
+  the whole transaction back — one edited row discarding 299 good ones, which
+  is exactly what SPEC §5's "one bad row cannot discard a 300-question file"
+  forbids. So `planImport()` refuses it as a FAILED row carrying the sentence
+  an operator can act on ("retire it and add a new question, or edit only its
+  explanation"), and the other rows still land.
+- **A passage's questions are the CONSECUTIVE rows of one topic** (decided
+  2026-10-19). A CSV row cannot carry a database id, so the importer has to
+  decide which rows share a passage. Consecutive-and-same-topic is how a
+  human writes them in a spreadsheet, and any cleverer rule would be one
+  nobody could predict from looking at the file. A group of fewer than two is
+  refused: SPEC §5 says "one shared passage, N questions".
+- **A mock answer carries no client timestamps; a practice answer does**
+  (decided 2026-10-19, after the live canary sweep found the first draft
+  wrong). A mock has a server-written section clock, so both `firstSeenAtMs`
+  (when the server served the question) and `answeredAtMs` (when the request
+  arrived) are measured on it and the action accepts neither from the client
+  — a graded row must not carry a time the client chose. Practice has no
+  section clock to measure against, so it does take the candidate's elapsed
+  time, bounded to half an hour by `secondsOn()`; it feeds nothing but their
+  own pacing average, so a student who inflates it misleads only themselves.
+- **The capability fence does not cover a student GET route** (recorded
+  2026-10-19). `apps/web/test/capabilities.test.ts` requires a binding for the
+  admin and super trees and for every MUTATING api route, and refuses a
+  binding for anything else as stale — so
+  `GET /api/aptitude/attempts/[attemptId]/clock` is left unbound, with the
+  reason at the `aptitude.sit` call site. It guards with
+  `requireActionUser()` plus an ownership `where` and returns only the
+  candidate's own clock. Widening the fence to cover student GETs is worth
+  doing and is not a change to make inside a slice; it joins the same note
+  Phase 6c left about mutating routes outside `app/api/`.
+- **Aptitude counts as activity but does not advance the streak** (decided
+  2026-10-19). `ActivityDay` gains `aptitudeAnswers`, `mocksFinalised` and
+  `xpAptitude`, and `User.lastActiveAt` is touched, because SPEC Phase 8's
+  nightly job takes its candidate set from `User [status, lastActiveAt]` and
+  counts "days with a qualifying ActivityDay" — without a row, a student who
+  practises aptitude every day and nothing else shows an empty heatmap, a
+  zero streak, and is swept toward SOFT_RESTRICTED by a policy engine that
+  cannot see them. The STREAK is left alone: the spec's own
+  `countsAsActivity` default is
+  `{"submission":true,"solve":true,"login":false,"lesson":true}` with no
+  aptitude key, and adding one here would be inventing Phase 8's policy a
+  phase early. The counters are written so that policy can count them when it
+  is designed.
+- **`xpAptitude` is a maintained column, not an aggregate** (decided
+  2026-10-19, and `tests/repo/xp-ledger.test.ts` decided it). The 200/day
+  aptitude cap is a read-then-write, and SPEC §4(d) forbids aggregating
+  `XpEvent` on a request. `ActivityDay.xpEasy` already exists for the
+  identical reason (the 600/day Easy cap), so the aptitude cap reads a
+  maintained column the same way. The fence then also refused an
+  `xpEvent.count()` for the "has this question been paid" pre-check, which
+  was right twice: the ledger's unique `idempotencyKey` IS that check, so the
+  insert is conditional on it and the pre-check is gone.
