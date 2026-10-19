@@ -211,3 +211,68 @@ Write the character class and the length as separate conjuncts:
 ```sql
 CHECK ("col" ~ '^[A-Za-z0-9_-]+$' AND length("col") BETWEEN 16 AND 1024)
 ```
+
+## A Postgres CHECK that evaluates to NULL is SATISFIED
+
+A `CHECK` constraint refuses a row only when it evaluates to **FALSE**. NULL
+passes. So a CHECK that reaches through a nullable column can silently accept
+exactly the write it exists to refuse:
+
+```sql
+-- WRONG: with "firstRationale" NULL, length(btrim(NULL)) is NULL, so
+-- `NULL BETWEEN 40 AND 4000` is NULL, the disjunct is NULL, `false OR NULL`
+-- is NULL — and the row is accepted.
+CHECK (
+  ("firstReviewerId" IS NULL AND "firstRationale" IS NULL)
+  OR ("firstReviewerId" IS NOT NULL AND length(btrim("firstRationale")) BETWEEN 40 AND 4000)
+)
+```
+
+```sql
+-- RIGHT: guard the column you are about to reach through.
+CHECK (
+  ("firstReviewerId" IS NULL AND "firstRationale" IS NULL)
+  OR ("firstReviewerId" IS NOT NULL
+      AND "firstRationale" IS NOT NULL AND length(btrim("firstRationale")) BETWEEN 40 AND 4000)
+)
+```
+
+Phase 6e shipped the wrong version, and `integrity-invariants.db.test.ts`
+caught it: a verdict with no rationale at all was accepted by the constraint
+whose entire job is the mandatory written rationale.
+
+The safe shape most of this schema already uses is different and does not
+have the problem — `"col" IS NULL OR <comparison on col>` is TRUE whenever
+the column is null, so the comparison is never reached. The trap is only
+there when the disjunct guards one column and then reaches through another.
+An audit of every hand-written CHECK across all migrations (2026-10-19) found
+these two and nothing else; the `ProblemVersion` checks that reach into jsonb
+already wrap the reach in `COALESCE(..., false)`.
+
+Two rules follow, and they are the same rule twice:
+
+- any CHECK that reaches through a nullable column needs its own
+  `IS NOT NULL`, or a `COALESCE(..., false)`;
+- a catalog fence proves a guard EXISTS; only an invariant test proves it
+  WORKS. Every migration that adds a CHECK gets both.
+
+## Do not touch `recx_test` while a gate is running
+
+`scripts/dev/linux-gate.sh` syncs the mirror, then runs `migrate deploy`
+against `recx_test` and the `RECX_DB_TESTS=1` suites against the code it
+synced. Applying a LATER migration to `recx_test` from Windows while that is
+in flight leaves the mirror's guard catalog describing a database that has
+moved on, and the two catalog fences fail with a shape that looks alarming
+and means nothing:
+
+```
+TRUNCATE > every guarded table has an enabled BEFORE TRUNCATE trigger
+  expected [ Array(29) ] to deeply equal [ Array(25) ]
+no other trigger runs a guard function
+  expected [ 'IntegrityFlag_no_truncate', …(3) ] to deeply equal []
+```
+
+Seen 2026-10-19: Phase 6e's migration was applied to `recx_test` while Phase
+6d's Linux gate was still on its services step. Nothing was wrong with either
+slice. Start the next slice's migrations after the gate reports, or gate the
+two slices together.

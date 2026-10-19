@@ -262,6 +262,177 @@ enum AccommodationStatus {
 /// Mirror of PROCTOR_EVENT_KINDS in @recx/shared (parity test), same order.
 /// Declared in Phase 4 so Accommodation.exemptSignals is typed; the
 /// ProctorEvent model itself arrives in Phase 6.
+/// A flagged sitting, waiting for a human (Phase 6e).
+///
+/// SPEC section 5 caps what this can do: "The maximum automatic consequence
+/// in the entire system is: flag for review and withhold the result from the
+/// public leaderboard, with a 72-hour review SLA after which the result
+/// publishes automatically as CLEARED."
+///
+/// So a flag withholds a result and orders a queue. It carries no score and
+/// writes to none. The band is NEVER shown to a student or a recruiter (SPEC
+/// section 5): it invites exactly the misreading the system exists to prevent,
+/// and it penalises the honest student with the bad laptop while the
+/// competent cheater scores a clean zero.
+model IntegrityFlag {
+  id                String            @id @default(cuid())
+  attemptId         String            @unique
+  attempt           AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  band              TriageBand
+  /// Points that decided the band. Context-only signals are excluded by
+  /// construction, so devtools and a second monitor cannot raise one.
+  substantivePoints Int
+  /// Context-only points: queue order and a reviewer's context, never a band.
+  contextPoints     Int               @default(0)
+  /// The contributions, as the reviewer sees them. Counts and sizes only.
+  signals           Json              @default("[]")
+  flaggedAt         DateTime          @default(now())
+  /// flaggedAt + 72h. At this moment an unreviewed flag auto-clears, so a
+  /// slow queue costs the institution rather than the student.
+  reviewDeadline    DateTime
+  status            IntegrityStatus   @default(OPEN)
+  /// 1 at MEDIUM, 2 at HIGH. LOW is bulk-cleared with a mandatory 10% random
+  /// sample, which is why a LOW flag can be OPEN needing none.
+  reviewersRequired Int               @default(0)
+  /// True while the result is kept off the public leaderboard.
+  withheld          Boolean           @default(true)
+  resolvedAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  reviews IntegrityReview[]
+  appeals IntegrityAppeal[]
+
+  @@index([status, reviewDeadline])
+  @@index([band, flaggedAt])
+}
+
+/// One reviewer's verdict. The RATIONALE is mandatory and minimum-length by
+/// CHECK (SPEC section 5: "mandatory human verdict with a written
+/// rationale"), because a verdict a student may appeal has to be a verdict a
+/// student can read.
+model IntegrityReview {
+  id         String           @id @default(cuid())
+  flagId     String
+  flag       IntegrityFlag    @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   User             @relation(fields: [reviewerId], references: [id])
+  verdict    IntegrityVerdict
+  /// What the reviewer concluded and why, in their own words. Shown to the
+  /// student in their own report.
+  rationale  String           @db.Text
+  decidedAt  DateTime         @default(now())
+
+  /// One verdict per reviewer per flag: two reviewers at HIGH means two
+  /// INDEPENDENT people, not one person twice.
+  @@unique([flagId, reviewerId])
+  @@index([reviewerId, decidedAt])
+}
+
+/// A student's appeal. SPEC section 5: a 7-day window, decided by TWO people,
+/// neither of whom reviewed the flag in the first place.
+model IntegrityAppeal {
+  id               String            @id @default(cuid())
+  flagId           String
+  flag             IntegrityFlag     @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  studentId        String
+  student          User              @relation("AppealStudent", fields: [studentId], references: [id])
+  /// The student's own words. Never summarised away.
+  reason           String            @db.Text
+  submittedAt      DateTime          @default(now())
+  /// submittedAt + 7 days.
+  decideBy         DateTime
+  firstReviewerId  String?
+  firstVerdict     IntegrityVerdict?
+  firstRationale   String?           @db.Text
+  firstDecidedAt   DateTime?
+  secondReviewerId String?
+  secondVerdict    IntegrityVerdict?
+  secondRationale  String?           @db.Text
+  secondDecidedAt  DateTime?
+  outcome          AppealOutcome     @default(PENDING)
+  resolvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([outcome, decideBy])
+  @@index([studentId, submittedAt])
+}
+
+/// A message an invigilator sent a candidate mid-sitting. SPEC section 5: "a
+/// modal they must acknowledge, acknowledgement recorded".
+model InvigilatorMessage {
+  id             String            @id @default(cuid())
+  attemptId      String
+  attempt        AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  body           String            @db.Text
+  requiresAck    Boolean           @default(true)
+  sentById       String
+  sentAt         DateTime          @default(now())
+  acknowledgedAt DateTime?
+
+  @@index([attemptId, sentAt])
+}
+
+/// Ending a sitting takes TWO staff (Phase 6e).
+///
+/// SPEC section 5: "TERMINATE [...] requires a free-text reason and writes an
+/// AuditLog row. Terminate additionally requires a second staff confirmation
+/// and still does not by itself void the result."
+///
+/// Deliberately NOT Phase 4's PrivilegedOperation: that machinery requires a
+/// second SUPER-ADMIN, which is the wrong bar for an invigilator standing in
+/// a hall who needs the colleague beside them to agree. The two-person rule
+/// is a CHECK here instead.
+model AttemptTermination {
+  id            String            @id @default(cuid())
+  attemptId     String            @unique
+  attempt       AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  requestedById String
+  /// Why, in the invigilator's own words. A student may ask to see it.
+  reason        String            @db.Text
+  requestedAt   DateTime          @default(now())
+  /// The second staff member. Never the same person (CHECK).
+  confirmedById String?
+  confirmedAt   DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@index([confirmedAt])
+}
+
+enum TriageBand {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum IntegrityStatus {
+  /// Waiting for a human, or for the 72-hour SLA.
+  OPEN
+  /// A human looked and cleared it.
+  CLEARED
+  /// A human looked and upheld it.
+  UPHELD
+  /// Nobody looked within 72 hours, so it cleared itself.
+  AUTO_CLEARED
+  /// An appeal overturned an UPHELD flag.
+  OVERTURNED
+}
+
+enum IntegrityVerdict {
+  CLEAR
+  UPHOLD
+}
+
+enum AppealOutcome {
+  PENDING
+  /// The flag stands.
+  UPHELD
+  /// The flag was wrong and is overturned.
+  OVERTURNED
+}
+
 enum ProctorEventKind {
   FOCUS_LOSS
   FULLSCREEN_EXIT
@@ -403,6 +574,9 @@ model User {
 
   deviceRegistrations DeviceRegistration[]
   webAuthnChallenges  WebAuthnChallenge[]
+
+  integrityReviews IntegrityReview[]
+  integrityAppeals IntegrityAppeal[] @relation("AppealStudent")
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -2391,6 +2565,10 @@ model AssessmentAttempt {
 
   snapshots AttemptSnapshot[]
 
+  integrityFlag       IntegrityFlag?
+  invigilatorMessages InvigilatorMessage[]
+  termination         AttemptTermination?
+
   @@unique([assessmentId, userId, attemptNumber])
   @@index([status, expiresAt])
   @@index([assessmentId, integrityScore])
@@ -2456,23 +2634,23 @@ model DeviceRegistration {
 /// One WebAuthn challenge, outstanding. Single-use and short-lived: a
 /// challenge that can be replayed is not a challenge.
 model WebAuthnChallenge {
-  id           String          @id @default(cuid())
-  userId       String
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String          @id @default(cuid())
+  userId               String
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// Base64url random. Unique, so a replay cannot create a second row.
-  challenge    String          @unique
-  purpose      WebAuthnPurpose
+  challenge            String          @unique
+  purpose              WebAuthnPurpose
   /// The sitting this challenge is for, when asserting to start one.
-  assessmentId String?
-  expiresAt    DateTime
+  assessmentId         String?
+  expiresAt            DateTime
   /// Written once, by the verification that spends it.
-  consumedAt   DateTime?
+  consumedAt           DateTime?
   /// Which device signed it, written by the verification that spends the
   /// challenge. This row IS the evidence that a fresh assertion happened:
   /// the attempt-start path reads it instead of trusting a cookie, so
   /// there is no signed value to forge and no second place to expire.
   deviceRegistrationId String?
-  createdAt    DateTime        @default(now())
+  createdAt            DateTime        @default(now())
 
   @@index([userId, purpose, expiresAt])
   @@index([expiresAt])

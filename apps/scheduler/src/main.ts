@@ -7,6 +7,7 @@ import pino from "pino";
 import { describeDatabaseUrl, loadConfig, loadDevEnvFile, withSingleConnection } from "./config";
 import { DailyChallengeJob } from "./daily-challenge";
 import { AttemptSweepJob } from "./attempt-sweep";
+import { IntegritySlaJob } from "./integrity-sla";
 import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
@@ -97,6 +98,8 @@ const governance = new GovernanceSweepJob({ db, log, dryRun });
 // Contests (Phase 5): the only writer of ContestStanding.rank.
 const contestRank = new ContestRankJob({ db, log, dryRun });
 const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
+// Phase 6e: the review SLA and the appeal deadline, both student-favouring.
+const integritySla = new IntegritySlaJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -206,6 +209,16 @@ async function tick(): Promise<boolean> {
     await runJob("attemptSweep", async () => {
       const report = await attemptSweep.tick(now);
       if (report.autoSubmitted > 0 || report.disconnected > 0) log.info({ report }, "attempt sweep tick");
+      return { ok: !report.failed, report };
+    }),
+  );
+  // Integrity: the 72-hour review SLA and the 7-day appeal deadline. Both
+  // resolve in the student's favour, so a queue nobody staffed costs the
+  // institution rather than someone's placement.
+  results.push(
+    await runJob("integritySla", async () => {
+      const report = await integritySla.tick(now);
+      if (report.autoCleared > 0 || report.appealsOverturned > 0) log.warn({ report }, "integrity SLA tick");
       return { ok: !report.failed, report };
     }),
   );

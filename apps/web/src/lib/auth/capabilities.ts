@@ -134,9 +134,10 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
   {
     key: "integrity.overturn",
     label: "Overturn an integrity decision",
+    // Wired in Phase 6e, when IntegrityFlag arrived. Only ever overturns: a
+    // super-admin may not uphold harder than the reviewers already could.
     roles: SUPER_ONLY,
-    actions: [],
-    arrives: { phase: 6, models: ["IntegrityFlag"] },
+    actions: ["super-integrity#overturnIntegrityDecision"],
   },
   {
     key: "audit.readFull",

@@ -48,6 +48,12 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_excess_device",
   "recx_refuse_device_change",
   "recx_refuse_challenge_reuse",
+  // 20261019240000_phase6e_review
+  "recx_refuse_integrity_flag_change",
+  "recx_refuse_review_change",
+  "recx_refuse_appeal_change",
+  "recx_refuse_message_change",
+  "recx_refuse_termination_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -78,6 +84,11 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "AttemptSnapshot",
   // 20261019220000_phase6d_containment
   "DeviceRegistration",
+  // 20261019240000_phase6e_review
+  "IntegrityFlag",
+  "IntegrityReview",
+  "IntegrityAppeal",
+  "AttemptTermination",
 ];
 
 export interface GuardTrigger {
@@ -234,6 +245,42 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_challenge_reuse",
     level: "ROW",
   },
+  // 20261019240000_phase6e_review
+  {
+    name: "IntegrityFlag_write_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "IntegrityFlag",
+    fn: "recx_refuse_integrity_flag_change",
+    level: "ROW",
+  },
+  {
+    name: "IntegrityReview_append_only",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "IntegrityReview",
+    fn: "recx_refuse_review_change",
+    level: "ROW",
+  },
+  {
+    name: "IntegrityAppeal_write_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "IntegrityAppeal",
+    fn: "recx_refuse_appeal_change",
+    level: "ROW",
+  },
+  {
+    name: "InvigilatorMessage_write_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "InvigilatorMessage",
+    fn: "recx_refuse_message_change",
+    level: "ROW",
+  },
+  {
+    name: "AttemptTermination_write_once",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "AttemptTermination",
+    fn: "recx_refuse_termination_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -252,7 +299,7 @@ export const GUARDED_TABLES: readonly string[] = [...new Set(GUARD_TRIGGERS.map(
 export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; table: string }> = [];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019230000_phase6d_assertion_device";
+export const CHECK_CATALOG_THROUGH = "20261019240000_phase6e_review";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -442,6 +489,35 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["WebAuthnChallenge_device_check", "WebAuthnChallenge"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019230000_phase6d_assertion_device" })),
+  ...(
+    [
+      // A flag withholds a result and orders a queue; it carries no score.
+      ["IntegrityFlag_points_check", "IntegrityFlag"],
+      ["IntegrityFlag_reviewers_check", "IntegrityFlag"],
+      ["IntegrityFlag_band_check", "IntegrityFlag"],
+      ["IntegrityFlag_deadline_check", "IntegrityFlag"],
+      ["IntegrityFlag_resolved_check", "IntegrityFlag"],
+      ["IntegrityFlag_withheld_check", "IntegrityFlag"],
+      // The mandatory written rationale, with a floor that excludes "ok".
+      ["IntegrityReview_rationale_check", "IntegrityReview"],
+      ["IntegrityAppeal_reason_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_window_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_first_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_second_check", "IntegrityAppeal"],
+      // Two people, and the same person twice is not two people.
+      ["IntegrityAppeal_two_person_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_order_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_resolved_check", "IntegrityAppeal"],
+      ["IntegrityAppeal_complete_check", "IntegrityAppeal"],
+      ["InvigilatorMessage_body_check", "InvigilatorMessage"],
+      ["InvigilatorMessage_ack_check", "InvigilatorMessage"],
+      // Terminate takes a second staff member, as a CHECK and not a route.
+      ["AttemptTermination_reason_check", "AttemptTermination"],
+      ["AttemptTermination_two_person_check", "AttemptTermination"],
+      ["AttemptTermination_confirmed_check", "AttemptTermination"],
+      ["AttemptTermination_order_check", "AttemptTermination"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019240000_phase6e_review" })),
 ];
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */

@@ -22,6 +22,7 @@ export * from "./exam-randomise";
 export * from "./cidr";
 export * from "./seb";
 export * from "./device";
+export * from "./triage";
 export * from "./roster";
 export * from "./governance";
 export {

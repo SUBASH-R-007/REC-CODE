@@ -67,6 +67,9 @@ describe("scheduler jobs", () => {
       // Phase 6b: auto-submit at the deadline and the 45-second presence
       // sweep. The only automatic action in the system runs here.
       "attemptSweep",
+      // Phase 6e: the 72-hour review SLA and the 7-day appeal deadline, both
+      // of which resolve in the student's favour.
+      "integritySla",
     ]);
   });
 });

@@ -158,7 +158,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 4 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
-| `integrity.overturn` | super-admin | - | - | - | - | yes | arrives in Phase 6 |
+| `integrity.overturn` | super-admin | - | - | - | - | yes | 1 action |
 | `audit.readFull` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `users.impersonate` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `judge.rotateKeys` | super-admin | - | - | - | - | yes | 1 action, 1 page |
