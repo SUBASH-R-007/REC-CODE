@@ -159,3 +159,27 @@ asserted never to contain `--share-net`.
 `pnpm lint && pnpm typecheck && pnpm test && pnpm build` must be green on
 Windows and Linux before a phase is closed; extra checks and manual
 verification are recorded in `docs/RUNBOOK.md` with a date.
+
+## Tailwind colour utilities fail silently
+
+Tailwind v4 emits a colour utility only for a `--color-*` entry in
+`packages/design/theme.css`. A class naming anything else — `text-fg`,
+`bg-surface-raised`, `text-on-accent` — compiles to **nothing**: no error, no
+warning, no missing module. The element simply inherits, which on a dark
+background often looks close enough to pass a glance.
+
+Five such classes were written into the Phase 6c exam shell from memory of a
+different design system and went green through `lint`, `typecheck` and
+`build`. The real token names are deliberately not the ones most design
+systems use:
+
+| Looks right | Actually |
+|---|---|
+| `text-fg`, `text-fg-muted` | `text-text`, `text-text-secondary` |
+| `bg-surface-raised` | `bg-elevated` |
+| `text-on-accent`, `bg-accent` | `text-primary-fg`, `bg-primary` |
+| `outline-accent` | `outline-ring` |
+
+`tests/repo/design-tokens.test.ts` now fails on any colour utility whose
+suffix contains one of our token stems and does not resolve. Read
+`packages/design/theme.css` rather than guessing; it is the whole list.
