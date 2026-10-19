@@ -21,6 +21,9 @@ import {
   APTITUDE_QUESTION_KINDS,
   MOCK_PATTERN_STATUSES,
   MOCK_ATTEMPT_STATUSES,
+  CALENDAR_DAY_KINDS,
+  LEAVE_KINDS,
+  LEAVE_STATUSES,
 } from "@recx/shared";
 import { CONTENT_ORIGINS } from "@recx/shared/authoring";
 import { describe, expect, it } from "vitest";
@@ -115,6 +118,9 @@ const MIRRORS: Array<[prismaEnum: string, sharedName: string, shared: readonly s
   ["AptitudeQuestionKind", "APTITUDE_QUESTION_KINDS", APTITUDE_QUESTION_KINDS],
   ["MockPatternStatus", "MOCK_PATTERN_STATUSES", MOCK_PATTERN_STATUSES],
   ["MockAttemptStatus", "MOCK_ATTEMPT_STATUSES", MOCK_ATTEMPT_STATUSES],
+  ["CalendarDayKind", "CALENDAR_DAY_KINDS", CALENDAR_DAY_KINDS],
+  ["LeaveKind", "LEAVE_KINDS", LEAVE_KINDS],
+  ["LeaveStatus", "LEAVE_STATUSES", LEAVE_STATUSES],
   // Difficulty keys the XP table; the Prisma enum must offer exactly those.
   ["Difficulty", "the keys of XP_RULES.firstSolve", Object.keys(XP_RULES.firstSolve)],
 ];

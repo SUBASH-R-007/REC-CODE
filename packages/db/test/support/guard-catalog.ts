@@ -61,6 +61,9 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_section_clock_change",
   "recx_refuse_closed_section_write",
   "recx_refuse_used_pattern_change",
+  // 20261019260000_phase8a_calendar
+  "recx_refuse_past_calendar_day_change",
+  "recx_refuse_leave_terms_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -109,6 +112,9 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   // 20261019250400_phase7d_import
   "AptitudeImport",
   "AptitudeImportRow",
+  // 20261019260000_phase8a_calendar
+  "CalendarDay",
+  "LeaveException",
 ];
 
 export interface GuardTrigger {
@@ -347,6 +353,23 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_used_pattern_change",
     level: "ROW",
   },
+  /**
+   * 20261019260000_phase8a_calendar. A past calendar day is frozen because
+   * Phase 8c evidence rows cite days BY DATE: editing one rewrites the
+   * explanation of a decision already taken. Today and the future stay
+   * editable — a calendar is planned and revised ahead, which is the point of
+   * having one — so the guard tests the date rather than carrying a WHEN
+   * clause (a WHEN clause here would be frozen at trigger-creation time,
+   * which is the opposite of what "past" means).
+   */
+  { name: "CalendarDay_past_immutable", timing: "BEFORE UPDATE OR DELETE", table: "CalendarDay", fn: "recx_refuse_past_calendar_day_change", level: "ROW" },
+  /**
+   * The TERMS of a leave, not only its status. A leave approved for three
+   * days in October and later widened to three weeks in November would
+   * retroactively excuse an absence nobody approved — and the evidence row
+   * citing it would still cite it.
+   */
+  { name: "LeaveException_terms_immutable", timing: "BEFORE UPDATE", table: "LeaveException", fn: "recx_refuse_leave_terms_change", level: "ROW" },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -377,7 +400,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261019250400_phase7d_import";
+export const CHECK_CATALOG_THROUGH = "20261019260000_phase8a_calendar";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -691,7 +714,46 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["AptitudeImportRow_applied_check", "AptitudeImportRow"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261019250400_phase7d_import" })),
+  ...(
+    [
+      ["CalendarDay_label_check", "CalendarDay"],
+      ["LeaveException_range_check", "LeaveException"],
+      ["LeaveException_reason_check", "LeaveException"],
+      ["LeaveException_decision_pair_check", "LeaveException"],
+      ["LeaveException_rejection_note_check", "LeaveException"],
+      ["LeaveException_two_person_check", "LeaveException"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261019260000_phase8a_calendar" })),
 ];
+
+/**
+ * EXCLUDE constraints. Prisma cannot model one, the drift check cannot see
+ * one, and `uncataloguedChecks` does not either — an EXCLUDE is `contype =
+ * 'x'`, not `'c'` — so without this list a gist constraint could be dropped
+ * by a later migration and every fence would stay green. That is the exact
+ * failure mode this file exists to prevent.
+ */
+export const EXCLUSION_CONSTRAINTS = [
+  {
+    name: "LeaveException_no_overlapping_approved",
+    table: "LeaveException",
+    migration: "20261019260000_phase8a_calendar",
+    /** The operator classes, in the order the migration writes them. */
+    using: "gist",
+    /**
+     * Each element, written to match BOTH readings: the migration's own SQL
+     * and `pg_get_constraintdef`, which renders the same constraint with
+     * casts the migration never wrote (`'[]'::text`, `'APPROVED'::"LeaveStatus"`).
+     * One catalogue entry serving the static fence and the live one is the
+     * point — two spellings of the same rule is how they drift apart.
+     */
+    elements: [
+      String.raw`"?userId"?\s+WITH\s+=`,
+      String.raw`daterange\("?startDate"?,\s*"?endDate"?,\s*'\[\]'(?:::text)?\)\s+WITH\s+&&`,
+    ],
+    where: String.raw`"?status"?\s*=\s*'APPROVED'`,
+  },
+] as const;
 
 /** The partial unique indexes Prisma cannot model (the drift check cannot see them either). */
 export const PARTIAL_UNIQUE_INDEXES = [

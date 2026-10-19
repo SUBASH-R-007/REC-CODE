@@ -5,6 +5,7 @@ import {
   GUARDED_TABLES,
   HAND_WRITTEN_CHECKS,
   OTHER_TRIGGERS_ON_GUARDED_TABLES,
+  EXCLUSION_CONSTRAINTS,
   PARTIAL_UNIQUE_INDEXES,
   type GuardTrigger,
 } from "./support/guard-catalog";
@@ -194,6 +195,37 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     expect(def).toContain(`(${idx.columns.join(", ")})`);
     expect(def).toMatch(new RegExp(String.raw`WHERE\s+\(*\s*${idx.where.replace(/"/g, "")}`, "i"));
   });
+
+  /**
+   * The gist EXCLUDE constraint, LIVE. `pg_get_constraintdef` is the only
+   * honest reading of one: an EXCLUDE is contype 'x', so the CHECK query two
+   * tests above cannot see it, Prisma's drift check cannot model it, and
+   * `uncataloguedChecks` is blind to it. A catalogue fence proves the
+   * migration still WRITES it; this proves the database still HAS it.
+   */
+  it.each(EXCLUSION_CONSTRAINTS.map((e) => [e.name, e] as const))(
+    "EXCLUDE constraint %s is present, validated, and keeps its operator class, elements and predicate",
+    async (name, ex) => {
+      const rows = await db.$queryRawUnsafe<Array<{ table: string; validated: boolean; def: string }>>(
+        `SELECT cl.relname AS "table", co.convalidated AS validated, pg_get_constraintdef(co.oid) AS def
+           FROM pg_constraint co
+           JOIN pg_class cl ON cl.oid = co.conrelid
+           JOIN pg_namespace n ON n.oid = cl.relnamespace
+          WHERE co.contype = 'x' AND co.conname = $1 AND n.nspname = 'public' AND co.coninhcount = 0`,
+        name,
+      );
+      expect(rows, `${name} is missing`).toHaveLength(1);
+      const live = rows[0]!;
+      expect(live).toMatchObject({ table: ex.table, validated: true });
+      expect(live.def, name).toMatch(new RegExp(String.raw`EXCLUDE\s+USING\s+${ex.using}\b`, "i"));
+      for (const element of ex.elements) {
+        expect(live.def, `${name}: element ${element}`).toMatch(new RegExp(element, "i"));
+      }
+      // `\(*`, not `\(?`: pg_get_constraintdef double-parenthesises the
+      // predicate — `WHERE ((status = 'APPROVED'::"LeaveStatus"))`.
+      expect(live.def, `${name} lost its predicate`).toMatch(new RegExp(String.raw`WHERE\s*\(*\s*${ex.where}`, "i"));
+    },
+  );
 
   it("triggers fire in this session and by default (session_replication_role is origin and is not overridden for a database or role)", async () => {
     const [role] = await db.$queryRawUnsafe<Array<{ value: string }>>(`SELECT current_setting('session_replication_role') AS value`);

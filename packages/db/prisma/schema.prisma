@@ -582,6 +582,9 @@ model User {
   mockAttempts       MockAttempt[]
   aptitudeTopicStats AptitudeUserTopicStat[]
 
+  /// Excused absences, read by the inactivity counter (Phase 8).
+  leaveExceptions LeaveException[]
+
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
 }
@@ -3204,4 +3207,105 @@ model AptitudeImportRow {
   createdAt   DateTime               @default(now())
 
   @@unique([importId, line])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Phase 8a — the academic calendar, and approved leave
+//
+// These two tables exist so that "ten days inactive" is a sentence about a
+// student rather than a sentence about a date subtraction. A college closes
+// for Pongal, holds exam weeks, runs placement drives; a student is ill, or
+// bereaved, or at a university exam. Every one of those days is a day nobody
+// may hold against them, and the only way to say so is to write it down.
+//
+// Both tables are read by exactly one consumer today — the inactivity counter
+// in Phase 8c — and both are append-mostly on purpose: an evidence row cites
+// the days it excluded, so a calendar that could be rewritten afterwards is a
+// calendar that turns old evidence into a lie.
+// ─────────────────────────────────────────────────────────────────────────
+
+enum CalendarDayKind {
+  REGULAR
+  /// The college is shut. Pongal, a national holiday, a declared closure.
+  HOLIDAY
+  /// University or internal exams. A working week, but not one anybody owes
+  /// practice on.
+  EXAM_WEEK
+  SEMESTER_BREAK
+  /// On-campus recruitment. The students this platform exists for are busy
+  /// doing the thing it prepares them for.
+  PLACEMENT_WEEK
+}
+
+enum LeaveKind {
+  MEDICAL
+  BEREAVEMENT
+  UNIVERSITY_EXAM
+  PLACEMENT_DRIVE
+  INTERNSHIP
+  SPORTS_EVENT
+  APPROVED_OTHER
+}
+
+enum LeaveStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// One campus day. `date` is the primary key and a @db.Date: a calendar entry
+/// is about a day, not an instant, and a row keyed by a timestamp would hold
+/// two different "3 October"s on either side of midnight IST.
+///
+/// `kind` and `isWorkingDay` answer DIFFERENT questions and the counter reads
+/// them separately: `kind <> REGULAR` is a structural exclusion, while
+/// `isWorkingDay = false` is the weekend — and that second one is what the
+/// policy's `excludeNonWorkingDays` toggle switches. So an EXAM_WEEK may
+/// truthfully say it is a working day, and nothing here forces otherwise.
+model CalendarDay {
+  date         DateTime        @id @db.Date
+  isWorkingDay Boolean         @default(true)
+  /// What a staff member reads in the calendar grid. "Pongal", "CAT-2 week".
+  label        String
+  kind         CalendarDayKind @default(REGULAR)
+  createdById  String
+  createdAt    DateTime        @default(now())
+
+  @@index([kind, date])
+}
+
+/// A student's excused absence. Both end dates inclusive.
+///
+/// Never self-approved (CHECK on `decidedById <> requestedById`, the same
+/// two-person shape as PrivilegedOperation), never overlapping another
+/// APPROVED row for the same student (a gist EXCLUDE constraint), and its
+/// terms are immutable once written — a leave whose dates could be widened
+/// after approval is a leave that excuses whatever it is later made to.
+///
+/// A REQUESTED row excuses nothing. That is the whole reason the status
+/// exists: otherwise a student could stop the counter by asking.
+model LeaveException {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  kind      LeaveKind
+  startDate DateTime    @db.Date
+  endDate   DateTime    @db.Date
+  status    LeaveStatus @default(REQUESTED)
+  /// The student's own words, 10–1000 characters by CHECK.
+  reason    String      @db.Text
+  /// An uploaded medical certificate or exam hall ticket, when there is one.
+  /// A plain id, not a relation: the file store is not this table's child.
+  evidenceFileId String?
+  requestedById  String
+  decidedById    String?
+  decidedAt      DateTime?
+  /// Mandatory and minimum-length on a REJECTED row, by CHECK. A refusal a
+  /// student cannot read is a refusal they cannot answer.
+  decisionNote   String?   @db.Text
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, status, startDate])
+  @@index([status, startDate])
 }

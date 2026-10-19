@@ -10,6 +10,7 @@ import {
   GUARDED_TABLES,
   HAND_WRITTEN_CHECKS,
   OTHER_TRIGGERS_ON_GUARDED_TABLES,
+  EXCLUSION_CONSTRAINTS,
   PARTIAL_UNIQUE_INDEXES,
   TRUNCATE_GUARDED,
   type GuardTrigger,
@@ -350,6 +351,46 @@ function partialIndexProblems(migs: readonly Migration[]): string[] {
   return problems;
 }
 
+// ── EXCLUDE constraints ──────────────────────────────────────────────────
+
+/**
+ * Problems with the catalogued EXCLUDE constraints (empty = intact).
+ *
+ * An EXCLUDE is `contype = 'x'`, so `uncataloguedChecks` is blind to it and
+ * the Prisma drift check cannot model it at all. Without this detector a
+ * later migration could drop the overlap constraint and every other fence in
+ * this file would still be green.
+ */
+function exclusionProblems(migs: readonly Migration[]): string[] {
+  const problems: string[] = [];
+  const all = migs.map((m) => m.sql).join("\n");
+  for (const ex of EXCLUSION_CONSTRAINTS) {
+    const adds = [
+      ...all.matchAll(new RegExp(String.raw`ADD\s+CONSTRAINT\s+"?${escape(ex.name)}"?\s+EXCLUDE\b[\s\S]*?;`, "gi")),
+    ].map((m) => m[0]);
+    if (adds.length !== 1) {
+      problems.push(`${ex.name}: added ${adds.length} times`);
+      continue;
+    }
+    const sql = adds[0]!;
+    if (!new RegExp(String.raw`EXCLUDE\s+USING\s+${escape(ex.using)}\b`, "i").test(sql)) {
+      problems.push(`${ex.name}: not USING ${ex.using}`);
+    }
+    for (const element of ex.elements) {
+      if (!new RegExp(element, "i").test(sql)) problems.push(`${ex.name}: element missing: ${element}`);
+    }
+    if (!new RegExp(String.raw`WHERE\s*\(*\s*${ex.where}`, "i").test(sql)) {
+      problems.push(`${ex.name}: lost its predicate`);
+    }
+    for (const { dir, sql: mig } of migs) {
+      if (new RegExp(String.raw`DROP\s+CONSTRAINT\b[^;]*"?${escape(ex.name)}"?`, "i").test(mig)) {
+        problems.push(`${dir} drops ${ex.name}`);
+      }
+    }
+  }
+  return problems;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 
 describe("frozen-version coverage (schema ↔ guard ↔ triggers ↔ factories)", () => {
@@ -603,6 +644,19 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
       expect(uncataloguedChecks(sneaky)).toEqual([`${CHECK_CATALOG_THROUGH}: X_unlisted_check`]);
     });
 
+    it("flags an EXCLUDE constraint that is dropped, re-added, loses its operator class, an element or its predicate", () => {
+      const intact = migrations.filter((m) => /_phase8a_calendar$/.test(m.dir));
+      expect(exclusionProblems(intact)).toEqual([]);
+      const mutate = (fn: (sql: string) => string) => intact.map((m) => ({ ...m, sql: fn(m.sql) }));
+      expect(exclusionProblems([...intact, { dir: "29990101000000_mutant", sql: 'ALTER TABLE "LeaveException" DROP CONSTRAINT "LeaveException_no_overlapping_approved";' }])).not.toEqual([]);
+      expect(exclusionProblems(mutate((sql) => sql.replace(/USING gist/, "USING btree")))).not.toEqual([]);
+      expect(exclusionProblems(mutate((sql) => sql.replace(/"userId" WITH =,\s*/, "")))).not.toEqual([]);
+      expect(exclusionProblems(mutate((sql) => sql.replace(/\) WHERE \("status" = 'APPROVED'\)/, ")")))).not.toEqual([]);
+      // Widened from APPROVED to every status would refuse a student's second
+      // REQUEST, which is a different constraint wearing the same name.
+      expect(exclusionProblems(mutate((sql) => sql.replace(/"status" = 'APPROVED'/, "true")))).not.toEqual([]);
+    });
+
     it("flags a partial unique index that is dropped, altered, re-created or loses its predicate", () => {
       const intact = migrations.filter((m) => /_phase4_admin_authoring$/.test(m.dir));
       expect(partialIndexProblems(intact)).toEqual([]);
@@ -674,5 +728,10 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
 
   it("keeps the three partial unique indexes with their predicates, never dropped or altered", () => {
     expect(partialIndexProblems(migrations)).toEqual([]);
+  });
+
+  it("keeps every EXCLUDE constraint with its operator class, elements and predicate", () => {
+    expect(EXCLUSION_CONSTRAINTS.map((e) => e.name)).toEqual([...new Set(EXCLUSION_CONSTRAINTS.map((e) => e.name))]);
+    expect(exclusionProblems(migrations)).toEqual([]);
   });
 });

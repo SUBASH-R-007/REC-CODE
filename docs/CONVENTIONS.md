@@ -386,6 +386,80 @@ backwards mid-import (an NTP correction, a resumed laptop) must not cost the
 whole import report. The alternative, taking both from `now()` in SQL, works
 too and is better where nothing else needs the value.
 
+
+### The drift has a SIGN, and WSL's clock changes it while you work
+
+Two further things, learned in Phase 8a.
+
+**The number above is not a constant.** Mid-session the WSL Postgres clock had
+drifted to **370 ms BEHIND** the Windows host — the opposite sign — and 21
+Phase 4 governance tests failed at once with
+`PrivilegedOperation_decided_after_request_check` and
+`Accommodation_decided_after_request_check`. Nothing in the repository had
+changed; the same suites had passed on the Linux gate an hour earlier, where
+the application and the database share one clock and the skew is zero by
+construction. WSL2 does not keep its clock in step with the host across a
+host sleep or a long session.
+
+So before believing a timestamp CHECK failure is a code bug, **measure the
+skew and its sign**:
+
+```js
+const before = Date.now();
+const [row] = await db.$queryRawUnsafe("SELECT extract(epoch from now()) * 1000 AS ms");
+const after = Date.now();
+console.log("skew", Math.round(Number(row.ms) - (before + after) / 2), "ms");
+```
+
+A few hundred milliseconds either way is the environment. `wsl --shutdown`
+(then restart Postgres and Redis) resyncs it from the host and needs no sudo;
+`hwclock -s` does too but prompts for a password and will hang a
+non-interactive shell.
+
+**A `.db.test.ts` is subject to the same rule as the application.** A test
+that writes one timestamp from the host (`new Date()`, or a Prisma default
+Prisma fills client-side) and the other from SQL (`now()`) is comparing two
+clocks, so whether it passes depends on the drift's sign that afternoon. The
+Phase 4 fixtures above do exactly this. They are correct in intent and they
+pass on the gate, so Phase 8a left them alone rather than widening a
+constraint to accommodate a broken clock — but a new `.db.test.ts` should take
+both ends of any compared pair from one side, the same rule the Phase 7d
+importer follows.
+
+## Do not run the whole `.db.test.ts` set from Windows
+
+`RECX_DB_TESTS=1 vitest run` across the `@recx/db` package fails on Windows
+with twenty copies of
+
+```
+Error: P1001: Can't reach database server at `localhost:5433`
+```
+
+and it is not the database. Each `.db.test.ts` file calls `applyMigrations()`,
+which spawns its own `prisma migrate deploy`; twenty of those at once saturate
+WSL2's localhost port forwarding, and once saturated **the forwarding stays
+dead for every later connection until `wsl --shutdown`** — including the
+serial re-run, which is why `--no-file-parallelism` does not help after the
+fact. Inside WSL, `pg_isready` keeps answering happily the whole time, so the
+database looks fine from the Linux side and unreachable from the Windows side.
+
+This was never part of a gate. The Windows `pnpm test` step runs without
+`RECX_DB_TESTS`, so every `.db.test.ts` **skips** (that is the 991 skipped the
+Phase 7 gate reports), and the Linux gate's `services-tests` step runs them
+with the flags set *inside* WSL, where there is no forwarding to saturate.
+
+So, while developing on Windows:
+
+- run live DB suites **one file at a time** (`npx vitest run calendar-invariants`),
+  which works and is fast;
+- take the whole set from the Linux gate, which is the thing that gates anyway;
+- if forwarding has already died, `wsl --shutdown`, then wait for
+  `systemctl is-active postgresql@17-main redis-server` to report active —
+  systemd starts both, so no `sudo service` call is needed, and `sudo` here
+  prompts for a password and will hang a non-interactive shell.
+
+A restart also resyncs the clock, which fixes the skew above at the same time.
+
 ## A test that sweeps a shared table globally must drain it first
 
 `recx_test` is one database and vitest runs test files in parallel, so a
