@@ -48,6 +48,17 @@ const h = vi.hoisted(() => {
     process.env.DATABASE_URL =
       process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
   }
+  /**
+   * Phase 9f. `env()` is parsed as a whole on first access, so a module that
+   * reads one variable fails on a missing unrelated one. Without these,
+   * `profile-export#createProfileExport` threw on IP_HASH_PEPPER before it
+   * built a payload — the sweep still passed, because an action that errors
+   * leaks no canary, but it was checking nothing. These make the happy path
+   * actually run, which is the only version of this test worth having: the
+   * payload it signs is built from the fixture's own rows, canaries and all.
+   */
+  process.env.IP_HASH_PEPPER ??= "exposure-test-pepper-16+";
+  process.env.EXPORT_SIGNING_SECRET ??= "exposure-test-export-signing-secret-32+";
   class RedirectSentinel extends Error {
     constructor(readonly url: string) {
       super(`NEXT_REDIRECT ${url}`);
@@ -683,6 +694,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         // Frozen rows and the XP ledger refuse DELETE by trigger; lifted only inside this transaction.
         ...frozen.map((t) => raw(`ALTER TABLE "public"."${t}" DISABLE TRIGGER "${t}_frozen_guard"`)),
         ...(xp > 0 ? [raw(`ALTER TABLE "public"."XpEvent" DISABLE TRIGGER "XpEvent_append_only"`)] : []),
+        /**
+         * Phase 9f. `profile-export#createProfileExport` is exercised as S,
+         * so by the time this runs the fixture user owns a signed link — and
+         * `ProfileExport` refuses DELETE by trigger (it is revoked, never
+         * deleted) while `ProfileExport_userId_fkey` is RESTRICT. Both have
+         * to come off for the fixture to be removable, and both go back on
+         * below.
+         */
+        raw(`ALTER TABLE "public"."ProfileExport" DISABLE TRIGGER "ProfileExport_payload_frozen"`),
         raw(`DELETE FROM "public"."XpEvent" WHERE "userId" = ANY($1::text[])`, userIds),
         ...[
           "XpBucket",
@@ -709,7 +729,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
           // in the file passes and the SUITE fails in teardown, which is the
           // failure mode docs/CONVENTIONS.md warns about by name.
           "LeaveException",
+          // Phase 9f, for the same reason: every test in the file passed and
+          // the SUITE failed in teardown on this foreign key, which is the
+          // failure mode docs/CONVENTIONS.md warns about by name.
+          "ProfileExport",
         ].map((t) => raw(`DELETE FROM "public"."${t}" WHERE "userId" = ANY($1::text[])`, userIds)),
+        raw(`ALTER TABLE "public"."ProfileExport" ENABLE TRIGGER "ProfileExport_payload_frozen"`),
         // Phase 5 contest fixture. ContestProblem_frozen_version refuses an
         // UPDATE but not a DELETE, so only the contest's own guards come off.
         raw(`ALTER TABLE "public"."Contest" DISABLE TRIGGER "Contest_rating_once"`),
@@ -846,6 +871,19 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "api/activity/route.ts#POST": { call: call(() => studentRequest("/api/activity", { method: "POST", json: { problemId: ids.problem, seconds: 30 } })) },
     "api/admin/problems/import/route.ts#POST": {
       call: call(() => studentRequest("/api/admin/problems/import", { method: "POST", headers: { "content-type": "application/zip" }, body: "PK" })),
+      status: [403],
+    },
+    // Phase 9e. The placement CSV. A student must be refused with exactly
+    // Forbidden and no part of the file — the body check below is what
+    // catches a route that built the CSV before checking the role.
+    "api/placement/export/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/placement/export", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "dept=&batch=&section=",
+        }),
+      ),
       status: [403],
     },
     "api/auth/login/route.ts#POST": {
@@ -1090,6 +1128,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "account#myStatusHistory": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStatusHistory!,
     "readiness#myReadiness": async () => (await load(path.join(QUERIES_DIR, "readiness.ts"))).myReadiness!,
     "readiness#myMentor": async () => (await load(path.join(QUERIES_DIR, "readiness.ts"))).myMentor!,
+    "readiness#myExportLinks": async () => (await load(path.join(QUERIES_DIR, "readiness.ts"))).myExportLinks!,
     "judge-languages#getPublicLanguageRows": async () => (await load(path.join(QUERIES_DIR, "judge-languages.ts"))).getPublicLanguageRows!,
     "leaderboard#getLeaderboard": async () => (await load(path.join(QUERIES_DIR, "leaderboard.ts"))).getLeaderboard!,
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
@@ -1158,6 +1197,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // officer about the student for a mentor to act on, and rendering it back
     // to them would turn an internal note into a message nobody chose to send.
     "readiness#myMentor": () => [[ids.user]],
+    // Phase 9f. The student's own signed links: a code, a kind and three
+    // dates. Deliberately no payload and no signature — a signature
+    // rendered on a page is a signature that can be copied off it.
+    "readiness#myExportLinks": () => [[ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1284,6 +1327,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   /** `<file under src/app>` → its params and searchParams. */
   const PAGE_CALLS: Record<string, () => { params?: Record<string, string>; searchParams?: Record<string, string> }> = {
     "(public)/judge/page.tsx": () => ({}),
+    // Phase 9f. The public verification page, with a code that matches
+    // nothing: the "no record" render is the one a student (or anybody)
+    // reaches without a link, and it must carry no canary either.
+    "(public)/verify/[code]/page.tsx": () => ({ params: { code: "a".repeat(24) } }),
     "(public)/layout.tsx": () => ({}),
     "(student)/accessibility/page.tsx": () => ({}),
     "(student)/bookmarks/page.tsx": () => ({}),
@@ -1454,6 +1501,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   /** `<module>#<export>` → fixture calls as S, in order (later calls may use earlier results). */
   const SELF_SERVICE_CALLS: Record<string, Array<() => unknown[]>> = {
     "auth#logout": [() => []],
+    /**
+     * Phase 9f. A student signs their OWN record, then withdraws a link that
+     * is not theirs — so the sweep exercises both the happy path (which
+     * builds a payload from their own rows, and must carry no canary) and
+     * the "not one of yours" refusal.
+     */
+    "profile-export#createProfileExport": [() => [{ kind: "PROFILE" }]],
+    "profile-export#revokeProfileExport": [() => [{ code: "a".repeat(24) }]],
     // A student appealing their own decision. The fixture flag does not
     // exist, so the action refuses with "not found" — which is the right
     // answer and still exercises the path as S.
