@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   CAPABILITIES,
   IMPERSONATOR_ACTIONS,
+  MENTOR_CAPABILITIES,
+  PLACEMENT_CAPABILITIES,
   PUBLIC_ACTIONS,
   PUBLIC_ROUTES,
   ROLES,
@@ -206,15 +208,26 @@ describe("every SUPER_ADMIN ActionRef resolves to a guarded server action", () =
 });
 
 describe("the capability model", () => {
-  it("keys are unique across the three tiers", () => {
+  it("keys are unique across the five tiers", () => {
     const keys = CAPABILITIES.map((c) => c.key);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(keys).toHaveLength(SUPER_ADMIN_CAPABILITIES.length + STAFF_CAPABILITIES.length + SELF_SERVICE_CAPABILITIES.length);
+    expect(keys).toHaveLength(
+      SUPER_ADMIN_CAPABILITIES.length +
+        STAFF_CAPABILITIES.length +
+        PLACEMENT_CAPABILITIES.length +
+        MENTOR_CAPABILITIES.length +
+        SELF_SERVICE_CAPABILITIES.length,
+    );
   });
 
-  it("staff capabilities are ADMIN + SUPER_ADMIN; self-service ones are every signed-in role", () => {
+  it("each tier admits exactly its own roles", () => {
     for (const c of STAFF_CAPABILITIES) expect(sorted(c.roles), c.key).toEqual(["ADMIN", "SUPER_ADMIN"]);
     for (const c of SELF_SERVICE_CAPABILITIES) expect(sorted(c.roles), c.key).toEqual(sorted(ROLES));
+    // Phase 9d. The two boundaries the phase exists to draw, asserted per
+    // capability rather than once over the shared constant — so a capability
+    // added with a hand-written role list fails here.
+    for (const c of PLACEMENT_CAPABILITIES) expect(sorted(c.roles), c.key).toEqual(["PLACEMENT_OFFICER", "SUPER_ADMIN"]);
+    for (const c of MENTOR_CAPABILITIES) expect(sorted(c.roles), c.key).toEqual(["ADMIN", "SUPER_ADMIN", "TA_MENTOR"]);
     expect(STAFF_CAPABILITIES.map((c) => c.key)).toContain("judge.operate");
   });
 
@@ -300,6 +313,16 @@ describe("every action's real guard admits exactly its capability's roles", () =
     expect(rolesOf({ name: "requireAdminScopeAction", args: [] })).toEqual(["ADMIN", "SUPER_ADMIN"]);
     expect(rolesOf({ name: "requireAdminScopePage", args: [] })).toEqual(["ADMIN", "SUPER_ADMIN"]);
     expect(rolesOf({ name: "requireSuperAdminPage", args: [] })).toEqual(["SUPER_ADMIN"]);
+    // Phase 9d. The placement guards admit no ADMIN: an AdminScope is a
+    // department-and-batch slice and the cohort dashboard is a whole-college
+    // instrument, so admitting every scoped admin would undo the scope.
+    expect(rolesOf({ name: "requirePlacementPage", args: [] })).toEqual(["PLACEMENT_OFFICER", "SUPER_ADMIN"]);
+    expect(rolesOf({ name: "requirePlacementAction", args: [] })).toEqual(["PLACEMENT_OFFICER", "SUPER_ADMIN"]);
+    // And the mentor guards admit no PLACEMENT_OFFICER, which is the point of
+    // the whole arrangement: the at-risk list routes a student AWAY from the
+    // analytics surface, so the person it routes to must not be reading it.
+    expect(rolesOf({ name: "requireMentorPage", args: [] })).toEqual(["ADMIN", "SUPER_ADMIN", "TA_MENTOR"]);
+    expect(rolesOf({ name: "requireMentorAction", args: [] })).toEqual(["ADMIN", "SUPER_ADMIN", "TA_MENTOR"]);
     expect(rolesOf({ name: "requireActionUser", args: [] })).toEqual(sorted(ROLES));
     expect(rolesOf({ name: "requireImpersonator", args: [] })).toBeNull();
     expect(GUARD_NAMES).toContain("requireAdminScopeAction");
@@ -345,8 +368,19 @@ describe("route handlers are bound and guarded", () => {
   });
 });
 
-describe("every /admin and /super page is bound and guarded", () => {
-  const pages = [...walk(path.join(SRC, "app/admin"), (n) => n === "page.tsx"), ...walk(path.join(SRC, "app/super"), (n) => n === "page.tsx")];
+describe("every staff page is bound and guarded", () => {
+  /**
+   * The four staff trees. Phase 9d added /placement-cell and /mentor, and
+   * they are walked here rather than listed in a capability only: a page
+   * added to either tree without a capability fails the binding test below,
+   * which is the whole reason this is a walk and not a list.
+   */
+  const pages = [
+    ...walk(path.join(SRC, "app/admin"), (n) => n === "page.tsx"),
+    ...walk(path.join(SRC, "app/super"), (n) => n === "page.tsx"),
+    ...walk(path.join(SRC, "app/placement-cell"), (n) => n === "page.tsx"),
+    ...walk(path.join(SRC, "app/mentor"), (n) => n === "page.tsx"),
+  ];
   const owners = new Map<string, Array<{ owner: string; roles: readonly string[] }>>();
   for (const c of CAPABILITIES) for (const p of c.pages ?? []) owners.set(p, [...(owners.get(p) ?? []), { owner: c.key, roles: c.roles }]);
   for (const p of SUPER_ADMIN_SUPPORTING_PAGES) owners.set(p, [...(owners.get(p) ?? []), { owner: "SUPER_ADMIN_SUPPORTING_PAGES", roles: ["SUPER_ADMIN"] }]);
@@ -355,6 +389,8 @@ describe("every /admin and /super page is bound and guarded", () => {
     expect(pages.length).toBeGreaterThan(35);
     expect(pages).toContain("app/admin/problems/[id]/page.tsx");
     expect(pages).toContain("app/super/page.tsx");
+    expect(pages).toContain("app/placement-cell/page.tsx");
+    expect(pages).toContain("app/mentor/[menteeId]/page.tsx");
   });
 
   it("every page is bound; every bound page exists; a supporting page is in no capability", () => {
@@ -377,6 +413,8 @@ describe("every /admin and /super page is bound and guarded", () => {
   it.each([
     ["app/admin/layout.tsx", ["ADMIN", "SUPER_ADMIN"]],
     ["app/super/layout.tsx", ["SUPER_ADMIN"]],
+    ["app/placement-cell/layout.tsx", ["PLACEMENT_OFFICER", "SUPER_ADMIN"]],
+    ["app/mentor/layout.tsx", ["ADMIN", "SUPER_ADMIN", "TA_MENTOR"]],
   ] as const)("%s guards the whole tree too", (layout, roles) => {
     const guard = firstStatementGuard(readFileSync(path.join(SRC, layout), "utf8"), layout, "default");
     expect(rolesOf(guard)).toEqual([...roles]);
@@ -386,14 +424,57 @@ describe("every /admin and /super page is bound and guarded", () => {
 describe("roleHas / can / capabilityMatrix", () => {
   const selfKeys = SELF_SERVICE_CAPABILITIES.map((c) => c.key);
 
-  it("gives SUPER_ADMIN everything, ADMIN staff + self-service, every other role self-service only", () => {
+  const placementKeys = PLACEMENT_CAPABILITIES.map((c) => c.key);
+  const mentorKeys = MENTOR_CAPABILITIES.map((c) => c.key);
+
+  /**
+   * The matrix as an EXACT set per role, which is the assertion the Phase 9
+   * design asks for by name. A spot check ("the officer does not hold
+   * roles.manage") passes while a capability is granted by accident
+   * somewhere else; equality fails the moment one is.
+   */
+  it("gives each role exactly its own tiers and nothing else", () => {
     const matrix = capabilityMatrix();
     expect(matrix.SUPER_ADMIN).toEqual(CAPABILITIES.map((c) => c.key));
-    expect(matrix.ADMIN).toEqual([...STAFF_CAPABILITIES.map((c) => c.key), ...selfKeys]);
+    // An ADMIN is a mentor too: a department admin is already trusted with
+    // that department's students and is often the person who has the
+    // conversation. What they may read of any one student is limited by
+    // lib/auth/mentor-scope.ts, which fails closed.
+    expect(matrix.ADMIN).toEqual([...STAFF_CAPABILITIES.map((c) => c.key), ...mentorKeys, ...selfKeys]);
     expect(matrix.STUDENT).toEqual(selfKeys);
-    expect(matrix.TA_MENTOR).toEqual(selfKeys);
-    expect(matrix.PLACEMENT_OFFICER).toEqual(selfKeys);
+    expect(matrix.TA_MENTOR).toEqual([...mentorKeys, ...selfKeys]);
+    expect(matrix.PLACEMENT_OFFICER).toEqual([...placementKeys, ...selfKeys]);
     expect(Object.keys(matrix).sort()).toEqual([...ROLES].sort());
+  });
+
+  it("gives the placement officer no authoring, moderation, role or status power", () => {
+    /**
+     * SPEC §4's reasoning, as a test: the three roles the college asked for
+     * would have handed every placement officer problem-deletion and
+     * role-change power. The officer holds the placement keys and the
+     * self-service ones, and nothing from the twelve or from STAFF — which
+     * is where authoring, moderation, accommodations and the judge console
+     * all live.
+     */
+    for (const key of SUPER_ADMIN_CAPABILITY_KEYS) expect(roleHas("PLACEMENT_OFFICER", key), key).toBe(false);
+    for (const c of STAFF_CAPABILITIES) expect(roleHas("PLACEMENT_OFFICER", c.key), c.key).toBe(false);
+    // And no mentor capability either: an officer reading the at-risk list
+    // must not also be the named human it routes a student to.
+    for (const key of mentorKeys) expect(roleHas("PLACEMENT_OFFICER", key), key).toBe(false);
+  });
+
+  it("gives the mentor no authoring, no assessments and no role changes", () => {
+    for (const key of SUPER_ADMIN_CAPABILITY_KEYS) expect(roleHas("TA_MENTOR", key), key).toBe(false);
+    for (const c of STAFF_CAPABILITIES) expect(roleHas("TA_MENTOR", c.key), c.key).toBe(false);
+    for (const key of placementKeys) expect(roleHas("TA_MENTOR", key), key).toBe(false);
+  });
+
+  it("puts every capability in exactly one tier", () => {
+    const seen = new Map<string, number>();
+    for (const c of CAPABILITIES) seen.set(c.key, (seen.get(c.key) ?? 0) + 1);
+    expect([...seen].filter(([, n]) => n !== 1)).toEqual([]);
+    expect(capabilityTier("placement.analytics")).toBe("placement");
+    expect(capabilityTier("mentor.mentees.view")).toBe("mentor");
   });
 
   it("no role but SUPER_ADMIN holds any of the twelve; no role below ADMIN holds a staff capability", () => {

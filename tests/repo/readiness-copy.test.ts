@@ -37,7 +37,7 @@ const PAGE = `${SRC}/app/(student)/placement/page.tsx`;
 const STUDENT_SURFACES = [
   PAGE,
   `${SRC}/components/placement/tier-card.tsx`,
-  `${SRC}/server/queries/placement.ts`,
+  `${SRC}/server/queries/readiness.ts`,
   "packages/shared/src/readiness-snapshot.ts",
 ];
 

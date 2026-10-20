@@ -175,9 +175,16 @@ const appRel = (full: string) => path.relative(APP, full).split(path.sep).join("
 const appFiles = walk(APP).map(appRel);
 const routeFiles = appFiles.filter((f) => f.endsWith("/route.ts")).sort();
 const ENTRY = /(?:^|\/)(?:page|layout|loading|error|global-error|not-found|template|default)\.tsx?$/;
-const studentEntries = appFiles
-  .filter((f) => ENTRY.test(f) && !/^(?:admin|super|api)\//.test(f))
-  .sort();
+/**
+ * Every app entry a STUDENT can reach. The staff trees are excluded: they are
+ * swept by apps/web/test/capability-matrix.test.ts, which renders each of
+ * them as every role and asserts the guard sends the wrong ones away.
+ *
+ * Phase 9d added `placement-cell/` and `mentor/`. `(student)/placement/` is
+ * NOT excluded — that is the student's own card and belongs in this sweep.
+ */
+const STAFF_TREES = /^(?:admin|super|api|placement-cell|mentor)\//;
+const studentEntries = appFiles.filter((f) => ENTRY.test(f) && !STAFF_TREES.test(f)).sort();
 const isClientModule = (rel: string) => /^\s*["']use client["']/.test(readFileSync(path.join(APP, rel), "utf8"));
 
 const HTTP_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
@@ -1056,8 +1063,19 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   // ── Queries ────────────────────────────────────────────────────────────
 
   const QUERIES_DIR = path.join(SRC, "server/queries");
+  /**
+   * Every STUDENT-reachable query module. A staff module is named
+   * `<role>-something.ts` and is covered by capabilities.test.ts and
+   * capability-matrix.test.ts instead, which call it as every role and
+   * assert the guard refuses the ones that must not pass.
+   *
+   * Phase 9 added `mentor-` and `placement-`. The student's own readiness
+   * lives in `readiness.ts`, with no role prefix, precisely so that it stays
+   * in THIS sweep: it is the one Phase 9 query a student calls.
+   */
+  const STAFF_MODULE_PREFIXES = ["admin-", "super-", "mentor-", "placement-"];
   const queryModules = readdirSync(QUERIES_DIR)
-    .filter((f) => f.endsWith(".ts") && !f.startsWith("admin-") && !f.startsWith("super-"))
+    .filter((f) => f.endsWith(".ts") && !STAFF_MODULE_PREFIXES.some((prefix) => f.startsWith(prefix)))
     .map((f) => f.replace(/\.ts$/, ""))
     .sort();
 
@@ -1070,7 +1088,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "calendar#termKeyOn": async () => (await load(path.join(QUERIES_DIR, "calendar.ts"))).termKeyOn!,
     "account#myStanding": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStanding!,
     "account#myStatusHistory": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStatusHistory!,
-    "placement#myReadiness": async () => (await load(path.join(QUERIES_DIR, "placement.ts"))).myReadiness!,
+    "readiness#myReadiness": async () => (await load(path.join(QUERIES_DIR, "readiness.ts"))).myReadiness!,
+    "readiness#myMentor": async () => (await load(path.join(QUERIES_DIR, "readiness.ts"))).myMentor!,
     "judge-languages#getPublicLanguageRows": async () => (await load(path.join(QUERIES_DIR, "judge-languages.ts"))).getPublicLanguageRows!,
     "leaderboard#getLeaderboard": async () => (await load(path.join(QUERIES_DIR, "leaderboard.ts"))).getLeaderboard!,
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
@@ -1133,7 +1152,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // what comes back is a score with the measurable weight beside it, the
     // component breakdown and one action — never a percentile a peer could
     // be identified from, never a band, never a flag count.
-    "placement#myReadiness": () => [[ids.user]],
+    "readiness#myReadiness": () => [[ids.user]],
+    // Phase 9d. The student's own mentor of record: a name and a date, and
+    // deliberately NOT the assignment's reason — that text was written by an
+    // officer about the student for a mentor to act on, and rendering it back
+    // to them would turn an internal note into a message nobody chose to send.
+    "readiness#myMentor": () => [[ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1180,7 +1204,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   };
   /** Exports that read nothing problem-scoped, with the reason. */
   const NOT_PROBLEM_SCOPED: Record<string, string> = {
-    "placement#headlineAction": "pure: picks the lowest tier with a gap out of a value myReadiness already returned; no database access",
+    "readiness#headlineAction": "pure: picks the lowest tier with a gap out of a value myReadiness already returned; no database access",
     // Phase 7's select vocabulary. Not queries: they are the column lists the
     // queries select THROUGH, and tests/repo/aptitude-answer-exposure.test.ts
     // asserts what each one may and may not name. Keeping them beside the

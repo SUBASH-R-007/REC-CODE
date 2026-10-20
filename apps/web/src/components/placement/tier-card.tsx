@@ -1,6 +1,6 @@
 import { Badge, Card, CardBody, CardHeader, ProgressBar } from "@recx/design";
 import { MISSING_REASON_COPY, TOPIC_LABEL, type ComponentBreakdown } from "@recx/shared";
-import type { TierView } from "@/server/queries/placement";
+import type { TierView } from "@/server/queries/readiness";
 
 /**
  * One readiness tier, as a student reads it (Phase 9c).

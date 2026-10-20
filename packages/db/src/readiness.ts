@@ -1,6 +1,7 @@
 import {
   APTITUDE_TOPIC_AREA,
   MIN_PERCENTILE_COHORT,
+  READINESS_RATING_MIN_CONTESTS,
   TOPICS,
   campusDay,
   cohortKeyFor,
@@ -34,7 +35,6 @@ import type { Db } from "./index";
  * database — and a disputed score is the point of the whole phase.
  */
 
-const RATING_MIN_CONTESTS = 3;
 /** Below this many answered aptitude questions, an accuracy is noise. */
 const APTITUDE_MIN_ANSWERED = 20;
 /** The window `consistency` is measured over, per SPEC §5. */
@@ -295,7 +295,7 @@ export function buildCohorts(sources: ReadinessSources): Map<string, CohortPopul
         verbal.push(apt.verbal.correct / apt.verbal.answered);
       }
       const rate = sources.rating.get(member.userId);
-      if (rate && rate.contestsRated >= RATING_MIN_CONTESTS) rating.push(rate.rating);
+      if (rate && rate.contestsRated >= READINESS_RATING_MIN_CONTESTS) rating.push(rate.rating);
     }
     out.set(cohortKey, {
       cohortKey,
@@ -352,11 +352,19 @@ export function inputsFor(
   return {
     aptitudePercentile: rank(apt?.aptitude.answered, apt?.aptitude.correct, cohort.aptitude, APTITUDE_MIN_ANSWERED),
     verbalPercentile: rank(apt?.verbal.answered, apt?.verbal.correct, cohort.verbal, APTITUDE_MIN_ANSWERED),
+    /**
+     * The order of these three answers is the honest one. A cohort too small
+     * to rank in is not the student's problem and no number of contests
+     * fixes it, so it is said first; below the floor says "keep going", and
+     * only a student who has entered none at all is told to try one.
+     */
     ratingPercentile: tooSmall
       ? missing("COHORT_TOO_SMALL")
-      : rate && rate.contestsRated >= RATING_MIN_CONTESTS
+      : rate && rate.contestsRated >= READINESS_RATING_MIN_CONTESTS
         ? present(percentileRankSorted(rate.rating, cohort.rating))
-        : missing("NO_DATA_YET"),
+        : rate && rate.contestsRated > 0
+          ? missing("TOO_FEW_RATED_CONTESTS")
+          : missing("NO_DATA_YET"),
     /**
      * No source in this plan at any phase — the mock-interview scheduler is
      * Phase 11+. Permanently MISSING, which is why no TOP score can exceed

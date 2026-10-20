@@ -183,6 +183,11 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `problems.review` | staff | - | - | yes | - | yes | 3 actions |
 | `problems.publish` | staff | - | - | yes | - | yes | 1 action |
 | `problems.import` | staff | - | - | yes | - | yes | 1 action, 1 route, 2 pages |
+| `placement.analytics` | placement | - | - | - | yes | yes | 1 page |
+| `mentor.mentees.view` | mentor | - | yes | yes | - | yes | 2 pages |
+| `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
+| `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
+| `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
 | `judge.submit` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |

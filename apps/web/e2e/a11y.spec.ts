@@ -128,6 +128,12 @@ const TARGETS: readonly Target[] = [
   { path: "/notes", as: "student", gating: false },
   { path: "/bookmarks", as: "student", gating: false },
   { path: "/help", as: "student", gating: false },
+  // Phase 9d, reported. The two staff trees the phase adds. Scanned as the
+  // SUPER_ADMIN, who holds both roles: a PLACEMENT_OFFICER and a TA_MENTOR
+  // account are not in the e2e fixture, and the markup does not depend on
+  // which of the admitted roles is looking.
+  { path: "/placement-cell", as: "admin", gating: false },
+  { path: "/mentor", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
   { path: "/judge", as: null, gating: false },

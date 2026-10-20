@@ -136,6 +136,21 @@ export const TIER_TARGETS: Record<
  * Why a component is missing. The distinction matters to the student: one of
  * these is their move to make and two are not.
  */
+/**
+ * How many rated contests before a rating counts towards readiness.
+ *
+ * SPEC §7: "Do not treat a contest rating as meaningful before ~8–12
+ * contests." Eight is the earliest the spec permits, and the floor matters
+ * more here than anywhere else in the system: `RATING_PERCENTILE` is 35 % of
+ * TOP, so treating a two-contest rating as real would be the single largest
+ * unearned swing readiness can produce — in either direction.
+ *
+ * Distinct from `PROVISIONAL_CONTESTS = 5`, which is a DISPLAY rule for the
+ * "?" suffix on a rating. A rating can be worth showing with a caveat and
+ * still be too thin to score anybody against.
+ */
+export const READINESS_RATING_MIN_CONTESTS = 8;
+
 export const MISSING_REASONS = [
   /** Nothing in this plan produces it. Not the student's to fix. */
   "NO_SOURCE_YET",
@@ -143,6 +158,12 @@ export const MISSING_REASONS = [
   "NO_DATA_YET",
   /** Too few peers to rank against without identifying them. */
   "COHORT_TOO_SMALL",
+  /**
+   * A rating exists but under too few rated contests to mean anything.
+   * Separate from NO_DATA_YET because the action differs: one says "try
+   * one", this says "keep going, you are part of the way there".
+   */
+  "TOO_FEW_RATED_CONTESTS",
 ] as const;
 export type MissingReason = (typeof MISSING_REASONS)[number];
 
@@ -150,6 +171,7 @@ export const MISSING_REASON_COPY: Record<MissingReason, string> = {
   NO_SOURCE_YET: "Not measured yet — this part of the platform is not built.",
   NO_DATA_YET: "No data yet. Try one and this starts counting.",
   COHORT_TOO_SMALL: "Too few people in your cohort to rank against yet.",
+  TOO_FEW_RATED_CONTESTS: `A rating starts counting after ${READINESS_RATING_MIN_CONTESTS} rated contests.`,
 };
 
 /** A component's state: a 0–1 value, or absent with a reason. */
@@ -465,6 +487,9 @@ function actionDetail(
       return "verbal reasoning practice";
     case "RATING_PERCENTILE":
       return "enter the next rated contest";
+    // A MISSING component offers no points available, so a rating below the
+    // floor never reaches here — the sentence is for a rating that counts
+    // and is simply low.
     case "CONSISTENCY":
       return "practise on more days — even one problem counts";
     case "MOCK_INTERVIEW_SCORE":

@@ -83,6 +83,15 @@ vi.mock("@/lib/auth/guards", async (importActual) => {
     requireActionRole: wrap("requireActionRole", actual.requireActionRole),
     requireSuperAdmin: wrap("requireSuperAdmin", actual.requireSuperAdmin),
     requireImpersonator: wrap("requireImpersonator", actual.requireImpersonator),
+    // Phase 9d. Every guard a bound page or action may call FIRST has to be
+    // wrapped, or "the guard runs first" reads the page's first database
+    // call instead and fails with no idea why: the composite guards close
+    // over the real requirePageRole inside the actual module, so wrapping
+    // that one does not cover them.
+    requirePlacementPage: wrap("requirePlacementPage", actual.requirePlacementPage),
+    requirePlacementAction: wrap("requirePlacementAction", actual.requirePlacementAction),
+    requireMentorPage: wrap("requireMentorPage", actual.requireMentorPage),
+    requireMentorAction: wrap("requireMentorAction", actual.requireMentorAction),
   };
 });
 
@@ -288,7 +297,9 @@ for (const c of CAPABILITIES) for (const page of c.pages ?? []) pageRoles.set(pa
 for (const page of SUPER_ADMIN_SUPPORTING_PAGES) pageRoles.set(page, ["SUPER_ADMIN"]);
 const pageRows = [...pageRoles].sort(([a], [b]) => a.localeCompare(b));
 const PAGE_PROPS = () => ({
-  params: Promise.resolve({ id: "row_1", importId: "row_1" }),
+  // Every dynamic segment any bound page takes, in one object: a page reads
+  // the one it declares and ignores the rest.
+  params: Promise.resolve({ id: "row_1", importId: "row_1", menteeId: "row_1" }),
   searchParams: Promise.resolve({}),
 });
 
@@ -423,7 +434,7 @@ describe("role × capability matrix: route handlers (real guards)", () => {
   });
 });
 
-describe("role × capability matrix: /admin and /super pages (real guards)", () => {
+describe("role × capability matrix: every staff page (real guards)", () => {
   it("covers every bound page", () => {
     expect(pageRows.length).toBeGreaterThan(35);
   });

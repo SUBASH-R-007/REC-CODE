@@ -1,5 +1,11 @@
 import type { Db } from "@recx/db";
-import { MIN_PERCENTILE_COHORT, SCHEDULER_JOB_NAMES, TOPICS, type Topic } from "@recx/shared";
+import {
+  MIN_PERCENTILE_COHORT,
+  READINESS_RATING_MIN_CONTESTS,
+  SCHEDULER_JOB_NAMES,
+  TOPICS,
+  type Topic,
+} from "@recx/shared";
 import pino from "pino";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { READINESS_BATCH, READINESS_HOUR_IST, READINESS_MINUTE_IST, ReadinessJob } from "../src/readiness";
@@ -202,7 +208,9 @@ describe("what it computes", () => {
     /**
      * The whole phase in one assertion. A bare "70" in a report a human
      * reads is the exact mistake this design is arranged to avoid: with
-     * mockInterviewScore unsourced, a 70 on TOP is 70 out of 85.
+     * mockInterviewScore unsourced, a 70 on TOP is 70 out of 85 — and in
+     * THIS fixture it is 70 out of 50, because the seeded students have five
+     * rated contests and the readiness floor is eight.
      */
     const { db } = recordingDb();
     const job = new ReadinessJob({ db, log, dryRun: true });
@@ -210,8 +218,39 @@ describe("what it computes", () => {
     expect(report.sample.length).toBeGreaterThan(0);
     for (const row of report.sample) {
       expect(row.top, row.collegeId).toMatch(/^(—|\d+\/\d+)$/);
-      if (row.top !== "—") expect(row.top.split("/")[1]).toBe("85");
+      // 100 - 15 (mock, no source) - 35 (rating, below the floor).
+      if (row.top !== "—") expect(row.top.split("/")[1]).toBe("50");
     }
+  });
+
+  it("holds the rating to EIGHT rated contests, and the floor costs exactly 35", async () => {
+    /**
+     * SPEC §7: "Do not treat a contest rating as meaningful before ~8–12
+     * contests." `RATING_PERCENTILE` is 35 % of TOP, so this floor is the
+     * single largest unearned swing readiness could produce in either
+     * direction — and the fixture's five contests is deliberately
+     * `PROVISIONAL_CONTESTS`, the DISPLAY rule for the "?" suffix. A rating
+     * worth showing with a caveat is still too thin to score anybody
+     * against, and the two numbers being different is the point.
+     *
+     * The cohort is 40 here, above `MIN_PERCENTILE_COHORT`, so the only
+     * thing moving is the floor.
+     */
+    const denominator = async (contestsRated: number) => {
+      const base = sources(40) as unknown as { students: Array<{ userId: string }> };
+      loadReadinessSources.mockResolvedValue({
+        ...base,
+        rating: new Map(base.students.map((s) => [s.userId, { rating: 1300, contestsRated }])),
+      } as never);
+      const { db } = recordingDb();
+      const report = await new ReadinessJob({ db, log, dryRun: true }).tick(AT_0230_IST);
+      const top = report.sample[0]!.top;
+      return Number(top.split("/")[1]);
+    };
+
+    expect(await denominator(READINESS_RATING_MIN_CONTESTS), "at the floor it counts").toBe(85);
+    expect(await denominator(READINESS_RATING_MIN_CONTESTS - 1), "one short, it does not").toBe(50);
+    expect(85 - 50, "the rating is 35 % of TOP").toBe(35);
   });
 
   it("puts no name in the sample — a college id and numbers only", async () => {

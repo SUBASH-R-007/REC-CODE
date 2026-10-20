@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardBody } from "@recx/design";
 import {
+  MENTOR_VISIBILITY,
   MIN_PERCENTILE_COHORT,
   READINESS_CALIBRATION_NOTE,
   READINESS_EMPTY_STATES,
@@ -12,7 +13,8 @@ import {
   formatCampusDay,
 } from "@recx/shared";
 import { requireUser } from "@/lib/auth/guards";
-import { headlineAction, myReadiness } from "@/server/queries/placement";
+import { headlineAction, myMentor, myReadiness } from "@/server/queries/readiness";
+import { MentorBadge } from "@/components/mentor/mentor-badge";
 import { TierCard } from "@/components/placement/tier-card";
 
 export const metadata: Metadata = { title: "Placement readiness" };
@@ -42,7 +44,7 @@ export const metadata: Metadata = { title: "Placement readiness" };
  */
 export default async function PlacementPage() {
   const user = await requireUser();
-  const readiness = await myReadiness(user.id);
+  const [readiness, mentor] = await Promise.all([myReadiness(user.id), myMentor(user.id)]);
   const headline = headlineAction(readiness);
 
   return (
@@ -163,6 +165,56 @@ export default async function PlacementPage() {
               </Link>
             </p>
           </section>
+
+          {mentor ? (
+            <section className="space-y-3 rounded-xl border border-border p-5">
+              <h2 className="flex flex-wrap items-center gap-2 font-display text-lg font-semibold">
+                <span>{mentor.name} is your mentor</span>
+                <MentorBadge />
+              </h2>
+              <p className="max-w-2xl text-sm text-text-secondary">
+                Since {formatCampusDay(mentor.since)}. They are somebody to plan with — nothing about this is a mark
+                against you, and nothing about it is on any record a recruiter sees.
+              </p>
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                    What they can see
+                  </h3>
+                  <ul className="space-y-1.5 text-sm">
+                    {MENTOR_VISIBILITY.canSee.map((line) => (
+                      <li key={line} className="flex gap-2">
+                        <span aria-hidden="true" className="text-muted">
+                          ·
+                        </span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                    What they cannot
+                  </h3>
+                  {/*
+                    The shorter list, and the one that matters: a student who
+                    does not know what a mentor can see will assume the worst,
+                    and the worst is the thing that stops them asking for help.
+                  */}
+                  <ul className="space-y-1.5 text-sm">
+                    {MENTOR_VISIBILITY.cannotSee.map((line) => (
+                      <li key={line} className="flex gap-2">
+                        <span aria-hidden="true" className="text-success">
+                          ✓
+                        </span>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           <section className="space-y-2 border-t border-border pt-5 text-xs text-muted">
             <p className="max-w-2xl">{READINESS_CALIBRATION_NOTE}</p>

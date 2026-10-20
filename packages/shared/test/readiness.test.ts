@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PROVISIONAL_CONTESTS } from "../src/rating";
 import { TOPICS, type Topic } from "../src/topics";
 import {
   AT_RISK_QUIET_DAYS,
@@ -9,6 +10,7 @@ import {
   MISSING_REASONS,
   READINESS_COMPONENTS,
   READINESS_FRAMING,
+  READINESS_RATING_MIN_CONTESTS,
   READINESS_TIERS,
   READINESS_TIER_LABEL,
   TIER_TARGETS,
@@ -96,6 +98,47 @@ describe("the weights are the spec's", () => {
     for (const component of READINESS_COMPONENTS) expect(COMPONENT_LABEL[component].length).toBeGreaterThan(3);
     for (const tier of READINESS_TIERS) expect(READINESS_TIER_LABEL[tier].length).toBeGreaterThan(3);
     for (const reason of MISSING_REASONS) expect(MISSING_REASON_COPY[reason].length).toBeGreaterThan(10);
+  });
+});
+
+describe("the rating floor", () => {
+  it("is EIGHT rated contests, which is the earliest SPEC \u00a77 permits", () => {
+    /**
+     * "Do not treat a contest rating as meaningful before ~8\u201312 contests."
+     * RATING_PERCENTILE is 35 % of TOP, so this is the single largest
+     * unearned swing readiness could produce in either direction: a student
+     * who won one lucky round would read as top-tier ready, and a strong
+     * student two contests in would read as not.
+     */
+    expect(READINESS_RATING_MIN_CONTESTS).toBe(8);
+  });
+
+  it("is not the display rule, and must not be confused with it", () => {
+    // PROVISIONAL_CONTESTS decides whether a rating is shown with a "?". A
+    // rating worth showing with a caveat is still too thin to score anybody
+    // against, so readiness has its own, stricter floor.
+    expect(READINESS_RATING_MIN_CONTESTS).toBeGreaterThan(PROVISIONAL_CONTESTS);
+  });
+
+  it("costs TOP exactly the rating's weight when it is missing", () => {
+    const withRating = scoreTier("TOP", inputs({ ratingPercentile: present(0.6) }));
+    const without = scoreTier("TOP", inputs({ ratingPercentile: missing("TOO_FEW_RATED_CONTESTS") }));
+    expect(withRating.availableWeight - without.availableWeight).toBe(35);
+    // And the missing one offers NO points available: a component below its
+    // floor is not a gap the student closes tonight.
+    const row = without.missing.find((c) => c.component === "RATING_PERCENTILE")!;
+    expect(row.pointsAvailable).toBe(0);
+  });
+
+  it("says how many contests, rather than just 'no data'", () => {
+    /**
+     * The two reasons call for different actions: NO_DATA_YET says "try
+     * one", TOO_FEW_RATED_CONTESTS says "keep going, you are part of the way
+     * there". Telling a student with six contests that there is no data
+     * would be both wrong and discouraging.
+     */
+    expect(MISSING_REASON_COPY.TOO_FEW_RATED_CONTESTS).toContain(String(READINESS_RATING_MIN_CONTESTS));
+    expect(MISSING_REASON_COPY.TOO_FEW_RATED_CONTESTS).not.toEqual(MISSING_REASON_COPY.NO_DATA_YET);
   });
 });
 

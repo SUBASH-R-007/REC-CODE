@@ -161,3 +161,39 @@ export async function myReadiness(userId: string, now = new Date()): Promise<MyR
     rulesVersion: snapshot.rulesVersion,
   };
 }
+
+/**
+ * Who the student's own mentor of record is, if anybody (Phase 9d).
+ *
+ * A student who has been assigned a mentor should be told, by name, and told
+ * what that person can see. SPEC §4 names the badge as part of the role for
+ * the same reason: a student told to "ask your mentor" has to know which of
+ * the people answering is one.
+ *
+ * It returns the mentor's NAME and nothing else about them. Not their email,
+ * not their college id — a student does not need a staff member's contact
+ * record to recognise them in a corridor or a thread.
+ *
+ * It deliberately does NOT return the assignment's `reason`. That text was
+ * written by an officer about the student, for a mentor to act on, and
+ * rendering it back to the student would turn an internal note into a
+ * message nobody chose to send them. If the placement cell wants the student
+ * told something, that is a notification, written as such.
+ */
+export interface MyMentor {
+  readonly name: string;
+  /** The campus day the assignment was made, "yyyy-MM-dd". */
+  readonly since: string;
+}
+
+export async function myMentor(userId: string): Promise<MyMentor | null> {
+  const row = await db.mentorAssignment.findFirst({
+    where: { menteeId: userId, endedAt: null },
+    select: { assignedAt: true, mentor: { select: { firstName: true, lastName: true } } },
+  });
+  if (!row) return null;
+  return {
+    name: `${row.mentor.firstName} ${row.mentor.lastName}`.trim(),
+    since: campusDay(row.assignedAt),
+  };
+}

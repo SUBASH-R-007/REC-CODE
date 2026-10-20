@@ -19,10 +19,17 @@ import type { PrivilegedOperationKind, Role } from "@recx/db";
  *     refused before any database access, audit or enqueue, and an
  *     impersonating SUPER_ADMIN gets the read-only refusal.
  *
- * Three tiers of capability:
+ * Five tiers of capability:
  *   - SUPER_ADMIN_CAPABILITIES: the spec's twelve, SUPER_ADMIN only;
  *   - STAFF_CAPABILITIES: ADMIN and SUPER_ADMIN (requireActionRole /
  *     requireAdminScopeAction; pages requireAdminScopePage / requirePageRole);
+ *   - PLACEMENT_CAPABILITIES: PLACEMENT_OFFICER and SUPER_ADMIN
+ *     (requirePlacementPage / requirePlacementAction). Cohort analytics and
+ *     nothing else — no authoring, moderation, role change or account
+ *     status, and no route to a student's private work;
+ *   - MENTOR_CAPABILITIES: TA_MENTOR, ADMIN and SUPER_ADMIN
+ *     (requireMentorPage / requireMentorAction), limited per student by
+ *     lib/auth/mentor-scope.ts, which fails closed;
  *   - SELF_SERVICE_CAPABILITIES: any signed-in user (requireActionUser),
  *     always acting on their own rows.
  * Plus four lists that are not capabilities: SUPER_ADMIN_SUPPORTING_ACTIONS
@@ -49,7 +56,7 @@ export interface Capability<K extends string = string> {
   readonly pages?: readonly PageRef[];
   readonly privileged?: readonly PrivilegedOperationKind[];
   /** Declared now, wired in a later phase: no actions until then (a test fails once `models` exist). */
-  readonly arrives?: { readonly phase: 5 | 6 | 8; readonly models: readonly string[] };
+  readonly arrives?: { readonly phase: 5 | 6 | 8 | 11; readonly models: readonly string[] };
 }
 
 export const SUPER_ADMIN_CAPABILITY_KEYS = [
@@ -70,6 +77,23 @@ export type SuperAdminCapabilityKey = (typeof SUPER_ADMIN_CAPABILITY_KEYS)[numbe
 
 const SUPER_ONLY: readonly Role[] = Object.freeze(["SUPER_ADMIN"] as const);
 const STAFF: readonly Role[] = Object.freeze(["ADMIN", "SUPER_ADMIN"] as const);
+/**
+ * Phase 9d. The placement cell, and deliberately NOT ADMIN: an AdminScope is
+ * a department-and-batch slice and the cohort dashboard is a whole-college
+ * instrument, so admitting every scoped admin would quietly undo the scope.
+ */
+const PLACEMENT: readonly Role[] = Object.freeze(["PLACEMENT_OFFICER", "SUPER_ADMIN"] as const);
+/**
+ * Phase 9d. The mentor of record. ADMIN is here because a department admin
+ * is already trusted with that department's students and is often the person
+ * who has the conversation; the per-mentee check in lib/auth/mentor-scope.ts
+ * is what limits what any of them can read, and it fails closed.
+ *
+ * PLACEMENT_OFFICER is NOT here, and that is the point of the whole
+ * arrangement: the at-risk list routes a student AWAY from the analytics
+ * surface, so the person it routes to must not be the one reading it.
+ */
+const MENTOR: readonly Role[] = Object.freeze(["TA_MENTOR", "ADMIN", "SUPER_ADMIN"] as const);
 const EVERY_SIGNED_IN_ROLE: readonly Role[] = Object.freeze([...ROLES]);
 
 function deepFreeze<T>(value: T): T {
@@ -658,6 +682,76 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
   },
 ] as const satisfies readonly Capability[]);
 
+/**
+ * The placement cell's capabilities (Phase 9).
+ *
+ * Its own tier, not a slice of STAFF, because the role boundary is the whole
+ * reason the role exists. An officer reads cohort analytics and nothing else:
+ * no authoring, no moderation, no role change, no account status, and no
+ * route to a student's private work. `tests/repo/placement-fence.test.ts`
+ * holds the model allowlist, and `capabilityMatrix().PLACEMENT_OFFICER` is
+ * asserted as an EXACT set so a capability granted here by accident fails
+ * rather than ships.
+ */
+export const PLACEMENT_CAPABILITIES = deepFreeze([
+  {
+    key: "placement.analytics",
+    label: "Read cohort placement analytics",
+    roles: PLACEMENT,
+    actions: [],
+    pages: ["app/placement-cell/page.tsx"],
+  },
+] as const satisfies readonly Capability[]);
+
+/**
+ * The mentor of record's capabilities (Phase 9).
+ *
+ * One live capability and three declared for Phase 11. The three are
+ * declared NOW rather than added later because the spec names discussion
+ * moderation as part of the ROLE: a role whose powers arrive two phases after
+ * the role is a role nobody can reason about, and a declared-but-unwired
+ * capability fails its own test the day the models appear.
+ */
+export const MENTOR_CAPABILITIES = deepFreeze([
+  {
+    key: "mentor.mentees.view",
+    label: "See my mentees and their coverage",
+    roles: MENTOR,
+    actions: [],
+    pages: ["app/mentor/page.tsx", "app/mentor/[menteeId]/page.tsx"],
+  },
+  /**
+   * All three are gated on the DISCUSSION models, including the editorial
+   * one. `Editorial` already exists — it is the Phase 3 problem editorial,
+   * written through the ADMIN authoring pipeline, and a mentor gets no part
+   * of that. What arrives in Phase 11 is the community surface: a mentor's
+   * explanation attached to a thread. Gating it on a model that already
+   * exists would make the test demand wiring for a power that has nowhere
+   * to be wired.
+   */
+  {
+    key: "mentor.discussion.moderate",
+    label: "Moderate discussion",
+    roles: MENTOR,
+    actions: [],
+    arrives: { phase: 11, models: ["DiscussionPost", "DoubtThread"] },
+  },
+  {
+    key: "mentor.solution.editorial",
+    label: "Explain a solution on a thread",
+    roles: MENTOR,
+    actions: [],
+    arrives: { phase: 11, models: ["DiscussionPost", "DoubtThread"] },
+  },
+  {
+    key: "mentor.doubts.answer",
+    label: "Answer student doubts",
+    roles: MENTOR,
+    actions: [],
+    arrives: { phase: 11, models: ["DoubtThread"] },
+  },
+] as const satisfies readonly Capability[]);
+
 /** The one action that works DURING an impersonation (guard requireImpersonator()). */
 export const IMPERSONATOR_ACTIONS: readonly ActionRef[] = Object.freeze(["super-impersonate#endImpersonation"] as const);
 
@@ -668,13 +762,22 @@ export const PUBLIC_ACTIONS: readonly ActionRef[] = Object.freeze(["auth#logout"
 export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze(["app/api/auth/login/route.ts#POST"] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];
+export type PlacementCapabilityKey = (typeof PLACEMENT_CAPABILITIES)[number]["key"];
+export type MentorCapabilityKey = (typeof MENTOR_CAPABILITIES)[number]["key"];
 export type SelfServiceCapabilityKey = (typeof SELF_SERVICE_CAPABILITIES)[number]["key"];
-export type CapabilityKey = SuperAdminCapabilityKey | StaffCapabilityKey | SelfServiceCapabilityKey;
-export type CapabilityTier = "super-admin" | "staff" | "self-service";
+export type CapabilityKey =
+  | SuperAdminCapabilityKey
+  | StaffCapabilityKey
+  | PlacementCapabilityKey
+  | MentorCapabilityKey
+  | SelfServiceCapabilityKey;
+export type CapabilityTier = "super-admin" | "staff" | "placement" | "mentor" | "self-service";
 
 export const CAPABILITIES: readonly Capability<CapabilityKey>[] = Object.freeze([
   ...SUPER_ADMIN_CAPABILITIES,
   ...(STAFF_CAPABILITIES as readonly Capability<StaffCapabilityKey>[]),
+  ...(PLACEMENT_CAPABILITIES as readonly Capability<PlacementCapabilityKey>[]),
+  ...(MENTOR_CAPABILITIES as readonly Capability<MentorCapabilityKey>[]),
   ...(SELF_SERVICE_CAPABILITIES as readonly Capability<SelfServiceCapabilityKey>[]),
 ]);
 
@@ -682,6 +785,8 @@ const BY_KEY: ReadonlyMap<string, Capability<CapabilityKey>> = new Map(CAPABILIT
 const TIER: ReadonlyMap<string, CapabilityTier> = new Map([
   ...SUPER_ADMIN_CAPABILITIES.map((c) => [c.key, "super-admin"] as const),
   ...STAFF_CAPABILITIES.map((c) => [c.key, "staff"] as const),
+  ...PLACEMENT_CAPABILITIES.map((c) => [c.key, "placement"] as const),
+  ...MENTOR_CAPABILITIES.map((c) => [c.key, "mentor"] as const),
   ...SELF_SERVICE_CAPABILITIES.map((c) => [c.key, "self-service"] as const),
 ]);
 

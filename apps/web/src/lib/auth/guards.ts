@@ -10,6 +10,7 @@ import { ForbiddenError, ImpersonationReadOnlyError, UnauthorizedError } from "@
  *
  *   Pages:   requireUser(), requirePageRole(...roles), requireSuperAdminPage()
  *   Actions: requireActionUser(), requireActionRole(...roles), requireSuperAdmin()
+ *   Phase 9: requirePlacementPage/Action(), requireMentorPage/Action()
  */
 
 export function homeForRole(role: Role): string {
@@ -17,11 +18,17 @@ export function homeForRole(role: Role): string {
     case "SUPER_ADMIN":
     case "ADMIN":
       return "/admin";
+    // Phase 9d. A mentor's home is their mentee list: the role exists to
+    // have a conversation with a named student, and the list is the only
+    // place that names them.
     case "TA_MENTOR":
+      return "/mentor";
     case "PLACEMENT_OFFICER":
     case "STUDENT":
     default:
-      // Mentor and placement-officer homes arrive with Phase 9.
+      // The placement cell's own home arrives with the cohort dashboard in
+      // Phase 9e; until that page exists, sending an officer to it would be
+      // a redirect into a 404.
       return "/dashboard";
   }
 }
@@ -80,6 +87,51 @@ export async function requireActionRole(...roles: Role[]): Promise<User> {
 /** Guard for every SUPER_ADMIN-exclusive capability (see src/lib/auth/capabilities.ts). */
 export async function requireSuperAdmin(): Promise<User> {
   return requireActionRole("SUPER_ADMIN");
+}
+
+/**
+ * The placement cell (Phase 9d).
+ *
+ * PLACEMENT_OFFICER and SUPER_ADMIN, and deliberately NOT ADMIN: an
+ * `AdminScope` is a department-and-batch slice, and the cohort dashboard is a
+ * whole-college instrument. Giving every scoped admin the college-wide
+ * readiness distribution would quietly undo the scope.
+ *
+ * The officer role gains no authoring, no moderation, no role change and no
+ * account-status power. SPEC §4's reasoning, carried across: the three roles
+ * the college asked for would have handed every placement officer
+ * problem-deletion and role-change power, and five roles with clean
+ * boundaries is barely more work and far safer.
+ */
+export async function requirePlacementPage(): Promise<User> {
+  return requirePageRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+}
+
+export async function requirePlacementAction(): Promise<User> {
+  return requireActionRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+}
+
+/**
+ * The mentor of record (Phase 9d).
+ *
+ * TA_MENTOR, ADMIN and SUPER_ADMIN. ADMIN is here because a department
+ * admin is already trusted with that department's students and is often the
+ * person who ends up having the conversation; the per-mentee check in
+ * lib/auth/mentor-scope.ts is what actually limits what any of them can
+ * read, and it fails closed — no active assignment, no students.
+ *
+ * PLACEMENT_OFFICER is NOT here. The at-risk list exists to route a student
+ * away from the analytics surface and towards somebody who teaches them, so
+ * the person it routes to must not be the one reading the dashboard. The
+ * database refuses an officer as mentor as well
+ * (`MentorAssignment_mentor_is_not_student_or_officer`).
+ */
+export async function requireMentorPage(): Promise<User> {
+  return requirePageRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
+}
+
+export async function requireMentorAction(): Promise<User> {
+  return requireActionRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
 }
 
 export function isStaff(role: Role): boolean {
