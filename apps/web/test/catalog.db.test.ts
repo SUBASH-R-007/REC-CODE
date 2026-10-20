@@ -1,6 +1,20 @@
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CatalogFilters } from "@/components/problems/catalog-filters";
+
+/**
+ * Phase 10c put the company filter's options and the problem pointer under
+ * `unstable_cache`, and Next's real one throws "incrementalCache missing"
+ * outside a request. Here it is the identity, so the reads run and this file
+ * keeps testing the SQL rather than the cache — the same mock the exposure
+ * sweep uses. (The Linux gate found this: the function is only ever called
+ * from a request in production, so nothing on Windows noticed.)
+ */
+vi.mock("next/cache", () => ({
+  unstable_cache: <T>(fn: T) => fn,
+  revalidatePath: () => undefined,
+  revalidateTag: () => undefined,
+}));
 
 /**
  * The /problems catalogue query against a real Postgres (recx_test,
