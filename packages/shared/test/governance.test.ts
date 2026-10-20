@@ -75,12 +75,16 @@ describe("scheduler jobs", () => {
       // nightly, which is what decides whether the mock XP percentile term is
       // meaningful yet.
       "mockSweep",
-      // Phase 8c: the inactivity sweep. A DRY RUN in this slice — it counts,
-      // applies the holdbacks and reports, and writes nothing to User,
-      // AccountRestriction or AccountStatusEvent. It appears here so
-      // /super/jobs shows it and a tick that stops running is visible, which
-      // is the point of shipping the dry run first.
+      // Phase 8c: the inactivity sweep, at 02:00 campus time. It counts
+      // counted days, applies the holdbacks and advances one rung at a time;
+      // --dry-run makes it report and write nothing at all, rather than
+      // writing behind a filter somebody can forget.
       "inactivitySweep",
+      // Phase 9c: the nightly readiness snapshot, at 02:30 — AFTER the
+      // inactivity sweep, because consistency and lastActiveOn are read from
+      // ActivityDay and a figure computed before the sweep finished would be
+      // computed against a cohort whose restrictions were a day stale.
+      "readinessSnapshot",
     ]);
   });
 });

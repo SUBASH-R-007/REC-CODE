@@ -10,6 +10,7 @@ import { AttemptSweepJob } from "./attempt-sweep";
 import { IntegritySlaJob } from "./integrity-sla";
 import { MockSweepJob } from "./mock-sweep";
 import { InactivitySweepJob } from "./inactivity-sweep";
+import { ReadinessJob } from "./readiness";
 import { ContestRankJob } from "./contest-rank";
 import { GovernanceSweepJob } from "./governance";
 import { recordJobStatus } from "./job-status";
@@ -104,6 +105,7 @@ const attemptSweep = new AttemptSweepJob({ db, log, dryRun });
 const integritySla = new IntegritySlaJob({ db, log, dryRun });
 const mockSweep = new MockSweepJob({ db, log, dryRun });
 const inactivitySweep = new InactivitySweepJob({ db, log, dryRun, queues });
+const readiness = new ReadinessJob({ db, log, dryRun });
 log.info({ mailTransport: mailTransport.name }, "mail transport");
 
 // ── Lifecycle ───────────────────────────────────────────────────────────
@@ -246,6 +248,17 @@ async function tick(): Promise<boolean> {
     await runJob("inactivitySweep", async () => {
       const report = await inactivitySweep.tick(now);
       if (report.ran) log.info({ report: { ...report, sample: report.sample.length } }, "inactivity sweep tick");
+      return { ok: !report.failed, report };
+    }),
+  );
+  // Readiness, at 02:30 — AFTER the inactivity sweep at 02:00. The order
+  // matters: consistency and lastActiveOn are read from ActivityDay, and a
+  // readiness figure computed before the sweep had finished would be
+  // computed against a cohort half of whose restrictions were a day stale.
+  results.push(
+    await runJob("readinessSnapshot", async () => {
+      const report = await readiness.tick(now);
+      if (report.ran) log.info({ report: { ...report, sample: report.sample.length } }, "readiness run");
       return { ok: !report.failed, report };
     }),
   );

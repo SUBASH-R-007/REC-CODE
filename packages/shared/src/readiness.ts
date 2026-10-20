@@ -29,6 +29,17 @@
 
 import { TOPICS, type Topic } from "./topics";
 
+/**
+ * The version of the weights below.
+ *
+ * Every snapshot cites it, so a recalibration after the first placement
+ * cycle — which SPEC §5 explicitly plans for — produces NEW numbers rather
+ * than silently rewriting last year's. Bump it in the same change that
+ * changes any weight or any target, or a stored breakdown will stop
+ * explaining its own score.
+ */
+export const READINESS_RULES_VERSION = 1;
+
 export const READINESS_TIERS = ["SERVICE", "PRODUCT", "TOP"] as const;
 export type ReadinessTier = (typeof READINESS_TIERS)[number];
 

@@ -12,7 +12,8 @@
     "./audit-chain": "./src/audit-chain.ts",
     "./attempt": "./src/attempt.ts",
     "./mock": "./src/mock.ts",
-    "./inactivity": "./src/inactivity.ts"
+    "./inactivity": "./src/inactivity.ts",
+    "./readiness": "./src/readiness.ts"
   },
   "scripts": {
     "generate": "prisma generate",
