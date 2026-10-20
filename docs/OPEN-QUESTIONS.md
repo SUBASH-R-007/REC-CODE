@@ -2150,3 +2150,62 @@ again. The first CI run will say, and the honest expectation is that one or
 two assertions will need a documented adjustment — which must be an
 adjustment with a reason in CAPACITY.md, not a quiet loosening of the
 budget.
+
+### The topology is written and has never been started, and that is the honest state.
+
+`deploy/compose.app.yml`, `compose.db.yml`, `compose.judge.yml`, the
+`Caddyfile` and `pgbackrest.conf` are the artefacts the college's ops person
+will use. None of them has been run: one Windows laptop with a WSL2 mirror,
+no second host, no registry, no public hostname, no certificate, no object
+store, nowhere offsite.
+
+What that leaves genuinely unknown, as opposed to merely untried:
+
+- **Whether the app image runs as `node apps/web/server.js`.** The repository
+  has no Dockerfile yet — CI builds and tests, it does not package. The
+  compose files name `RECX_WEB_IMAGE` and assume a standalone Next build.
+  Writing the Dockerfile without being able to build and run it would add a
+  second unverified file rather than remove one, so it is named here instead.
+- **Whether `mc ready local` is the right MinIO health check** for whichever
+  release the college pins. It is right for recent ones.
+- **Whether the judge container's `privileged` + `cgroup: host` is enough for
+  isolate inside Docker.** The worker runs natively in WSL2 here, where every
+  judging test in this repository runs; nobody has run it inside a container.
+  The systemd unit in `infra/judge/systemd/` is the path that IS exercised,
+  and a college with two judge hosts should probably use it.
+- **Whether a rolling restart actually preserves an SSE stream.** The deploy
+  script restarts one replica at a time and waits for health, but a student
+  whose stream was pinned to the restarted replica reconnects — the client
+  does reconnect, and what that looks like mid-contest has not been watched.
+  It is why the script refuses to deploy during a contest at all.
+
+### The restore drill runs here; the offsite half cannot.
+
+The drill is the part that gets skipped everywhere, so it is the part that
+runs: 67 seconds, into a scratch database, with the drift check and the row
+counts and the blob consistency check (`docs/RUNBOOK.md` §3). What it does
+not cover is pgBackRest: WAL archiving, the 5-minute RPO, the encrypted
+offsite repository and the 2-hour RTO are configured and untested, because
+testing them needs a second host and an object store.
+
+The gap matters in a specific way worth writing down: the drill proves a
+`pg_dump` set restores. It does NOT prove that point-in-time recovery works,
+and those are different mechanisms — a dump is a snapshot, WAL replay is a
+sequence. A college that wants the 5-minute RPO must run `pgbackrest
+restore --type=time` once on the real host before believing it.
+
+### There is no Dockerfile in this repository.
+
+Mentioned twice because it is the thing somebody will look for. CI builds the
+application and runs the gates; it does not produce an image. The compose
+files take one by digest. Writing a Dockerfile that has never been built
+would be the third unverified artefact in a phase already carrying two, and
+the image is also the one artefact whose correctness is cheap to establish
+the moment a registry exists.
+
+What it will have to do, recorded so the next person does not have to derive
+it: a Next standalone build, the Prisma client generated for the right
+platform, `prisma/migrations` present (the health endpoint counts the
+folder), the judge worker and scheduler as separate entrypoints from the same
+image, and no toolchain in it at all — those belong to the judge image, which
+`infra/judge/` already defines.

@@ -1,0 +1,105 @@
+# REC Code — the app host's edge (Phase 10e).
+#
+# Not run here: one laptop, no public hostname, no certificate. Written as
+# the artefact the college's ops person will use; docs/RUNBOOK.md §3 records
+# it as NOT RUN.
+#
+# Caddy terminates TLS and speaks HTTP/2 by default, which is the reason it
+# is Caddy and the reason HTTP/2 is not negotiable here: verdicts arrive over
+# Server-Sent Events, and HTTP/1.1 caps a browser at roughly six connections
+# per origin — a student with four tabs open would starve their own page
+# loads waiting for a connection their own SSE stream is holding.
+#
+# Everything below is either a security header the application cannot set for
+# itself or a routing decision. The Content-Security-Policy is NOT here: it
+# carries a per-request nonce and is set by apps/web/src/middleware.ts, which
+# is the only place that knows the nonce.
+
+{
+	# Fill in before the first deploy. ACME needs a real address for expiry
+	# notices, and a certificate that silently fails to renew takes the
+	# platform down on a date nobody has in their calendar.
+	email {$RECX_ACME_EMAIL}
+
+	# Access logs go to the container's stdout, where the json-file driver in
+	# compose.app.yml rotates them. They hold a client address, so they are
+	# subject to the same retention as everything else: see docs/SECURITY.md.
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$RECX_PUBLIC_HOST} {
+	encode zstd gzip
+
+	# ── Headers the app cannot set for itself ────────────────────────────
+	header {
+		# HSTS with preload. Two years, because a downgrade on a campus
+		# network is the realistic attack on a platform students reach from
+		# shared wifi.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The exam surface needs the camera and the microphone in the modes
+		# that use them; nothing else here does. The app narrows this further
+		# per route — this is the floor, not the policy.
+		Permissions-Policy "geolocation=(), payment=(), usb=(), camera=(self), microphone=(self)"
+		# Caddy's default; stated so a future edit does not remove it.
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# ── Server-Sent Events ───────────────────────────────────────────────
+	#
+	# Verdict streams. Buffering a stream is the one way to make a correct
+	# judge look broken: the verdict arrives at the proxy and sits there, and
+	# the student watches a spinner until the connection is closed.
+	@sse path /api/submissions/*/stream /api/runs/*/stream /api/exam/*/stream
+	handle @sse {
+		reverse_proxy web:3000 {
+			flush_interval -1
+			transport http {
+				# A verdict can legitimately take a minute on a busy judge; a
+				# stream must not be cut before the alert that watches for a
+				# slow judge would even fire.
+				read_timeout 10m
+			}
+		}
+	}
+
+	# ── Everything else ──────────────────────────────────────────────────
+	handle {
+		reverse_proxy web:3000 {
+			# Compose's DNS returns both replicas; least-connections rather
+			# than round-robin because an SSE stream pins a connection for
+			# minutes and round-robin would keep handing new page loads to
+			# the replica already holding them.
+			lb_policy least_conn
+			# The health endpoint answers 200 even when it is not ok, by
+			# design, so passive health checking is what takes a replica out:
+			# an unreachable or 5xx-ing process, not an unhappy body.
+			fail_duration 10s
+			max_fails 3
+		}
+	}
+
+	# ── Never proxied ────────────────────────────────────────────────────
+	#
+	# `/api/metrics` is scraped over the monitoring network, not the
+	# internet. It is also behind a bearer token (and answers 404 without
+	# one), so this block is the second half of the same decision rather
+	# than the only one.
+	@metrics path /api/metrics
+	handle @metrics {
+		respond 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# A bare `http://` request is redirected by Caddy automatically. The judge
+# hosts and the monitoring host are not served from here at all: they talk
+# over their own networks, and neither has a public listener.

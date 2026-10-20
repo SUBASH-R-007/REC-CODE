@@ -964,6 +964,111 @@ queue.
    the result arriving and the student seeing it: check the SSE path
    (`sse_connections_active`) and the Redis publish, not the judge.
 
+### 2.13 Backups, restores and deploys (Phase 10e)
+
+Five scripts in `scripts/ops/`, and three compose files in `deploy/` — one
+per host role. The compose files, the Caddyfile and the pgBackRest config
+have **never been started**: there is one development laptop and no second
+host. Each says so at the top, and §3 records it with what would have to be
+true to run it. What does run here, and must keep running, is the restore
+drill.
+
+#### A backup is one set, or it is nothing
+
+```bash
+# Postgres and the test-data store, captured together.
+DATABASE_URL_DIRECT=... TESTDATA_DIR=.../storage/testdata \
+  scripts/ops/backup.sh --out ~/recx-backups
+
+scripts/ops/verify-backup.sh ~/recx-backups/recx-backup-YYYYMMDDTHHMMSSZ
+```
+
+A set is `database.dump` (pg_dump -Fc), `testdata.tar.zst` and
+`MANIFEST.txt` with both digests, the migration head, the image and the
+host. If either half fails, the directory is removed — there is no partial
+set to find later and believe.
+
+**The reason it is one set:** a problem's test cases live in
+content-addressed blobs, and a submission records which problem VERSION
+judged it. A dump restored next to a test-data snapshot from a different
+hour leaves submissions judged against test cases that no longer exist, and
+that is only ever discovered mid-incident by somebody trying to explain a
+verdict.
+
+`verify-backup.sh` recomputes both digests, checks both sizes, reads
+pg_dump's own table of contents and decompresses the test data. It refuses a
+set with a changed byte in either file, a manifest that disagrees with its
+own files, or a missing half — all four demonstrated, §3.
+
+#### Restoring
+
+```bash
+# Into a scratch database. The target must be empty, or named *_scratch /
+# *_restore / *_drill / *_test, or forced with --force and a typed name.
+scripts/ops/restore.sh ~/recx-backups/recx-backup-… \
+  --into postgresql://…/recx_scratch --testdata /tmp/testdata
+```
+
+It verifies first, every time: the moment somebody is restoring is the moment
+they are least likely to check by hand. Without `--testdata` it says, loudly,
+that the database is restored WITHOUT its blobs — a platform served from that
+state judges against test cases it cannot read.
+
+#### The drill, which is the deliverable
+
+```bash
+DATABASE_URL_DIRECT=... TESTDATA_DIR=... scripts/ops/restore-drill.sh
+```
+
+Takes a set, verifies it, restores it into `recx_drill`, and then asks the
+three questions that decide whether a restore is usable: does the schema
+match the code (`prisma migrate diff --exit-code`), are the rows there (the
+tables whose absence would make the platform look fine and be empty), and
+does the unpacked test-data store agree with the restored rows about which
+blobs are stored rather than inline. It prints a line for §3 and drops the
+scratch database.
+
+**Run it monthly, and before every contest week.** A backup script that has
+never been restored is a file.
+
+#### Deploying
+
+```bash
+# By digest, never by tag. Refuses while a contest or an assessment is live.
+RECX_WEB_IMAGE=registry/recx-web@sha256:… scripts/ops/deploy.sh
+
+# Migrations are a separate, supervised step — and take a backup first.
+RUN_MIGRATIONS=true RECX_WEB_IMAGE=…@sha256:… scripts/ops/deploy.sh
+```
+
+Four rules, each because the alternative has bitten somebody:
+
+1. **A digest, not a tag.** A platform that redeploys "the same tag" and
+   behaves differently is a platform nobody can reason about.
+2. **It refuses while a contest or an assessment is live**, by reading
+   `/api/health` — which is partly why `activeContest` is on a health
+   endpoint at all. `FORCE_DEPLOY=1` overrides it, prints what it is
+   overriding, and says so in the deploy log.
+3. **Migrations are off by default.** Auto-migrating on boot runs them N
+   times concurrently during a rolling deploy and applies a bad migration
+   before anyone reads the error. With `RUN_MIGRATIONS=true` the script takes
+   a backup, applies them once, and only then restarts replicas. Whether a
+   migration is expand/contract-safe is a review step, not something the
+   script can check.
+4. **One replica at a time, health-gated** on the BODY (`/api/health`
+   answers 200 even when it is not ok). A bad image takes out one replica
+   rather than the platform, and the previous digest is in the deploy log.
+
+#### What is NOT run here, and what would have to be true
+
+| Artefact | What it needs |
+|---|---|
+| `deploy/compose.app.yml` | a host, a registry with the image, a public hostname and a certificate |
+| `deploy/compose.db.yml` | a second host, and `initdb --data-checksums` at creation (it cannot be turned on later) |
+| `deploy/compose.judge.yml` | a judge host; the worker itself runs natively in WSL2 here, which is how every judging test in this repository runs |
+| `deploy/Caddyfile` | a public hostname for ACME |
+| pgBackRest WAL archiving, offsite | an object store, an `age` key and somewhere offsite to put it |
+
 ### Inactivity: a policy engine, not a kill switch (Phase 8)
 
 **Read this before touching the thresholds, and before anybody asks you to
@@ -1257,3 +1362,9 @@ coordinator from actual runs — never in advance.
 | 10d | 2026-10-20 | The reporter is in the student bundle and not in the exam one, read off the production build | PASS — `web-vitals` is its own 6.6 KB lazy chunk, so the three page loads in four that are not sampled never fetch it; the reporter itself sits in the `(student)` layout chunk (4.0 KB). **Zero chunks under `app/(exam)` contain the beacon endpoint**, which is the property that matters: a locked-down page should make exactly the requests its own protocol describes. `tests/repo/exam-isolation.test.ts` keeps it that way by forbidding the import. Every size budget still met (`/dashboard` 121.5 of 160 KB, `/problems` 123.9 of 170 KB, `/problems/[slug] shell` 173.3 of 220 KB) | Claude |
 | 10d | 2026-10-20 | **Lighthouse CI, run here** against a production build with the reference device's throttling | PASS — `@lhci/cli@0.14.0 autorun`, 3 runs per page, 4× CPU / 3 Mbps / 150 ms / 375×812. `/login` LCP **1,212 ms**, FCP 912, CLS 0, TBT 43, performance 98; `/judge` LCP **2,376 ms**, FCP 1,532, CLS 0, TBT 277, performance 91. Budgets are per page: `/judge` gets the statement page's 2.5 s because it is the platform's longest server-rendered document, raised after the measurement and written into `docs/CAPACITY.md` §8 with the reason — a budget loosened without one is a budget nobody chose. Recorded in full in `docs/CAPACITY.md` §8.4 | Claude |
 | 10d | 2026-10-20 | Three things the first Lighthouse run found, none of them in the product | **ALL FIXED**, and each would otherwise have surfaced on a CI runner nobody was watching. (1) `/problems` was in the audit list and silently **redirected to `/login`** — Lighthouse holds no session, so all six runs measured the sign-in page and the only sign was "Checking assertions against 1 URL(s)"; the fence now refuses a session-guarded page in that list. (2) **The platform had no favicon at all** — `errors-in-console` failed with a 404 for `/favicon.ico`: no `app/icon.*`, no `public/favicon.ico`, no `<link rel="icon">` anywhere, so every page load in every browser logged an error and no tab ever showed a mark. Fixed with `app/icon.svg` and the explicit link the Pages Router sign-in page has to carry itself. (3) **Two assertions could never pass**: a `//` comment key inside `assertions` is read as an audit name, and `no-unload-listeners` and `render-blocking-resources` produce no value under these settings. The config also needed `npx next start` rather than `node_modules/.bin/next` (not a command on Windows) and not `pnpm exec` (the global pnpm on this machine refuses to switch versions) | Claude |
+| 10e | 2026-10-20 | **The restore drill, run here**, into a scratch database | PASS in **67 s** — `scripts/ops/restore-drill.sh` against the dev database in the WSL2 mirror (PostgreSQL 17.11 on 5433). A 56 MB set taken and verified (`pg_restore` reads 1,055 entries; zstd verifies the test data), restored into `recx_drill`, and then the three questions that decide whether a restore is usable: **no drift** (`prisma migrate diff --exit-code` = 0 against the schema in this checkout), every counted table present and equal to the source (User 9, Problem 17, ProblemVersion 18, TestCase 207, TestBlob 334, Submission 1, AuditLog 391), and the unpacked store (145 files) agreeing with the restored rows about the 85 blobs that live in the store rather than inline. Migration head `20261020270200_phase9f_drives_exports`. The scratch database is created and dropped by the drill | Claude |
+| 10e | 2026-10-20 | `verify-backup.sh` refuses a tampered set — four mutations, one control | PASS 4/4 refused, control verified. A changed byte in `database.dump` (digest mismatch, reported with both prefixes); a changed byte in `testdata.tar.zst`; a **manifest** whose digest disagrees with its own file (one digit changed); and **half a set** — `testdata.tar.zst` removed with the manifest untouched, refused with "a half set must never restore". That last one is the failure the one-set rule exists to prevent: a dump restored beside a test-data snapshot from another hour leaves submissions judged against test cases that no longer exist | Claude |
+| 10e | 2026-10-20 | Every refusal in the ops scripts, exercised rather than reviewed | PASS 5/5. `restore.sh` refuses the live database by name and content ("it holds 116 tables… and its name is not one of the scratch shapes") and refuses an unverifiable set **before writing anything**. `deploy.sh` refuses an unset image, refuses one pinned by TAG (`registry.example/recx-web:1.4.2` → "must be pinned by digest"), and refuses to deploy blind when `/api/health` is unreachable ("deploy blind is not a deploy") | Claude |
+| 10e | 2026-10-20 | The deploy gate that matters: a live contest | PASS — exercised against the REAL `/api/health` body with `activeContest` flipped to true, served from a throwaway listener (no contest invented in the database: the script's input is a health body, so that is what was varied). Without an override: **REFUSED** — "a contest or an assessment is LIVE. Students are mid-attempt; a rolling restart drops their SSE streams and their next save races the restart." With `FORCE_DEPLOY=1`: it proceeds and writes "deploying DURING a live contest or assessment, deliberately" to the deploy log, so the override is auditable rather than invisible. It then stops at `docker`, which this machine does not run — the honest boundary of what can be tested here | Claude |
+| 10e | 2026-10-20 | `deploy/compose.{app,db,judge}.yml`, `deploy/Caddyfile`, `deploy/pgbackrest.conf` | **NOT RUN HERE.** One Windows laptop with a WSL2 mirror: no second host, no registry, no public hostname, no certificate, no object store and nowhere offsite. Each file says so at the top, and §2.13 lists what each would need. What is asserted instead, by `tests/repo/deploy-topology.test.ts` (15 tests): every image comes from a `${VAR:?…sha256:…}` so compose REFUSES to start rather than pulling a tag that has moved; the database host publishes **no** port; every judge-host port is bound to that host's monitoring address rather than to every interface (Phase 2: a judge host has no public listener); the app host publishes exactly 80, 443 and 443/udp; no credential appears as a value anywhere in `deploy/` (only `*_FILE` indirection or `${VAR}`); and the backup repository is encrypted with `aes-256-cbc` **before** it leaves the host, with the passphrase in the environment and not in the file | Claude |
+| 10e | 2026-10-20 | The judge host is barely containerised, and the file says why | Recorded because it reads as a mistake: `compose.judge.yml` runs the worker `privileged` with the host's cgroup filesystem. That is what `isolate` needs, and the isolation that matters is between a student's code and everything else — which isolate provides on a host prepared by `infra/judge/install-isolate.sh` and verified at boot by the worker's own hardening check. A rootless container around it would add a second, weaker boundary and break the first. The honest alternative is no container at all: the systemd unit in `infra/judge/systemd/`, which is probably what a college with two judge hosts should use | Claude |

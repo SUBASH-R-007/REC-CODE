@@ -1,0 +1,234 @@
+# REC Code — the APP host (Phase 10e).
+#
+#   docker compose -f deploy/compose.app.yml --env-file deploy/app.env up -d
+#
+# What runs here: Caddy, two web replicas, the scheduler, Redis and MinIO.
+# What does not: Postgres (compose.db.yml) and the judge (compose.judge.yml).
+# SPEC §10's topology, and the split matters — a judge host has no public
+# listener at all and the database host has no application code on it.
+#
+# ── Not run here ───────────────────────────────────────────────────────────
+# This file has never been started: the development machine is one Windows
+# laptop with a WSL2 mirror and no second host. It is written as the artefact
+# the college's ops person will use, and `docs/RUNBOOK.md` §3 records it as
+# NOT RUN with what would have to be true to run it. A row that says NOT RUN
+# is worth more than a row that says PASS about a thing nobody tried.
+#
+# ── Images are pinned by DIGEST, and the file refuses to start otherwise ───
+# Every image comes from a variable with `:?` — compose fails with that
+# message if it is unset, rather than quietly pulling `:latest`. A tag is not
+# a pin: `postgres:17` moves, and an image that moves under a running
+# platform is how a Tuesday becomes an incident. `scripts/ops/deploy.sh`
+# resolves each tag to `name@sha256:…`, records it in the deploy log, and
+# writes it into `deploy/app.env`.
+#
+# ── Secrets ────────────────────────────────────────────────────────────────
+# Docker secrets, decrypted on the host from `sops+age` at deploy time. No
+# `.env` file in git holds one, which `tests/repo/` already enforces, and
+# nothing in this file names a value.
+
+name: recx-app
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # ── The public edge ─────────────────────────────────────────────────────
+  #
+  # HTTP/2 is not an optimisation here, it is a requirement: verdicts arrive
+  # over SSE, and HTTP/1.1 caps a browser at ~6 connections per origin, so a
+  # student with four tabs open starves their own page loads. Caddy speaks
+  # h2 by default and terminates TLS with its own certificate management.
+  caddy:
+    image: ${RECX_CADDY_IMAGE:?set to caddy:2.8-alpine@sha256:... — deploy.sh records the digest}
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge, app]
+    logging: *logging
+
+  # ── The web app, two replicas ───────────────────────────────────────────
+  #
+  # Two because one is a single point of failure during a contest and three
+  # would need PgBouncer (see compose.db.yml). They are interchangeable: no
+  # local state, sessions in Postgres, the SSE fan-out through Redis.
+  #
+  # `judge_verdict_total` and `auth_login_failures_total` live here and are
+  # scraped from BOTH replicas, which is safe because Prometheus sums
+  # counters. The queue GAUGES are on the scheduler for the opposite reason.
+  web:
+    image: ${RECX_WEB_IMAGE:?set to the application image@sha256:... built by CI}
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    command: ["node", "apps/web/server.js"]
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      APP_URL: ${RECX_APP_URL:?the public origin, e.g. https://code.rajalakshmi.edu.in}
+      REDIS_URL: redis://redis:6379
+      TESTDATA_DRIVER: s3
+      TESTDATA_S3_ENDPOINT: http://minio:9000
+      TESTDATA_S3_BUCKET: recx-testdata
+      # Reads go through the pooled URL and migrations through the direct one;
+      # both are files so the password never appears in `docker inspect`.
+      DATABASE_URL_FILE: /run/secrets/database_url
+      AUTH_SECRET_FILE: /run/secrets/auth_secret
+      IP_HASH_PEPPER_FILE: /run/secrets/ip_hash_pepper
+      EXPORT_SIGNING_SECRET_FILE: /run/secrets/export_signing_secret
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      TESTDATA_S3_ACCESS_KEY_FILE: /run/secrets/minio_access_key
+      TESTDATA_S3_SECRET_KEY_FILE: /run/secrets/minio_secret_key
+    secrets:
+      - database_url
+      - auth_secret
+      - ip_hash_pepper
+      - export_signing_secret
+      - metrics_token
+      - minio_access_key
+      - minio_secret_key
+    # The one endpoint that answers while things are broken: 200 with
+    # `ok:false` in the body rather than a 5xx, so this check tells compose
+    # "the process is up" and the deploy script reads the body for the rest.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    networks: [app, data]
+    logging: *logging
+
+  # ── The scheduler: exactly one ──────────────────────────────────────────
+  #
+  # One, and the reconciler takes a Postgres advisory lock anyway, so a
+  # second instance is safe but pointless. It owns the three judge GAUGES
+  # (`judge_queue_depth`, `judge_oldest_job_age_seconds`,
+  # `judge_worker_heartbeat_age_seconds`) precisely because there is one of
+  # it: a gauge read from either of two replicas would be the same Redis
+  # number reported twice.
+  #
+  # METRICS_PORT publishes to the monitoring network only. The listener binds
+  # 127.0.0.1 inside the container, so nothing but this network reaches it.
+  scheduler:
+    image: ${RECX_WEB_IMAGE:?set to the application image@sha256:... built by CI}
+    restart: unless-stopped
+    command: ["node", "apps/scheduler/dist/main.js"]
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      METRICS_PORT: "9101"
+      MAIL_TRANSPORT: smtp
+      DATABASE_URL_FILE: /run/secrets/database_url_direct
+      SMTP_URL_FILE: /run/secrets/smtp_url
+    secrets:
+      - database_url_direct
+      - smtp_url
+    networks: [app, data, monitoring]
+    logging: *logging
+
+  # ── Redis: transport, with a floor under it ─────────────────────────────
+  #
+  # AOF `everysec`, because Redis here is transport rather than truth
+  # (RUNBOOK §2.1) but losing the queue mid-contest still means every
+  # in-flight submission waits for the reconciler to re-enqueue it. One
+  # second of possible loss costs almost nothing and saves that.
+  #
+  # No port published: only the app network reaches it.
+  redis:
+    image: ${RECX_REDIS_IMAGE:?set to redis:7.4-alpine@sha256:... — deploy.sh records the digest}
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [app]
+    logging: *logging
+
+  # ── MinIO: the test-data store ──────────────────────────────────────────
+  #
+  # Problem bundles under immutable versioned keys (SPEC §3c). Not published
+  # publicly: the web app and the judge hosts read it over their own
+  # networks, and a bundle URL is never handed to a browser.
+  minio:
+    image: ${RECX_MINIO_IMAGE:?set to minio/minio:RELEASE...@sha256:... — deploy.sh records the digest}
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_secret_key
+    secrets:
+      - minio_access_key
+      - minio_secret_key
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+    networks: [data, judge]
+    logging: *logging
+
+networks:
+  # Caddy and the internet.
+  edge:
+  # Caddy ↔ web ↔ scheduler.
+  app:
+  # Application ↔ Postgres and MinIO.
+  data:
+  # The judge hosts reach MinIO for bundles, and nothing else here.
+  judge:
+  # Prometheus on the monitoring host scrapes the scheduler over this.
+  monitoring:
+
+volumes:
+  caddy-data:
+  caddy-config:
+  redis-data:
+  minio-data:
+
+# Decrypted on the host by `sops -d` at deploy time, into files that are
+# removed when the deploy finishes. Nothing in this directory is a secret.
+secrets:
+  database_url:
+    file: /run/recx/secrets/database_url
+  database_url_direct:
+    file: /run/recx/secrets/database_url_direct
+  auth_secret:
+    file: /run/recx/secrets/auth_secret
+  ip_hash_pepper:
+    file: /run/recx/secrets/ip_hash_pepper
+  export_signing_secret:
+    file: /run/recx/secrets/export_signing_secret
+  metrics_token:
+    file: /run/recx/secrets/metrics_token
+  minio_access_key:
+    file: /run/recx/secrets/minio_access_key
+  minio_secret_key:
+    file: /run/recx/secrets/minio_secret_key
+  smtp_url:
+    file: /run/recx/secrets/smtp_url
