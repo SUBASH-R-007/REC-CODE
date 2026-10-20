@@ -65,3 +65,4 @@ export * from "./alerts";
 export * from "./metrics";
 export * from "./metrics-registry";
 export * from "./percentile";
+export * from "./vitals";

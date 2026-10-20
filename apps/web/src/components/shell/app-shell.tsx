@@ -5,6 +5,7 @@ import { NotificationsBell } from "@/components/shell/notifications-bell";
 import { PaletteLauncher } from "@/components/shell/palette-launcher";
 import { MobileNav, SidebarFooterNav, SidebarNav } from "@/components/shell/sidebar-nav";
 import { UserMenu } from "@/components/shell/user-menu";
+import { VitalsReporter } from "@/components/shell/vitals-reporter";
 import { UserMenuLink } from "@/components/shell/user-menu-link";
 import { Wordmark } from "@/components/shell/wordmark";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -99,6 +100,14 @@ export async function AppShell({ user, children }: { user: User; children: React
       </main>
 
       <MobileNav />
+      {/*
+        Field vitals, one page load in four (Phase 10d). Here rather than in
+        the root layout on purpose: `app/(exam)` is its own route group with
+        its own layout, so a proctored attempt sends no beacons — a locked
+        down page should make exactly the requests its own protocol
+        describes.
+      */}
+      <VitalsReporter />
     </div>
   );
 }

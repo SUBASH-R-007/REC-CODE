@@ -59,8 +59,20 @@ const UNWRAPPED_ALLOWLIST: Record<string, string | null> = {
   "auth#logout": null,
   "super-impersonate#endImpersonation": "requireImpersonator",
 };
-/** Route handlers that authenticate another way (judge nodes: bearer token; sign-in: the credential itself). */
-const ROUTE_EXEMPT_PREFIXES = ["apps/web/src/app/api/judge/", "apps/web/src/app/api/auth/login/"];
+/** Route handlers that authenticate another way, or have nothing to authenticate (see each entry). */
+const ROUTE_EXEMPT_PREFIXES = [
+  "apps/web/src/app/api/judge/",
+  "apps/web/src/app/api/auth/login/",
+  /**
+   * Field vitals (Phase 10d). It authenticates nothing because there is
+   * nothing to attribute: the body is three fields, the metric and route
+   * must each be one of a closed list, the value is bucketed before it is
+   * stored and the key holds no identity. Its protection is a rate limit per
+   * hashed address and the fact that the caller cannot name the key.
+   * `apps/web/test/vitals.test.ts` asserts all of that.
+   */
+  "apps/web/src/app/api/vitals/",
+];
 
 const actionFiles = findFiles({ under: [ACTIONS_DIR], extensions: [".ts"] }).filter(
   (rel) => !rel.slice(ACTIONS_DIR.length + 1).includes("/"),

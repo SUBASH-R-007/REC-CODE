@@ -2086,3 +2086,67 @@ request. What is open is the browser-cache half, which needs either a
 decision that statements are public or a statement subresource; if the
 college ever puts a CDN in front of the app host, this is the first thing to
 revisit.
+
+### Field vitals have no user id, and "which students see a slow editor" is therefore unanswerable.
+
+`POST /api/vitals` takes a metric, a value and a route pattern. It stores a
+bucketed histogram per metric per route per day in Redis, with a 35-day
+expiry set on every write. There is no user id, no session, no address, and
+the dynamic segment is collapsed in the browser before the beacon goes out:
+`/problems/two-sum` is reported as `/problems/[slug]`.
+
+The trade, stated rather than discovered later: a `WebVital` row per page
+view per student would answer "whose editor is slow" — and would be a
+browsing history with a performance column, in the datastore with the least
+access control over it. The questions this platform actually needs answered
+("is the p75 LCP on the statement page within its 2.5 s budget this week")
+need the route and the number and nothing else.
+
+What is lost is real, and worth naming: a single student on a bad device
+cannot be found from this data, and a complaint ("the editor is slow for me")
+cannot be confirmed or refuted from it. The answer to that is the `perf`
+Playwright project on a device, not a per-student table.
+
+### A vitals report is attributed to the route the document was LOADED with.
+
+LCP, FCP and TTFB are document-level, and CLS and INP accumulate over a
+document's life. The handlers are registered once per document, so a layout
+shift caused by a client-side navigation to `/leaderboard` is attributed to
+whatever route the student entered on — usually `/dashboard`.
+
+Re-registering per navigation would double-count, which is worse. The
+honest alternatives are to accept the attribution (what is done) or to
+report a route change as a new "page view" with its own partial metrics,
+which web-vitals v4 supports but which needs a reset discipline this
+platform has no use for yet. Revisit if a route's p75 ever looks wrong in a
+way that only SPA navigation explains.
+
+### One page load in four reports, so a quiet day has thin data.
+
+`VITALS_SAMPLE_RATE` is 0.25. A p75 per route per day needs tens of samples,
+and a contest hour will produce thousands; a quiet Sunday on a small route
+may produce five, and `vitalPercentile` will happily compute a percentile
+from five samples. Nothing in the pipeline marks that as thin.
+
+The fix, if it ever matters, is to report the total alongside the bucket —
+`vitalPercentile` already returns it — and to refuse to draw a p75 under
+some minimum. Not done, because there is no dashboard yet to draw it on.
+
+### Lighthouse CI's budgets are enforced in CI, which this repository has never run.
+
+`apps/web/lighthouserc.json` holds the assertions and
+`.github/workflows/ci.yml` runs them against a production build with the
+reference device's throttling. The configuration was validated by running
+`@lhci/cli` locally against a production build (recorded in
+`docs/RUNBOOK.md` §3), which is the part that can be done here; the GitHub
+job itself has never run, because nothing in this project has ever been
+pushed.
+
+What that leaves open: whether the budgets pass on a CI runner. The numbers
+come from `docs/CAPACITY.md` §8 and are targets for the reference device,
+and §7.2 already records that this development laptop does not meet the
+editor's timing targets under its own load. A runner is a different machine
+again. The first CI run will say, and the honest expectation is that one or
+two assertions will need a documented adjustment — which must be an
+adjustment with a reason in CAPACITY.md, not a quiet loosening of the
+budget.

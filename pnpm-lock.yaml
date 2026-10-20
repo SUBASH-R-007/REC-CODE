@@ -214,6 +214,9 @@ importers:
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
+      web-vitals:
+        specifier: ^4
+        version: 4.2.4
       yauzl:
         specifier: 3.4.0
         version: 3.4.0
@@ -2735,6 +2738,9 @@ packages:
   w3c-keyname@2.2.8:
     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
 
+  web-vitals@4.2.4:
+    resolution: {integrity: sha512-r4DIlprAGwJ7YM11VZp4R884m0Vmgr6EAKe3P+kO0PPj3Unqyvv59rczf6UiGcb9Z8QxZVcqKNwv/g0WNdWwsw==}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -4951,6 +4957,8 @@ snapshots:
       - yaml
 
   w3c-keyname@2.2.8: {}
+
+  web-vitals@4.2.4: {}
 
   which@2.0.2:
     dependencies:

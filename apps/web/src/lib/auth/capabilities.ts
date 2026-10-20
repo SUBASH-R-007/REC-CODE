@@ -853,11 +853,21 @@ export const PUBLIC_ACTIONS: readonly ActionRef[] = Object.freeze(["auth#logout"
  *     token unset the endpoint is disabled, and a wrong token gets a 404
  *     rather than a 401, which would advertise that an endpoint worth
  *     guessing a token for exists.
+ *   - `/api/vitals` takes a performance number from a browser and stores it
+ *     in a histogram with no identity in the key. A session would buy
+ *     nothing — there is nobody to attribute the number to — and would cost
+ *     the measurements that matter most: a beacon fires while the document
+ *     is being torn down, which is exactly when a cookie may have expired.
+ *     What makes it safe is the shape of what it can do: three fields, a
+ *     closed list of metrics and routes, bucketed before storage, rate
+ *     limited per hashed address, and 204 to everything so it cannot be used
+ *     to enumerate anything.
  */
 export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
   "app/api/auth/login/route.ts#POST",
   "app/api/health/route.ts#GET",
   "app/api/metrics/route.ts#GET",
+  "app/api/vitals/route.ts#POST",
 ] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];

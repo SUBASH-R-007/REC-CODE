@@ -889,6 +889,24 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * on the one host with a public listener.
      */
     "api/metrics/route.ts#GET": { call: call(() => studentRequest("/api/metrics")), status: [404] },
+    /**
+     * Phase 10d. `/api/vitals` answers 204 to everything — what it accepts
+     * and what it drops — because a beacon has nobody to report an error to
+     * and a 400 on an unknown metric would be a way to enumerate the list.
+     * The sweep's job is the body: there is none, so there is nothing to
+     * leak, and nothing it writes carries an identity (asserted in
+     * `apps/web/test/vitals.test.ts`).
+     */
+    "api/vitals/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/vitals", {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: JSON.stringify({ metric: "LCP", value: 1234, route: "/dashboard" }),
+        }),
+      ),
+      status: [204],
+    },
     "api/placement/export/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/placement/export", {

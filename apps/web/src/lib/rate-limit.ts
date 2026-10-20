@@ -27,6 +27,16 @@ export const LOGIN_RATE_LIMITS = {
   ip: { limit: 20, windowMs: FIFTEEN_MINUTES },
 } as const satisfies Record<string, RateLimitRule>;
 
+/**
+ * Field vitals (Phase 10d): per hashed client address.
+ *
+ * 120 a minute is a generous page-load rate for one browser — a student
+ * clicking through the problem list fast samples one in four of those — and
+ * a useless write rate for anybody who found the endpoint and wanted to fill
+ * Redis with it.
+ */
+export const VITALS_RATE_LIMIT = { limit: 120, windowMs: 60_000 } as const satisfies RateLimitRule;
+
 export interface RateLimitDecision {
   allowed: boolean;
   /** Budget left after this attempt (0 when refused). */

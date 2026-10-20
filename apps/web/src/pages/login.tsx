@@ -85,6 +85,14 @@ export default function LoginPage({ error, identifier, invalid, focus }: Props) 
       <Head>
         <title>{`${error ? "Sign-in failed — " : ""}Sign in · ${PRODUCT_NAME}`}</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/*
+          The App Router emits this link from app/icon.svg; a Pages Router
+          page has to say it itself. Without it the browser falls back to
+          requesting /favicon.ico, which does not exist — a 404 and a console
+          error on the one page every student starts from. Found by
+          Lighthouse's errors-in-console audit (Phase 10d).
+        */}
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <meta
           name="description"
           content={`${PRODUCT_NAME} is the coding practice platform of ${COLLEGE_NAME}: original problems, instant judging and progress you can see.`}

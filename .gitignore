@@ -12,6 +12,8 @@ apps/web/public/monaco/
 .turbo/
 playwright-report/
 test-results/
+# Lighthouse CI reports (Phase 10d)
+.lighthouseci/
 *.log
 .DS_Store
 

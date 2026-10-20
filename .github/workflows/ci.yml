@@ -371,3 +371,94 @@ jobs:
         run: |
           promtool check config infra/monitoring/prometheus.yml
           promtool check rules infra/monitoring/alerts.yml
+
+  # Lighthouse CI against a production build with the reference device's
+  # throttling (docs/CAPACITY.md §8, where every number is explained).
+  #
+  # Its own job, deliberately: Lighthouse is slow and flaky under contention,
+  # and a flaky gate sharing a job with the axe one makes people re-run both
+  # — which is how an accessibility gate stops being trusted.
+  #
+  # `next start` rather than `next dev`: a dev-server timing says nothing
+  # about production (CAPACITY.md §7.3 records how little). The two URLs are
+  # the pages reachable without a session; the workspace needs one, so its
+  # budget is enforced by the `perf` Playwright project instead.
+  lighthouse:
+    name: Lighthouse (reference device budgets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: recx
+          POSTGRES_PASSWORD: recx-dev-only
+          POSTGRES_DB: recx_lh
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U recx -d recx_lh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      # CI-only values. Never used by any deployment.
+      DATABASE_URL: postgresql://recx:recx-dev-only@localhost:5433/recx_lh
+      DATABASE_URL_DIRECT: postgresql://recx:recx-dev-only@localhost:5433/recx_lh
+      REDIS_URL: redis://127.0.0.1:6379
+      IP_HASH_PEPPER: ci-only-pepper-not-used-in-any-deployment
+      APP_URL: http://localhost:3210
+      NEXT_TELEMETRY_DISABLED: "1"
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-lh-1
+      SEED_STUDENT_PASSWORD: ci-only-student-password-lh-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      # /problems renders the catalogue, so it needs the seeded problem.
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: Build
+        run: pnpm --filter @recx/web build
+
+      # The assertions live in apps/web/lighthouserc.json so they can be run
+      # by hand with the same numbers CI uses.
+      - name: Lighthouse CI
+        working-directory: apps/web
+        run: npx --yes @lhci/cli@0.14.0 autorun
+
+      - name: Upload the Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: apps/web/.lighthouseci
+          retention-days: 14
+          if-no-files-found: ignore

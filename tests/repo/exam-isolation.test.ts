@@ -33,6 +33,16 @@ const FORBIDDEN: ReadonlyArray<{ readonly pattern: RegExp; readonly why: string 
   { pattern: /theme-toggle|theme-switch/, why: "the theme is fixed at start: no mid-exam repaint" },
   { pattern: /\bxp\b|xp-chip/, why: "no XP chip inside an exam" },
   { pattern: /impersonation/, why: "an impersonated session cannot sit an exam" },
+  /**
+   * Phase 10d. A locked-down page should make exactly the requests its own
+   * protocol describes: a beacon leaving an attempt is something an
+   * invigilator would have to explain, and a student watching the network
+   * tab during an exam should see nothing they cannot account for. The
+   * reporter is mounted in the app shell, which the exam tree already
+   * cannot reach — this entry is here so that stays true if somebody moves
+   * it to the root layout.
+   */
+  { pattern: /vitals|web-vitals/, why: "no field-vitals beacon leaves a proctored attempt" },
 ];
 
 interface Violation {
