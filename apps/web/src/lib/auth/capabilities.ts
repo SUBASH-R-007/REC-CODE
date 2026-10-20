@@ -839,8 +839,26 @@ export const IMPERSONATOR_ACTIONS: readonly ActionRef[] = Object.freeze(["super-
 /** Needs no session: signing out must always work (it is not wrapped in runAction). */
 export const PUBLIC_ACTIONS: readonly ActionRef[] = Object.freeze(["auth#logout"] as const);
 
-/** Needs no session: the sign-in form posts here (the credential is the authentication). */
-export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze(["app/api/auth/login/route.ts#POST"] as const);
+/**
+ * Needs no session. Three, and each for a different reason:
+ *
+ *   - the sign-in form posts to login, where the credential IS the
+ *     authentication;
+ *   - `/api/health` is read by a load balancer and by the deploy script,
+ *     neither of which has a session, and it discloses nothing a visitor
+ *     could not infer — counts, never names, ids or slugs;
+ *   - `/api/metrics` is authenticated by a BEARER TOKEN rather than by a
+ *     role (`METRICS_TOKEN`), because the caller is Prometheus. It is listed
+ *     here because it holds no session, not because it is open: with the
+ *     token unset the endpoint is disabled, and a wrong token gets a 404
+ *     rather than a 401, which would advertise that an endpoint worth
+ *     guessing a token for exists.
+ */
+export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
+  "app/api/auth/login/route.ts#POST",
+  "app/api/health/route.ts#GET",
+  "app/api/metrics/route.ts#GET",
+] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];
 export type PlacementCapabilityKey = (typeof PLACEMENT_CAPABILITIES)[number]["key"];

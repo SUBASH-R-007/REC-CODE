@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@prisma/client": "6.16.2",
+    "@prometheus-io/client": "0.16.1",
     "@recx/db": "workspace:*",
     "@recx/shared": "workspace:*",
     "bullmq": "^5.56.0",

@@ -13,6 +13,7 @@
     "test:integration": "RECX_ISOLATE_INTEGRATION=1 vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@prometheus-io/client": "0.16.1",
     "@recx/shared": "workspace:*",
     "bullmq": "^5.56.0",
     "ioredis": "^5.7.0",

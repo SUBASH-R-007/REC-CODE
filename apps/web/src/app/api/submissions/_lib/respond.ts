@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import type { StudentView } from "@/lib/judge/view";
 import { newSubscriber } from "@/lib/redis";
 import { getStudentView, type Viewer } from "@/server/queries/submissions";
+import { sseClosed, sseOpened, submissionCompleted } from "@/lib/metrics";
 
 /**
  * Shared by /api/submissions/[id](/stream) and /api/runs/[id](/stream): the
@@ -95,10 +96,21 @@ export async function streamResponse(request: Request, kind: ViewableKind, rawId
   let ping: ReturnType<typeof setInterval> | undefined;
   let lifetime: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
+  /** The latency histogram takes one sample per stream, not one per snapshot. */
+  let observed = false;
 
   const cleanup = () => {
     if (closed) return;
     closed = true;
+    /**
+     * Phase 10a. Decremented HERE, in the one function every exit path goes
+     * through — the abort listener, the lifetime timeout, a failed enqueue
+     * and a normal close all call it, and the `closed` guard makes it
+     * idempotent. A decrement at any individual exit would leak the gauge
+     * upwards on the paths somebody forgot, and a gauge that only ever rises
+     * reads as a connection leak that is not happening.
+     */
+    sseClosed();
     if (ping) clearInterval(ping);
     if (lifetime) clearTimeout(lifetime);
     if (onAbort) request.signal.removeEventListener("abort", onAbort);
@@ -109,6 +121,7 @@ export async function streamResponse(request: Request, kind: ViewableKind, rawId
     }
   };
 
+  sseOpened();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const write = (chunk: string) => {
@@ -129,6 +142,30 @@ export async function streamResponse(request: Request, kind: ViewableKind, rawId
           // Already closed by the client.
         }
       };
+      /**
+       * Phase 10a. `submission_e2e_latency_seconds` is observed HERE, where
+       * the student's wait ends — not in the worker, where the judge's work
+       * ends. The number that matters includes the queue: a histogram taken
+       * inside the worker would report a comfortable 1.2 seconds while a
+       * student watched a spinner for forty.
+       *
+       * Taken from the row's own `createdAt` rather than from a timer in this
+       * request, because the student may have opened the stream late (a
+       * reload, a second tab) and the wait started when they pressed Submit.
+       */
+      const observeOnce = (view: { createdAt: string }) => {
+        /**
+         * SUBMISSIONS only. A Run is a different and much shorter thing — two
+         * sample cases against no hidden tests — and folding its latency into
+         * the same histogram would drag the p95 down and make the 30-second
+         * alert fire late on the metric that is supposed to catch it.
+         */
+        if (observed || kind !== "submission") return;
+        observed = true;
+        const started = Date.parse(view.createdAt);
+        if (Number.isFinite(started)) submissionCompleted((Date.now() - started) / 1000);
+      };
+
       /** Re-read the row; send it; finish if terminal. */
       const refresh = async () => {
         const view = await getStudentView(kind, id, viewer).catch(() => null);
@@ -136,6 +173,7 @@ export async function streamResponse(request: Request, kind: ViewableKind, rawId
         if (!view) return close();
         send("snapshot", view);
         if (view.terminal) {
+          observeOnce(view);
           send("done", {});
           close();
         }
@@ -143,6 +181,12 @@ export async function streamResponse(request: Request, kind: ViewableKind, rawId
 
       send("snapshot", initial);
       if (initial.terminal) {
+        /**
+         * Deliberately NOT observed on this path. A terminal verdict that was
+         * already reached before the stream opened is a reload or a second
+         * tab, and counting it would measure how long the student took to
+         * come back rather than how long the judge took.
+         */
         send("done", {});
         return close();
       }

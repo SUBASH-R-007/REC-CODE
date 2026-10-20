@@ -53,7 +53,7 @@ of its security half already. Taking stock first, so nothing is rebuilt:
 | Server-side sanitisation of statements | **Done** (Phase 3) | `packages/shared/src/sanitize.ts` |
 | Rate limits (Redis sliding window) | **Done** (Phase 1/4) | `apps/web/src/lib/rate-limit.ts` |
 | Lockfile committed, pinned toolchains | **Done** | `pnpm-lock.yaml`, `infra/judge/toolchains/*` |
-| Judge under 20 direct dependencies | **Done** (asserted) | `tests/repo/judge-deps.test.ts` |
+| Judge under 20 direct dependencies | **True today (5), never asserted** | fence added in 10f |
 | CI: lint, typecheck, test, build, size, axe, keyboard, isolate | **Done** (Phase 1–7) | `.github/workflows/ci.yml` |
 | Judge host hardening, nftables, blacklist | **Done** (Phase 2) | `infra/judge/*` |
 | `docs/CAPACITY.md`, `RUNBOOK.md`, `SECURITY.md`, `ACCESSIBILITY.md` | Exist, incomplete | `docs/` |
@@ -366,6 +366,9 @@ while one is live unless `FORCE_DEPLOY=1`.
     recorded with a date and a name.
 13. **The drift check** (`prisma migrate diff --exit-code`) passes in CI.
 14. **Lighthouse CI** meets the reference-device budgets.
+15. **The judge worker's direct dependency count stays under twenty.** True
+    today at five and never asserted, which is what taking stock is for.
+    Adding `prom-client` makes it six.
 
 Manual, from the spec's own line: pull the plug on a judge host mid-contest
 and confirm leases reclaim, the reconciler re-enqueues and no submission is

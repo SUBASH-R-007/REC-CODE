@@ -29,6 +29,13 @@ const schema = z.object({
     .string()
     .min(32, "EXPORT_SIGNING_SECRET must be at least 32 characters.")
     .default("dev-only-export-signing-secret-change-me"),
+  /**
+   * Bearer token for GET /api/metrics (Phase 10a). UNSET DISABLES the
+   * endpoint, which is the safe default on the one host with a public
+   * listener — "no token means no check" is how a metrics endpoint ends up
+   * open to the internet.
+   */
+  METRICS_TOKEN: z.string().min(24, "METRICS_TOKEN must be at least 24 characters.").optional(),
   /** Test-data store driver: local filesystem (dev/CI) or S3/MinIO. */
   TESTDATA_DRIVER: z.enum(["local", "s3"]).default("local"),
   TESTDATA_DIR: z.string().default("./storage/testdata"),

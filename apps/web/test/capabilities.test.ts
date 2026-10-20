@@ -332,6 +332,23 @@ describe("every action's real guard admits exactly its capability's roles", () =
 describe("route handlers are bound and guarded", () => {
   const routeFiles = walk(path.join(SRC, "app"), (n) => n === "route.ts");
   const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+  /**
+   * Operational endpoints that must be bound although they are GETs.
+   *
+   * The rule below requires admin and super routes plus every MUTATING API
+   * route, so a GET under `app/api` is not required by default — reasonable
+   * for the student reads, which are covered by the exposure sweep instead.
+   * These two are different: they are deliberately UNAUTHENTICATED surfaces
+   * added in Phase 10a, and an unauthenticated endpoint is exactly the kind
+   * that should be declared rather than overlooked.
+   *
+   * Widening the rule to every API GET would be stricter still, and is worth
+   * doing — it is recorded in docs/OPEN-QUESTIONS.md rather than done here,
+   * because it would require binding a dozen student reads in a slice about
+   * metrics.
+   */
+  const REQUIRED_GETS = ["app/api/health/route.ts#GET", "app/api/metrics/route.ts#GET"];
+
   /** Route methods that must be bound: admin and super trees, plus every mutating API route except judge-node ones. */
   const required = routeFiles.flatMap((rel) => {
     const fns = exportedFunctionTexts(readFileSync(path.join(SRC, rel), "utf8"), rel);
@@ -344,6 +361,7 @@ describe("route handlers are bound and guarded", () => {
       )
       .map((m) => `${rel}#${m}`);
   });
+  for (const ref of REQUIRED_GETS) if (!required.includes(ref)) required.push(ref);
   const owners = new Map<string, Array<{ owner: string; roles: readonly string[] | null }>>();
   for (const c of CAPABILITIES) for (const r of c.routes ?? []) owners.set(r, [...(owners.get(r) ?? []), { owner: c.key, roles: c.roles }]);
   for (const r of PUBLIC_ROUTES) owners.set(r, [...(owners.get(r) ?? []), { owner: "PUBLIC_ROUTES", roles: null }]);
@@ -351,6 +369,9 @@ describe("route handlers are bound and guarded", () => {
   it("finds the admin import route and the super export route (sanity)", () => {
     expect(required).toContain("app/api/admin/problems/import/route.ts#POST");
     expect(required).toContain("app/super/data/exports/[id]/route.ts#GET");
+    // Phase 10a: the two unauthenticated operational endpoints.
+    expect(required).toContain("app/api/health/route.ts#GET");
+    expect(required).toContain("app/api/metrics/route.ts#GET");
   });
 
   it("every required route method is bound exactly once; nothing stale is bound", () => {

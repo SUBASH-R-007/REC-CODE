@@ -17,6 +17,7 @@ import {
 } from "@recx/shared";
 import { db } from "@/lib/db";
 import type { AttemptGuardOk } from "@/lib/exam/attempt";
+import { proctorEventRecorded } from "@/lib/metrics";
 
 /**
  * Ingesting client telemetry (Phase 6c).
@@ -200,6 +201,17 @@ export async function ingestProctorEvents(
       : db.proctorEvent.count({ where: { attemptId: attempt.id, atMs: -1 } }),
     db.assessmentAttempt.updateMany({ where: { id: attempt.id, version: attempt.version }, data }),
   ]);
+
+  /**
+   * Phase 10a. Counted AFTER the transaction commits, so the metric counts
+   * events that are recorded rather than events that were attempted — a
+   * counter that moved on a rolled-back write would make
+   * `proctor_event_total` disagree with the table it is supposed to describe.
+   *
+   * The TYPE only. A per-attempt label would put a per-student behavioural
+   * record on the monitoring host, which no retention policy reaches.
+   */
+  for (const row of rows) proctorEventRecorded(row.kind);
 
   if (written.count !== 1) {
     // Another writer (a heartbeat, another flush) moved the row first. The

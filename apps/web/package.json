@@ -29,6 +29,7 @@
     "@lezer/highlight": "^1.2.1",
     "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "6.16.2",
+    "@prometheus-io/client": "0.16.1",
     "@recx/db": "workspace:*",
     "@recx/design": "workspace:*",
     "@recx/shared": "workspace:*",

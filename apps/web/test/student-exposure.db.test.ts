@@ -876,6 +876,19 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // Phase 9e. The placement CSV. A student must be refused with exactly
     // Forbidden and no part of the file — the body check below is what
     // catches a route that built the CSV before checking the role.
+    /**
+     * Phase 10a. `/api/health` answers everybody — it is read by a load
+     * balancer with no session — so the sweep's job here is to prove it
+     * discloses nothing: counts, never a name, an id or a slug, and no
+     * canary.
+     */
+    "api/health/route.ts#GET": { call: call(() => studentRequest("/api/health")), status: [200] },
+    /**
+     * And `/metrics` is 404 for a student, because `METRICS_TOKEN` is unset
+     * in the fixture: unset DISABLES the endpoint, which is the safe default
+     * on the one host with a public listener.
+     */
+    "api/metrics/route.ts#GET": { call: call(() => studentRequest("/api/metrics")), status: [404] },
     "api/placement/export/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/placement/export", {
