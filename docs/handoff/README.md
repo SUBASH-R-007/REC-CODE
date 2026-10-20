@@ -24,8 +24,17 @@ that review has happened or been dropped.
 | 3 Student product surface | Gated 2026-10-10 |
 | 4 Authoring, admin, `/super` | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
 | 5 Contests | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
-| 6 Assessments and proctoring | **In progress** — 6a, 6b done (`docs/handoff/phase6/DESIGN.md`); 6c, 6d, 6e next |
-| 7–10 | Not started. Draft designs exist (`docs/handoff/phaseN/DESIGN.md`), each with a "Review findings — fix before implementing" section an independent pass produced; settle those first |
+| 6 Assessments and proctoring | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
+| 7 Aptitude, verbal and logical reasoning | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
+| 8 Inactivity as a policy engine | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
+| 9 Placement readiness | Gated 2026-10-20 — both platforms, 8,466 tests, nothing skipped (`docs/RUNBOOK.md` §3) |
+| 10 Ops, observability, performance, hardening | **Closing** — 10a–10f done (`docs/handoff/phase10/DESIGN.md`); see `docs/RUNBOOK.md` §3 for the drills, and §2.12–2.13 for the alerts and the backup/deploy procedures |
+
+Phase 10's own design document records, per slice, what was built and what was
+deliberately NOT built here — the multi-host topology, pgBackRest offsite and
+the monitoring VM are written and unstarted, each with a NOT RUN row in
+`docs/RUNBOOK.md` §3 saying what would have to be true to run them. Read those
+rows before assuming anything in `deploy/` has ever been started.
 
 ## Phase 4: what is done
 

@@ -420,25 +420,99 @@ role. Every `/super` page calls `requireSuperAdminPage()` itself.
 
 ---
 
-## 11. Planned (Phase 10)
+## 10a. Observability is a datastore, and it is treated as one (Phase 10)
 
-Not in place today. Listed so nobody assumes otherwise.
+Prometheus is scraped by another host, retained for months and rendered on
+dashboards people photograph into chat. It is the least access-controlled
+datastore in the system, so what reaches it is a security decision rather
+than an engineering convenience.
 
-| Item | What it adds |
-|---|---|
-| **OIDC sign-in** via the LMS | single sign-on; passwords become a fallback |
-| **sops + age** | encrypted deployment secrets in the repository, decrypted only on the target host |
-| **Rate limits everywhere** | today only sign-in is rate-limited (submissions and Runs have per-user in-flight caps); Phase 10 covers every action and route handler, including `/api/judge/*` |
-| **Dependabot** | automated dependency and GitHub Actions update PRs |
-| Audit terminal-hash export | ships each day's terminal hash off-box, closing the superuser gap in §8 |
-| Redis ACLs for judge nodes | limits a node's Redis user to the queue keys and progress channels |
+**No metric label may identify a person.** Not a user id, a college id, a
+handle, an attempt id or a submission id. The whole label vocabulary of the
+platform is six names — `queue` (a judge lane), `worker` (a host name),
+`language` (a catalogue key), `verdict`, `type` (a proctor signal type) and
+`reason` (a sign-in failure code) — and every one is a bounded set that is
+not a person. `buildMetrics` **throws at startup** on a forbidden label, so a
+process that would publish a student's id to the monitoring host does not
+start; `apps/web/test/metrics-contract.test.ts` asserts it over the served
+exposition text rather than over the declaration, because the text is what
+leaves the process.
+
+That rule decides two specific designs:
+
+* `proctor_event_total{type}` carries the TYPE only. A per-attempt proctor
+  counter would be a per-student behavioural record in the one place no
+  retention policy reaches.
+* **Field vitals carry no user id at all** (`POST /api/vitals`): a metric, a
+  value and a route PATTERN, bucketed before storage, with the dynamic
+  segment collapsed in the browser — `/problems/two-sum` is reported as
+  `/problems/[slug]`. A `WebVital` row per page view per student would answer
+  "whose editor is slow" and would be a browsing history with a performance
+  column. The cost is stated in `docs/OPEN-QUESTIONS.md`: that question is
+  unanswerable from this data, by design.
+
+**`/metrics` is not public.** On the two Node processes it binds 127.0.0.1
+and compose publishes it to the monitoring network only; on web — the one
+host with a public listener — it is a route handler behind a bearer token
+(`METRICS_TOKEN`, its own secret). With the token unset the endpoint is
+DISABLED rather than open, and a wrong token gets a **404 rather than a
+401**, because a 401 advertises that an endpoint worth guessing a token for
+exists.
+
+**`/api/health` is unauthenticated and says nothing a visitor could not
+infer**: states and counts, never a name, an id or a slug. `activeContest`
+is a boolean and `activeContests` a count — an operator needs to know
+whether something is running and a stranger must not learn which.
+
+**The vitals endpoint is unauthenticated and writes.** What makes that safe
+is the shape of what it can do: three fields and no more (a fourth key is
+refused rather than stripped), a closed list of metrics and of routes so the
+caller never names the Redis key, a rate limit per hashed address, and 204
+for everything — what it accepts and what it drops — so it cannot be used to
+enumerate anything.
+
+## 10b. The judge worker's dependency surface stays small (Phase 10)
+
+The judge worker keeps **under twenty direct dependencies** — six today —
+and `tests/repo/judge-dependencies.test.ts` asserts both the count and the
+list. It has been true since Phase 2 and was never asserted, which is how a
+number that is true by accident becomes false without anybody noticing.
+
+The reason it matters on this process and not on the web app: the worker
+runs a stranger's code on a host with a setuid sandbox, and every direct
+dependency is a package that gets to run *before* the sandbox does. A
+supply-chain compromise in the web app is a serious incident; one in the
+judge worker is arbitrary code on the machine whose whole job is to contain
+arbitrary code. The same fence refuses a database client, an HTTP server or
+anything else that could turn networking on, one level above the
+environment check that already refuses a key matching `/DATABASE|NET/i`.
+
+---
+
+## 11. Still planned, after Phase 10
+
+Phase 10 closed the observability and operations half of the list this
+section used to hold (§10a, §10b, and `docs/RUNBOOK.md` §2.12–2.13). What is
+left is listed here so nobody assumes otherwise, with what each one is
+waiting on — "planned" with no condition attached is how an item stays on a
+list for two years.
+
+| Item | What it adds | Waiting on |
+|---|---|---|
+| **OIDC sign-in** via the LMS | single sign-on; passwords become a fallback | the college's identity provider, and a decision about who owns the mapping from an LMS identity to a `User` row |
+| **Rate limits on every route** | today: sign-in, the privileged operations, and `/api/vitals`. The judge endpoints are authenticated by a node token and bounded by the lease, which is not the same thing | nothing external; it is a slice of work, and the shape is `lib/rate-limit.ts` plus a rule per route |
+| **Redis ACLs for judge nodes** | limits a node's Redis user to the queue keys and progress channels; today a compromised node's token is narrow but its Redis access is not | a deployment, because the ACL has to be provisioned where Redis runs |
+| **Audit terminal-hash export** | ships each day's terminal hash off-box, closing the superuser gap in §8 | somewhere off-box to ship it to; the monitoring host is the obvious candidate and does not exist yet |
+| **GlitchTip** (not Sentry SaaS) | stack traces with student data stay on college infrastructure | a host to run it on |
+| **Dependabot** | automated dependency and Actions update PRs | nothing: `.github/dependabot.yml` is committed and takes effect the first time this repository is pushed |
+| **sops + age** | encrypted deployment secrets, decrypted only on the target host | the `age` key pair. `deploy/compose.*.yml` already takes every credential through Docker secrets and names this as the mechanism; nothing is encrypted in the repository yet because there is nothing deployed |
 
 ## 12. Accepted findings
 
 | Finding | Severity | Why accepted | Revisit when |
 |---|---|---|---|
-| `style-src 'unsafe-inline'` | Low | §5: a style nonce would break React style attributes and Monaco | React/Monaco no longer need inline styles |
-| A superuser can rewrite an audit day before export | Medium | §8: needs off-box export | Phase 10 export ships |
+| `style-src 'unsafe-inline'` | Low | §5: a style nonce would break React style attributes and Monaco. SPEC §10's own instruction: try the nonce-only policy, and if the editor breaks keep this and document the trade rather than spending a week on it — a low-severity finding against a non-working editor is not a trade worth making | React/Monaco no longer need inline styles |
+| A superuser can rewrite an audit day before export | Medium | §8: needs off-box export, which needs somewhere off-box. Phase 10 did NOT close this — §11 says what it waits on | the terminal-hash export ships (a monitoring host is the obvious destination) |
 | Hidden-test input secrecy is best-effort | Medium for assessments | a program is handed its input | per-attempt test data for assessments |
 | A compromised judge host can forge results for jobs it claims | Medium | the residual risk of any remote judge; contained to claimed jobs | rejudge-on-second-node for assessments |
 | Sign-in rate limiter fails open when Redis is down | Low | §2: availability over strictness, Argon2id cost still applies | — |

@@ -2209,3 +2209,53 @@ platform, `prisma/migrations` present (the health endpoint counts the
 folder), the judge worker and scheduler as separate entrypoints from the same
 image, and no toolchain in it at all — those belong to the judge image, which
 `infra/judge/` already defines.
+
+### The manual items carried out of earlier phases, and why each is still open.
+
+Phase 10 closes with these outstanding. They are listed together because a
+deferred manual check that is not written down anywhere becomes a check
+nobody remembers was never done.
+
+| Item | From | Why it is still open |
+|---|---|---|
+| A full assessment sat with a **screen reader in each proctor mode** | 6 | An hour or more per mode, with NVDA, actually sitting it. Clicking through it quickly would produce a gate row that says PASS and means nothing. `docs/ACCESSIBILITY.md` §6 now says so rather than implying every gate included one |
+| **Drop the network mid-attempt** and watch the save path | 6 | Producible here (the service worker and the write-ahead to IndexedDB exist), and it needs a person watching a real attempt rather than a script: the question is what the student SEES, which is the one thing automation here cannot judge |
+| Sit a full seeded **TCS-NQT mock** end to end | 7 | Two hours of sitting. The sections, the per-section clocks and the auto-submit are covered by tests; what is not is the experience of the whole thing |
+| Import a **300-question CSV with three broken rows** | 7 | The importer's row-level errors are unit-tested; what is untested is whether a staff member can tell from the report which three rows to fix |
+| Read a **Phase 8 dry-run sweep report** end to end | 8 | The sweep's dry run is tested; the report is for a human to read before a live run, and nobody has read one |
+| **axe on `/account/leave` and `/account/reactivate`** | 8 | Both are in the suite's page list now; what was deferred was the manual pass at 400% zoom |
+| The **readiness card for three lopsided students** | 9 | Needs three seeded students with deliberately uneven profiles. The arithmetic is unit-tested; the question is whether the card reads as fair to the student it describes |
+| The **nightly job, dry-run then live**, read end to end | 9 | Producible here; it is a reading task, not a scripting one |
+
+None of these is blocked by anything external. Every one is a person-hours
+item, and the honest reason they are open is that they are person-hours
+items. The two Phase 10 manual items the spec named — the judge plug-pull and
+the Redis restart — were done (`docs/RUNBOOK.md` §3), and the plug-pull found
+a bug that none of the automated suites had, which is the argument for
+getting through the rest of this list rather than retiring it.
+
+### Prometheus never evaluated these rules; `promtool test rules` would close that.
+
+Recorded in the 10b section above and repeated here because it is the one
+observability gap that survives the phase: `reduce` in
+`packages/shared/src/alerts.ts` mirrors each alert expression and the harness
+asserts the number crosses, but nothing on this machine has watched
+Prometheus itself evaluate `histogram_quantile(0.95, …)` over these buckets.
+`promtool test rules` takes a unit-test file of series and expected alerts;
+this repository could write one today and cannot run it.
+
+### GlitchTip is configured nowhere, and that is a deliberate gap rather than an oversight.
+
+SPEC §10 asks for GlitchTip rather than Sentry SaaS, so that stack traces
+containing student data stay on college infrastructure. There is no host to
+run it on, and adding a DSN to the application now would mean either
+pointing it at nothing or pointing it at a SaaS — the second being the thing
+the spec rules out. What exists instead: pino JSON on stdout, which the
+compose files rotate, and `console.error` with a reference id on every
+unexpected path (`lib/errors.ts`), so an incident is traceable from a
+student's reference number without an error tracker.
+
+What to do when the host exists: add the DSN as a Docker secret, initialise
+in `instrumentation.ts`, and **scrub before send** — the same label rule the
+metrics follow, because a stack trace carries local variables and those
+include a student's code.

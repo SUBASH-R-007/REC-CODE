@@ -29,7 +29,14 @@ export interface FakeRun {
   files?: Record<string, { data: string | Buffer; mode?: number }>;
 }
 
-export type FakeHandler = (request: ExecRequest, box: ReadonlyMap<string, FakeFile>) => FakeRun;
+/**
+ * A handler sees the box it is running in, and may CHANGE it: that is how a
+ * test models a box that is not what the worker thinks it is — a stale box
+ * left by a crashed worker, a file the toolchain removed. (Phase 10f: the
+ * plug-pull drill found the worker calling a missing source file a student's
+ * compile error, and the regression test needs a box that lost its source.)
+ */
+export type FakeHandler = (request: ExecRequest, box: Map<string, FakeFile>) => FakeRun;
 
 export const OK_META: IsolateMeta = {
   status: null,

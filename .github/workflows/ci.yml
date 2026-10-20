@@ -90,6 +90,24 @@ jobs:
         if: runner.os == 'Linux'
         run: pnpm db:migrate
 
+      # ── The drift check (Phase 10f) ─────────────────────────────────
+      #
+      # Does the migration folder produce the schema the code expects? The
+      # migrations have just been applied to an empty database above, so
+      # `migrate diff` between that database and schema.prisma must be
+      # EMPTY; `--exit-code` makes a difference a failure.
+      #
+      # It catches the mistake nobody notices locally: a change to
+      # schema.prisma committed without its migration. `prisma migrate dev`
+      # keeps the developer's own database correct, so everything passes on
+      # their machine and the next person's `migrate deploy` produces a
+      # schema the code cannot use.
+      - name: Schema drift (migrations vs schema.prisma)
+        if: runner.os == 'Linux'
+        working-directory: packages/db
+        run: |
+          pnpm exec prisma migrate diff             --from-schema-datasource prisma/schema.prisma             --to-schema-datamodel prisma/schema.prisma             --exit-code
+
       - name: Lint
         run: pnpm lint
 

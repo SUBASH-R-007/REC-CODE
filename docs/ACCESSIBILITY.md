@@ -146,15 +146,32 @@ surfaces and primary text so every pair clears AA (see
 
 ## 6. How this is verified
 
-* Every phase gate includes a keyboard-only pass and a screen-reader pass
-  (NVDA with Chrome and Firefox on Windows) over the pages that phase
-  shipped, at 200% and 400% zoom; results go into the Gate log in
-  `docs/RUNBOOK.md`.
+* **Automated axe checks** (`@axe-core/playwright`, zero serious or critical
+  violations) run in the end-to-end suite (`apps/web/e2e/a11y.spec.ts`) over
+  every page a phase has shipped — **140 scans** at the Phase 9 gate: each
+  page in light and dark × 1366×768 and 375×812, including the `/admin`,
+  `/super`, `/mentor`, `/placement-cell` and `/judge` surfaces, the workspace
+  with its console open and its mobile Code/Result tabs, and the exam
+  surfaces. A keyboard-only solving journey runs beside it
+  (`keyboard-journey.spec.ts`), and `docs/RUNBOOK.md` §3 records every run
+  with its date and count.
 * Palette contrast and colour-vision simulation are unit-tested in
   `packages/design`.
-* Automated axe checks (`@axe-core/playwright`, zero serious or critical
-  violations, light and dark themes) run on `/login`, `/dashboard`,
-  `/problems`, `/problems/[slug]` and `/leaderboard`, together with a
-  keyboard-only solving journey, in the end-to-end suite (`apps/web/e2e`).
+* **Keyboard-only passes** are automated and gated (above). **Screen-reader
+  passes are manual, and not all of them have been done** — stated plainly
+  rather than implied by the sentence this bullet replaced, which claimed a
+  screen-reader pass at every gate:
+  * done, and recorded in `docs/RUNBOOK.md` §3: the solving journey, the
+    catalogue, the dashboard and the verdict announcements (NVDA with
+    Chrome, Windows);
+  * **outstanding**: a full assessment sat with a screen reader in each
+    proctor mode. It is carried in `docs/OPEN-QUESTIONS.md` with its reason
+    — it needs a sitting of an hour or more per mode, and doing it badly
+    (clicking through rather than sitting it) would produce a row in the
+    gate log that says PASS and means nothing.
+  A barrier found by that pass is a bug, not a finding to be negotiated;
+  until it is run, the exam surface's screen-reader behaviour is asserted
+  only by axe and by the keyboard journey, which is weaker and is why this
+  bullet says so.
 * A barrier reported by a student is a bug with the same priority as a
   functional one.

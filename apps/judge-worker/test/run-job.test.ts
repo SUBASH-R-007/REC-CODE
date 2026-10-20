@@ -187,6 +187,50 @@ describe("runJob — compile errors", () => {
     expect(outcome.compile).toMatchObject({ ok: false, output: COMPILE_RESOURCE_MESSAGE, resourceExceeded: true, timeMs: 10_400 });
   });
 
+  it("a compile that failed with no source in the box is INFRASTRUCTURE, not CE", async () => {
+    /**
+     * Phase 10f, and it is a bug the plug-pull drill found rather than a
+     * hypothetical: `kill -9` on a worker leaves its isolate boxes
+     * allocated, the restarted worker's `--init` does not give it a usable
+     * box, and the compile step then ran against an EMPTY box. Python said
+     * `FileNotFoundError: 'solution.py'`, which classified as a compile
+     * error — so six students' correct programs were recorded as CE
+     * (docs/RUNBOOK.md §3).
+     *
+     * A wrong verdict shown to a student is the one failure this platform
+     * must not have. If the source is not in the box, the box is broken:
+     * InfraError, the lease is released, the job is retried on a healthy
+     * node, and three consecutive releases drain this one.
+     */
+    const job = buildJob({ language: "py312", source: "print(1)\n", cases: ADDER_CASES });
+    await expect(
+      judge(job, (req, box) => {
+        if (req.role !== "compile") return {};
+        // The box lost the source: exactly what a stale box looks like.
+        // py312 compiles `main.py` (the catalogue's sourceFile); the
+        // traceback below names the file the interpreter was pointed at.
+        box.delete("main.py");
+        return {
+          meta: { status: "RE", exitCode: 1, message: "Exited with error status 1" },
+          stderr: "Traceback (most recent call last):\nFileNotFoundError: [Errno 2] No such file or directory: 'solution.py'",
+        };
+      }),
+    ).rejects.toBeInstanceOf(InfraError);
+  });
+
+  it("a compile that failed WITH its source in the box is still CE", async () => {
+    // The other side of the rule: a student's real compile error must still
+    // reach them, so the guard may never swallow one.
+    const job = buildJob({ language: "py312", source: "print(1\n", cases: ADDER_CASES });
+    const { outcome } = await judge(job, (req) =>
+      req.role === "compile"
+        ? { meta: { status: "RE", exitCode: 1, message: "Exited with error status 1" }, stderr: "SyntaxError: '(' was never closed" }
+        : {},
+    );
+    expect(outcome.verdict).toBe("CE");
+    expect(outcome.compile!.output).toContain("SyntaxError");
+  });
+
   it("isolate XX while compiling is an infrastructure failure", async () => {
     await expect(
       judge(buildJob({ cases: ADDER_CASES }), (req) =>

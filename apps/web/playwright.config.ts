@@ -74,6 +74,19 @@ export default defineConfig({
     },
     // Phase 4: the public /judge page and the workspace footer link into it.
     { name: "judge", testMatch: /judge-page\.spec\.ts$/, outputDir: "./test-results/judge" },
+    /**
+     * Phase 10f: the resilience drill — returning a quarantined node to
+     * service through /admin/judge, and what a student sees while the judge
+     * is gone. NOT in any gate and not run by the suite: it needs a live
+     * stack and a human to kill the worker at the right moment. Run it by
+     * name, `--project=resilience`.
+     */
+    {
+      name: "resilience",
+      testMatch: /judge-resilience\.spec\.ts$/,
+      outputDir: "./test-results/resilience",
+      fullyParallel: false,
+    },
     // Phase 5: authoring a contest, entering it, and the arena's hard block
     // below 768 px. No judge needed — nothing here submits.
     {

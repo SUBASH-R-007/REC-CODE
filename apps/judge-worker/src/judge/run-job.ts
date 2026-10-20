@@ -289,8 +289,40 @@ async function compileProgram(
         throw new InfraError(`isolate internal error while compiling: ${result.meta.message ?? "unknown"}`);
       case "resource":
         return ce({ output: COMPILE_RESOURCE_MESSAGE, timeMs, resourceExceeded: true });
-      case "error":
+      case "error": {
+        /**
+         * A compile that failed because the SOURCE IS NOT IN THE BOX is an
+         * infrastructure failure, not a student's compile error (Phase 10f).
+         *
+         * Found by the plug-pull drill: `kill -9` on a worker leaves its
+         * isolate boxes allocated, and the restarted worker's `--init` on
+         * one of those boxes does not give it a usable box. The compile step
+         * then ran against an empty box and Python said
+         * `FileNotFoundError: 'solution.py'` — which classified as a
+         * compile error, so **six students' correct programs were recorded
+         * as CE** (docs/RUNBOOK.md §3, the 10f drill).
+         *
+         * A wrong verdict shown to a student is the one failure this
+         * platform must not have, and it is cheap to rule out: if the source
+         * file is not there, the box is broken, so this is an InfraError —
+         * the lease is released, the job is retried on a healthy node, and
+         * three consecutive releases drain this one.
+         *
+         * `listFiles` failing is treated as "present", so a transient
+         * listing error can never turn a genuine CE into an InfraError: the
+         * student's real compile error still reaches them.
+         */
+        const present = await sandbox
+          .listFiles("compile")
+          .then((files) => files.some((f) => f.name === language.sourceFile))
+          .catch(() => true);
+        if (!present) {
+          throw new InfraError(
+            `the compile box has no ${language.sourceFile} after writing it: the box is not usable (a stale box from a crashed worker looks exactly like this)`,
+          );
+        }
         return ce({ output: diagnostics(raw, LIMITS.compile.outputBytes), timeMs, resourceExceeded: false });
+      }
       case "ok":
         break;
     }

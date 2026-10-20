@@ -205,6 +205,29 @@ describe("the ops scripts", () => {
     expect(deploy).toContain('RUN_MIGRATIONS="${RUN_MIGRATIONS:-false}"');
   });
 
+  it("is backed by a drift check in CI, so a deploy's migration step is safe", () => {
+    /**
+     * `deploy.sh` can apply migrations; it cannot tell whether they produce
+     * the schema the code expects. CI can: migrations are applied to an
+     * empty database and `prisma migrate diff --exit-code` must then find
+     * nothing.
+     *
+     * The mistake it catches is invisible locally. `prisma migrate dev`
+     * keeps the developer's own database correct, so a change to
+     * schema.prisma committed WITHOUT its migration passes every test on
+     * their machine and produces a schema the code cannot use the first
+     * time somebody runs `migrate deploy`.
+     */
+    const workflow = readRepoFile(".github/workflows/ci.yml").replace(/\r\n/g, "\n");
+    expect(workflow).toContain("prisma migrate diff");
+    expect(workflow).toContain("--exit-code");
+    const verify = workflow.slice(workflow.indexOf("\n  verify:"), workflow.indexOf("\n  e2e:"));
+    expect(verify, "the drift check belongs in the gate job, after the migrations are applied").toContain(
+      "prisma migrate diff",
+    );
+    expect(verify.indexOf("pnpm db:migrate")).toBeLessThan(verify.indexOf("prisma migrate diff"));
+  });
+
   it("refuses to deploy during a live contest unless it is told to", () => {
     const deploy = readRepoFile("scripts/ops/deploy.sh");
     expect(deploy).toContain("activeContest");
