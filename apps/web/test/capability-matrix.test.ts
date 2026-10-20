@@ -59,7 +59,16 @@ vi.mock("@/lib/outbox", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/outbox")>()),
   enqueueEmail: h.enqueueEmail,
 }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn(), unstable_cache: (fn: unknown) => fn }));
+vi.mock("next/cache", () => ({
+  revalidatePath: vi.fn(),
+  revalidateTag: vi.fn(),
+  unstable_cache: (fn: unknown) => fn,
+  // Phase 9e. The audited drill-down calls this before it reads anything.
+  // Left out of the mock it is undefined, and the page throws a TypeError
+  // that reads here as "the page never got past its guard" — which is how
+  // it was found.
+  unstable_noStore: vi.fn(),
+}));
 vi.mock("@/lib/auth/session", () => ({
   getCurrentUser: async () => h.state.user,
   currentSessionId: async () => "session_1",
@@ -202,6 +211,23 @@ const actionRows: Array<{ ref: string; owner: string; roles: readonly string[] }
 /** How to call each bound route handler: a same-origin request and its context. */
 const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
   "app/api/admin/problems/import/route.ts#POST": () => [sameOrigin("/api/admin/problems/import", "not a zip")],
+  /**
+   * Phase 9e. A form POST, because the route WRITES a `PlacementExport` row:
+   * a GET that recorded an export every time a tab was refreshed would make
+   * the record useless. The body names no columns, so the recipe exercises
+   * the default — every allowed column.
+   */
+  "app/api/placement/export/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/placement/export", {
+      method: "POST",
+      headers: {
+        host: "localhost:3100",
+        origin: "http://localhost:3100",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: "dept=&batch=&section=",
+    }),
+  ],
   "app/api/drafts/route.ts#POST": () => [sameOrigin("/api/drafts", "{}")],
   "app/api/activity/route.ts#POST": () => [sameOrigin("/api/activity", "{}")],
   "app/api/exam/[attemptId]/events/route.ts#POST": () => [

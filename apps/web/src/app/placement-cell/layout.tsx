@@ -21,6 +21,7 @@ export default async function PlacementCellLayout({ children }: { children: Reac
         { href: "/placement-cell/heatmap", label: "Topic weakness", match: "prefix" },
         { href: "/placement-cell/at-risk", label: "Worth a conversation", match: "prefix" },
         { href: "/placement-cell/aptitude", label: "Aptitude", match: "prefix" },
+        { href: "/placement-cell/export", label: "Export", match: "prefix" },
       ]}
     >
       {children}

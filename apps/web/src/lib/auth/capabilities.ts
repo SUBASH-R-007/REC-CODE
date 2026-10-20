@@ -708,10 +708,38 @@ export const PLACEMENT_CAPABILITIES = deepFreeze([
   },
   {
     /**
+     * The per-student view. Its own capability because it is the one
+     * placement surface that reads ONE named student, and every view of it
+     * writes an `AuditLog` row — so "who looked at whom" is answerable, which
+     * is the whole difference between analytics and surveillance.
+     */
+    key: "placement.drilldown",
+    label: "Open one student's coverage, with an audit row",
+    roles: PLACEMENT,
+    actions: [],
+    pages: ["app/placement-cell/students/[id]/page.tsx"],
+  },
+  {
+    /**
+     * The CSV. Separate again, because an export leaves the platform: a file
+     * on a laptop is outside every guard in this repo, which is why the route
+     * records who asked, for which cohort, and a digest of what they were
+     * given.
+     */
+    key: "placement.export",
+    label: "Export the cohort as a spreadsheet",
+    roles: PLACEMENT,
+    actions: [],
+    routes: ["app/api/placement/export/route.ts#POST"],
+    pages: ["app/placement-cell/export/page.tsx"],
+  },
+  {
+    /**
      * Routing a student to a named mentor. Its own capability rather than
      * part of `placement.analytics`, because it is the one thing on these
-     * surfaces that WRITES — and the only consequence the at-risk list can
-     * have is that a named person is asked to talk to somebody.
+     * surfaces that WRITES to anything about a student — and the only
+     * consequence the at-risk list can have is that a named person is asked
+     * to talk to somebody.
      */
     key: "placement.mentor.route",
     label: "Ask a mentor to follow up with a student",

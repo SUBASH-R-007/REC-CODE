@@ -145,6 +145,15 @@ const TARGETS: readonly Target[] = [
   { path: "/placement-cell/heatmap", as: "admin", gating: true },
   { path: "/placement-cell/at-risk", as: "admin", gating: false },
   { path: "/placement-cell/aptitude", as: "admin", gating: false },
+  { path: "/placement-cell/export", as: "admin", gating: false },
+  /**
+   * `/placement-cell/students/[id]` is deliberately NOT scanned. Every view
+   * of it writes an AuditLog row, so an automated scan on every run would
+   * manufacture a record of somebody looking at a student that nobody looked
+   * at — and the value of that log is that every row in it is real. It is
+   * covered by the capability matrix (rendered as every role, guard
+   * asserted) and by the manual pass recorded in docs/RUNBOOK.md §3.
+   */
   { path: "/mentor", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).

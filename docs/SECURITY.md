@@ -184,6 +184,8 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `problems.publish` | staff | - | - | yes | - | yes | 1 action |
 | `problems.import` | staff | - | - | yes | - | yes | 1 action, 1 route, 2 pages |
 | `placement.analytics` | placement | - | - | - | yes | yes | 4 pages |
+| `placement.drilldown` | placement | - | - | - | yes | yes | 1 page |
+| `placement.export` | placement | - | - | - | yes | yes | 1 route, 1 page |
 | `placement.mentor.route` | placement | - | - | - | yes | yes | 2 actions |
 | `mentor.mentees.view` | mentor | - | yes | yes | - | yes | 2 pages |
 | `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
