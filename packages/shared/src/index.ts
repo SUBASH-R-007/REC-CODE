@@ -57,4 +57,6 @@ export * from "./inactivity-copy";
 export * from "./mentor";
 export * from "./readiness";
 export * from "./readiness-snapshot";
+export * from "./readiness-distribution";
+export * from "./placement-export";
 export * from "./percentile";
