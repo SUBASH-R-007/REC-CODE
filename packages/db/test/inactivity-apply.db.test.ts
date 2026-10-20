@@ -192,6 +192,16 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       await db.adminScope.deleteMany({ where: { adminId: mentorId } });
       await drop("AdminScope", "AdminScope_grant_immutable");
       await db.user.deleteMany({ where: { id: { in: userIds } } });
+      /**
+       * And the submission fixture's own problem, version and language
+       * config, which this file now creates rather than borrowing from
+       * whatever the database happened to hold. The version is not frozen,
+       * so no guard stands in the way; `deleteMany` on the two tables is
+       * keyed by this run's tag so a parallel run is untouched.
+       */
+      await db.problemVersion.deleteMany({ where: { problem: { slug: `apl-${run}-problem` } } });
+      await db.problem.deleteMany({ where: { slug: `apl-${run}-problem` } });
+      await db.languageConfig.deleteMany({ where: { toolchainId: `apl-${run}-gcc` } });
       expect(await disabledTriggers(db)).toEqual([]);
     } finally {
       await db.$disconnect();
@@ -410,14 +420,53 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
   });
 
-  /** A contest, a practice and an assessment submission, all QUEUED. */
+  /**
+   * A contest, a practice and an assessment submission, all QUEUED.
+   *
+   * The problem, its version and the language config are CREATED here. They
+   * used to be found with `findFirstOrThrow`, which passes on any database
+   * that has been seeded or that another suite has written to, and fails on
+   * a fresh one — which is what CI gives it: the gate job applies the
+   * migrations and does not seed. The first CI run of this file (Phase 10,
+   * the first push of these phases) failed with P2025 "No record was found",
+   * and it would have failed the same way for anybody who ran the suites
+   * against a clean `recx_test`.
+   */
   async function submissionFixture(userId: string) {
-    const problem = await db.problem.findFirstOrThrow({ select: { id: true } });
-    const version = await db.problemVersion.findFirstOrThrow({
-      where: { problemId: problem.id },
+    const problem = await db.problem.create({
+      data: {
+        slug: `apl-${run}-problem`,
+        displayCode: `APL${run}`,
+        title: "Inactivity fixture",
+        difficulty: "EASY",
+        status: "PUBLISHED",
+      },
       select: { id: true },
     });
-    const language = await db.languageConfig.findFirstOrThrow({ select: { id: true, key: true } });
+    const version = await db.problemVersion.create({
+      data: {
+        problemId: problem.id,
+        revision: 1,
+        title: "Inactivity fixture",
+        difficulty: "EASY",
+        statementMd: "Solve it.",
+        ioMode: "STDIN",
+        timeLimitMs: 1000,
+      },
+      select: { id: true },
+    });
+    const language = await db.languageConfig.create({
+      data: {
+        key: "cpp20",
+        toolchainId: `apl-${run}-gcc`,
+        version: "13.2.0",
+        label: "C++20 (fixture)",
+        runtime: {},
+        enabled: true,
+        isCurrent: true,
+      },
+      select: { id: true, key: true },
+    });
 
     const make = async (lane: "CONTEST" | "PRACTICE" | "ASSESSMENT") =>
       (

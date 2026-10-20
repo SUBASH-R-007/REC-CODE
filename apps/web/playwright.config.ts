@@ -27,8 +27,24 @@ const channel = process.platform === "win32" ? "chrome" : undefined;
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./test-results",
-  // A dev server compiles each route on its first request: generous budgets.
-  timeout: 120_000,
+  /**
+   * A dev server compiles each route on its FIRST request, so these budgets
+   * are about the compiler rather than about the product. On a two-core CI
+   * runner that first compile is several times slower than on a developer's
+   * machine: the first CI run of this suite lost two tests to
+   * `page.goto: Timeout 90000ms exceeded` — one of them the RBAC test that
+   * walks every `/super` page in a single test, which is a dozen first
+   * compiles in a row.
+   *
+   * Raising them does not weaken anything the suite asserts: axe
+   * violations, RBAC redirects and the keyboard journey are what it checks,
+   * and how fast a page ARRIVES is asserted against a production build by
+   * Lighthouse (`apps/web/lighthouserc.json`) and by the `perf` project.
+   * The CI job also warms the routes before this runs, so most of the
+   * compiling happens where a failure is a failure to compile rather than a
+   * test failure.
+   */
+  timeout: process.env.CI ? 300_000 : 120_000,
   expect: { timeout: 20_000 },
   retries: 0,
   fullyParallel: false,
@@ -41,7 +57,7 @@ export default defineConfig({
   use: {
     baseURL,
     ...(channel ? { channel } : {}),
-    navigationTimeout: 90_000,
+    navigationTimeout: process.env.CI ? 180_000 : 90_000,
     actionTimeout: 20_000,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

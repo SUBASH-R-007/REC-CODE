@@ -217,15 +217,29 @@ jobs:
         working-directory: apps/web
         run: npx playwright install --with-deps chromium
 
+      # --disable-source-maps for the reason docs/RUNBOOK.md §1.5 gives: the
+      # retained maps for several thousand modules are the bulk of the heap
+      # growth that makes `next dev` restart itself mid-request, and a
+      # restart surfaces as ERR_EMPTY_RESPONSE inside whichever assertion
+      # was loading.
       - name: Start the web app (next dev, background)
         run: |
-          nohup pnpm --filter @recx/web dev > "$RUNNER_TEMP/web.log" 2>&1 &
+          nohup pnpm --filter @recx/web exec next dev -p 3000 --disable-source-maps > "$RUNNER_TEMP/web.log" 2>&1 &
           for i in $(seq 1 120); do
             if curl -sf -o /dev/null http://localhost:3000/login; then exit 0; fi
             sleep 2
           done
           cat "$RUNNER_TEMP/web.log"
           exit 1
+
+      # `next dev` compiles a route on its first request, and this suite
+      # visits about sixty. Warming moves that cost out of the assertions:
+      # the first CI run of this job lost two tests to `page.goto: Timeout
+      # 90000ms exceeded`, one of them the RBAC test that walks every
+      # /super page in a single test. Signed out is enough — a route
+      # compiles before its guard redirects.
+      - name: Warm the routes the suite visits
+        run: bash scripts/dev/warm-routes.sh http://localhost:3000
 
       # rbac and judge need no judge worker; authoring needs E2E_JUDGE=1 and
       # runs only against the live local stack.
@@ -382,9 +396,24 @@ jobs:
           sudo apt-get install -y --no-install-recommends prometheus
           promtool --version
 
-      # `check config` resolves rule_files relative to the config file, so it
-      # also proves alerts.yml is reachable from prometheus.yml — a rules
+      # `promtool check config` validates that every file the config
+      # REFERENCES exists, and `prometheus.yml` points at the bearer token as
+      # a Docker secret on the monitoring host:
+      #
+      #   FAILED: error checking authorization credentials or bearer token
+      #   file "/run/secrets/recx_metrics_token": no such file or directory
+      #
+      # That is the config being right, not wrong — the token must never be
+      # inline (tests/repo/deploy-topology.test.ts refuses it). So CI makes an
+      # empty file where the host has a secret, and the FULL check runs: it
+      # resolves `rule_files` relative to the config too, which is how
+      # alerts.yml being reachable from prometheus.yml gets proved. A rules
       # file nobody loads is the quietest way to have no alerting at all.
+      - name: Stand in for the monitoring host's secret
+        run: |
+          sudo install -D -m 600 /dev/null /run/secrets/recx_metrics_token
+          sudo sh -c 'printf not-a-real-token > /run/secrets/recx_metrics_token'
+
       - name: Check the Prometheus config and the rule file
         run: |
           promtool check config infra/monitoring/prometheus.yml
