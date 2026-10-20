@@ -1070,6 +1070,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "calendar#termKeyOn": async () => (await load(path.join(QUERIES_DIR, "calendar.ts"))).termKeyOn!,
     "account#myStanding": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStanding!,
     "account#myStatusHistory": async () => (await load(path.join(QUERIES_DIR, "account.ts"))).myStatusHistory!,
+    "placement#myReadiness": async () => (await load(path.join(QUERIES_DIR, "placement.ts"))).myReadiness!,
     "judge-languages#getPublicLanguageRows": async () => (await load(path.join(QUERIES_DIR, "judge-languages.ts"))).getPublicLanguageRows!,
     "leaderboard#getLeaderboard": async () => (await load(path.join(QUERIES_DIR, "leaderboard.ts"))).getLeaderboard!,
     "problems#listCatalog": async () => (await load(path.join(QUERIES_DIR, "problems.ts"))).listCatalog!,
@@ -1128,6 +1129,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // does not want rendered as a wall of dates.
     "account#myStanding": () => [[ids.user]],
     "account#myStatusHistory": () => [[ids.user]],
+    // Phase 9c. The student's own readiness. `userId` is a where clause, and
+    // what comes back is a score with the measurable weight beside it, the
+    // component breakdown and one action — never a percentile a peer could
+    // be identified from, never a band, never a flag count.
+    "placement#myReadiness": () => [[ids.user]],
     "judge-languages#getPublicLanguageRows": () => [[]],
     "leaderboard#getLeaderboard": () => {
       const user = h.state.user!;
@@ -1174,6 +1180,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   };
   /** Exports that read nothing problem-scoped, with the reason. */
   const NOT_PROBLEM_SCOPED: Record<string, string> = {
+    "placement#headlineAction": "pure: picks the lowest tier with a gap out of a value myReadiness already returned; no database access",
     // Phase 7's select vocabulary. Not queries: they are the column lists the
     // queries select THROUGH, and tests/repo/aptitude-answer-exposure.test.ts
     // asserts what each one may and may not name. Keeping them beside the
@@ -1273,6 +1280,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // Phase 8e. The route OUT of a restriction, and the page that renders a
     // student's own status history.
     "(student)/account/reactivate/page.tsx": () => ({}),
+    // Phase 9c. Renders the caller's own readiness breakdown.
+    "(student)/placement/page.tsx": () => ({}),
     "(student)/aptitude/page.tsx": () => ({}),
     "(student)/aptitude/[topic]/page.tsx": () => ({ params: { topic: "percentages" } }),
     "(student)/aptitude/mock/[slug]/page.tsx": () => ({ params: { slug: ids.aptitudePatternSlug } }),

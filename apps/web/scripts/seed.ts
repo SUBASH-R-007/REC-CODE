@@ -78,6 +78,7 @@ import { AUTHORED_PROBLEMS, HELP_BY_SLUG, TOPICS_BY_SLUG } from "./content/index
 import { syncSeededMockPatterns } from "./content/aptitude";
 import { syncSeededCalendar } from "./content/calendar";
 import { syncSeededInactivityPolicy } from "./content/inactivity";
+import { syncSeededReadiness } from "./content/readiness";
 import { syncSeededStudyPlans } from "./content/study-plans";
 import type { AuthoredProblem, HelpContent } from "./content/types";
 
@@ -940,6 +941,20 @@ async function main() {
       log(
         `inactivity policy: ${pol.action}, version ${pol.version}, auto-disable ${pol.autoDisableEnabled ? "ON" : "off"}`,
       );
+    }
+    // Phase 9: one readiness run, through the real 02:30 pipeline. Without
+    // it /placement shows only its "not worked out yet" state, which also
+    // means the accessibility scan would be scanning an empty page and
+    // reporting it as a pass.
+    {
+      const r = await syncSeededReadiness(app.db);
+      log(
+        `readiness: ${r.snapshots} snapshot(s) for ${r.students} student(s) on ${r.computedOn}` +
+          ` (unmeasurable tiers: service ${r.unmeasurable.service}, product ${r.unmeasurable.product}, top ${r.unmeasurable.top})`,
+      );
+      if (r.cohortsTooSmall.length > 0) {
+        log(`  cohorts too small to rank in: ${r.cohortsTooSmall.join(", ")}`);
+      }
     }
     await seedDailyChallenge(app.db, adminId);
     await seedJudgeNode(app);

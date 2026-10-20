@@ -114,6 +114,13 @@ const TARGETS: readonly Target[] = [
   { path: "/aptitude", as: "student", gating: true },
   { path: "/account/leave", as: "student", gating: true },
   { path: "/account/reactivate", as: "student", gating: true },
+  /**
+   * Phase 9c, GATING. The page is a grid of three cards with a progress bar
+   * per component, which is exactly the shape that goes wrong for a screen
+   * reader: every bar carries its own label with the denominator in it, and
+   * the scan is what keeps that true.
+   */
+  { path: "/placement", as: "student", gating: true },
   // Reported, not gating.
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },

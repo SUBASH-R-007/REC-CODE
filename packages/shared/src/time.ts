@@ -40,6 +40,28 @@ export function campusDay(at: Date): string {
   return dayFormatter.format(at);
 }
 
+/**
+ * "14 Mar 2095" — a campus day a human reads, from a "yyyy-MM-dd" string.
+ *
+ * Day only, no time: the readiness run and the inactivity sweep both work in
+ * whole campus days, and printing "00:00 IST" beside a date whose time means
+ * nothing invites a reader to believe the figure was computed at midnight.
+ * Parsed at UTC midnight, which is 05:30 the same day in campus time, so the
+ * day never slips backwards the way a local-midnight parse would.
+ */
+const DAY_FORMAT = new Intl.DateTimeFormat("en-IN", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  timeZone: CAMPUS_TIME_ZONE,
+});
+
+export function formatCampusDay(day: string | null | undefined): string {
+  if (!day) return "—";
+  const at = new Date(`${day}T00:00:00.000Z`);
+  return Number.isNaN(at.getTime()) ? "—" : DAY_FORMAT.format(at);
+}
+
 /** The campus day as a UTC-midnight Date, for @db.Date columns. */
 export function campusDayDate(at: Date): Date {
   return new Date(`${campusDay(at)}T00:00:00.000Z`);

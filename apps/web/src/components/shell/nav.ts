@@ -17,6 +17,7 @@ export type NavIconKey =
   | "learn"
   | "contests"
   | "aptitude"
+  | "placement"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -86,6 +87,16 @@ export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
         "Aptitude",
         "aptitude",
         "Quantitative, logical and verbal practice, and full mocks with worked explanations",
+      ),
+      // Phase 9c. In ASSESS rather than ME, because readiness is a measure
+      // of preparation and belongs beside the things that measure it — and
+      // because a student looking for "am I ready" does not look under
+      // their own profile for it.
+      item(
+        "/placement",
+        "Readiness",
+        "placement",
+        "How much of the placement preparation you have covered, and the most useful thing to do next",
       ),
     ]),
   },

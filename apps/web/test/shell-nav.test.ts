@@ -61,9 +61,11 @@ describe("shell navigation model", () => {
       ["Practice", ["/problems", "/sheets", "/learn"]],
       // Contests arrived in Phase 5.
       ["Compete", ["/contests", "/leaderboard"]],
-      // ASSESS was reserved empty for Phases 6-7; aptitude is its first and,
-      // so far, only entry.
-      ["Assess", ["/aptitude"]],
+      // ASSESS was reserved empty for Phases 6-7; aptitude was its first
+      // entry, and Phase 9c put readiness beside it — a measure of
+      // preparation belongs next to the things that measure it, and a
+      // student asking "am I ready" does not look under their own profile.
+      ["Assess", ["/aptitude", "/placement"]],
       // Phase 8a put "Excused days" in ME rather than in ASSESS: it is about
       // the student's own account, not about practising. Last in the group,
       // because it is the entry nobody should need often.
