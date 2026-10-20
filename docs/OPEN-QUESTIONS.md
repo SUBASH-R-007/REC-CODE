@@ -1786,3 +1786,85 @@ unnoticed and nobody is ever unsure what to do next"** — not "everyone
 progresses". A platform that claimed the second would be lying, and the lie
 would be load-bearing: it is exactly the claim that justifies closing an
 account for silence.
+
+## Phase 9 — placement readiness
+
+### The coverage targets are a choice, and they decide what "ready" means.
+
+The spec gives the component WEIGHTS for all three tiers and does not give
+the targets those components are measured against. The weights decide how
+much each part counts; the targets decide how much work counts as full marks,
+and they are therefore the more consequential of the two.
+
+*What ships:* `TIER_TARGETS` in `packages/shared/src/readiness.ts` —
+
+| Tier | Coverage target | What it counts | Per topic |
+|---|---|---|---|
+| SERVICE | 120 | easy or medium problems solved, hint or no hint | — |
+| PRODUCT | 80 | medium problems solved without a hint or an editorial | 4 |
+| TOP | 120 | medium or hard problems solved without a hint or an editorial | 8 |
+
+TOP's number is not smaller than PRODUCT's despite being the harder tier,
+because the three columns count different things: a hundred and twenty
+unassisted medium-or-hard solves is a much larger ask than eighty unassisted
+mediums. The equality with SERVICE's 120 is a coincidence of the units.
+
+**For the placement cell to confirm against a real cycle.** Changing a target
+changes every student's score, so it is a `READINESS_RULES_VERSION` bump and
+not an edit: a snapshot stores the version it was computed under, and
+`ReadinessSnapshot_recompute_only` refuses a row whose version goes
+backwards.
+
+An earlier draft shipped 80 / 60 / 50, which made the hardest tier the
+easiest to max out — a student could reach full TOP coverage with fewer
+problems than full PRODUCT coverage. Caught while reading the design for the
+role slice, not by a test, which is why the table above is now in the
+document the placement cell reads.
+
+### A rating counts after eight rated contests, not five.
+
+SPEC §7: "Do not treat a contest rating as meaningful before ~8–12
+contests." `PROVISIONAL_CONTESTS = 5` stays what it is — the display rule for
+the "?" suffix on a rating — and readiness has its own, stricter floor
+`READINESS_RATING_MIN_CONTESTS = 8`, the earliest the range permits.
+
+*Why it is the one floor worth arguing about:* `RATING_PERCENTILE` is 35 % of
+TOP. A student who won one lucky round would read as top-tier ready and a
+strong student two contests in would read as not, and both errors are larger
+than anything else readiness can get wrong. Below the floor the component is
+MISSING with its own reason, so the student is told "a rating starts counting
+after 8 rated contests" rather than "no data" — the first is true and
+actionable, the second is neither.
+
+### `mockInterviewScore` has no source, and will not have one this year.
+
+It is 10 % of SERVICE, 10 % of PRODUCT and **15 % of TOP**, and the
+mock-interview scheduler is Phase 11 or later. So it is permanently
+`MISSING / NO_SOURCE_YET` at launch, and no TOP score can exceed 85.
+
+*What ships:* the weights are **not** renormalised over the present
+components, and three constraints make that non-negotiable rather than
+conventional — a score may never exceed the measurable weight, a tier with
+nothing measurable has NO score rather than a zero, and both are CHECKs in
+the database. Every surface states the denominator, including the officer
+ones, where a 70 compared against an absolute threshold of 70 would mark a
+whole cohort as under-prepared because of a component nobody has built.
+
+Renormalising would make a student who has never done a mock interview look
+exactly as ready as one who has done five. That is the single largest honesty
+risk in the phase and it is worth stating plainly: a TOP score is a score out
+of 85, computed from three components, and the fourth is not coming this
+year.
+
+### A cohort under thirty is not ranked at all.
+
+`MIN_PERCENTILE_COHORT = 30`. Below it a percentile is a disguised ranking: in
+a cohort of eleven, "you are at the 9th percentile" identifies you to anybody
+who can count. The three percentile components come back
+`MISSING / COHORT_TOO_SMALL` instead, and the officer overview says which
+cohorts those were, because that is a fact an administrator acts on.
+
+*The cost, stated:* a small department's students see a lower score than a
+large department's equally-prepared students, because fewer of their
+components are measurable. The denominator is shown everywhere precisely so
+that this is visible rather than mistaken for being behind.

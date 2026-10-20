@@ -117,6 +117,19 @@ export const TIER_WEIGHTS: Record<ReadinessTier, Partial<Record<ReadinessCompone
 /**
  * Coverage and breadth targets per tier.
  *
+ * The spec gives the weights but not these numbers, so they are a choice,
+ * recorded in docs/OPEN-QUESTIONS.md for the placement cell to confirm
+ * against a real cycle.
+ *
+ * `coverage` counts DIFFERENT things per tier, which is why TOP's is not
+ * smaller than PRODUCT's despite being the harder tier: SERVICE counts easy
+ * or medium problems solved however they were reached, PRODUCT counts
+ * mediums solved without help, and TOP counts mediums or hards solved
+ * without help. A hundred and twenty unassisted medium-or-hard solves is a
+ * much larger ask than eighty unassisted mediums; the number being equal to
+ * SERVICE's is a coincidence of the units, not a statement that the two
+ * tiers demand the same work.
+ *
  * `perTopic` is what `topicBreadth` divides by, and the two tiers that use it
  * want different depths: a product interview expects you to have met every
  * topic a few times, a top-tier loop expects real familiarity. SERVICE has
@@ -127,9 +140,9 @@ export const TIER_TARGETS: Record<
   ReadinessTier,
   { readonly coverage: number; readonly perTopic: number | null }
 > = {
-  SERVICE: { coverage: 80, perTopic: null },
-  PRODUCT: { coverage: 60, perTopic: 4 },
-  TOP: { coverage: 50, perTopic: 8 },
+  SERVICE: { coverage: 120, perTopic: null },
+  PRODUCT: { coverage: 80, perTopic: 4 },
+  TOP: { coverage: 120, perTopic: 8 },
 };
 
 /**

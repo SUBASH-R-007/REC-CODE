@@ -101,6 +101,43 @@ describe("the weights are the spec's", () => {
   });
 });
 
+describe("the coverage targets", () => {
+  it("are the numbers docs/OPEN-QUESTIONS.md records for the placement cell", () => {
+    /**
+     * The spec gives the weights and not these, so they are a choice — and
+     * the more consequential one: the weights decide how much each part
+     * counts, the targets decide how much work is full marks.
+     *
+     * An earlier draft shipped 80 / 60 / 50, which made the HARDEST tier the
+     * easiest to max out: full TOP coverage took fewer problems than full
+     * PRODUCT coverage. Pinned here so a change is a deliberate
+     * READINESS_RULES_VERSION bump rather than a typo.
+     */
+    expect(TIER_TARGETS).toEqual({
+      SERVICE: { coverage: 120, perTopic: null },
+      PRODUCT: { coverage: 80, perTopic: 4 },
+      TOP: { coverage: 120, perTopic: 8 },
+    });
+  });
+
+  it("asks for more depth per topic at the top than in the middle", () => {
+    expect(TIER_TARGETS.TOP.perTopic!).toBeGreaterThan(TIER_TARGETS.PRODUCT.perTopic!);
+    // SERVICE has no breadth weight at all: a service round does not ask
+    // about segment trees.
+    expect(TIER_TARGETS.SERVICE.perTopic).toBeNull();
+    expect(TIER_WEIGHTS.SERVICE.TOPIC_BREADTH).toBeUndefined();
+  });
+
+  it("gives each tier a target for the component it actually counts", () => {
+    // A tier whose coverage component had no target would divide by zero and
+    // score everybody full marks, which `coverage()` turns into present(1).
+    expect(TIER_WEIGHTS.SERVICE.EASY_MEDIUM_COVERAGE).toBeGreaterThan(0);
+    expect(TIER_WEIGHTS.PRODUCT.MEDIUM_UNASSISTED_COVERAGE).toBeGreaterThan(0);
+    expect(TIER_WEIGHTS.TOP.MEDIUM_HARD_UNASSISTED_COVERAGE).toBeGreaterThan(0);
+    for (const tier of READINESS_TIERS) expect(TIER_TARGETS[tier].coverage, tier).toBeGreaterThan(0);
+  });
+});
+
 describe("the rating floor", () => {
   it("is EIGHT rated contests, which is the earliest SPEC \u00a77 permits", () => {
     /**
@@ -306,8 +343,12 @@ describe("SERVICE counts an assisted solve; PRODUCT and TOP do not", () => {
    * get there alone.
    */
   const hinted = inputs({
-    // 80 solves, every one of them assisted: the unassisted counters are 0.
-    easyMediumSolved: 80,
+    // SERVICE's whole target, every solve of it assisted: the unassisted
+    // counters are 0. Read from TIER_TARGETS rather than written as a
+    // number, because the point of the test is "the target, reached with
+    // help" and a literal would quietly stop meaning that if the target
+    // moved — which it has.
+    easyMediumSolved: TIER_TARGETS.SERVICE.coverage,
     mediumUnassisted: 0,
     mediumHardUnassisted: 0,
     unassistedByTopic: {},
@@ -361,7 +402,18 @@ describe("the gaps and the next action", () => {
     const score = scoreTier("PRODUCT", behind);
     const action = nextAction("PRODUCT", score, behind);
     expect(action!.component).toBe("MEDIUM_UNASSISTED_COVERAGE");
-    expect(action!.sentence).toMatch(/^\+27 points available: 54 more medium problems without a hint$/);
+    /**
+     * The exact sentence, with its two numbers derived rather than typed:
+     * the shortfall is the target minus what they have, and the points are
+     * the component's weight times the fraction still missing. Writing
+     * "+27.8" and "74" as literals would make this a test of what the code
+     * printed last time rather than of the arithmetic the student is owed.
+     */
+    const short = TIER_TARGETS.PRODUCT.coverage - 6;
+    const points = 30 * (short / TIER_TARGETS.PRODUCT.coverage);
+    expect(action!.sentence).toBe(
+      `+${points.toFixed(1)} points available: ${short} more medium problems without a hint`,
+    );
   });
 
   it("ranks the three largest gaps by the same points figure the action uses", () => {
