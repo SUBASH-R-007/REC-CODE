@@ -699,7 +699,24 @@ export const PLACEMENT_CAPABILITIES = deepFreeze([
     label: "Read cohort placement analytics",
     roles: PLACEMENT,
     actions: [],
-    pages: ["app/placement-cell/page.tsx"],
+    pages: [
+      "app/placement-cell/page.tsx",
+      "app/placement-cell/heatmap/page.tsx",
+      "app/placement-cell/at-risk/page.tsx",
+      "app/placement-cell/aptitude/page.tsx",
+    ],
+  },
+  {
+    /**
+     * Routing a student to a named mentor. Its own capability rather than
+     * part of `placement.analytics`, because it is the one thing on these
+     * surfaces that WRITES — and the only consequence the at-risk list can
+     * have is that a named person is asked to talk to somebody.
+     */
+    key: "placement.mentor.route",
+    label: "Ask a mentor to follow up with a student",
+    roles: PLACEMENT,
+    actions: ["placement-mentor#assignMentor", "placement-mentor#endAssignment"],
   },
 ] as const satisfies readonly Capability[]);
 

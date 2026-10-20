@@ -76,6 +76,7 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_snapshot_identity_change",
   "recx_refuse_mentor_assignment_change",
   "recx_refuse_unsuitable_mentor",
+  "recx_refuse_placement_export_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -136,6 +137,8 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "ReadinessRun",
   "ReadinessSnapshot",
   "MentorAssignment",
+  // 20261020270100_phase9e_placement_export
+  "PlacementExport",
 ];
 
 export interface GuardTrigger {
@@ -463,6 +466,19 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     // The one catalogued column scope in the database. See `updateOf`.
     updateOf: ["mentorId"],
   },
+  /**
+   * 20261020270100_phase9e_placement_export. An export record is append-only:
+   * one that could be edited after the fact would be a record of nothing,
+   * and one that could be deleted would let the person who exported a whole
+   * cohort remove the evidence that they did.
+   */
+  {
+    name: "PlacementExport_append_only",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "PlacementExport",
+    fn: "recx_refuse_placement_export_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -503,7 +519,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261020270000_phase9b_readiness";
+export const CHECK_CATALOG_THROUGH = "20261020270100_phase9e_placement_export";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -876,6 +892,13 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["MentorAssignment_reason_check", "MentorAssignment"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261020270000_phase9b_readiness" })),
+  ...(
+    [
+      ["PlacementExport_columns_check", "PlacementExport"],
+      ["PlacementExport_sha256_check", "PlacementExport"],
+      ["PlacementExport_filters_object", "PlacementExport"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261020270100_phase9e_placement_export" })),
 ];
 
 /**

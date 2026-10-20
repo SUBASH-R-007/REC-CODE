@@ -127,14 +127,23 @@ export function requireScopedMenteePage(scope: MentorScope, userId: string): Sco
  * mentor's NAME rather than their id, because the only question an officer
  * asks of it is "who do I ask to have the conversation".
  */
+export interface RecordedMentor {
+  /** The assignment, so a surface can END it without a second lookup. */
+  readonly assignmentId: string;
+  readonly mentorId: string;
+  readonly name: string;
+  readonly assignedAt: Date;
+}
+
 export async function mentorsOf(
   menteeIds: readonly string[],
   client: Db | DbTx = db,
-): Promise<ReadonlyMap<string, { mentorId: string; name: string; assignedAt: Date }>> {
+): Promise<ReadonlyMap<string, RecordedMentor>> {
   if (menteeIds.length === 0) return new Map();
   const rows = await client.mentorAssignment.findMany({
     where: { menteeId: { in: [...menteeIds] }, endedAt: null },
     select: {
+      id: true,
       menteeId: true,
       mentorId: true,
       assignedAt: true,
@@ -145,6 +154,7 @@ export async function mentorsOf(
     rows.map((row) => [
       row.menteeId,
       {
+        assignmentId: row.id,
         mentorId: row.mentorId,
         name: `${row.mentor.firstName} ${row.mentor.lastName}`.trim(),
         assignedAt: row.assignedAt,

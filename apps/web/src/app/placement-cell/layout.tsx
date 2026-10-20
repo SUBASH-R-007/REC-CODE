@@ -16,7 +16,12 @@ export default async function PlacementCellLayout({ children }: { children: Reac
       user={user}
       area="Placement cell"
       home="/placement-cell"
-      nav={[{ href: "/placement-cell", label: "Overview", match: "exact" }]}
+      nav={[
+        { href: "/placement-cell", label: "Overview", match: "exact" },
+        { href: "/placement-cell/heatmap", label: "Topic weakness", match: "prefix" },
+        { href: "/placement-cell/at-risk", label: "Worth a conversation", match: "prefix" },
+        { href: "/placement-cell/aptitude", label: "Aptitude", match: "prefix" },
+      ]}
     >
       {children}
     </RoleShell>

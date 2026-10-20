@@ -139,7 +139,7 @@ describe("the coverage targets", () => {
 });
 
 describe("the rating floor", () => {
-  it("is EIGHT rated contests, which is the earliest SPEC \u00a77 permits", () => {
+  it("is EIGHT rated contests, which is the earliest SPEC §7 permits", () => {
     /**
      * "Do not treat a contest rating as meaningful before ~8\u201312 contests."
      * RATING_PERCENTILE is 35 % of TOP, so this is the single largest

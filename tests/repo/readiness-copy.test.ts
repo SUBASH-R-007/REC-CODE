@@ -33,12 +33,29 @@ const SRC = "apps/web/src";
 
 const PAGE = `${SRC}/app/(student)/placement/page.tsx`;
 
-/** Every readiness surface a student reads. */
+/**
+ * Every readiness surface a STUDENT reads.
+ *
+ * `components/placement/` holds both: the student's tier card and the
+ * officer's charts. The copy rules below are about what a STUDENT is told, so
+ * the officer components are listed separately and excluded — an officer
+ * surface may legitimately say "worth a conversation", and the at-risk
+ * vocabulary is refused only where a student would see it.
+ */
 const STUDENT_SURFACES = [
   PAGE,
   `${SRC}/components/placement/tier-card.tsx`,
+  `${SRC}/components/mentor/mentor-badge.tsx`,
   `${SRC}/server/queries/readiness.ts`,
   "packages/shared/src/readiness-snapshot.ts",
+  "packages/shared/src/mentor.ts",
+];
+
+/** Officer-only components under the same folder, covered by the placement fence. */
+const OFFICER_SURFACES = [
+  `${SRC}/components/placement/cohort-filter.tsx`,
+  `${SRC}/components/placement/distribution-table.tsx`,
+  `${SRC}/components/placement/mentor-routing.tsx`,
 ];
 
 /**
@@ -97,7 +114,12 @@ describe("the mandatory framing is rendered, before any number", () => {
 });
 
 describe("no score is rendered without the weight that was measurable", () => {
-  it.each(STUDENT_SURFACES)("%s", (file) => {
+  // Student AND officer surfaces. R5 of the Phase 9 resolutions: the
+  // denominator rule was engineered into the student's card and the database
+  // and then dropped on the cohort dashboard, where a 70 compared against an
+  // absolute 70 marks a whole cohort as under-prepared because of a component
+  // nobody has built.
+  it.each([...STUDENT_SURFACES, ...OFFICER_SURFACES])("%s", (file) => {
     const source = readRepoFile(file);
     const code = lexSource(source).code;
     // `.score` as a property read, not `serviceScore` or `topScore` (the
@@ -218,14 +240,28 @@ describe("a readiness surface never mentions a band, an integrity score or a fla
     // A new file under components/placement or app/(student)/placement must
     // be added above, or this fence quietly stops covering it.
     const found = findFiles({
-      under: [`${SRC}/components/placement`, `${SRC}/app/(student)/placement`],
+      under: [
+        `${SRC}/components/placement`,
+        `${SRC}/components/mentor`,
+        `${SRC}/app/(student)/placement`,
+      ],
       extensions: CODE_EXTENSIONS,
     }).sort();
-    const listed = new Set(STUDENT_SURFACES);
+    // Every file is classified: a student surface these rules apply to, or an
+    // officer surface they deliberately do not. A new file in either folder is
+    // on neither list and fails here, which is the point.
+    const listed = new Set([...STUDENT_SURFACES, ...OFFICER_SURFACES]);
     const missing = found.filter((file) => !listed.has(file));
     expect(
       missing,
-      `add these to STUDENT_SURFACES in tests/repo/readiness-copy.test.ts:\n${missing.join("\n")}`,
+      [
+        "These placement files are on neither list in tests/repo/readiness-copy.test.ts.",
+        "",
+        "STUDENT_SURFACES if a student reads it — the copy rules then apply.",
+        "OFFICER_SURFACES if only the placement cell does.",
+        "",
+        missing.join("\n"),
+      ].join("\n"),
     ).toEqual([]);
   });
 

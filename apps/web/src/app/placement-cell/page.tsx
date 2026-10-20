@@ -3,6 +3,10 @@ import { EmptyState } from "@recx/design";
 import { READINESS_CALIBRATION_NOTE, READINESS_FRAMING, formatCampusDay } from "@recx/shared";
 import { requirePlacementPage } from "@/lib/auth/guards";
 import { placementOverview } from "@/server/queries/placement-overview";
+import { cohortDistributions, cohortOptions } from "@/server/queries/placement-cohort";
+import { CohortFilter } from "@/components/placement/cohort-filter";
+import { DistributionTable } from "@/components/placement/distribution-table";
+import { cohortSize, parseCohortFilter } from "@/lib/placement/filter";
 
 export const metadata: Metadata = { title: "Placement cell" };
 
@@ -26,9 +30,20 @@ export const metadata: Metadata = { title: "Placement cell" };
  * the most common value — a single "out of" would be wrong for a named
  * fraction of the college.
  */
-export default async function PlacementCellPage() {
+export default async function PlacementCellPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requirePlacementPage();
   const overview = await placementOverview();
+  const filter = parseCohortFilter(await searchParams);
+  const cohort = overview.computedOn
+    ? await Promise.all([
+        cohortOptions(overview.computedOn),
+        cohortDistributions(overview.computedOn, filter),
+      ])
+    : null;
 
   return (
     <div className="space-y-8">
@@ -71,6 +86,40 @@ export default async function PlacementCellPage() {
               </p>
             ) : null}
           </section>
+
+          {cohort ? (
+            <>
+              <CohortFilter
+                basePath="/placement-cell"
+                current={filter}
+                options={cohort[0]}
+                total={cohortSize(cohort[0])}
+              />
+
+              <section className="space-y-4">
+                <h2 className="font-display text-lg font-semibold">
+                  How the cohort is spread, per tier
+                </h2>
+                <p className="max-w-3xl text-sm text-text-secondary">
+                  Each band is a percentage of what was MEASURABLE for that student, not a percentage of 100 — so a
+                  student whose rating does not count yet is not pushed down a band for it. The buckets are fixed, so
+                  two terms are comparable.
+                </p>
+                {cohort[1].rankable ? null : (
+                  <p className="max-w-3xl rounded-lg border border-border bg-primary-subtle/40 p-3 text-sm">
+                    This cohort has {cohort[1].size} students, fewer than the {cohort[1].minCohort} needed to compare
+                    anybody without effectively naming them — so no percentile was taken for them, and the aptitude,
+                    verbal and rating components are missing rather than low.
+                  </p>
+                )}
+                <div className="grid gap-4 lg:grid-cols-3">
+                  {cohort[1].tiers.map(({ dist, caption }) => (
+                    <DistributionTable key={dist.tier} dist={dist} caption={caption} />
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : null}
 
           <section className="space-y-3">
             <h2 className="font-display text-lg font-semibold">What was measurable</h2>

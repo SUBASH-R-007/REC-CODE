@@ -90,6 +90,15 @@ export async function requireSuperAdmin(): Promise<User> {
 }
 
 /**
+ * Each of the four composite guards below AWAITS its base guard and returns
+ * the result, rather than `return requireActionRole(...)`. Not style: the
+ * guard analyser in tests/repo/action-guards.test.ts reads a composite's
+ * first statement to prove it delegates to a base guard — which is what
+ * makes delegating safe, since the signed-in check and the impersonation
+ * refusal live in the base. A tail call with no await is invisible to it.
+ */
+
+/**
  * The placement cell (Phase 9d).
  *
  * PLACEMENT_OFFICER and SUPER_ADMIN, and deliberately NOT ADMIN: an
@@ -104,11 +113,13 @@ export async function requireSuperAdmin(): Promise<User> {
  * boundaries is barely more work and far safer.
  */
 export async function requirePlacementPage(): Promise<User> {
-  return requirePageRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+  const user = await requirePageRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+  return user;
 }
 
 export async function requirePlacementAction(): Promise<User> {
-  return requireActionRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+  const user = await requireActionRole("PLACEMENT_OFFICER", "SUPER_ADMIN");
+  return user;
 }
 
 /**
@@ -127,11 +138,13 @@ export async function requirePlacementAction(): Promise<User> {
  * (`MentorAssignment_mentor_is_not_student_or_officer`).
  */
 export async function requireMentorPage(): Promise<User> {
-  return requirePageRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
+  const user = await requirePageRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
+  return user;
 }
 
 export async function requireMentorAction(): Promise<User> {
-  return requireActionRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
+  const user = await requireActionRole("TA_MENTOR", "ADMIN", "SUPER_ADMIN");
+  return user;
 }
 
 export function isStaff(role: Role): boolean {

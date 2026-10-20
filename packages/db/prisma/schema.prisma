@@ -592,6 +592,7 @@ model User {
   readinessSnapshots ReadinessSnapshot[]
   menteeAssignments  MentorAssignment[] @relation("MenteeAssignments")
   mentorAssignments  MentorAssignment[] @relation("MentorAssignments")
+  placementExports   PlacementExport[]  @relation("PlacementExports")
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -3622,6 +3623,7 @@ model ReadinessSnapshot {
 
   @@unique([userId, computedOn])
   @@index([computedOn, departmentCode, batchYear, section])
+  @@index([computedOn, section])
   @@index([computedOn, serviceScore])
   @@index([computedOn, productScore])
   @@index([computedOn, topScore])
@@ -3650,4 +3652,36 @@ model MentorAssignment {
 
   @@index([mentorId, endedAt])
   @@index([menteeId, endedAt])
+}
+
+/// One placement CSV, as a record.
+///
+/// A CSV of five thousand students' readiness is the most portable thing this
+/// platform can produce, so a leaked one has to be attributable to a PERSON
+/// rather than to "the dashboard". The file's first line names this row's id,
+/// and this row names the person: the two point at each other.
+///
+/// `sha256` is of the file as sent. Not integrity protection — anybody holding
+/// the file can recompute it — but identification: given a spreadsheet somebody
+/// forwarded, the digest says which export it came from.
+///
+/// Append-only by trigger. A record that could be edited is a record of
+/// nothing, and one that could be deleted would let the person who exported a
+/// cohort remove the evidence.
+model PlacementExport {
+  id            String   @id @default(cuid())
+  requestedById String
+  requestedBy   User     @relation("PlacementExports", fields: [requestedById], references: [id])
+  requestedAt   DateTime @default(now())
+  /// The cohort filter as given, so "who was in that file" is answerable
+  /// without re-running a query against a cohort that has since changed.
+  filters       Json     @default("{}")
+  columns       String[]
+  rowCount      Int
+  /// The readiness run the figures came from; null when none had finished.
+  computedOn    DateTime? @db.Date
+  sha256        String
+
+  @@index([requestedById, requestedAt(sort: Desc)])
+  @@index([requestedAt(sort: Desc)])
 }

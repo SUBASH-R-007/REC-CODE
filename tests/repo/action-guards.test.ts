@@ -41,8 +41,18 @@ import ts from "typescript";
 
 const ACTIONS_DIR = "apps/web/src/server/actions";
 const BASE_GUARDS = new Set(["requireActionUser", "requireActionRole", "requireSuperAdmin"]);
-/** Composite guards and the file that defines each (checked below to start with a base guard). */
-const COMPOSITE_GUARDS: Record<string, string> = { requireAdminScopeAction: "apps/web/src/lib/auth/scope.ts" };
+/**
+ * Composite guards and the file that defines each. Each is checked below to
+ * start with a base guard, which is what makes delegating to one safe: the
+ * impersonation refusal and the signed-in check live in the base, so a
+ * composite that forgot them would fail that check rather than this list.
+ */
+const COMPOSITE_GUARDS: Record<string, string> = {
+  requireAdminScopeAction: "apps/web/src/lib/auth/scope.ts",
+  // Phase 9d. The placement cell and the mentor of record.
+  requirePlacementAction: "apps/web/src/lib/auth/guards.ts",
+  requireMentorAction: "apps/web/src/lib/auth/guards.ts",
+};
 const ACTION_GUARDS = new Set([...BASE_GUARDS, ...Object.keys(COMPOSITE_GUARDS)]);
 /** exportName → the guard its unwrapped first statement must await (null = none required). */
 const UNWRAPPED_ALLOWLIST: Record<string, string | null> = {

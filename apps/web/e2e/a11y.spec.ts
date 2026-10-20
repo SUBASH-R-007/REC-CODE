@@ -133,6 +133,18 @@ const TARGETS: readonly Target[] = [
   // account are not in the e2e fixture, and the markup does not depend on
   // which of the admitted roles is looking.
   { path: "/placement-cell", as: "admin", gating: false },
+  /**
+   * Phase 9e, GATING. The heatmap is the one surface in the whole product
+   * whose readability depends on markup rather than on copy: fourteen
+   * columns by N sections, with a count in every cell and colour as a
+   * redundant encoding. A grid that lost its scope="row" headers would be
+   * unreadable to a screen reader and would look identical to a sighted
+   * reviewer, which is exactly the failure a scan catches and a review does
+   * not.
+   */
+  { path: "/placement-cell/heatmap", as: "admin", gating: true },
+  { path: "/placement-cell/at-risk", as: "admin", gating: false },
+  { path: "/placement-cell/aptitude", as: "admin", gating: false },
   { path: "/mentor", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
