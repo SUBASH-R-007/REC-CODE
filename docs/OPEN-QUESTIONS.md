@@ -1976,3 +1976,113 @@ college's ops people can read it — a static page on the app host, or a PDF in
 the department share — and the override exists for exactly that. Left as the
 repository URL because inventing a URL that does not resolve would be worse
 than a slow one that does.
+
+### No `statementVersion` column: `Problem.version` already is one.
+
+The design asked for a new counter, bumped by the publish path. There is
+already one: `Problem.version`, the optimistic-concurrency token, is
+incremented by exactly the two writes that can change what a student reads —
+the publish flip and a retire — and the statement itself lives on a
+`ProblemVersion` that is frozen at publish and can never be edited in place.
+
+So `problem:{id}:v{version}` uses it. A second counter would have to be kept
+in step with the first, and the failure mode of getting that wrong is
+precisely the bug the versioned key exists to eliminate: a student reading an
+old statement. The one cost of reusing it is that a future write which bumps
+`version` for an unrelated reason would orphan a cache entry that was still
+valid — a wasted re-read, in the direction that is safe.
+
+### The catalogue ROWS are not cached, and should not be.
+
+SPEC asks for the problem list under `unstable_cache` with the tag
+`problems`. What is cached is the company filter options — the one part of
+`/problems` that is identical for every student. The rows are not, because
+one SQL statement returns the page, its window count, the viewer's solve
+state from `UserProblemStatus` and their bookmarks: a tuned single round
+trip, and every row in it is user-scoped.
+
+Caching it per student (a `userId` in the key, which the rule allows) would
+mean a student who has just solved a problem is told for the next minute that
+they have not. The staleness lands on the one column they are looking for.
+Splitting the statement into a shared id page plus a per-user overlay would
+make it cacheable, at the cost of two round trips and the window-count
+pagination; worth revisiting only if `/problems` ever shows up in a slow
+query log, which at a page size of 20 over a few thousand problems it will
+not.
+
+### The leaderboard ZSET was measured, and not built.
+
+SPEC asks for "a Redis ZSET for ZREVRANK" so a student's own rank is O(log n)
+rather than a count. Measured first, on PostgreSQL 17.11 in the WSL mirror,
+against a table with the board's index shape and **50,000 rows — sixteen
+times a 3,000-student campus**:
+
+| case | rows counted | execution |
+|---|---|---|
+| a student at the very bottom (every row ahead) | 50,000 | **5.2 ms** |
+| a student in the middle | 24,842 | **4.4 ms** |
+
+At this campus's scale that is a fraction of a millisecond, and a Redis round
+trip is 0.2–0.5 ms of it. So the ZSET would save a few milliseconds and cost
+a second source of truth for the number students care about most.
+
+That cost is not hypothetical, and it is why this is recorded rather than
+done:
+
+- **It would be stale.** `XpBucket` moves on every solve. A ZSET rebuilt by
+  the nightly job gives a rank that is hours old, while the count is live. A
+  stale rank is worse than a slow one — the student refreshes and sees the
+  same number after solving.
+- **It cannot express the board's own rules.** The visible rank subtracts
+  the students who have opted out of the public board (`aheadAll -
+  aheadHidden`), and the tiebreak is `lastXpAt` ascending, then `userId`. A
+  ZSET scores by one number: encoding xp and the timestamp into one float is
+  doable (xp × 2³¹ + an inverted second count fits in a float64 mantissa for
+  xp under 4 million), and the opt-out needs a second ZSET or a second query.
+  Two structures that must agree with each other and with Postgres.
+- **The fallback path doubles it.** "Falls back to the table when Redis is
+  down" means two implementations of rank, which can disagree — and the
+  disagreement surfaces as a student's rank changing when nothing about
+  their XP did.
+
+What would change the decision: a single board over ~200,000 rows, or that
+count over 50 ms in production. Both are a different institution.
+
+One thing the measurement did show, recorded because it looks like a bug and
+is not: the planner chooses a **sequential scan**, not the
+`(period, periodKey, xp DESC, lastXpAt ASC)` index, because the predicate is
+`xp > me.xp OR (xp = me.xp AND lastXpAt < me.lastXpAt)` and an OR across two
+columns is not a range on that index. At these sizes the seq scan is the
+cheaper plan anyway. Making it index-only would mean a row-comparison
+predicate, which does not express a mixed `DESC, ASC` order without
+rewriting the index — work worth doing at the row counts above, and not
+before.
+
+### `Cache-Control: public` on statements was not added.
+
+SPEC's caching line asks for `public, max-age=300,
+stale-while-revalidate=86400` on problem statements. The caching is
+implemented — immutable key, nothing invalidated, only orphaned — as a
+SERVER-side cache rather than an HTTP header, and the header was left off
+deliberately:
+
+- **A statement is not anonymous content on this platform.** `/problems`
+  requires a session; a publicly cacheable statement endpoint would make the
+  problem set readable by anyone who can guess an id. That is a product
+  decision, not a caching one.
+- **There is no shared cache in the topology.** `deploy/compose.app.yml` puts
+  Caddy in front of two web replicas with no CDN behind it, so `public` would
+  grant permission to a cache that does not exist while opening the one risk
+  it carries.
+- **The page is server-rendered by requirement.** SPEC §5 requires the
+  workspace to render without JavaScript, so the statement arrives inside the
+  page rather than as a subresource a browser could cache on its own. There
+  is nothing for `max-age` to apply to.
+
+What the spec wanted from the header — a reload that costs nothing and no
+invalidation to get wrong — is what the immutable key delivers: the render
+and the two queries behind a statement happen once per version, not once per
+request. What is open is the browser-cache half, which needs either a
+decision that statements are public or a statement subresource; if the
+college ever puts a CDN in front of the app host, this is the first thing to
+revisit.

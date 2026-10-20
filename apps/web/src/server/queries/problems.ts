@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { Prisma, type Difficulty } from "@recx/db";
 import {
@@ -12,6 +13,9 @@ import {
 } from "@recx/shared";
 import { starterStub, supportsFunctionMode } from "@recx/shared/harness";
 import { db } from "@/lib/db";
+import { renderMarkdown } from "@/lib/markdown";
+import { PROBLEMS_TAG, PROBLEM_POINTER_TTL_SECONDS, problemCacheKey } from "@/lib/problems/cache";
+import { getPublicLanguageRows } from "@/server/queries/judge-languages";
 import {
   CATALOG_PAGE_SIZE,
   pageCount,
@@ -202,14 +206,28 @@ export interface CatalogCompany {
   name: string;
 }
 
-/** Curated companies that tag at least one published problem (the company filter's options). */
-export async function listCatalogCompanies(): Promise<CatalogCompany[]> {
-  return db.company.findMany({
-    where: { curated: true, problems: { some: { problem: { status: "PUBLISHED" } } } },
-    orderBy: { name: "asc" },
-    select: { id: true, slug: true, name: true },
-  });
-}
+/**
+ * Curated companies that tag at least one published problem (the company
+ * filter's options).
+ *
+ * Cached under the `problems` tag (Phase 10c). It is the catalogue's most
+ * expensive shared read — an EXISTS over ProblemCompanyTag for every
+ * curated company — and it is the same list for every student on the page,
+ * so it is the one piece of /problems that can be cached without a user id
+ * in the key. The catalogue ROWS are not cached and must not be: they carry
+ * the viewer's solve state and bookmarks, and a student who has just solved
+ * a problem should not be told for the next minute that they have not.
+ */
+export const listCatalogCompanies: () => Promise<CatalogCompany[]> = unstable_cache(
+  async (): Promise<CatalogCompany[]> =>
+    db.company.findMany({
+      where: { curated: true, problems: { some: { problem: { status: "PUBLISHED" } } } },
+      orderBy: { name: "asc" },
+      select: { id: true, slug: true, name: true },
+    }),
+  ["catalog-companies", "v1"],
+  { tags: [PROBLEMS_TAG], revalidate: PROBLEM_POINTER_TTL_SECONDS },
+);
 
 export interface WorkspaceLanguage {
   key: LanguageKey;
@@ -236,6 +254,15 @@ export interface ProblemWorkspace {
   difficulty: Difficulty;
   versionId: string;
   statementMd: string;
+  /**
+   * The statement, rendered and sanitised (Phase 10c).
+   *
+   * Rendered inside the cached read rather than in the page, because the
+   * render is the expensive half — markdown to HTML and then the
+   * sanitiser, per request, for a string that cannot change while the key
+   * is the same.
+   */
+  statementHtml: string;
   constraints: string[];
   ioMode: "STDIN" | "FUNCTION";
   signature: FunctionSignature | null;
@@ -251,62 +278,157 @@ function asConstraints(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((c): c is string => typeof c === "string") : [];
 }
 
+// ── The problem cache (Phase 10c) ─────────────────────────────────
+
+interface ProblemPointer {
+  id: string;
+  slug: string;
+  displayCode: string;
+  status: string;
+  version: number;
+  liveVersionId: string | null;
+}
+
 /**
- * Everything the workspace page needs for one PUBLISHED problem, from its
- * LIVE version. Returns null for an unknown, unpublished or retired problem.
- * Only isSample test cases are loaded — a hidden test's blobs never leave
- * the database through this path. Cached per request (page + metadata).
+ * slug → which version is live.
+ *
+ * The only part of a problem read that has to be fresh, and the only part
+ * that is tagged: everything else hangs off the version this returns. Small
+ * on purpose — six columns, no joins — because it is the one read a publish
+ * must be able to make visible immediately.
  */
-export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWorkspace | null> => {
-  const problem = await db.problem.findUnique({
-    where: { slug },
-    select: {
-      id: true,
-      slug: true,
-      displayCode: true,
-      title: true,
-      difficulty: true,
-      status: true,
-      liveVersion: {
-        select: {
-          id: true,
-          title: true,
-          difficulty: true,
-          statementMd: true,
-          constraints: true,
-          ioMode: true,
-          functionSignature: true,
-          timeLimitMs: true,
-          memoryLimitKb: true,
-          starterCodes: { select: { language: true, code: true } },
-          testCases: {
-            where: { isSample: true },
-            orderBy: { index: "asc" },
-            select: {
-              index: true,
-              input: { select: { inline: true } },
-              output: { select: { inline: true } },
-            },
+const readProblemPointer: (slug: string) => Promise<ProblemPointer | null> = unstable_cache(
+  async (slug: string) =>
+    db.problem.findUnique({
+      where: { slug },
+      select: { id: true, slug: true, displayCode: true, status: true, version: true, liveVersionId: true },
+    }),
+  ["problem-pointer", "v1"],
+  { tags: [PROBLEMS_TAG], revalidate: PROBLEM_POINTER_TTL_SECONDS },
+);
+
+/** The immutable half of a workspace read: everything frozen at publish. */
+interface WorkspaceContent {
+  versionId: string;
+  title: string;
+  difficulty: Difficulty;
+  statementMd: string;
+  statementHtml: string;
+  constraints: string[];
+  ioMode: "STDIN" | "FUNCTION";
+  signature: FunctionSignature | null;
+  timeLimitMs: number;
+  memoryLimitKb: number;
+  samples: WorkspaceSample[];
+  starters: Array<{ language: string; code: string }>;
+}
+
+/**
+ * One frozen version's content, under the immutable key.
+ *
+ * **Nothing here is ever invalidated — it is orphaned.** A publish writes a
+ * new `Problem.version`, so the next read asks for a different key and this
+ * entry is never consulted again. That is why there is no tag and no
+ * `revalidate`: a cache entry that cannot be wrong does not need either, and
+ * every invalidation this code does not have to perform is an invalidation
+ * it cannot get wrong.
+ *
+ * `key` is the first argument rather than a `keyParts` entry because
+ * `unstable_cache` hashes its arguments into the cache key: passing SPEC's
+ * own `problem:{id}:v{n}` string makes the real key the documented one, and
+ * makes it readable in a test.
+ *
+ * The language list is deliberately NOT in here. Languages are enabled and
+ * disabled by an admin on their own schedule, and freezing them under a
+ * problem's version key would offer C++ for as long as that version stayed
+ * live. They come from `getPublicLanguageRows()`, which has its own cache
+ * and its own tag.
+ *
+ * Only `isSample` test cases are loaded, as before: a hidden test's blobs
+ * never leave the database through this path, and now they never enter a
+ * cache either.
+ */
+const readWorkspaceContent: (key: string, versionId: string) => Promise<WorkspaceContent | null> = unstable_cache(
+  async (_key: string, versionId: string): Promise<WorkspaceContent | null> => {
+    const version = await db.problemVersion.findUnique({
+      where: { id: versionId },
+      select: {
+        id: true,
+        title: true,
+        difficulty: true,
+        statementMd: true,
+        constraints: true,
+        ioMode: true,
+        functionSignature: true,
+        timeLimitMs: true,
+        memoryLimitKb: true,
+        starterCodes: { select: { language: true, code: true } },
+        testCases: {
+          where: { isSample: true },
+          orderBy: { index: "asc" },
+          select: {
+            index: true,
+            input: { select: { inline: true } },
+            output: { select: { inline: true } },
           },
         },
       },
-    },
-  });
-  if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersion) return null;
-  const version = problem.liveVersion;
+    });
+    if (!version) return null;
 
-  const signature =
-    version.ioMode === "FUNCTION" ? functionSignatureSchema.safeParse(version.functionSignature) : null;
-  const sig = signature?.success ? signature.data : null;
-  // A FUNCTION problem whose signature does not parse cannot be judged.
-  if (version.ioMode === "FUNCTION" && !sig) return null;
+    const parsed =
+      version.ioMode === "FUNCTION" ? functionSignatureSchema.safeParse(version.functionSignature) : null;
+    const signature = parsed?.success ? parsed.data : null;
+    // A FUNCTION problem whose signature does not parse cannot be judged.
+    if (version.ioMode === "FUNCTION" && !signature) return null;
 
-  const configs = await db.languageConfig.findMany({
-    where: { enabled: true, isCurrent: true },
-    select: { key: true, label: true, version: true },
-    orderBy: { key: "asc" },
-  });
-  const starters = new Map(version.starterCodes.map((s) => [s.language, s.code]));
+    return {
+      versionId: version.id,
+      title: version.title,
+      difficulty: version.difficulty,
+      statementMd: version.statementMd,
+      statementHtml: renderMarkdown(version.statementMd),
+      constraints: asConstraints(version.constraints),
+      ioMode: version.ioMode,
+      signature,
+      timeLimitMs: version.timeLimitMs,
+      memoryLimitKb: version.memoryLimitKb,
+      samples: version.testCases.map((t) => ({
+        index: t.index,
+        input: t.input.inline ?? "",
+        output: t.output.inline ?? "",
+      })),
+      starters: version.starterCodes.map((s) => ({ language: s.language, code: s.code })),
+    };
+  },
+  ["problem-workspace", "v1"],
+);
+
+/**
+ * Everything the workspace page needs for one PUBLISHED problem, from its
+ * LIVE version. Returns null for an unknown, unpublished or retired problem.
+ *
+ * Three reads, each cached where it is safe to be (Phase 10c): the live
+ * pointer (tagged, 60-second backstop), the version's frozen content (keyed
+ * by version, never invalidated) and the enabled languages (their own tag).
+ * Nothing user-scoped passes through any of them — solve state, bookmarks
+ * and drafts are read elsewhere, per request, because a cache entry holding
+ * one student's progress is the one caching mistake that shows another
+ * student their data.
+ *
+ * Still wrapped in React `cache` so the page and its `generateMetadata` make
+ * one set of reads rather than two.
+ */
+export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWorkspace | null> => {
+  const problem = await readProblemPointer(slug);
+  if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersionId) return null;
+
+  const content = await readWorkspaceContent(problemCacheKey(problem.id, problem.version), problem.liveVersionId);
+  if (!content) return null;
+
+  const configs = await getPublicLanguageRows();
+  const starters = new Map(content.starters.map((s) => [s.language, s.code]));
+  const sig = content.signature;
 
   const languages: WorkspaceLanguage[] = [];
   const functionUnavailable: ProblemWorkspace["functionUnavailable"] = [];
@@ -330,20 +452,17 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
     id: problem.id,
     slug: problem.slug,
     displayCode: problem.displayCode,
-    title: version.title,
-    difficulty: version.difficulty,
-    versionId: version.id,
-    statementMd: version.statementMd,
-    constraints: asConstraints(version.constraints),
-    ioMode: version.ioMode,
+    title: content.title,
+    difficulty: content.difficulty,
+    versionId: content.versionId,
+    statementMd: content.statementMd,
+    statementHtml: content.statementHtml,
+    constraints: content.constraints,
+    ioMode: content.ioMode,
     signature: sig,
-    timeLimitMs: version.timeLimitMs,
-    memoryLimitKb: version.memoryLimitKb,
-    samples: version.testCases.map((t) => ({
-      index: t.index,
-      input: t.input.inline ?? "",
-      output: t.output.inline ?? "",
-    })),
+    timeLimitMs: content.timeLimitMs,
+    memoryLimitKb: content.memoryLimitKb,
+    samples: content.samples,
     languages,
     functionUnavailable,
   };

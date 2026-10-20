@@ -274,20 +274,54 @@ gaps.
 `problem:{id}:v{statementVersion}`, `Cache-Control: public, max-age=300,
 stale-while-revalidate=86400`. Nothing is ever invalidated — only orphaned.
 That eliminates the whole class of "the student saw the old statement" bugs
-and makes a reload on bad campus wifi instant. It needs
-`Problem.statementVersion`, which does not exist yet: a counter bumped by the
+and makes a reload on bad campus wifi instant. It needs a counter bumped by the
 publish path, NOT the frozen `ProblemVersion.id` (a statement typo fix must
 not require a new frozen version, and a new frozen version must bump the
 key).
 
+**That counter already exists: `Problem.version`.** The new column this
+section asked for was not added. `Problem.version` is the optimistic
+concurrency token the publish flip and the retire already increment — which
+is exactly the set of writes that can change what a student reads, because
+the statement lives on a `ProblemVersion` frozen at publish that can never
+be edited in place. A second counter would have to be kept in step with the
+first, and the failure mode of getting that wrong is the bug the key exists
+to eliminate.
+
+**And the HTTP header was not added either**, while the caching it was asking
+for was. The immutable key is a server-side cache: the markdown render and
+the two queries behind a statement happen once per version. `Cache-Control:
+public` was left off because a statement is not anonymous content on this
+platform (`/problems` needs a session), there is no shared cache in the
+topology to grant permission to, and SPEC §5 requires the workspace to
+render without JavaScript — so the statement arrives inside the page rather
+than as a subresource a browser could cache. All three reasons are recorded
+in `docs/OPEN-QUESTIONS.md`, with what would change them.
+
 **The problem list** goes under `unstable_cache` with tag `problems`, 60s,
-`revalidateTag("problems")` on publish and on retire.
+`revalidateTag("problems")` on publish and on retire. What that turned out
+to mean: the live POINTER (slug → which version is live) and the company
+filter options are cached under the tag; the catalogue ROWS are not. One SQL
+statement returns the page, its window count, the viewer's solve state and
+their bookmarks — every row of it is user-scoped, and a 60-second cache
+would tell a student who has just solved a problem that they have not. The
+staleness would land on the one column they are looking at.
 
 **The global leaderboard** reads `XpBucket` plus a Redis ZSET for
 `ZREVRANK`, so a student's own rank is O(log n) rather than a scan. The ZSET
 is a cache of `XpBucket`, rebuilt by the existing nightly job, and the page
 falls back to the table when Redis is down — a leaderboard that 500s because
 a cache is cold is worse than a slow one.
+
+**Measured, and then not built.** At 50,000 rows — sixteen times this
+campus — the count the ZSET would replace runs in 5.2 ms for the worst-case
+student and 4.4 ms for a typical one. A Redis round trip is a tenth of that,
+so the saving is a few milliseconds and the cost is a second source of truth
+for a student's rank: stale between rebuilds while the count is live, unable
+to express the opt-out subtraction or the `lastXpAt` tiebreak in a single
+score, and doubled again by the fallback path. `docs/OPEN-QUESTIONS.md`
+carries the numbers, the two implementation problems in detail, and the
+thresholds that would change the decision.
 
 **The fence.** `tests/repo/cache-keys.test.ts`: no `unstable_cache` call
 whose key omits a user id in a module that reads an authenticated payload,

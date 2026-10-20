@@ -10,6 +10,7 @@ import { requestIpHash } from "@/lib/ip";
 import { problemDeletionCheck, versionDeletionCheck } from "@/lib/privileged/executors/problem-delete";
 import { createPrivilegedOperation } from "@/lib/privileged/operations";
 import { enforcePrivilegedRequestRate } from "@/lib/privileged/rate";
+import { revalidateProblems } from "@/lib/problems/cache";
 
 /**
  * Problem lifecycle, SUPER_ADMIN only (capability "problems.lifecycle"):
@@ -84,6 +85,15 @@ export async function retireProblem(
     });
     revalidatePath("/problems");
     revalidatePath(`/problems/${problem.slug}`);
+    /**
+     * Phase 10c. `revalidatePath` clears the rendered pages; the cached
+     * LIVE POINTER is a data cache entry and survives it, so without this a
+     * retired problem stays openable for up to a minute. The retire also
+     * bumped `Problem.version`, which orphans the content entry — the
+     * statement is not deleted from the cache, it simply stops being asked
+     * for, which is the whole point of a versioned key.
+     */
+    revalidateProblems();
     return { problemId: parsed.problemId, version: problem.version };
   }, "retireProblem");
 }

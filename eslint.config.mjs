@@ -33,6 +33,16 @@ export default tseslint.config(
       // see them. The directory goes away once Phase 4 is gated
       // (docs/handoff/README.md).
       "docs/handoff/**",
+      /**
+       * Playwright's own output. Both are gitignored, and `playwright-report`
+       * contains a bundled copy of the trace viewer — minified browser code
+       * that fails `no-undef` on `document` and `self` by the hundred. It
+       * only appears when the e2e suite is run from the repository itself
+       * (Windows); the WSL mirror has its own copy, which is why it took
+       * until Phase 10c to see this.
+       */
+      "**/playwright-report/**",
+      "**/test-results/**",
     ],
   },
   js.configs.recommended,

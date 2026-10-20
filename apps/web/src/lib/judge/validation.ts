@@ -14,6 +14,7 @@ import { audit } from "@/lib/audit";
 import { loadVersionContentInput } from "@/lib/authoring/content-input";
 import { testSetFingerprint } from "@/lib/authoring/fingerprint";
 import { db } from "@/lib/db";
+import { revalidateProblems } from "@/lib/problems/cache";
 import { ConflictError } from "@/lib/errors";
 import { readBlobBytes, sha256Hex } from "@/lib/testdata/blobs";
 import { prepareBundle, putBundle, testBundleFiles, type BundleTest, type PreparedBundle } from "@/lib/testdata/bundle";
@@ -905,6 +906,20 @@ export async function publishVersion(versionId: string, options: PublishOptions)
       },
       ipHash: options.ipHash ?? null,
     });
+    /**
+     * Phase 10c. The live pointer is cached for up to a minute, so without
+     * this a student could open a problem and read the PREVIOUS revision's
+     * statement for that minute — the exact bug the versioned key exists to
+     * eliminate, reintroduced one layer up. The content itself needs no
+     * invalidation: its key contains `Problem.version`, which this publish
+     * has just incremented, so the old entry is orphaned rather than stale.
+     *
+     * Last, and best effort: the publish has committed and been audited, and
+     * a revalidation that fails (an import running outside a request, where
+     * `revalidateTag` throws) must not turn a published problem into a
+     * reported failure.
+     */
+    revalidateProblems();
     return { ok: true, problemId: published.problemId, versionId, revision: published.revision };
   } catch (error) {
     if (error instanceof PublishAbort) return error.result;

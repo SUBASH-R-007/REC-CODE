@@ -11,7 +11,6 @@ import { LANGUAGE_COOKIE } from "@/lib/drafts/keys";
 import { pickInitialLanguage } from "@/lib/drafts/merge";
 import { loadServerDrafts } from "@/lib/drafts/server";
 import { slugSchema } from "@/lib/judge/submit-schema";
-import { renderMarkdown } from "@/lib/markdown";
 import { getProblemWorkspace } from "@/server/queries/problems";
 import { HISTORY_LIMIT, recentSubmissions } from "@/server/queries/submissions";
 import { ActivityTracker } from "@/components/help/activity-tracker";
@@ -78,7 +77,6 @@ export default async function ProblemPage({ params }: Params) {
   // Only this problem's offered languages travel to the browser.
   const drafts = serverDrafts.filter((d) => languageKeys.includes(d.language));
 
-  const statementHtml = renderMarkdown(problem.statementMd);
   const customHint = problem.signature
     ? `One value per line, in parameter order: ${problem.signature.params.map((p) => p.name).join(", ")}.`
     : "This text is passed to your program on standard input.";
@@ -125,7 +123,7 @@ export default async function ProblemPage({ params }: Params) {
         header={header}
         submissionCount={history.length}
         panels={{
-          description: <ProblemDescription problem={problem} statementHtml={statementHtml} />,
+          description: <ProblemDescription problem={problem} statementHtml={problem.statementHtml} />,
           editorial: (
             <Suspense fallback={<PanelSkeleton />}>
               <EditorialPanel problemId={problem.id} versionId={problem.versionId} />
