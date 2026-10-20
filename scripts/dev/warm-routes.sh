@@ -34,7 +34,7 @@ PASSES="${WARM_PASSES:-2}"
 ROUTES="
 /login /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
 /leaderboard /sheets /learn /profile /notes /bookmarks /help /judge /offline
-/contests /aptitude /placement /notifications /accessibility
+/contests /aptitude /placement /notifications /accessibility /api/health
 /account/leave /account/reactivate
 /admin /admin/students /admin/students/import /admin/cohorts /admin/sheets
 /admin/tracks /admin/reports /admin/announcements /admin/announcements/new
@@ -62,6 +62,21 @@ for pass in $(seq 1 "$PASSES"); do
       printf '  DEAD %s (empty reply: the dev server restarted; the next pass compiles it from cache)\n' "$route"
     fi
   done
+  # The sign-in POST handler compiles on its first request too, and the very
+  # first thing the suite does is sign in — so without this the compile
+  # happens inside `waitForURL`, which is how the first CI run of this suite
+  # lost its storage-state setup ("Sign-in failed for 2116231001004", no
+  # alert on the page, because the page had not navigated at all).
+  #
+  # An empty urlencoded body is refused as `identifier-missing` before
+  # anything reaches the database or the rate limiter, so this compiles the
+  # route and the modules behind it without signing anything in.
+  total=$((total + 1))
+  code="$(curl -s -o /dev/null -m 180 -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' --data '' \
+    "$BASE/api/auth/login" 2>/dev/null || echo 000)"
+  printf '  POST /api/auth/login -> %s (303 expected: the form was empty)\n' "$code"
+
   printf '  %s route(s) did not answer on this pass\n' "$pass_dead"
   dead=$pass_dead
 done
