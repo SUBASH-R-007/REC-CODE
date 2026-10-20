@@ -59,4 +59,6 @@ export * from "./readiness";
 export * from "./readiness-snapshot";
 export * from "./readiness-distribution";
 export * from "./placement-export";
+export * from "./export-payload";
+export * from "./drive";
 export * from "./percentile";

@@ -26,6 +26,7 @@ import {
   LEAVE_STATUSES,
   INACTIVITY_STAGES,
   ACCOUNT_STATUS_SOURCES,
+  READINESS_TIERS,
 } from "@recx/shared";
 import { CONTENT_ORIGINS } from "@recx/shared/authoring";
 import { describe, expect, it } from "vitest";
@@ -125,6 +126,7 @@ const MIRRORS: Array<[prismaEnum: string, sharedName: string, shared: readonly s
   ["LeaveStatus", "LEAVE_STATUSES", LEAVE_STATUSES],
   ["RestrictionStage", "INACTIVITY_STAGES", INACTIVITY_STAGES],
   ["AccountStatusSource", "ACCOUNT_STATUS_SOURCES", ACCOUNT_STATUS_SOURCES],
+  ["ReadinessTier", "READINESS_TIERS", READINESS_TIERS],
   // Difficulty keys the XP table; the Prisma enum must offer exactly those.
   ["Difficulty", "the keys of XP_RULES.firstSolve", Object.keys(XP_RULES.firstSolve)],
 ];

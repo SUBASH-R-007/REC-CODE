@@ -1868,3 +1868,29 @@ cohorts those were, because that is a fact an administrator acts on.
 large department's equally-prepared students, because fewer of their
 components are measurable. The denominator is shown everywhere precisely so
 that this is visible rather than mistaken for being behind.
+
+### The public verify page downloads JavaScript it does not use.
+
+`/verify/[code]` is server-rendered and renders fully without JavaScript —
+the `serverRendered` check in `apps/web/size-budgets.json` proves the page
+itself adds 0.2 KB, Next's page stub and nothing else. But its first load
+measures ~117 KB, because the App Router sends the framework bundle and the
+`(public)` layout chain to every route whether the route needs them or not.
+
+*Why it is worth a decision rather than a shrug:* this is the only page in the
+product whose audience has never seen the product. A recruiter opens it once,
+often on a phone, on whatever connection they have, and forms their whole
+impression of the college's platform from it. 117 KB to render a table of
+nine numbers is not a failure, but it is not nothing either.
+
+*What ships:* the budget records the measured figure (125 KB, with headroom)
+and the comment says what the number is made of, so nobody reads it as the
+page being heavy.
+
+*The option, for whoever picks this up:* `/login` already achieves a true
+zero-JS render through the Pages Router, with a `zeroJs: true` budget that
+asserts no `<script src>`, no preload and no `__NEXT_DATA__`. The same
+treatment would work here, and `/verify` is the strongest candidate in the
+product for it — it has no interactivity at all. It was not done in Phase 9f
+because moving a route between routers is a change to how it is rendered, not
+a tweak to its budget, and the phase was not the place to make it quietly.

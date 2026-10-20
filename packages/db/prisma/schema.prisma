@@ -593,6 +593,10 @@ model User {
   menteeAssignments  MentorAssignment[] @relation("MenteeAssignments")
   mentorAssignments  MentorAssignment[] @relation("MentorAssignments")
   placementExports   PlacementExport[]  @relation("PlacementExports")
+  placementDrives    PlacementDrive[]   @relation("DrivesCreated")
+  driveDecisions     DriveEligibilityDecision[] @relation("DriveDecisionsAbout")
+  driveDecisionsMade DriveEligibilityDecision[] @relation("DriveDecisionsMade")
+  profileExports     ProfileExport[]    @relation("ProfileExports")
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -712,6 +716,7 @@ model Company {
   curated   Boolean             @default(true)
   createdAt DateTime            @default(now())
   problems  ProblemCompanyTag[]
+  placementDrives PlacementDrive[]
 }
 
 model ProblemCompanyTag {
@@ -3684,4 +3689,114 @@ model PlacementExport {
 
   @@index([requestedById, requestedAt(sort: Desc)])
   @@index([requestedAt(sort: Desc)])
+}
+
+/// The readiness tier a drive recruits at.
+///
+/// Phase 9b needed no enum for this — the component breakdown is JSON keyed
+/// by tier, so one TOPIC_BREADTH entry can carry PRODUCT's and TOP's
+/// different per-topic targets. A drive has exactly one tier, so here the
+/// closed set is worth having in the database.
+enum ReadinessTier {
+  SERVICE
+  PRODUCT
+  TOP
+}
+
+enum DriveEligibility {
+  ELIGIBLE
+  NOT_ELIGIBLE
+}
+
+enum ProfileExportKind {
+  PROFILE
+  RESUME
+}
+
+/// One company visit.
+///
+/// `thresholdScore` is on the NORMALISED figure — a score as a percentage of
+/// what was measurable for that student — never on the raw score. With
+/// mockInterviewScore unsourced no TOP score can exceed 85, so a raw bar of
+/// 70 would fail a cohort for a component nobody has built.
+model PlacementDrive {
+  id                      String            @id @default(cuid())
+  companyId               String?
+  company                 Company?          @relation(fields: [companyId], references: [id])
+  companyName             String
+  tier                    ReadinessTier
+  driveOn                 DateTime          @db.Date
+  thresholdScore          Int?
+  eligibleBatchYear       Int?
+  eligibleDepartmentCodes String[]
+  notes                   String?
+  createdById             String
+  createdBy               User              @relation("DrivesCreated", fields: [createdById], references: [id])
+  createdAt               DateTime          @default(now())
+  archivedAt              DateTime?
+
+  decisions DriveEligibilityDecision[]
+
+  @@index([driveOn(sort: Desc), tier])
+}
+
+/// One human decision about one student and one drive.
+///
+/// SPEC §5: eligibility is "a human decision recorded in the audit log".
+/// The honest statement of what the database enforces, because a draft
+/// overclaimed it: a NOT NULL actor with a foreign key does NOT make an
+/// automatic decision impossible — any job holding a staff user id satisfies
+/// both. What is enforced is that the decision is attributable, carries a
+/// reason, never changes, and cannot exist without an AuditLog row in the
+/// same transaction (a deferred constraint trigger, checked at commit).
+model DriveEligibilityDecision {
+  id                  String           @id @default(cuid())
+  driveId             String
+  drive               PlacementDrive   @relation(fields: [driveId], references: [id])
+  userId              String
+  user                User             @relation("DriveDecisionsAbout", fields: [userId], references: [id])
+  decision            DriveEligibility
+  reason              String
+  decidedById         String
+  decidedBy           User             @relation("DriveDecisionsMade", fields: [decidedById], references: [id])
+  decidedAt           DateTime         @default(now())
+  /// The readiness day the decision was taken against: the figures move
+  /// nightly, and "they were under the bar" has to mean "under it on the day
+  /// somebody looked".
+  readinessComputedOn DateTime?        @db.Date
+
+  @@unique([driveId, userId])
+  @@index([driveId, decision])
+  @@index([userId, decidedAt(sort: Desc)])
+}
+
+/// A signed, publicly verifiable copy of a student's own record.
+///
+/// SPEC §5: "HMAC-signed profile/resume export reusing the LMS certificate +
+/// /verify pattern." The SHAPE is reused — a random public code, an HMAC over
+/// a canonical payload, a /verify route that re-derives it, and a revocation
+/// the student controls. The LMS's database is not: §7's "do not share a
+/// database with the LMS" holds, and this is a REC Code table.
+///
+/// The code is the primary key, so there is no sequential id a visitor could
+/// walk. Everything but the revocation is frozen by trigger: a signature over
+/// a mutable payload verifies nothing.
+model ProfileExport {
+  code         String            @id
+  userId       String
+  user         User              @relation("ProfileExports", fields: [userId], references: [id])
+  kind         ProfileExportKind
+  /// The frozen attested facts. Never an email, a roll number, a department,
+  /// a section, an integrity band or a flag count — a verification page is a
+  /// PUBLIC page.
+  payload      Json
+  rulesVersion Int
+  signature    String
+  algorithm    String            @default("HMAC-SHA256")
+  issuedAt     DateTime          @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  revokedById  String?
+
+  @@index([userId, issuedAt(sort: Desc)])
 }

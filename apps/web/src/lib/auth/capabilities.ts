@@ -680,6 +680,18 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       "account#selfClearRestriction",
     ],
   },
+  {
+    /**
+     * Phase 9f. A student signs their OWN record and can withdraw it. Self
+     * service, because it is their record: there is no path here that exports
+     * somebody else, and an officer who wants cohort data has the CSV, which
+     * records who asked.
+     */
+    key: "profile.export",
+    label: "Make and withdraw a signed copy of my own record",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["profile-export#createProfileExport", "profile-export#revokeProfileExport"],
+  },
 ] as const satisfies readonly Capability[]);
 
 /**
@@ -745,6 +757,30 @@ export const PLACEMENT_CAPABILITIES = deepFreeze([
     label: "Ask a mentor to follow up with a student",
     roles: PLACEMENT,
     actions: ["placement-mentor#assignMentor", "placement-mentor#endAssignment"],
+  },
+  {
+    key: "placement.drives",
+    label: "Keep the list of company drives",
+    roles: PLACEMENT,
+    actions: ["placement-drives#createDrive", "placement-drives#archiveDrive"],
+    pages: [
+      "app/placement-cell/drives/page.tsx",
+      "app/placement-cell/drives/new/page.tsx",
+      "app/placement-cell/drives/[id]/page.tsx",
+    ],
+  },
+  {
+    /**
+     * The one capability in the product that records a judgement about a
+     * student's opportunities. Its own, so the matrix shows it alone: SPEC
+     * §5 says eligibility is a human decision recorded in the audit log, and
+     * the database refuses a decision with no audit row in the same
+     * transaction.
+     */
+    key: "placement.eligibility.decide",
+    label: "Record a human eligibility decision for a drive",
+    roles: PLACEMENT,
+    actions: ["placement-drives#recordEligibility"],
   },
 ] as const satisfies readonly Capability[]);
 

@@ -187,6 +187,8 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `placement.drilldown` | placement | - | - | - | yes | yes | 1 page |
 | `placement.export` | placement | - | - | - | yes | yes | 1 route, 1 page |
 | `placement.mentor.route` | placement | - | - | - | yes | yes | 2 actions |
+| `placement.drives` | placement | - | - | - | yes | yes | 2 actions, 3 pages |
+| `placement.eligibility.decide` | placement | - | - | - | yes | yes | 1 action |
 | `mentor.mentees.view` | mentor | - | yes | yes | - | yes | 2 pages |
 | `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
 | `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
@@ -206,6 +208,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
+| `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 
 Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`.
 <!-- capability-matrix:end -->

@@ -145,6 +145,8 @@ const TARGETS: readonly Target[] = [
   { path: "/placement-cell/heatmap", as: "admin", gating: true },
   { path: "/placement-cell/at-risk", as: "admin", gating: false },
   { path: "/placement-cell/aptitude", as: "admin", gating: false },
+  { path: "/placement-cell/drives", as: "admin", gating: false },
+  { path: "/placement-cell/drives/new", as: "admin", gating: false },
   { path: "/placement-cell/export", as: "admin", gating: false },
   /**
    * `/placement-cell/students/[id]` is deliberately NOT scanned. Every view
@@ -158,6 +160,15 @@ const TARGETS: readonly Target[] = [
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
   { path: "/judge", as: null, gating: false },
+  /**
+   * Phase 9f, GATING, and signed out because that is how it is read. This is
+   * the only page in the product whose audience has never seen the product:
+   * a recruiter opens it once, on whatever device is to hand, and forms their
+   * whole impression from it. An unknown code is used so the scan needs no
+   * seeded export — the frame, the status block and the footer are the same
+   * markup on every outcome, which is why Shell() renders all five.
+   */
+  { path: "/verify/aaaaaaaaaaaaaaaaaaaaaaaa", as: null, gating: true },
   // Phase 4, GATING. /admin as the scoped ADMIN RECADMIN02 (what an admin
   // really sees); /super as the SUPER_ADMIN RECADMIN01; /judge signed out.
   { path: "/admin", as: "staffAdmin", gating: true },

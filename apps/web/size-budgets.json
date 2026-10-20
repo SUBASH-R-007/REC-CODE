@@ -32,10 +32,17 @@
       "maxKb": 135
     },
     {
-      "$comment": "Phase 9c. Readiness: three cards, a component table each and no interactivity at all. It is in serverRendered below, so this budget is the layout chain plus nothing — a client component added here fails both checks.",
+      "$comment": "Phase 9c. Readiness: three cards, a component table each. It is also in monacoFree below. The route does ship the export-links control, which is the student's own share-and-withdraw UI.",
       "route": "/placement",
       "entry": "/(student)/placement/page",
-      "maxKb": 135
+      "maxKb": 140
+    },
+    {
+      "$comment": "Phase 9f. The PUBLIC verification page: read by recruiters who have never seen this product and will not look twice, often on a phone. It is in serverRendered below, so the PAGE ships 0.2 KB of its own and renders fully without JavaScript, as SPEC §5 requires. The 117 KB measured here is Next's framework bundle plus the (public) layout chain, which the page does not need but the App Router sends anyway — recorded in docs/OPEN-QUESTIONS.md as a candidate for the zero-JS Pages Router treatment /login already uses.",
+      "route": "/verify/[code]",
+      "entry": "/(public)/verify/[code]/page",
+      "maxKb": 125,
+      "shared": false
     }
   ],
   "zeroJsSelfCheck": {
@@ -77,13 +84,14 @@
       "/(student)/aptitude/mock/attempt/[attemptId]/page",
       "/(student)/account/leave/page",
       "/(student)/account/reactivate/page",
-      "/(student)/placement/page"
+      "/(student)/placement/page",
+      "/(public)/verify/[code]/page"
     ],
     "entryPrefixes": ["/admin/", "/placement-cell/", "/mentor/"]
   },
   "serverRendered": {
     "$comment": "Pages that add no client JS of their own: the page's chunks beyond the framework and its layout chain may hold only Next's page stub (one module named exactly \"apps/web\"), at most maxOwnKb gzip. Any first-party or third-party client module there is a failure.",
     "maxOwnKb": 1,
-    "entries": ["/(public)/judge/page", "/(student)/placement/page"]
+    "entries": ["/(public)/judge/page", "/(public)/verify/[code]/page"]
   }
 }

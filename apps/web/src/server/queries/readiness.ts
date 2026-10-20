@@ -197,3 +197,38 @@ export async function myMentor(userId: string): Promise<MyMentor | null> {
     since: campusDay(row.assignedAt),
   };
 }
+
+export interface MyExportLink {
+  readonly code: string;
+  readonly kind: string;
+  readonly issuedOn: string;
+  readonly expiresOn: string | null;
+  readonly revokedOn: string | null;
+}
+
+/**
+ * The student's own signed links (Phase 9f).
+ *
+ * Dates as campus days rather than timestamps: a link's useful life is
+ * measured in days, and a time of day on it invites a reader to think the
+ * expiry is to the minute.
+ *
+ * It returns no payload and no signature. The student does not need either to
+ * decide whether to withdraw a link, and a signature rendered on a page is a
+ * signature that can be copied off it.
+ */
+export async function myExportLinks(userId: string): Promise<MyExportLink[]> {
+  const rows = await db.profileExport.findMany({
+    where: { userId },
+    orderBy: { issuedAt: "desc" },
+    take: 20,
+    select: { code: true, kind: true, issuedAt: true, expiresAt: true, revokedAt: true },
+  });
+  return rows.map((row) => ({
+    code: row.code,
+    kind: row.kind,
+    issuedOn: campusDay(row.issuedAt),
+    expiresOn: row.expiresAt ? campusDay(row.expiresAt) : null,
+    revokedOn: row.revokedAt ? campusDay(row.revokedAt) : null,
+  }));
+}

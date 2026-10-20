@@ -46,6 +46,7 @@ const STUDENT_SURFACES = [
   PAGE,
   `${SRC}/components/placement/tier-card.tsx`,
   `${SRC}/components/mentor/mentor-badge.tsx`,
+  `${SRC}/components/placement/export-links.tsx`,
   `${SRC}/server/queries/readiness.ts`,
   "packages/shared/src/readiness-snapshot.ts",
   "packages/shared/src/mentor.ts",
@@ -56,6 +57,8 @@ const OFFICER_SURFACES = [
   `${SRC}/components/placement/cohort-filter.tsx`,
   `${SRC}/components/placement/distribution-table.tsx`,
   `${SRC}/components/placement/mentor-routing.tsx`,
+  `${SRC}/components/placement/drive-form.tsx`,
+  `${SRC}/components/placement/eligibility-form.tsx`,
 ];
 
 /**

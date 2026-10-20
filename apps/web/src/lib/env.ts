@@ -13,6 +13,22 @@ const schema = z.object({
   REDIS_URL: z.string().min(1).default("redis://127.0.0.1:6379"),
   /** Pepper for ipHash = sha256(ip + pepper). Never store a raw IP. */
   IP_HASH_PEPPER: z.string().min(16, "IP_HASH_PEPPER must be at least 16 characters."),
+  /**
+   * HMAC key for the signed profile export (Phase 9f). Its OWN secret, not a
+   * reuse of anything else the server holds: a verify key is the one secret
+   * exercised by strangers on a public route, so it is the one most likely to
+   * be found wrong — and a key that could also mint a session or read the IP
+   * pepper would turn that into an account compromise. The worst a leaked
+   * verify key can do is let somebody forge a statement about their own
+   * practice record.
+   *
+   * 32 characters rather than 16: unlike the pepper, this key signs claims
+   * that leave the platform and are read by third parties.
+   */
+  EXPORT_SIGNING_SECRET: z
+    .string()
+    .min(32, "EXPORT_SIGNING_SECRET must be at least 32 characters.")
+    .default("dev-only-export-signing-secret-change-me"),
   /** Test-data store driver: local filesystem (dev/CI) or S3/MinIO. */
   TESTDATA_DRIVER: z.enum(["local", "s3"]).default("local"),
   TESTDATA_DIR: z.string().default("./storage/testdata"),
@@ -37,6 +53,19 @@ const schema = z.object({
     .default("false")
     .transform((v) => v === "true"),
 }).superRefine((value, ctx) => {
+  /**
+   * The dev default is a KNOWN string, so a production deployment that never
+   * set the variable would be signing public claims with a key published in
+   * this repository. Refused outright, the same way the unhardened-judge
+   * override is.
+   */
+  if (value.NODE_ENV === "production" && value.EXPORT_SIGNING_SECRET.startsWith("dev-only-")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["EXPORT_SIGNING_SECRET"],
+      message: "EXPORT_SIGNING_SECRET is still the development default; set a real secret in production.",
+    });
+  }
   if (value.NODE_ENV === "production" && value.JUDGE_ALLOW_UNHARDENED_NODES) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

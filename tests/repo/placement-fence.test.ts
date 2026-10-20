@@ -79,6 +79,11 @@ const PLACEMENT_READABLE_MODELS: Readonly<Record<string, string>> = {
   Assessment: "released assessment scores, which the spec's export allowlist names",
   AssessmentAttempt: "one student's released assessment score, for the same allowlist",
   Submission: "counts and verdicts; the SOURCE is a separate model and is forbidden",
+  // Phase 9f.
+  PlacementDrive: "the company visits the cell keeps",
+  DriveEligibilityDecision: "the human decisions recorded against a drive",
+  PlacementExport: "the record of who exported which cohort",
+  ProfileExport: "a student's own signed link, read to count their live ones",
 };
 
 /**
@@ -268,13 +273,51 @@ describe("R2 — default-deny, so a model nobody has written yet is already forb
 });
 
 describe("R3 — no cohort surface ranks students by readiness", () => {
-  /** The three score columns, in an orderBy or a raw ORDER BY. */
-  const RANKING = /orderBy[\s\S]{0,160}?\b(?:serviceScore|productScore|topScore)\b|ORDER\s+BY[^;]{0,80}?\b(?:serviceScore|productScore|topScore)\b/i;
+  const SCORE_COLUMN = /\b(?:serviceScore|productScore|topScore)\b/;
+
+  /**
+   * The balanced value of each `orderBy:` in the file.
+   *
+   * A window of N characters after the keyword does not work, and the first
+   * version of this rule proved it: `orderBy: { computedOn: "desc" }`
+   * followed by a `select` naming `serviceScore` was reported as a ranking.
+   * A fence that cries wolf gets widened until it says nothing, so it reads
+   * the value itself — brace- and bracket-balanced, so a nested
+   * `{ sort, nulls }` is included and the `select` after it is not.
+   */
+  function orderByValues(code: string): string[] {
+    const out: string[] = [];
+    for (const match of code.matchAll(/\borderBy\s*:\s*/g)) {
+      let i = (match.index ?? 0) + match[0].length;
+      const open = code[i];
+      if (open !== "{" && open !== "[") continue;
+      let depth = 0;
+      const start = i;
+      for (; i < code.length; i += 1) {
+        const c = code[i];
+        if (c === "{" || c === "[") depth += 1;
+        else if (c === "}" || c === "]") {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push(code.slice(start, i + 1));
+    }
+    return out;
+  }
+
+  /** A raw `ORDER BY` up to the end of its clause. */
+  function rawOrderBys(code: string): string[] {
+    return [...code.matchAll(/ORDER\s+BY\b([^;`)]{0,120})/gi)].map((m) => m[1] ?? "");
+  }
+
+  const ranks = (code: string): boolean =>
+    [...orderByValues(code), ...rawOrderBys(code)].some((value) => SCORE_COLUMN.test(value));
 
   it.each(FILES)("%s", (file) => {
     const { code } = lexSource(SOURCES.get(file)!);
     expect(
-      RANKING.test(code),
+      ranks(code),
       [
         `${file} orders by a readiness score.`,
         "",
@@ -288,14 +331,27 @@ describe("R3 — no cohort surface ranks students by readiness", () => {
     ).toBe(false);
   });
 
-  it("catches the shapes it is meant to", () => {
-    // Without this the regex could be narrowed until the rule passed
-    // vacuously. Three that must be caught and two that must not.
-    expect(RANKING.test('orderBy: { serviceScore: "desc" }')).toBe(true);
-    expect(RANKING.test("orderBy: [{ section: \"asc\" }, { topScore: \"desc\" }]")).toBe(true);
-    expect(RANKING.test('ORDER BY s."productScore" DESC')).toBe(true);
-    expect(RANKING.test('orderBy: { lastActiveOn: "asc" }'), "quiet days is the allowed sort").toBe(false);
-    expect(RANKING.test("const serviceScore = row.serviceScore;"), "reading a score is fine").toBe(false);
+  it("catches the shapes it is meant to, and not the ones it is not", () => {
+    // Without this the rule could be narrowed until it passed vacuously.
+    expect(ranks('orderBy: { serviceScore: "desc" }')).toBe(true);
+    expect(ranks('orderBy: [{ section: "asc" }, { topScore: "desc" }]')).toBe(true);
+    expect(ranks('ORDER BY s."productScore" DESC')).toBe(true);
+    expect(ranks('orderBy: { lastActiveOn: { sort: "asc", nulls: "first" }, productScore: "desc" }')).toBe(true);
+
+    expect(ranks('orderBy: { lastActiveOn: "asc" }'), "quiet days is the allowed sort").toBe(false);
+    expect(ranks("const serviceScore = row.serviceScore;"), "reading a score is fine").toBe(false);
+    expect(
+      ranks('orderBy: { lastActiveOn: { sort: "asc", nulls: "first" } }'),
+      "a nested sort option is not a score",
+    ).toBe(false);
+    /**
+     * The false positive that made this rule read the value rather than a
+     * window: ordering by one column while SELECTING the scores.
+     */
+    expect(
+      ranks('{ orderBy: { computedOn: "desc" }, select: { serviceScore: true, topScore: true } }'),
+      "selecting a score after ordering by something else",
+    ).toBe(false);
   });
 });
 

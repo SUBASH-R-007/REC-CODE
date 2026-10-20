@@ -77,6 +77,9 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_mentor_assignment_change",
   "recx_refuse_unsuitable_mentor",
   "recx_refuse_placement_export_change",
+  "recx_refuse_eligibility_change",
+  "recx_refuse_eligibility_without_audit",
+  "recx_refuse_profile_export_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -139,6 +142,10 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "MentorAssignment",
   // 20261020270100_phase9e_placement_export
   "PlacementExport",
+  // 20261020270200_phase9f_drives_exports
+  "PlacementDrive",
+  "DriveEligibilityDecision",
+  "ProfileExport",
 ];
 
 export interface GuardTrigger {
@@ -479,6 +486,32 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_placement_export_change",
     level: "ROW",
   },
+  /**
+   * 20261020270200_phase9f_drives_exports. A decision is never edited and
+   * never deleted: changing one is a NEW decision with its own reason, so
+   * "we reviewed it and changed our minds" and "we never said that" are not
+   * the same row.
+   */
+  {
+    name: "DriveEligibilityDecision_append_only",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "DriveEligibilityDecision",
+    fn: "recx_refuse_eligibility_change",
+    level: "ROW",
+  },
+  /**
+   * A signature over a mutable payload verifies nothing, so everything but
+   * the revocation is frozen — and the revocation may be set once, because
+   * un-revoking would let somebody re-publish a record the student had
+   * pulled back.
+   */
+  {
+    name: "ProfileExport_payload_frozen",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "ProfileExport",
+    fn: "recx_refuse_profile_export_change",
+    level: "ROW",
+  },
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
@@ -506,6 +539,17 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
   { name: "AccountRestriction_requires_event", table: "AccountRestriction" },
 
   /**
+   * 20261020270200_phase9f_drives_exports. The same animal, for the same
+   * reason: SPEC §5 says eligibility is "a human decision recorded in the
+   * audit log", and this is that sentence where no code path can route
+   * around it — at COMMIT, the decision and its AuditLog row either both
+   * exist or neither does. Deferred because the audit chain takes a per-day
+   * advisory lock and appends with its own hash link, so the two writes
+   * cannot be ordered without one waiting on the other.
+   */
+  { name: "DriveEligibilityDecision_requires_audit", table: "DriveEligibilityDecision" },
+
+  /**
    * 20261019250100_phase7b_patterns. The one non-guard trigger in the
    * database: it MAINTAINS MockPattern's denormalised totals rather than
    * refusing a write, so a listing page never aggregates to render (SPEC
@@ -519,7 +563,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261020270100_phase9e_placement_export";
+export const CHECK_CATALOG_THROUGH = "20261020270200_phase9f_drives_exports";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -899,6 +943,18 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["PlacementExport_filters_object", "PlacementExport"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261020270100_phase9e_placement_export" })),
+  ...(
+    [
+      ["PlacementDrive_company_check", "PlacementDrive"],
+      ["PlacementDrive_threshold_check", "PlacementDrive"],
+      ["PlacementDrive_batch_check", "PlacementDrive"],
+      ["DriveEligibilityDecision_reason_present", "DriveEligibilityDecision"],
+      ["ProfileExport_revoke_pair", "ProfileExport"],
+      ["ProfileExport_expiry_after_issue", "ProfileExport"],
+      ["ProfileExport_payload_object", "ProfileExport"],
+      ["ProfileExport_code_check", "ProfileExport"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261020270200_phase9f_drives_exports" })),
 ];
 
 /**
@@ -951,6 +1007,19 @@ export const DEFERRED_CONSTRAINT_TRIGGERS = [
     fn: "recx_refuse_restriction_without_event",
     /** Events, in the order the migration writes them. */
     timing: String.raw`AFTER\s+INSERT\s+OR\s+UPDATE\s+OF\s+"?stage"?`,
+  },
+  {
+    name: "DriveEligibilityDecision_requires_audit",
+    table: "DriveEligibilityDecision",
+    migration: "20261020270200_phase9f_drives_exports",
+    fn: "recx_refuse_eligibility_without_audit",
+    /**
+     * INSERT only, and no UPDATE OF clause: the row is append-only, so
+     * there is no update for this one to police. If it ever gained an
+     * UPDATE event that would mean the append-only guard had been
+     * weakened, and this fence would say so.
+     */
+    timing: String.raw`AFTER\s+INSERT`,
   },
 ] as const;
 

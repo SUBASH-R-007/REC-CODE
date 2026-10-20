@@ -13,7 +13,9 @@ import {
   formatCampusDay,
 } from "@recx/shared";
 import { requireUser } from "@/lib/auth/guards";
-import { headlineAction, myMentor, myReadiness } from "@/server/queries/readiness";
+import { headlineAction, myExportLinks, myMentor, myReadiness } from "@/server/queries/readiness";
+import { env } from "@/lib/env";
+import { ExportLinks } from "@/components/placement/export-links";
 import { MentorBadge } from "@/components/mentor/mentor-badge";
 import { TierCard } from "@/components/placement/tier-card";
 
@@ -44,7 +46,11 @@ export const metadata: Metadata = { title: "Placement readiness" };
  */
 export default async function PlacementPage() {
   const user = await requireUser();
-  const [readiness, mentor] = await Promise.all([myReadiness(user.id), myMentor(user.id)]);
+  const [readiness, mentor, links] = await Promise.all([
+    myReadiness(user.id),
+    myMentor(user.id),
+    myExportLinks(user.id),
+  ]);
   const headline = headlineAction(readiness);
 
   return (
@@ -215,6 +221,11 @@ export default async function PlacementPage() {
               </div>
             </section>
           ) : null}
+
+          <section className="space-y-3 border-t border-border pt-5">
+            <h2 className="font-display text-lg font-semibold">Share this, if you want to</h2>
+            <ExportLinks appUrl={env().APP_URL} links={links} />
+          </section>
 
           <section className="space-y-2 border-t border-border pt-5 text-xs text-muted">
             <p className="max-w-2xl">{READINESS_CALIBRATION_NOTE}</p>
