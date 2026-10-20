@@ -35,6 +35,7 @@ beforeAll(async () => {
   mod.sseOpened();
   mod.proctorEventRecorded("BLUR");
   mod.submissionCompleted(3.5);
+  mod.verdictReached("AC", "cpp");
   exposition = await mod.renderMetrics();
   served = parseExposition(exposition);
 });
@@ -87,6 +88,16 @@ describe("the contract itself", () => {
     for (const metric of METRICS) byName.set(metric.name, (byName.get(metric.name) ?? 0) + 1);
     expect([...byName].filter(([, n]) => n !== 1)).toEqual([]);
     expect(metricsFor("web").map((m) => m.name).sort()).toEqual([
+      /**
+       * `judge_verdict_total` is here and not on the scheduler, and the
+       * reason is the rule this whole test is about: a COUNTER is safe on a
+       * replicated process because Prometheus sums across instances, while a
+       * GAUGE is not, because two replicas reporting one Redis number report
+       * it twice. Every verdict passes through `POST /api/judge/result`, so
+       * counting it where it lands is exact; the scheduler would have to
+       * query for deltas and would miscount a skipped tick.
+       */
+      "judge_verdict_total",
       "proctor_event_total",
       "sse_connections_active",
       "submission_e2e_latency_seconds",
@@ -158,7 +169,7 @@ describe("no metric label can identify a person", () => {
   });
 });
 
-describe("the web registry exposes exactly its three", () => {
+describe("the web registry exposes exactly its four", () => {
   it("serves them, with the help text from the contract", () => {
     for (const metric of metricsFor("web")) {
       expect(exposition, metric.name).toContain(`# HELP ${metric.name} ${metric.help}`);

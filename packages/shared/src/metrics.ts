@@ -21,6 +21,19 @@
  *
  * `{queue}` is a judge lane and `{worker}` is a host name. Both are bounded
  * and neither is a person.
+ *
+ * ── Which process owns a metric ─────────────────────────────────────────
+ *
+ * A GAUGE must live on a process there is exactly one of, or its value
+ * depends on which instance was scraped: the queue depths are on the
+ * scheduler for that reason, and `sse_connections_active` is a legitimate
+ * per-replica gauge because the connections really are per replica.
+ *
+ * A COUNTER may live on a replicated process, because Prometheus sums across
+ * instances and `rate()` handles a restart's reset. That is why
+ * `judge_verdict_total` is on web, at the one point every verdict passes
+ * through, rather than on the scheduler, which would have to query for
+ * deltas and would miscount a skipped tick.
  */
 
 export const METRIC_TYPES = ["counter", "gauge", "histogram"] as const;
@@ -76,9 +89,22 @@ export const METRICS: readonly MetricSpec[] = Object.freeze([
     buckets: RUN_BUCKETS,
   },
   {
+    /**
+     * On WEB, not on the scheduler, and the distinction is the one that
+     * matters when deciding where any metric lives: every verdict in the
+     * system passes through `POST /api/judge/result`, so counting it there
+     * is exact and costs nothing, whereas the scheduler would have to query
+     * for deltas and would miscount the moment a tick were skipped.
+     *
+     * Two web replicas are not a problem for a COUNTER — Prometheus sums
+     * across instances, and a restart's reset is handled by `rate()`. It is
+     * GAUGES that cannot live on a replicated process: `judge_queue_depth`
+     * read from either replica would be the same Redis number reported
+     * twice, which is why those are on the scheduler.
+     */
     name: "judge_verdict_total",
     type: "counter",
-    owner: "scheduler",
+    owner: "web",
     labels: ["verdict", "language"],
     help: "Verdicts reached, by verdict and language. Both are closed sets.",
   },

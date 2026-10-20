@@ -12,6 +12,7 @@ import type { BlobSource, JudgeDriver, JudgeOutcome } from "./drivers/types";
 import { InfraError, ProtocolMismatchError, errorMessage } from "./errors";
 import type { Logger } from "./logger";
 import type { Publisher } from "./publisher";
+import { compileCacheHit, runCompleted } from "./metrics";
 
 /**
  * The worker's job path, independent of BullMQ so it is unit-testable and
@@ -168,6 +169,29 @@ export async function processJob(data: unknown, deps: ProcessorDeps, options: Pr
       compileCached: outcome.compile?.cached ?? null,
       tookMs: Date.now() - startedAt,
     };
+    /**
+     * Phase 10a. The same number the log line above carries, as a histogram.
+     * Observed here rather than inside `runJob` because this is where the
+     * lease's whole life is bracketed — claim, judge, post — and a histogram
+     * that measured only the sandbox would miss a slow blob fetch.
+     *
+     * After the post, so a run whose result could not be posted at all is
+     * not counted: that path throws, releases the lease and runs the job
+     * again, and counting both would double every retry.
+     *
+     * A post the server discarded as STALE is counted, and the asymmetry
+     * with `judge_verdict_total` is deliberate. A verdict counter has to
+     * agree with the submissions table, so it counts stored results only; a
+     * duration histogram describes work this host actually did, and the
+     * sandbox really did spend those seconds whether or not the lease had
+     * moved on by the time the result arrived.
+     */
+    runCompleted(summary.tookMs / 1000);
+    /**
+     * And the cache hit, from the outcome the driver returned, so the
+     * counter cannot drift from what was actually reused.
+     */
+    if (outcome.compile?.cached) compileCacheHit();
     if (posted.stale) {
       log.warn(summary, "result was stale (already finalised or the lease moved on); discarded by the server");
       return { outcome: "stale", verdict: outcome.verdict };

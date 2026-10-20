@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { createPrismaClient } from "@recx/db";
 import { RECONCILER_INTERVAL_MS, type SchedulerJobName } from "@recx/shared";
+import { startMetricsServer, type MetricsServer } from "@recx/shared/metrics-server";
 import { Redis } from "ioredis";
 import pino from "pino";
 import { describeDatabaseUrl, loadConfig, loadDevEnvFile, withSingleConnection } from "./config";
@@ -19,6 +20,8 @@ import { createMailTransport } from "./mail";
 import { OutboxDrainJob } from "./outbox";
 import { BullJudgeQueues } from "./queues";
 import { runReconcilerTick, tickDidWork } from "./reconciler";
+import { observeJudgeMetrics } from "./observe";
+import { METRICS_CONTENT_TYPE, renderMetrics } from "./metrics";
 
 /**
  * REC Code scheduler. Every RECONCILER_INTERVAL_MS one tick runs the judge
@@ -111,6 +114,14 @@ log.info({ mailTransport: mailTransport.name }, "mail transport");
 // ── Lifecycle ───────────────────────────────────────────────────────────
 
 let stopping = false;
+/**
+ * The `/metrics` listener, or null when METRICS_PORT is 0 (Phase 10a).
+ *
+ * Module scope because `close()` has to shut it down, and null by default
+ * because `--once` runs and tests must not open a socket or fail on a port
+ * that is already taken.
+ */
+let metricsServer: MetricsServer | null = null;
 const wake = new AbortController();
 
 function requestStop(signal: NodeJS.Signals): void {
@@ -178,6 +189,18 @@ async function tick(): Promise<boolean> {
       if (report.lock === "busy") log.debug("another scheduler instance holds the reconciler lock; skipped");
       else if (tickDidWork(report) || once) log.info({ report }, "reconciler tick");
       else log.debug({ report }, "reconciler tick");
+      /**
+       * Phase 10a. After the reconciler, so the depths published are the
+       * ones left AFTER this tick dispatched — publishing first would report
+       * a backlog the tick then cleared, and the two-minute alert would fire
+       * on a queue that was already draining.
+       *
+       * It never throws (see observe.ts) and it runs even on a busy lock:
+       * the other instance holds the reconciler, not the gauges, and a
+       * scheduler that stopped publishing because a peer was mid-tick would
+       * leave the dashboards blank for the duration.
+       */
+      await observeJudgeMetrics({ db, queues, log });
       return { ok: true, report };
     }),
   );
@@ -266,6 +289,15 @@ async function tick(): Promise<boolean> {
 }
 
 async function close(): Promise<void> {
+  /**
+   * First, and here it costs nothing to do so: everything below is a
+   * disconnect measured in milliseconds, with no drain to stay visible for.
+   * (The judge worker closes its listener LAST, because its shutdown drains
+   * running jobs and that is the window somebody is watching. Either way
+   * `close()` drops keep-alive sockets rather than waiting on them, so a
+   * scrape in flight never delays a shutdown.)
+   */
+  await metricsServer?.close();
   await queues.close();
   await redis.quit().catch(() => redis.disconnect());
   await db.$disconnect();
@@ -283,6 +315,20 @@ async function main(): Promise<void> {
     "scheduler starting",
   );
   await waitForRedis(REDIS_STARTUP_WAIT_MS);
+
+  /**
+   * Not for `--once`: a single tick has nothing to scrape and would leave a
+   * socket open past the process's useful life.
+   */
+  if (!once && config.metricsPort > 0) {
+    metricsServer = await startMetricsServer({
+      port: config.metricsPort,
+      render: renderMetrics,
+      contentType: METRICS_CONTENT_TYPE,
+      onError: (err) => log.warn({ err }, "metrics listener error"),
+    });
+    log.info({ port: metricsServer?.port }, "serving /metrics on 127.0.0.1");
+  }
 
   let ok = true;
   // The next tick starts only after the previous one has finished, so ticks

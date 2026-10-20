@@ -25,6 +25,21 @@ export function defaultCacheDir(platform: NodeJS.Platform = process.platform): s
 export const workerEnvShape = {
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(LOG_LEVELS).default("info"),
+  /**
+   * Port for the `/metrics` listener, or 0 for none (Phase 10a).
+   *
+   * Zero by default, and deliberately so: the listener is a socket, and
+   * neither the test suite nor a hand-run worker on a developer's box should
+   * open one or fail because a port was taken. A judge host's systemd unit
+   * sets it. The listener binds to 127.0.0.1 and this host has no public
+   * interface at all (Phase 2), so the node exporter scrapes it over the
+   * host's own loopback and nothing else can reach it.
+   *
+   * Not named RECX_PORT: this process serves nothing else, and a key that
+   * read as "the worker's port" would invite somebody to put the judge API
+   * behind it one day.
+   */
+  RECX_METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(0),
   /** Same grammar the app host accepts in x-recx-judge-node. */
   RECX_NODE_ID: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "RECX_NODE_ID must be 1–64 of [A-Za-z0-9._-]."),
   RECX_NODE_TOKEN: z

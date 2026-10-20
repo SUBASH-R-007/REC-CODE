@@ -67,6 +67,8 @@ const schema = z
     DATABASE_URL: z.string().optional(),
     REDIS_URL: z.string().regex(/^rediss?:\/\//, "must be a redis:// or rediss:// URL").optional(),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+    /** Phase 10a. 0 (the default) means no `/metrics` listener at all. */
+    METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(0),
     // Security email (EmailOutbox drain). Default: log in development, disabled elsewhere.
     MAIL_TRANSPORT: z.enum(MAIL_TRANSPORTS).optional(),
     SMTP_URL: z.string().regex(/^smtps?:\/\//, "must be an smtp:// or smtps:// URL").optional(),
@@ -120,6 +122,15 @@ export interface SchedulerConfig {
   redisUrl: string;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   mail: MailConfig;
+  /**
+   * Port for the `/metrics` listener, or 0 for none (Phase 10a).
+   *
+   * Zero by default, and that is deliberate: `--once` runs and tests must
+   * not open a socket or fail because a port was taken. Compose sets it, and
+   * publishes it to the monitoring network — the listener itself binds to
+   * 127.0.0.1, so running the scheduler outside compose exposes nothing.
+   */
+  metricsPort: number;
 }
 
 export interface MailConfig {
@@ -147,6 +158,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): SchedulerCo
     databaseUrlSource: direct ? "DATABASE_URL_DIRECT" : "DATABASE_URL",
     redisUrl: env.REDIS_URL ?? "redis://127.0.0.1:6379",
     logLevel: env.LOG_LEVEL,
+    metricsPort: env.METRICS_PORT,
     mail: {
       transport: env.MAIL_TRANSPORT ?? (env.NODE_ENV === "development" ? "log" : "disabled"),
       smtpUrl: env.SMTP_URL ?? null,

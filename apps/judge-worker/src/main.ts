@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Redis } from "ioredis";
 import { LIMITS, type HeartbeatResponse, type JudgeNodeStatus, type LanguageKey } from "@recx/shared";
+import { startMetricsServer, type MetricsServer } from "@recx/shared/metrics-server";
 import { LaneAllocator } from "./allocator";
 import { HttpJudgeApi } from "./api";
 import { enforceBootChecks } from "./boot";
@@ -21,6 +22,7 @@ import { errorMessage } from "./errors";
 import { checkHostHardening, hardeningIntake } from "./hardening";
 import { HeartbeatLoop, emptyHealth, type NodeHealth } from "./heartbeat";
 import { createLogger, type Logger } from "./logger";
+import { METRICS_CONTENT_TYPE, renderMetrics } from "./metrics";
 import type { ProcessorDeps } from "./processor";
 import { RedisPublisher } from "./publisher";
 import { runCalibration } from "./calibration";
@@ -82,6 +84,17 @@ async function main(): Promise<void> {
   }
 
   // ── Host hardening (isolate driver only; a real judge host) ─────────────
+  /**
+   * The `/metrics` listener (Phase 10a), or null when RECX_METRICS_PORT is 0.
+   *
+   * Declared here, started last, so that a scrape never sees a half-booted
+   * node: until the heartbeat loop runs there is nothing true to report, and
+   * a listener answering during the self-check would publish zeros that read
+   * as "this node judged nothing" - which is exactly what a broken node also
+   * looks like.
+   */
+  let metricsServer: MetricsServer | null = null;
+
   const health: NodeHealth = emptyHealth();
   const isReal = config.RECX_DRIVER === "isolate";
   let intakeAllowed = true;
@@ -231,6 +244,13 @@ async function main(): Promise<void> {
     clearTimeout(deadline);
     if (maintenanceTimer) clearInterval(maintenanceTimer);
     heartbeat.stop();
+    /**
+     * After the drain, not before it: the drain is the window somebody is
+     * most likely to be watching, and `close()` drops keep-alive sockets
+     * rather than waiting on them, so leaving it up costs the shutdown
+     * deadline nothing.
+     */
+    await metricsServer?.close();
     await Promise.allSettled([queueRedis.quit(), publishRedis.quit()]);
     logger.info("stopped");
     process.exit(code);
@@ -252,6 +272,16 @@ async function main(): Promise<void> {
     logger.error("node is NOT cleared for intake; it will heartbeat its health but take no jobs");
   }
   heartbeat.start();
+
+  if (config.RECX_METRICS_PORT > 0) {
+    metricsServer = await startMetricsServer({
+      port: config.RECX_METRICS_PORT,
+      render: renderMetrics,
+      contentType: METRICS_CONTENT_TYPE,
+      onError: (error) => logger.warn({ err: error }, "metrics listener error"),
+    });
+    logger.info({ port: metricsServer?.port }, "serving /metrics on 127.0.0.1");
+  }
 }
 
 /** Boot-time maintenance: self-check, calibration, startup credit, in order. */

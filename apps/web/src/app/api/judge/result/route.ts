@@ -41,6 +41,10 @@ export async function POST(request: Request) {
       body.kind === "submission" ? finalizeSubmission : body.kind === "run" ? finalizeRun : finalizeValidation;
     const outcome = await finalize(auth.node, body);
     if (outcome === "stale") return judgeJson({ stale: true }, 409);
+    // `judge_verdict_total` is counted inside the finalise functions, which
+    // are the only place that holds the submission's LANGUAGE — the result
+    // body does not carry it, and the judge protocol is not worth versioning
+    // for a metric label.
     return judgeJson({ ok: true });
   });
 }

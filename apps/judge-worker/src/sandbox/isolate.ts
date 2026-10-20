@@ -4,6 +4,7 @@ import { lstat, open, readFile, readdir, rm, unlink, type FileHandle } from "nod
 import path from "node:path";
 import { LIMITS, SANDBOX_FORCED_ENV, TOOLCHAIN_ID_PATTERN, TOOLCHAIN_ROOT } from "@recx/shared";
 import { InfraError, errorMessage } from "../errors";
+import { sandboxInitFailed } from "../metrics";
 import { watchdogMs } from "../judge/limits";
 import type { Logger } from "../logger";
 import { isMetaEmpty, parseIsolateMeta } from "./meta";
@@ -207,6 +208,15 @@ export class IsolateSandbox implements Sandbox {
     }
     const root = result.stdout.trim().split("\n").pop() ?? "";
     if (result.code !== 0 || !path.posix.isAbsolute(root)) {
+      /**
+       * Phase 10a. Counted AFTER the cleanup-and-retry above, so the metric
+       * means "the sandbox could not be made" rather than "a stale box was
+       * cleaned" — the second happens routinely after a killed run and would
+       * drown the signal. SPEC §10 calls the INTERNAL_ERROR rate the canary
+       * for a cgroup misconfiguration after a host upgrade; this is the same
+       * canary one layer down.
+       */
+      sandboxInitFailed();
       throw new InfraError(`isolate --init of box ${boxId} failed: ${result.stderr.trim() || `exit ${result.code}`}`);
     }
     this.roots.set(role, root);

@@ -32,6 +32,7 @@ const metrics = buildMetrics<Counter<string>, Gauge<string>, Histogram<string>>(
 const sseConnections = metrics.sse_connections_active as Gauge<string>;
 const proctorEvents = metrics.proctor_event_total as Counter<string>;
 const e2eLatency = metrics.submission_e2e_latency_seconds as Histogram<string>;
+const verdicts = metrics.judge_verdict_total as Counter<string>;
 
 /**
  * Every recorder is a no-throw. A metrics client that can break a request is
@@ -71,6 +72,22 @@ export function proctorEventRecorded(type: string): void {
 export function submissionCompleted(seconds: number): void {
   if (!Number.isFinite(seconds) || seconds < 0) return;
   quiet("submissionCompleted", () => e2eLatency.observe(seconds));
+}
+
+/**
+ * One verdict reached.
+ *
+ * Counted where every verdict in the system lands — `POST
+ * /api/judge/result` — and only for a result that was actually stored: a
+ * stale post (the lease moved on, the node was quarantined) is discarded by
+ * the server, and counting it would make the verdict totals disagree with
+ * the submissions table.
+ *
+ * Both labels are closed sets, which is what keeps this counter bounded:
+ * `Verdict` is an enum and `language` is a key from the language catalogue.
+ */
+export function verdictReached(verdict: string, language: string): void {
+  quiet("verdictReached", () => verdicts.inc({ verdict, language }));
 }
 
 /** The exposition payload, for `/metrics`. */

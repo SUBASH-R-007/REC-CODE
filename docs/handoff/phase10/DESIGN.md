@@ -117,14 +117,26 @@ retention policy reaches.
 Three processes, three registries, and deliberately not one shared one:
 
 - **web** — `sse_connections_active`, `submission_e2e_latency_seconds`,
-  `proctor_event_total`. It is the only process that sees an SSE connection
-  or a proctor event.
+  `proctor_event_total`, `judge_verdict_total`. It is the only process that
+  sees an SSE connection or a proctor event, and every verdict in the system
+  passes through `POST /api/judge/result`.
 - **judge-worker** — `judge_run_duration_seconds`,
-  `judge_sandbox_init_failures_total`, `judge_compile_cache_hits_total`, and
-  its own `judge_worker_heartbeat_age_seconds` is NOT self-reported (see
-  below).
+  `judge_sandbox_init_failures_total`, `judge_compile_cache_hits_total`. Its
+  own `judge_worker_heartbeat_age_seconds` is NOT self-reported (see below).
 - **scheduler** — `judge_queue_depth`, `judge_oldest_job_age_seconds`,
-  `judge_verdict_total`, `judge_worker_heartbeat_age_seconds`.
+  `judge_worker_heartbeat_age_seconds`.
+
+**Correction from the first draft of this document, which put
+`judge_verdict_total` on the scheduler.** It belongs on web, and the reason
+is the rule that decides where any of these live: a COUNTER may sit on a
+replicated process, because Prometheus sums across instances and `rate()`
+handles a restart's reset; a GAUGE may not, because two replicas reporting
+the same Redis number is that number reported twice. Counting verdicts where
+they arrive is exact and free, whereas the scheduler would have to query for
+deltas and would miscount the moment a tick were skipped. The implementation
+records it in `apps/web/src/lib/judge/finalize.ts` rather than in the route,
+because the result body carries the verdict but not the language — the head
+submission row does.
 
 **Why the heartbeat age is reported by the scheduler and not by the worker.**
 A worker that has died cannot report that its heartbeat is old. The metric
@@ -137,6 +149,25 @@ easier-to-get-wrong rule.
 Likewise `judge_queue_depth` comes from the scheduler, which already holds a
 Redis connection and already runs every minute. Putting it on web would make
 the number depend on which of two replicas was scraped.
+
+**How the two Node processes serve it.** Neither has an HTTP server, so both
+get the same 60-line listener from `@recx/shared/metrics-server`: 127.0.0.1
+only, one path, everything else 404, and a render failure answers 500 rather
+than taking the process down. Its port comes from `METRICS_PORT` on the
+scheduler and `RECX_METRICS_PORT` on the worker — each matching its own
+app's naming — and **0, the default, opens no socket at all**, so a `--once`
+tick and the test suite never bind a port. Web is the exception: it already
+has a listener, and its `/metrics` is a route handler behind a bearer token
+because it is the one host with a public interface.
+
+**The scheduler publishes its three gauges every tick, for every lane and
+every node, including the empty and the idle ones** (`apps/scheduler/src/
+observe.ts`). A gauge that simply stops being set keeps its last value for
+ever in some scrape configurations and disappears in others, so "depth > 200
+for 2 min" would otherwise fire on a lane that drained an hour ago. The one
+exception is Redis being unreachable: then the lanes are not reported at
+all, because publishing zeros would say "the queues are empty" when the
+truth is "we cannot see them".
 
 ### 3.3 `/metrics` is not public
 

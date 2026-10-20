@@ -108,6 +108,53 @@ export class BullJudgeQueues implements JudgeQueuePort {
     await this.queue(lane).add("judge", data, judgeJobOptions(lane, data.id));
   }
 
+  /**
+   * How many jobs are waiting in a lane, and how old the oldest is
+   * (Phase 10a).
+   *
+   * "Waiting" is `waiting + delayed + prioritized`, not just `waiting`: a
+   * job held back by a delay or sitting behind a priority is a job a student
+   * is waiting on, and BullMQ counts those separately. Excluding them would
+   * make the depth gauge read zero during exactly the backlog the alert
+   * exists to catch.
+   *
+   * The oldest age comes from the HEAD OF EACH of those three lists rather
+   * than from scanning the queue: at a depth of two hundred a scan would be
+   * the most expensive thing the tick did, and `getJobs` with the range
+   * `0..0` returns one job per type, so this is three fetches however deep
+   * the lane is.
+   *
+   * It has to be all three. A job enqueued with a priority — which is every
+   * judge job this platform enqueues, see `judgeJobOptions` — never appears
+   * in `waiting` at all, so reading only that list would report an age of
+   * zero for exactly the backlog the alert exists to catch.
+   *
+   * Each head is the oldest in its own list: `waiting` is a list in arrival
+   * order, and `prioritized` is a zset whose score is the priority first and
+   * the insertion counter second — and every job in one lane carries that
+   * lane's single priority, so within a lane ascending score IS arrival
+   * order. The one approximation is `delayed`, ordered by when it becomes
+   * due rather than when it arrived; delayed jobs here are retries with a
+   * backoff measured in seconds, so the head is close enough, and taking the
+   * MINIMUM timestamp of the three means a wrong guess there can only be
+   * corrected by one of the two exact lists, never hidden by it.
+   *
+   * `timestamp` is when the job was ENQUEUED, which for the oldest waiting
+   * job is the number SPEC §10's "oldest job > 60s" rule means: how long
+   * somebody has been waiting, not how long the job has existed.
+   */
+  async depth(lane: JudgeLane): Promise<{ waiting: number; oldestAgeSeconds: number }> {
+    const queue = this.queue(lane);
+    const counts = await queue.getJobCounts("waiting", "delayed", "prioritized");
+    const waiting = (counts.waiting ?? 0) + (counts.delayed ?? 0) + (counts.prioritized ?? 0);
+    if (waiting === 0) return { waiting: 0, oldestAgeSeconds: 0 };
+    const heads = await queue.getJobs(["waiting", "prioritized", "delayed"], 0, 0, true);
+    const stamps = heads.map((job) => job?.timestamp ?? 0).filter((at) => at > 0);
+    if (stamps.length === 0) return { waiting, oldestAgeSeconds: 0 };
+    const age = (Date.now() - Math.min(...stamps)) / 1000;
+    return { waiting, oldestAgeSeconds: Math.max(0, age) };
+  }
+
   async publish(kind: JobKind, id: string, event: ProgressEvent): Promise<void> {
     const payload = progressEventSchema.parse(event);
     await this.connection.publish(progressChannel(kind, id), JSON.stringify(payload));

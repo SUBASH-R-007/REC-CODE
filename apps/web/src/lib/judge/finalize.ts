@@ -16,6 +16,7 @@ import { JOB_ENTITY, markInternalError, publishProgress, requeueLease } from "./
 import { buildRunResult, buildSubmissionDetails, compactTestResults, truncateBytes, type SampleText } from "./truncate";
 import { recordJudgeUsage } from "./usage";
 import { advanceValidation, validationOutcome } from "./validation";
+import { verdictReached } from "@/lib/metrics";
 
 /**
  * Committing a worker's result, and releasing a job after an infrastructure
@@ -98,7 +99,10 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
   const { id } = body;
   const head = await db.submission.findUnique({
     where: { id },
-    select: { problemVersionId: true, claimToken: true },
+    // `language` is read for `judge_verdict_total`'s label (Phase 10a). The
+    // result body does not carry it, and versioning the judge protocol for a
+    // metric label would be the wrong trade; this select already runs.
+    select: { problemVersionId: true, claimToken: true, language: true },
   });
   // Cheap early exit before any blob reads; the guarded update below is the real check.
   if (!head || head.claimToken !== body.claimToken) return "stale";
@@ -220,6 +224,12 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
 
   await publishProgress("submission", id, { type: "final" });
   await resetConsecutiveIe(node.id);
+  /**
+   * Phase 10a. Here, past the guarded update, so the counter describes a
+   * result that was STORED: a stale post is discarded, and counting it would
+   * make `judge_verdict_total` disagree with the submissions table.
+   */
+  verdictReached(body.verdict, head.language);
   return "ok";
 }
 
@@ -227,7 +237,7 @@ export async function finalizeRun(node: JudgeNode, body: ResultRequest): Promise
   const { id } = body;
   const head = await db.runRequest.findUnique({
     where: { id },
-    select: { problemVersionId: true, customInput: true, claimToken: true, userId: true },
+    select: { problemVersionId: true, customInput: true, claimToken: true, userId: true, language: true },
   });
   if (!head || head.claimToken !== body.claimToken) return "stale";
 
@@ -269,6 +279,7 @@ export async function finalizeRun(node: JudgeNode, body: ResultRequest): Promise
 
   await publishProgress("run", id, { type: "final" });
   await resetConsecutiveIe(node.id);
+  verdictReached(body.verdict, head.language);
   return "ok";
 }
 

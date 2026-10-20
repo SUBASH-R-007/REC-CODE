@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./harness": "./src/harness/index.ts",
     "./authoring": "./src/authoring/index.ts",
-    "./samples/two-sum": "./src/samples/two-sum.ts"
+    "./samples/two-sum": "./src/samples/two-sum.ts",
+    "./metrics-server": "./src/metrics-server.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
