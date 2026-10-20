@@ -24,6 +24,20 @@ import {
 process.env.IP_HASH_PEPPER ??= "metrics-test-pepper-16+";
 process.env.DATABASE_URL ??= "postgresql://recx:recx@localhost:5433/recx_test";
 
+/** The ten SPEC §10 names, so the eleventh cannot quietly displace one. */
+const SPEC_TEN = [
+  "judge_queue_depth",
+  "judge_oldest_job_age_seconds",
+  "judge_run_duration_seconds",
+  "judge_verdict_total",
+  "judge_worker_heartbeat_age_seconds",
+  "judge_sandbox_init_failures_total",
+  "judge_compile_cache_hits_total",
+  "submission_e2e_latency_seconds",
+  "proctor_event_total",
+  "sse_connections_active",
+];
+
 let exposition: string;
 let served: Array<{ name: string; labels: string[] }>;
 
@@ -36,13 +50,23 @@ beforeAll(async () => {
   mod.proctorEventRecorded("BLUR");
   mod.submissionCompleted(3.5);
   mod.verdictReached("AC", "cpp");
+  mod.loginFailed("credentials");
   exposition = await mod.renderMetrics();
   served = parseExposition(exposition);
 });
 
 describe("the contract itself", () => {
-  it("names the ten metrics SPEC §10 asks for", () => {
+  it("names the ten metrics SPEC §10 asks for, and one more it needs", () => {
+    /**
+     * Ten are required by name. The eleventh,
+     * `auth_login_failures_total`, exists because the same paragraph asks
+     * for an alert on "failed logins >100/min" and an alert needs a series
+     * — see the comment on it in `packages/shared/src/metrics.ts`. The
+     * assertion is a closed list either way: a metric nobody decided to add
+     * fails here.
+     */
     expect([...ALL_METRIC_NAMES].sort()).toEqual([
+      "auth_login_failures_total",
       "judge_compile_cache_hits_total",
       "judge_oldest_job_age_seconds",
       "judge_queue_depth",
@@ -54,7 +78,11 @@ describe("the contract itself", () => {
       "sse_connections_active",
       "submission_e2e_latency_seconds",
     ]);
-    expect(METRICS).toHaveLength(10);
+    expect(METRICS).toHaveLength(11);
+    expect(
+      METRICS.filter((m) => SPEC_TEN.includes(m.name)),
+      "every one of SPEC's ten is still here",
+    ).toHaveLength(10);
   });
 
   it("gives every metric a help string somebody could act on", () => {
@@ -97,6 +125,7 @@ describe("the contract itself", () => {
        * counting it where it lands is exact; the scheduler would have to
        * query for deltas and would miscount a skipped tick.
        */
+      "auth_login_failures_total",
       "judge_verdict_total",
       "proctor_event_total",
       "sse_connections_active",
@@ -134,11 +163,18 @@ describe("no metric label can identify a person", () => {
     for (const metric of METRICS) {
       expect(forbiddenLabels(metric.labels), metric.name).toEqual([]);
     }
-    // The whole label vocabulary of the system, deduplicated: `queue` is
-    // used by two metrics. Five names, all bounded, none a person.
+    /**
+     * The whole label vocabulary of the system, deduplicated: `queue` is
+     * used by two metrics. Six names, all bounded, none a person — a lane,
+     * a host name, a language key, a proctor signal type, a verdict and a
+     * sign-in failure code. The list is closed on purpose: a new label is a
+     * decision about what reaches the monitoring host, so it has to be made
+     * here as well as at the metric.
+     */
     expect([...new Set(METRICS.flatMap((m) => m.labels))].sort()).toEqual([
       "language",
       "queue",
+      "reason",
       "type",
       "verdict",
       "worker",
@@ -169,7 +205,7 @@ describe("no metric label can identify a person", () => {
   });
 });
 
-describe("the web registry exposes exactly its four", () => {
+describe("the web registry exposes exactly its five", () => {
   it("serves them, with the help text from the contract", () => {
     for (const metric of metricsFor("web")) {
       expect(exposition, metric.name).toContain(`# HELP ${metric.name} ${metric.help}`);

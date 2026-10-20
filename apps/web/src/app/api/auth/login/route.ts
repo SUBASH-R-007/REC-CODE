@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isProduction } from "@/lib/env";
 import { referenceId } from "@/lib/errors";
 import { isSameOrigin } from "@/lib/help/same-origin";
+import { loginFailed } from "@/lib/metrics";
 import { signIn } from "@/lib/auth/sign-in";
 import { LOGIN_IDENTIFIER_COOKIE } from "@/lib/auth/login-cookie";
 import type { SignInFailure } from "@/lib/auth/sign-in-errors";
@@ -99,6 +100,19 @@ function see(location: string): NextResponse {
 }
 
 function failed(failure: SignInFailure, extra: { typed?: string; retry?: number; ref?: string } = {}): NextResponse {
+  /**
+   * `auth_login_failures_total` is counted HERE rather than in `signIn()`,
+   * because this is the funnel every refusal passes through: a cross-site
+   * post and a body that was not our form never reach `signIn` at all, and
+   * those are precisely the shapes an attack has. Phase 10b's "failed logins
+   * > 100/min" alert reads the sum.
+   *
+   * Counted for `rate-limited` too. The limiter is working when that code is
+   * returned, but a credential-stuffing run against one account shows up as
+   * a handful of `credentials` and then hundreds of `rate-limited`, so a rule
+   * that ignored them could not see the attack it exists to catch.
+   */
+  loginFailed(failure);
   const query = new URLSearchParams({ error: failure });
   if (extra.retry !== undefined) query.set("retry", String(extra.retry));
   if (extra.ref) query.set("ref", extra.ref);

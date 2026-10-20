@@ -5,9 +5,10 @@ import { buildMetrics } from "@recx/shared";
 /**
  * The web process's metrics (Phase 10a).
  *
- * Three of the ten, and they are the three only this process can see: an
- * open verdict stream, a proctor signal as it arrives, and submit-to-verdict
- * as the STUDENT experiences it rather than as the judge measures it.
+ * Five of the eleven, and they are the ones only this process can see: an
+ * open verdict stream, a proctor signal as it arrives, submit-to-verdict as
+ * the STUDENT experiences it rather than as the judge measures it, every
+ * verdict at the one point they all pass through, and a refused sign-in.
  *
  * Its own `Registry`, not the client's global one. Two reasons, and the
  * second is the one that bites: the global registry is shared with anything
@@ -33,6 +34,7 @@ const sseConnections = metrics.sse_connections_active as Gauge<string>;
 const proctorEvents = metrics.proctor_event_total as Counter<string>;
 const e2eLatency = metrics.submission_e2e_latency_seconds as Histogram<string>;
 const verdicts = metrics.judge_verdict_total as Counter<string>;
+const loginFailures = metrics.auth_login_failures_total as Counter<string>;
 
 /**
  * Every recorder is a no-throw. A metrics client that can break a request is
@@ -88,6 +90,21 @@ export function submissionCompleted(seconds: number): void {
  */
 export function verdictReached(verdict: string, language: string): void {
   quiet("verdictReached", () => verdicts.inc({ verdict, language }));
+}
+
+/**
+ * One refused sign-in, by failure CODE.
+ *
+ * The code and nothing else. A failed login is the one event where the
+ * tempting label — which account, from which address — is exactly the one
+ * that must not be here: Prometheus is scraped by another host, kept for
+ * months and rendered on screens people photograph, and `audit()` already
+ * records a failure against the account in a table with access control over
+ * it. This counter answers "is somebody spraying us", which is a rate, not
+ * an identity.
+ */
+export function loginFailed(reason: string): void {
+  quiet("loginFailed", () => loginFailures.inc({ reason }));
 }
 
 /** The exposition payload, for `/metrics`. */

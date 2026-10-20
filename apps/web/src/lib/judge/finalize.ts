@@ -292,7 +292,13 @@ export async function finalizeValidation(node: JudgeNode, body: ResultRequest): 
   const { id } = body;
   const head = await db.validationRun.findUnique({
     where: { id },
-    select: { claimToken: true, problemVersionId: true, referenceSolution: { select: { expectedVerdict: true } } },
+    select: {
+      claimToken: true,
+      problemVersionId: true,
+      // For `judge_verdict_total`'s label (Phase 10a).
+      language: true,
+      referenceSolution: { select: { expectedVerdict: true } },
+    },
   });
   if (!head || head.claimToken !== body.claimToken) return "stale";
 
@@ -327,6 +333,14 @@ export async function finalizeValidation(node: JudgeNode, body: ResultRequest): 
 
   await publishProgress("validation", id, { type: "final" });
   await resetConsecutiveIe(node.id);
+  /**
+   * A validation counts as a verdict, and it has to: these run on the same
+   * judge hosts as a student's submission, and `markInternalError` counts
+   * their failures. If the numerator could include a validation but the
+   * denominator could not, the INTERNAL_ERROR rate alert would read high
+   * every time a staff member validated a problem.
+   */
+  verdictReached(body.verdict, head.language);
   // The result is committed; moving the pipeline on must never fail the
   // worker's callback (the CLI and the next result retry it).
   await advanceValidation(head.problemVersionId).catch((error: unknown) =>

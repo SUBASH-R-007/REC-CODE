@@ -1894,3 +1894,85 @@ treatment would work here, and `/verify` is the strongest candidate in the
 product for it — it has no interactivity at all. It was not done in Phase 9f
 because moving a route between routers is a change to how it is rendered, not
 a tweak to its budget, and the phase was not the place to make it quietly.
+
+## Phase 10 — ops, observability and the things that cannot be run here
+
+### An eleventh metric, because an alert needs a series.
+
+SPEC §10 lists ten required metrics and, in the same sentence, eight alerts.
+One of those alerts — "failed logins >100/min" — has no metric in the list to
+read. So `auth_login_failures_total{reason}` exists, and the ten are treated
+as what the spec requires rather than as a ceiling.
+
+The alternative was a rule written against the log stream: pino → Loki, with
+Loki's own ruler. That is a second alerting system with a second set of
+failure modes (a label changed in a log line silently empties the query), for
+one rule, and it would have been chosen only to keep a list at ten.
+
+`reason` is the sign-in failure CODE, a closed set of nine declared in
+`apps/web/src/lib/auth/sign-in-errors.ts`. Never the account, never the
+hashed address. That is not squeamishness: Prometheus is scraped by another
+host, retained for months and rendered on screens people photograph, and
+`audit()` already records a failed sign-in against the account in a table
+with access control over it. The counter answers "is somebody spraying us",
+which is a rate and not an identity.
+
+Counted at the route's `failed()` funnel rather than inside `signIn()`,
+because a cross-site post and a body that is not our form never reach
+`signIn` — and those are the shapes an attack has.
+
+### Half the alert rules cannot have their condition produced here, and the harness says so.
+
+Four of the eight fire against the real stack: a 250-job backlog, a job left
+to wait a real sixty seconds, a `JudgeNode` row that stopped checking in, and
+120 refused sign-ins against the running web app. The other four are
+asserted against samples, and each for a different reason:
+
+- **disk >80%** and **DB connections >80%** read node_exporter and
+  postgres_exporter. Neither installs on this machine without root. The DB
+  condition is itself producible — opening eighty connections is a loop — but
+  producing a condition that no metric observes proves nothing.
+- **INTERNAL_ERROR rate >2%** needs a problem whose checker exits 3, run
+  through the whole pipeline. That is the mid-contest judge drill, which is a
+  manual 10f item against a judge host, not a row for a script to write into
+  a database.
+- **e2e p95 >30s** needs a 31-second verdict, which means making the judge
+  slow on purpose. That is a load test; `scripts/load/burst.ts` is where that
+  lives.
+
+What is open: the first two stay synthetic until the college's monitoring VM
+exists, at which point the exporters are installed and the two rules should
+be fired for real on it — that is twenty minutes of work there and
+impossible here. The third is closed by the judge drill when it is run. The
+fourth is arguably best left synthetic for ever: an alert test that requires
+the platform to be slow is a load test wearing a different hat.
+
+### The harness mirrors each expression; it does not evaluate it.
+
+Every rule carries a `reduce` that reads the number its PromQL computes, and
+`packages/shared/test/alerts.test.ts` asserts each rule fires just above its
+threshold and stays quiet just below it. That catches the mistakes that
+matter in practice — a threshold that disagrees with the YAML, a metric name
+that does not exist, a histogram read through the wrong series — but a mirror
+is not an engine: `reduce` and the expression are two implementations of one
+intention, and they could agree with each other and both be wrong.
+
+`promtool check config` and `promtool check rules` close the syntax half, in
+CI. What remains open is semantic: nobody has watched Prometheus itself
+evaluate `histogram_quantile(0.95, …)` over these buckets and return the
+number `reduce` returns. The honest way to close it is a one-off on the
+monitoring VM — load the rule file, feed it the harness's own samples through
+`promtool test rules`, and record the result in the runbook. `promtool test
+rules` takes a unit-test file of series and expected alerts, which this
+repository could write today; what it cannot do is run it.
+
+### The `runbook_url` in a rule points at a GitHub blob.
+
+`RUNBOOK_BASE_DEFAULT` is this repository's own `docs/RUNBOOK.md` on `main`,
+and the generator takes an override. For an on-call person at 10:40 on the
+morning of a drive, a link that needs a GitHub account and a VPN is a link
+they will not open. The right answer is the runbook published where the
+college's ops people can read it — a static page on the app host, or a PDF in
+the department share — and the override exists for exactly that. Left as the
+repository URL because inventing a URL that does not resolve would be worse
+than a slow one that does.

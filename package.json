@@ -9,7 +9,7 @@
   },
   "scripts": {
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "pnpm -r --workspace-concurrency=4 typecheck && tsc --noEmit -p tests/repo/tsconfig.json && tsc --noEmit -p scripts/load/tsconfig.json",
+    "typecheck": "pnpm -r --workspace-concurrency=4 typecheck && tsc --noEmit -p tests/repo/tsconfig.json && tsc --noEmit -p scripts/load/tsconfig.json && tsc --noEmit -p scripts/ops/tsconfig.json",
     "test": "pnpm -r --workspace-concurrency=1 test && vitest run --config vitest.repo.config.ts",
     "build": "pnpm -r build",
     "size": "pnpm --filter @recx/web size",

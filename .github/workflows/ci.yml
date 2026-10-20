@@ -338,3 +338,36 @@ jobs:
           RECX_ISOLATE_INTEGRATION: "1"
           RECX_GOLDEN_EXTRA_LANGUAGES: java21
         run: pnpm --filter @recx/judge-worker test:integration
+
+  # The one check nothing on the development machine can do: whether the
+  # PromQL in infra/monitoring/alerts.yml parses, and whether Prometheus
+  # would load the config that references it. `reduce` in
+  # packages/shared/src/alerts.ts mirrors each expression and
+  # scripts/ops/fire-alerts.ts asserts the number crosses its threshold, but
+  # neither is a PromQL engine — and Prometheus cannot be installed on that
+  # machine without root. So it runs here.
+  monitoring:
+    name: Monitoring rules (promtool)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The apt package ships promtool alongside the server. Pinned to the
+      # distribution's version on purpose: a rule file that parses under the
+      # Prometheus the college will actually install is the thing being
+      # checked, not the newest release.
+      - name: Install promtool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends prometheus
+          promtool --version
+
+      # `check config` resolves rule_files relative to the config file, so it
+      # also proves alerts.yml is reachable from prometheus.yml — a rules
+      # file nobody loads is the quietest way to have no alerting at all.
+      - name: Check the Prometheus config and the rule file
+        run: |
+          promtool check config infra/monitoring/prometheus.yml
+          promtool check rules infra/monitoring/alerts.yml

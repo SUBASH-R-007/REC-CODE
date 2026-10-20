@@ -1,0 +1,109 @@
+# Prometheus, on the monitoring host (Phase 10b).
+#
+# It runs on a SEPARATE machine from the app, and that is the whole point:
+# when the app host is on fire the dashboards must still load. SPEC §10 says
+# so, and it is also why nothing in this file scrapes through the app's own
+# reverse proxy.
+#
+# Targets are written as the compose service names each host publishes on the
+# monitoring network (deploy/compose.*.yml). Replace the three host names with
+# the real ones at install time; nothing else in this file is per-site except
+# the alertmanager address.
+#
+# Not run here: this development machine is a Windows laptop with a WSL2
+# mirror and no second host. `promtool check config` and `promtool check
+# rules` run in CI (.github/workflows/ci.yml, the `monitoring` job), and
+# scripts/ops/fire-alerts.ts produces each rule's condition against the local
+# stack. docs/RUNBOOK.md §3 records both.
+
+global:
+  # 30s, not 15s: every gauge in this system is published once a scheduler
+  # tick (60s), so a faster scrape would cost twice the samples to describe
+  # the same number. The alert `for:` durations in alerts.yml are all a
+  # multiple of this.
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    platform: recx
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # ── The web app ───────────────────────────────────────────────────────
+  #
+  # The one process with a public listener, so its /metrics is a route
+  # handler behind a bearer token (METRICS_TOKEN) rather than a private
+  # port. The token file is a Docker secret on the monitoring host; it is
+  # never in this file and never in git.
+  #
+  # Two replicas, and both are scraped: the counters sum across them, which
+  # is why judge_verdict_total and auth_login_failures_total are allowed to
+  # live on a replicated process and the queue gauges are not.
+  - job_name: recx-web
+    metrics_path: /api/metrics
+    scheme: https
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/recx_metrics_token
+    static_configs:
+      - targets: ["app.recx.internal:443"]
+        labels:
+          host: app
+
+  # ── The scheduler ─────────────────────────────────────────────────────
+  #
+  # Exactly one instance, which is what makes it the right home for
+  # judge_queue_depth, judge_oldest_job_age_seconds and
+  # judge_worker_heartbeat_age_seconds: a gauge read from either of two
+  # replicas would be the same Redis number reported twice.
+  #
+  # METRICS_PORT in compose; the listener itself binds 127.0.0.1 and compose
+  # publishes it to the monitoring network only.
+  - job_name: recx-scheduler
+    static_configs:
+      - targets: ["app.recx.internal:9101"]
+        labels:
+          host: app
+
+  # ── The judge hosts ───────────────────────────────────────────────────
+  #
+  # RECX_METRICS_PORT in the systemd unit. These hosts have no public
+  # listener at all (Phase 2), so the scrape crosses the monitoring network
+  # and nothing else can reach the port.
+  - job_name: recx-judge
+    static_configs:
+      - targets:
+          - "judge-1.recx.internal:9103"
+          - "judge-2.recx.internal:9103"
+
+  # ── Host and database exporters ───────────────────────────────────────
+  #
+  # Not ours: node_exporter 1.8 and postgres_exporter 0.15. The two rules
+  # that read them (HostDiskNearlyFull, PostgresConnectionsHigh) name
+  # metrics from these exporters, and packages/shared/src/alerts.ts lists
+  # those names explicitly so a rename upstream is a test failure rather
+  # than a rule that silently never fires.
+  #
+  # The host's own CPU and memory come from here rather than from
+  # collectDefaultMetrics inside the app, because this is the thing that
+  # still works when the app process is the problem.
+  - job_name: node
+    static_configs:
+      - targets:
+          - "app.recx.internal:9100"
+          - "db.recx.internal:9100"
+          - "judge-1.recx.internal:9100"
+          - "judge-2.recx.internal:9100"
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["db.recx.internal:9187"]
+        labels:
+          host: db

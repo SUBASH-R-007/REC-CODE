@@ -766,6 +766,192 @@ reconciler intervals without a finished tick.
 start. The browser lands on the user's home with a banner; nothing can be
 changed until "End impersonation" (or 15 minutes, or sign-out).
 
+### 2.12 Alerts: what each one means, and what to do (Phase 10b)
+
+Eight rules, the eight SPEC §10 names. They live as data in
+`packages/shared/src/alerts.ts` and `infra/monitoring/alerts.yml` is
+**generated** from that list — edit the TypeScript, then:
+
+```bash
+RECX_UPDATE_DOCS=1 pnpm --filter @recx/shared exec vitest run test/monitoring-files.test.ts
+```
+
+Every rule carries a `for:`, a `severity`, the SPEC phrase it implements, and
+a `runbook_url` pointing at the heading below with its name. `severity:
+critical` means students are affected now; `severity: warning` means act
+today, not tonight.
+
+**Firing them.** `scripts/ops/fire-alerts.ts` produces each condition against
+a local stack and asserts the number crosses the rule's threshold:
+
+```bash
+# Postgres and Redis up; the scheduler and the worker NOT running
+# (the harness publishes the gauges itself and consumes nothing).
+pnpm --filter @recx/scheduler exec tsx ../../scripts/ops/fire-alerts.ts
+pnpm --filter @recx/scheduler exec tsx ../../scripts/ops/fire-alerts.ts --only JudgeQueueBacklog
+```
+
+Four of the eight are produced for real; four are asserted against samples,
+and the harness prints which and why — the exporters the other two read
+(node_exporter, postgres_exporter) cannot be installed on the development
+machine without root, a real INTERNAL_ERROR needs a problem whose checker
+exits 3, and a real 31-second verdict means making the judge slow on purpose.
+`promtool` checks the PromQL itself, in CI: nothing on this machine can
+evaluate a Prometheus expression, and `reduce` in `alerts.ts` mirrors each
+expression rather than running it.
+
+#### JudgeQueueBacklog
+
+More than **200** jobs waiting in one lane for two minutes. Students are
+queued behind a backlog the platform cannot clear at its current capacity.
+
+1. `/admin/judge` — how many nodes are ONLINE, and what are their lanes?
+   A node DRAINED or lane-restricted during a contest is the usual cause.
+2. If every node is ONLINE and busy, this is capacity, not a fault: the lane
+   priorities (`LANE_PRIORITY`) already put ASSESSMENT and CONTEST ahead of
+   PRACTICE, so a contest is being served and practice is waiting. Say so on
+   the status page rather than adding hosts mid-contest.
+3. If nodes are ONLINE and idle, the queue is not being dispatched: see
+   **JudgeOldestJobStale** below, which will also be firing.
+
+Do not flush the queue. Every job in it belongs to a submission row that the
+reconciler will re-enqueue within a tick, so a flush buys a minute and then
+the same backlog returns, minus any job whose submission has since been
+cleaned up.
+
+#### JudgeOldestJobStale
+
+The oldest waiting job in a lane has been waiting more than **60** seconds.
+SPEC calls this "the number a student feels", and it is the one queue metric
+that cannot be explained away by load: a deep queue that is draining is a
+platform working hard, and a job that has sat for a minute while the queue
+drains around it is a job nobody will take.
+
+1. Check `judge_worker_heartbeat_age_seconds` first. A lane with a stale
+   oldest job and a node that stopped checking in is one incident, not two.
+2. `/admin/judge` → is the lane restricted on every node? A node that serves
+   only PRACTICE cannot take the CONTEST job at the head of the queue.
+3. Check the job's own attempt count in `Submission.attemptCount`: a job on
+   its third attempt is being claimed and dropped, which is a node problem
+   (self-check, toolchain) rather than a dispatch problem.
+
+The age is read from the head of the `waiting`, `prioritized` and `delayed`
+lists. Every judge job carries a lane priority, so it is the `prioritized`
+list that normally answers — a reading of zero with a non-zero depth means
+the gauge is being read wrongly, not that the queue is young.
+
+#### JudgeWorkerHeartbeatStale
+
+A judge node has not checked in for more than **90** seconds. The scheduler's
+node sweep marks it OFFLINE at 20 s and reclaims its leases in the same tick,
+so by the time this fires the work it held has already been re-enqueued:
+nothing is lost, and what is gone is capacity.
+
+1. Is the host up? `ssh judge-N`, then `systemctl status recx-judge`.
+2. If the service is running but silent, read its log for `host hardening`
+   and `self-check`: a node whose self-check fails quarantines itself and
+   stops claiming, which looks identical from the dashboard.
+3. If the host is gone, rebuild rather than repair (§2.3 — judge hosts are
+   cattle). A rebuilt node registers itself and starts claiming.
+
+This number is derived by the scheduler from `JudgeNode.lastHeartbeatAt` and
+is never self-reported. That is deliberate: a dead worker cannot report that
+its own heartbeat is old, so a self-reported series would go *missing*
+instead of *high*, and an alert on a missing series fires on every restart
+until somebody silences it.
+
+#### JudgeInternalErrorRate
+
+More than **0.02** of verdicts — 2% over five minutes — are INTERNAL_ERROR.
+SPEC calls this the canary for a broken compiler image or a cgroup
+misconfiguration after a host upgrade, "otherwise discovered from student
+complaints".
+
+1. `judge_sandbox_init_failures_total` on each worker. Rising there means
+   `isolate --init` is being refused: a kernel or cgroup change, almost
+   always after an upgrade or a reboot into a new kernel.
+2. Flat there, but IEs rising, points at the image: a toolchain that no
+   longer exists, a checker that cannot be executed, a missing
+   `/var/lib/recjudge/etc`.
+3. `/admin/judge` → a node with three consecutive IEs is quarantined
+   automatically. If every node is still ONLINE and the rate is climbing, the
+   fault is shared, so it is the image or the problem, not the host.
+
+There is no minimum-volume guard on this rule, so one IE in a quiet hour can
+fire it. That is the intent: the quiet hour is exactly when somebody upgrades
+a judge host.
+
+#### HostDiskNearlyFull
+
+A filesystem is more than **0.8** — 80% — full. A warning, not a page: 80% is
+act-today.
+
+1. On the **db** host the first casualty is WAL archiving, and a failed
+   archive is a backup that silently stops being restorable. Check
+   `pgbackrest info` before freeing space.
+2. On a **judge** host it is usually the blob cache. It evicts itself, but
+   `RECX_CACHE_MAX_BYTES` may be set above what the disk can actually give;
+   lower it rather than deleting the cache by hand.
+3. On the **app** host, look at the container log driver and MinIO before
+   anything else.
+
+Never free space by deleting a backup set. `verify-backup.sh` refuses a set
+whose MANIFEST digests do not match its files, and half a set is worse than
+none — it looks restorable.
+
+#### PostgresConnectionsHigh
+
+More than **0.8** — 80% — of `max_connections` are in use for five minutes.
+The next connection to be refused belongs to a student mid-submission.
+
+1. `SELECT state, count(*) FROM pg_stat_activity GROUP BY 1;` — `idle in
+   transaction` is the one to chase. A session left open by a migration or a
+   psql window holds locks as well as a connection.
+2. The web app runs a bounded pool and the scheduler holds a single
+   connection, so a number this high is usually something outside them: a
+   restart loop multiplying the scheduler's connection, or a long-running
+   query somebody started by hand.
+3. Do not raise `max_connections` to clear the alert. PgBouncer is the answer
+   when web replicas exceed four, and `deploy/compose.db.yml` says so in a
+   comment; before that, the honest fix is to find what is holding them.
+
+#### FailedLoginBurst
+
+More than **100** sign-ins a minute are being refused. Credential stuffing,
+or an integration retrying a wrong password in a loop. A warning rather than
+a page: the rate limiter is already refusing these, per account and per
+hashed client address.
+
+1. `/super/audit`, filter `auth.login_failed` — the audit trail records
+   failures against the account, which the metric deliberately does not.
+2. The dashboard's breakdown by `reason` tells the two cases apart:
+   `rate-limited` climbing while `credentials` stays flat is one account
+   being sprayed and the limiter holding; `credentials` climbing across many
+   accounts is a list being tried.
+3. A single account under attack needs nothing done to it — the limiter
+   already refuses it. If the source is one network, block it at Caddy; the
+   platform never stores a raw address, so the audit trail gives you a hash,
+   not an address to block.
+
+Do not raise the sign-in rate limits to quieten this. They are what is
+working.
+
+#### SubmissionLatencyP95High
+
+95th-percentile submit-to-verdict is over **30** seconds. Measured where the
+student's wait ends, not where the judge's work ends, so it includes the
+queue.
+
+1. Compare it with `judge_run_duration_seconds`. A high p95 with short run
+   durations is queueing: go to **JudgeQueueBacklog**. A high p95 with long
+   run durations is the problem's limits or a slow host.
+2. One problem with a 15-second limit and a hundred submissions will move
+   this on its own; check the recent submissions' problems before treating it
+   as a platform fault.
+3. If both numbers are normal and the p95 is still high, the gap is between
+   the result arriving and the student seeing it: check the SSE path
+   (`sse_connections_active`) and the Redis publish, not the judge.
+
 ### Inactivity: a policy engine, not a kill switch (Phase 8)
 
 **Read this before touching the thresholds, and before anybody asks you to
@@ -1039,3 +1225,15 @@ coordinator from actual runs — never in advance.
 | 9f | 2026-10-20 | Four registry gaps the LINUX gate found, which Windows cannot | **ALL FIXED.** The opt-in DB suites are skipped on Windows, so `pnpm test` there passed over every one of these: the officer CSV route had no `ROUTE_CALLS` entry (bound but never called as a student), `readiness#myExportLinks` was unregistered, `(public)/verify/[code]/page.tsx` was unswept, and the two self-service export actions had no fixtures. This is precisely what the `services-tests` step exists for — four tests failed and named each one | Claude |
 | 9f | 2026-10-20 | The exposure sweep was passing on this action without exercising it | **FIXED, and worth recording.** `createProfileExport` threw on `IP_HASH_PEPPER: Required` before it built a payload: `env()` parses as a whole, so a module reading one variable fails on a missing unrelated one. The sweep still passed — an action that errors leaks no canary — while checking nothing. With `IP_HASH_PEPPER` and `EXPORT_SIGNING_SECRET` set in the suite's hoisted block the happy path runs, and the payload it signs is built from the fixture's own canary-bearing rows. Which then surfaced a teardown failure on `ProfileExport_userId_fkey` (RESTRICT) and `ProfileExport_payload_frozen` (no DELETE) — the same shape as the Phase 8a `LeaveException` teardown, and the same lesson: every test in the file passes and the SUITE fails | Claude |
 | 9 (all) | 2026-10-20 | **The full Linux gate closing Phase 9** — `scripts/dev/linux-gate.sh` in the WSL2 mirror over 9a through 9f: lint, typecheck, test, build, `migrate deploy` to `recx_test`, the `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1` suites and the real-isolate suite | PASS **7/7 steps**. With the services suites every test runs and **nothing is skipped: 8,466 tests** (shared 1,658, judge-worker 403, db 1,445, design 84, scheduler 259, web 3,709, repo fences 908), plus isolate-integration **260/260**. Phase 9 is therefore green on Windows and Linux | Claude |
+| 10a | 2026-10-20 | The web process's metrics, read off a live `/metrics` rather than asserted in a test | PASS — `sse_connections_active` up and back down across a real verdict stream, `proctor_event_total{type}` moving as signals arrived, `submission_e2e_latency_seconds` observing a real submit-to-verdict. The exposition carries no label matching `user|student|college|handle|email|attempt|submission|ip|name|section`, and no `process_*` or `nodejs_*` (no `collectDefaultMetrics`: the host's own numbers come from the node exporter, which is the thing that still works when this process is the problem) | Claude |
+| 10a | 2026-10-20 | `/api/health` always answers 200, and its Redis field was wrong until it was read live | **FIXED.** The endpoint reports `ok: false` in the body rather than a 5xx, because a health check that cannot be reached cannot say what is wrong. Reading the live response showed `redis: "down"` on a healthy Redis: the client runs with `enableOfflineQueue: false`, so a ping issued mid-connect rejects immediately. `pingRedis()` now waits for `ready` inside the same timeout. No test would have caught this — the stub was connected | Claude |
+| 10a | 2026-10-20 | `/metrics` on web is 404, not 401, without the right token | PASS — no token, a wrong token of the same length, and the right one: 404, 404, 200. A 401 would confirm the endpoint exists to a scan; the route is also absent from the capability matrix's "required GETs" for the same reason, with the reasoning written at the list | Claude |
+| 10a | 2026-10-20 | The judge worker's and the scheduler's `/metrics` listeners, live in the WSL mirror | PASS — scheduler on 9101 and worker on 9103: `GET /metrics` 200, `GET /` 404, and both refuse connections after SIGTERM. The scheduler publishes all five lanes as `judge_queue_depth{queue=…} 0` and the dev node's `judge_worker_heartbeat_age_seconds{worker=…} 2945.135` — a node that stopped checking in 49 minutes ago, rising rather than going missing, which is the whole reason that gauge is derived by the scheduler. Labels present: `queue`, `worker`, `le`, and nothing else | Claude |
+| 10a | 2026-10-20 | A scrape one tick too early, which read as a broken pipeline | Worth recording: the first run showed the three gauge families with **no series at all**. The listener answers a few hundred milliseconds before the first reconciler tick, and the gauges are published BY the tick — so the scrape was 200 ms early. The check now waits for the tick before scraping. A metric with `# HELP` and no samples looks identical to one nothing publishes | Claude |
+| 10a | 2026-10-20 | The four Windows gates closing 10a | PASS 4/4 — lint (0 warnings), typecheck, test and build. The suite caught the half-finished move of `judge_verdict_total` from the scheduler to web: `metricsFor("web")` was still a three-item literal in `apps/web/test/metrics-contract.test.ts`. Plus the opt-in Redis suite 7/7, including the new depth test | Claude |
+| 10a | 2026-10-20 | `queues.depth()` against a real BullMQ, and the bug it exists to refuse | **FIXED before it shipped.** Every judge job this platform enqueues carries a lane priority, and a prioritized job never appears in BullMQ's `waiting` list at all — so counting only `waiting`, or reading the oldest age from its head, reports an empty queue during exactly the backlog the alert exists to catch. `depth()` counts `waiting + delayed + prioritized` and reads the oldest from the head of each of the three. Proved against a real Redis with a backdated job (ASSESSMENT lane, untouched by the other tests), and proved non-vacuous by reverting to the naive count: `expected +0 to be 1` | Claude |
+| 10b | 2026-10-20 | **Every alert rule fired**, against the live stack where the condition can be produced | PASS 8/8 — `scripts/ops/fire-alerts.ts`. Live: `JudgeQueueBacklog` 250 real jobs on the PRACTICE lane (depth 250 > 200), `JudgeOldestJobStale` one job left to wait **61.6 real seconds** (> 60), `JudgeWorkerHeartbeatStale` a `JudgeNode` row 120 s stale (its own series read 120 s; the rule's `max by (worker)` read 4,771 s, the dev node that stopped checking in earlier), `FailedLoginBurst` **120 refusals in 2.6 s = 2,790/min** against the running web app, read back through the token-guarded `/metrics`. Synthetic, with the reason in the output: the two exporter rules (node_exporter and postgres_exporter need root to install here), `JudgeInternalErrorRate` (a real IE needs a checker that exits 3 — the 10f judge drill) and `SubmissionLatencyP95High` (a real 31 s verdict means making the judge slow, which is a load test). The two of our own are asserted through `buildMetrics` against the contract's real definitions, bucket ladder included | Claude |
+| 10b | 2026-10-20 | Each rule fires just above its threshold and stays quiet just below it | PASS — 32 shared tests over the rule list, including a two-sided fixture per rule (200 vs 201 jobs, 90 s vs 91 s, 2 of 102 verdicts vs 3 of 103, 0.8 vs 0.81 of a disk, 100 vs 101 refusals a minute, a p95 of 20 s vs 37.5 s). A one-sided assertion passes on a rule that fires constantly, which is worse than no rule: it is a rule somebody silences, and then the real one is silent too. Also asserted: every rule's threshold appears in its own expression, every metric an expression reads exists (ours or a declared exporter's), and an absent metric reduces to `null` rather than 0 — "below the threshold" and "nothing is publishing" are different incidents | Claude |
+| 10b | 2026-10-20 | `promtool check config` and `promtool check rules` | **NOT RUN HERE.** Prometheus cannot be installed on this machine without root (`apt` needs a password; no container runtime is running), so nothing here can parse PromQL or load a rule file. Both commands run in CI instead — `.github/workflows/ci.yml`, the `monitoring` job, pinned to the distribution's Prometheus — and `packages/shared/test/monitoring-files.test.ts` fails if that job is removed. What would have to be true to run it here: a Prometheus binary, which means root or a download; the gap it leaves is recorded in `docs/OPEN-QUESTIONS.md` along with the one-off `promtool test rules` that would close it properly | Claude |
+| 10b | 2026-10-20 | The rule file is generated, and the dashboards plot only metrics that exist | PASS — `infra/monitoring/alerts.yml` is rendered from `packages/shared/src/alerts.ts` and the fence rewrites it under `RECX_UPDATE_DOCS=1`; a hand edit is a failing test. 13 further assertions over the committed files: `prometheus.yml` loads the rule file next to it, scrapes all three of our processes and both exporters, reads the web token from a file and carries no inline secret, and evaluates no faster than it scrapes (a `for:` shorter than one scrape interval fires on a single sample). Both Grafana dashboards parse, take the datasource as a variable, plot 12 expressions between them — every metric known — and group by no label that could identify a person, checked by reading the label names out of the expressions rather than by a substring search, because `submission_e2e_latency_seconds` contains the word `submission` | Claude |
+| 10b | 2026-10-20 | Every alert says what to do, in the runbook, before it can fire | PASS — §2.12 above: one `#### <AlertName>` section per rule, each with the threshold, the first thing to check, and what NOT to do (do not flush the queue; do not free disk space by deleting a backup set; do not raise `max_connections`; do not raise the sign-in rate limits — they are what is working). The fence refuses a rule whose `runbook_url` anchor has no heading, and refuses a heading that is a heading and little else | Claude |

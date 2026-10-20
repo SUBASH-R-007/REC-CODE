@@ -159,6 +159,30 @@ export const METRICS: readonly MetricSpec[] = Object.freeze([
     help: "Proctor signals recorded, by type. Never by attempt or by student.",
   },
   {
+    /**
+     * The eleventh, and the only one SPEC §10's metric list does not name.
+     *
+     * It is there because that same paragraph asks for an alert on "failed
+     * logins >100/min", and an alert needs a series: without this counter
+     * the rule could only be written against logs, which is a different
+     * system with a different ruler and a different failure mode. The list
+     * of ten is what the spec REQUIRES, not a ceiling.
+     *
+     * `reason` is the sign-in failure code (`credentials`, `rate-limited`,
+     * `inactive`, and the validation codes) — a closed set of nine,
+     * declared in `apps/web/src/lib/auth/sign-in-errors.ts`. Never the
+     * identifier, never the account, never the hashed IP: a per-account
+     * failure counter would be a login-attempt log in the one datastore no
+     * retention policy reaches, and the audit trail already records the
+     * failures that matter, against the account, where access is controlled.
+     */
+    name: "auth_login_failures_total",
+    type: "counter",
+    owner: "web",
+    labels: ["reason"],
+    help: "Sign-in attempts refused, by failure code. Never by account or by address.",
+  },
+  {
     name: "sse_connections_active",
     type: "gauge",
     owner: "web",

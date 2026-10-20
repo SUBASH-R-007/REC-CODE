@@ -16,6 +16,7 @@ import {
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { verdictReached } from "@/lib/metrics";
 import { redis } from "@/lib/redis";
 import { buildJudgeJobSpec, JobSpecError, type JobSpecChecker, type JobSpecInput } from "./job-spec";
 import { isSensitiveLane } from "./lanes";
@@ -165,15 +166,27 @@ export async function markInternalError(
           AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" <= now())
           AND "attemptCount" >= 3`;
   const outcome = kind === "validation" ? Prisma.sql`, outcome = 'FAILED'::"ValidationOutcome"` : Prisma.empty;
-  const rows = await db.$queryRaw<{ ownerId: string | null; attemptCount: number }[]>`
+  const rows = await db.$queryRaw<{ ownerId: string | null; attemptCount: number; language: string }[]>`
     UPDATE ${JOB_TABLE[kind]}
     SET status = 'INTERNAL_ERROR'::"SubmissionStatus", "judgeState" = 'FAILED'::"JudgeState",
         verdict = 'IE'::"Verdict", "claimToken" = NULL, "leaseExpiresAt" = NULL, "judgedAt" = now()
         ${outcome}
     WHERE id = ${id} AND ${condition}
-    RETURNING ${OWNER_COLUMN[kind]} AS "ownerId", "attemptCount"`;
+    RETURNING ${OWNER_COLUMN[kind]} AS "ownerId", "attemptCount", "language"`;
   const row = rows[0];
   if (!row) return false;
+
+  /**
+   * Phase 10b. An IE written HERE is the only kind the verdict counter would
+   * otherwise miss, and it is the one the alert is about: SPEC §10 calls the
+   * INTERNAL_ERROR rate "the canary for a broken compiler image or a cgroup
+   * misconfiguration after a host upgrade". A worker that hits an InfraError
+   * never posts a verdict at all — it releases the lease and the job retries
+   * — so `judge_verdict_total{verdict="IE"}` would have stayed at zero
+   * however broken the judge hosts were, and the rule would have been a
+   * comment.
+   */
+  verdictReached("IE", row.language);
 
   console.error(
     `[judge] !!! ${kind} ${id} marked INTERNAL_ERROR after ${row.attemptCount} attempt(s) ` +

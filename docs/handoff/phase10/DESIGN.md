@@ -202,23 +202,68 @@ written with `for:` and a `runbook_url` pointing at a `docs/RUNBOOK.md`
 anchor, because an alert that does not say what to do is a pager that teaches
 people to silence it.
 
+The rules themselves live as DATA in `packages/shared/src/alerts.ts` and the
+YAML is generated from that list, for the same reason the metric names are
+data: a file full of PromQL is unreadable to a test, and the drift that makes
+a monitoring repo worthless — the YAML saying 200 where the harness asserts
+20 — leaves every rule looking right. Each rule carries the SPEC phrase it
+implements, the number it is asserted against, and how the harness produces
+it.
+
+One addition the spec's metric list does not contain:
+**`auth_login_failures_total{reason}`**. SPEC §10 asks for an alert on failed
+logins, and an alert needs a series — without it the rule could only be
+written against logs, which is a different ruler with different failure
+modes. The label is the sign-in failure CODE and never the account or the
+address: the audit trail already records failures against the account, in a
+table with access control over it.
+
 `scripts/ops/fire-alerts.ts` is the deliverable. For each rule it produces
 the condition against the local stack and asserts the expression is true:
 
-| Rule | How the harness produces it |
-|---|---|
-| queue depth > 200 for 2 min | enqueue 250 jobs with no worker running |
-| oldest job > 60s | enqueue one job, no worker, wait |
-| worker heartbeat > 90s | insert a `JudgeNode` with an old `lastHeartbeatAt` |
-| INTERNAL_ERROR rate > 2% / 5 min | submit against a problem whose checker is deliberately broken |
-| disk > 80% | **not producible** — asserted against a synthetic sample instead |
-| DB connections > 80% | open connections up to the configured fraction |
-| failed logins > 100/min | 120 wrong-password posts against one account |
-| e2e p95 > 30s | observe the histogram with a synthetic 31s sample |
+| Rule | How the harness produces it | |
+|---|---|---|
+| queue depth > 200 for 2 min | 250 jobs enqueued with no worker consuming the lane | live |
+| oldest job > 60s | one job enqueued, no worker, and 60 real seconds of waiting | live |
+| worker heartbeat > 90s | a `JudgeNode` row whose `lastHeartbeatAt` is two minutes old | live |
+| failed logins > 100/min | 120 wrong-password posts to `/api/auth/login` | live |
+| INTERNAL_ERROR rate > 2% / 5 min | samples on the contract's own counter | synthetic |
+| disk > 80% | samples in node_exporter's shape | synthetic |
+| DB connections > 80% | samples in postgres_exporter's shape | synthetic |
+| e2e p95 > 30s | observations on the contract's own histogram | synthetic |
 
-Two of the eight are asserted against synthetic samples rather than real
-conditions, and the table says which. Filling a disk to 80% on a development
-laptop is not a test, it is an outage.
+**Four and four, not the six and two this section first claimed.** Written
+down because the difference is the honest part:
+
+- *disk* and *DB connections* read node_exporter and postgres_exporter. The
+  DB condition is producible here — opening eighty connections is a loop —
+  but neither exporter can be installed on this machine without root, so
+  there would be nothing to read. Producing a condition no metric observes
+  proves nothing.
+- *INTERNAL_ERROR* needs a problem whose checker exits 3 and a submission run
+  through the whole pipeline. That is the mid-contest judge drill in 10f: a
+  thing to do to a judge host, not a row for a script to write into a
+  database.
+- *e2e p95* needs a 31-second verdict, which means making the judge slow on
+  purpose. That is a load test, and `scripts/load/` is where it lives.
+
+The four synthetic ones are not asserted against invented numbers. For our
+own two, the harness builds the metric through `buildMetrics` from the same
+contract the web process uses — same names, same labels, same bucket ladder —
+so a ladder moved in `metrics.ts` changes what the p95 assertion computes.
+For the exporters' two, the samples are written in each exporter's own shape
+and the metric names are listed in `packages/shared/src/alerts.ts`, so a
+rename upstream is a test failure rather than a rule that silently never
+fires.
+
+**And the limit of all of it, stated rather than implied: the harness proves
+the condition is producible and that the number crosses. It does not evaluate
+the PromQL.** Each rule carries a `reduce` that mirrors its expression, and
+`packages/shared/test/alerts.test.ts` asserts every rule fires just above its
+threshold and stays quiet just below it — but a mirror is not an engine.
+`promtool check config` and `promtool check rules` run in CI
+(`.github/workflows/ci.yml`, the `monitoring` job), because nothing on a
+machine without root can install a Prometheus to ask.
 
 ## 4. Caching (10c)
 
