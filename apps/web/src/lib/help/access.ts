@@ -1,0 +1,99 @@
+import "server-only";
+import { helpAccess, type HelpAccess, type HelpContext } from "@recx/shared";
+import { db } from "@/lib/db";
+
+/**
+ * THE help chokepoint. Every hint and editorial read or reveal — the panels,
+ * the reveal actions, anything later phases add — asks getHelpState() and
+ * obeys `access`. Nothing else decides who may see help; there are no
+ * per-feature branches. The policy itself is helpAccess() in @recx/shared:
+ * CONTEST and ASSESSMENT get nothing, unconditionally.
+ *
+ * The context is always decided on the server (today the practice workspace
+ * is PRACTICE); it is never taken from client input.
+ */
+
+/**
+ * The practice workspace's context — the only surface that serves help in
+ * Phase 3. Contest (Phase 5) and assessment (Phase 6) workspaces pass their
+ * own context, decided from the student's live attempt on the server, and
+ * get nothing.
+ */
+export const WORKSPACE_HELP_CONTEXT: HelpContext = "PRACTICE";
+
+export interface HelpState {
+  problemId: string;
+  /** The problem's live version: the only version whose help is served. */
+  liveVersionId: string;
+  context: HelpContext;
+  /** Judged practice submissions (CE included, IE excluded). */
+  attempts: number;
+  failedAttempts: number;
+  solved: boolean;
+  /** Active workspace seconds (ProblemActivity). */
+  activeSeconds: number;
+  editorialVisibleAt: Date | null;
+  now: Date;
+  access: HelpAccess;
+}
+
+/**
+ * The student's help state for one problem, or null when the problem is
+ * unknown or not published (there is nothing to help with, and an
+ * unpublished problem's help must not leak).
+ */
+export async function getHelpState(
+  userId: string,
+  problemId: string,
+  context: HelpContext,
+  options: { now?: Date } = {},
+): Promise<HelpState | null> {
+  const key = { userId_problemId: { userId, problemId } };
+  const [problem, status, activity] = await Promise.all([
+    db.problem.findUnique({
+      where: { id: problemId },
+      select: { id: true, status: true, liveVersionId: true, editorialVisibleAt: true },
+    }),
+    db.userProblemStatus.findUnique({
+      where: key,
+      select: { status: true, attempts: true, failedAttempts: true },
+    }),
+    db.problemActivity.findUnique({ where: key, select: { activeSeconds: true } }),
+  ]);
+  if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersionId) return null;
+
+  const now = options.now ?? new Date();
+  const attempts = status?.attempts ?? 0;
+  const failedAttempts = status?.failedAttempts ?? 0;
+  const solved = status?.status === "SOLVED";
+  const activeSeconds = activity?.activeSeconds ?? 0;
+  const editorialVisibleAt = problem.editorialVisibleAt ?? null;
+
+  return {
+    problemId: problem.id,
+    liveVersionId: problem.liveVersionId,
+    context,
+    attempts,
+    failedAttempts,
+    solved,
+    activeSeconds,
+    editorialVisibleAt,
+    now,
+    access: helpAccess({ context, attempts, failedAttempts, activeSeconds, solved, editorialVisibleAt, now }),
+  };
+}
+
+/** The chokepoint allows no help at all here (a contest or assessment). */
+export function helpClosed(state: HelpState): boolean {
+  return state.access.maxHintTier === 0 && !state.access.editorial;
+}
+
+/** May this hint tier be revealed / shown? (Reads the chokepoint's decision.) */
+export function hintAllowed(state: HelpState, tier: number): boolean {
+  return tier >= 1 && tier <= state.access.maxHintTier;
+}
+
+/** May the editorial be viewed / shown? (Reads the chokepoint's decision.) */
+export function editorialAllowed(state: HelpState): boolean {
+  return state.access.editorial;
+}

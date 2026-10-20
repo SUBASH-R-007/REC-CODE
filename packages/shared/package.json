@@ -1,0 +1,29 @@
+{
+  "name": "@recx/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Contracts shared by every REC Code process: verdicts, limits, judge protocol, XP rules, topic taxonomy, language catalog, FUNCTION harness. No I/O, no database, no secrets.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./harness": "./src/harness/index.ts",
+    "./authoring": "./src/authoring/index.ts",
+    "./samples/two-sum": "./src/samples/two-sum.ts",
+    "./metrics-server": "./src/metrics-server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

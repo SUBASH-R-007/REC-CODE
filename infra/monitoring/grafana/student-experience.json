@@ -1,0 +1,136 @@
+{
+  "__comment": "Phase 10b. What a student actually experiences, and what the platform is being asked to do. Every series here is an aggregate: by verdict, by language, by proctor signal TYPE, by sign-in failure code. There is no panel that can be narrowed to a person, because Prometheus is scraped by another host, kept for months and rendered on screens people photograph — a per-attempt proctor panel would be a per-student behavioural record in the least controlled datastore in the system.",
+  "uid": "recx-student-experience",
+  "title": "REC Code — student experience",
+  "tags": ["recx", "student"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "Asia/Kolkata",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Submit to verdict, as the student waits",
+      "description": "Observed where the student's wait ends, not where the judge's work ends: it includes the queue. SPEC's SLO is a p95 under 30s, which is where SubmissionLatencyP95High fires.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(submission_e2e_latency_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(submission_e2e_latency_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Submissions per minute by language",
+      "description": "Load, and the shape of it. A language that suddenly stops appearing is usually a toolchain that stopped existing on the judge hosts after a rebuild.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (language) (rate(judge_verdict_total[5m])) * 60",
+          "legendFormat": "{{language}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Open verdict streams",
+      "description": "Per web replica, which is correct for this one: the connections really are per replica, so two lines are two replicas and not one number counted twice.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sse_connections_active",
+          "legendFormat": "{{instance}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Proctor signals per minute, by type",
+      "description": "The type and nothing else. No signal here penalises anybody: the most the platform does automatically is flag an attempt for review and withhold it from the public leaderboard, and a human decides the rest.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (rate(proctor_event_total[5m])) * 60",
+          "legendFormat": "{{type}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Refused sign-ins per minute, by reason",
+      "description": "Alerts above 100/min (FailedLoginBurst). `rate-limited` climbing while `credentials` stays flat is the limiter working: a run against one account is refused before the password is ever checked.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(auth_login_failures_total[1m])) * 60",
+          "legendFormat": "{{reason}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+# REC Code — a JUDGE host (Phase 10e).
+#
+#   docker compose -f deploy/compose.judge.yml --env-file deploy/judge.env up -d
+#
+# Two to three of these, rebuilt weekly from the Phase 2 image
+# (`infra/judge/cloud-init.yaml`). Each runs one worker process with N slots.
+#
+# ── Not run here ───────────────────────────────────────────────────────────
+# Never started: one laptop. The worker itself runs natively in the WSL2
+# mirror with real isolate, which is how every judging test in this
+# repository is run; what is untried is this file. `docs/RUNBOOK.md` §3 says
+# so.
+#
+# ── Why the judge is barely containerised ──────────────────────────────────
+# `isolate` needs cgroup v2 delegation, setuid, and a kernel it can trust;
+# the sandbox is the host's hardening, not the container's. So the container
+# is `privileged` with the host's cgroup filesystem — which sounds like the
+# opposite of security and is the reverse: the ISOLATION that matters is
+# between a student's code and everything else, and isolate provides it on a
+# host prepared by `infra/judge/install-isolate.sh` and verified at boot by
+# the worker's own hardening check. A rootless container around it would add
+# a second, weaker boundary and break the first.
+#
+# The honest alternative is no container at all — a systemd unit, which is
+# what `infra/judge/systemd/` already provides and what a college with two
+# judge hosts should probably use. This file exists for the case where the
+# ops person wants one deployment mechanism for all three host roles.
+#
+# ── This host has no public listener ───────────────────────────────────────
+# Nothing is published. The worker CALLS OUT to the app host (claim, fetch,
+# result, heartbeat) with a node token that can do nothing else, and the only
+# inbound port is `/metrics` on the monitoring network. Phase 2 established
+# that; it is not relaxed here.
+
+name: recx-judge
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  judge-worker:
+    image: ${RECX_JUDGE_IMAGE:?set to the judge image@sha256:... built from infra/judge}
+    restart: unless-stopped
+    # See the note above: this is what isolate needs, and the sandbox is
+    # isolate's, not the container runtime's.
+    privileged: true
+    cgroup: host
+    pid: host
+    environment:
+      NODE_ENV: production
+      RECX_DRIVER: isolate
+      RECX_APP_URL: ${RECX_APP_URL:?the app host's origin, e.g. https://code.rajalakshmi.edu.in}
+      RECX_NODE_ID: ${RECX_NODE_ID:?this host's node id, e.g. judge-1}
+      # One slot per physical core with its SMT sibling idle, plus
+      # housekeeping cores (docs/CAPACITY.md §1): five on an 8-core host.
+      RECX_SLOTS: ${RECX_SLOTS:-5}
+      RECX_BOX_BASE: "0"
+      RECX_SLOT_CPUS: ${RECX_SLOT_CPUS:?one core per slot, e.g. 2,3,4,5,6}
+      RECX_QUEUES: judge-assessment,judge-contest,judge-run,judge-practice,judge-rejudge
+      RECX_CACHE_DIR: /var/cache/recjudge/blobs
+      RECX_CACHE_MAX_BYTES: "42949672960"
+      RECX_SYNTHETIC_ETC: /var/lib/recjudge/etc
+      # 127.0.0.1 inside the container; published to the monitoring network
+      # only by the port mapping below.
+      RECX_METRICS_PORT: "9103"
+      RECX_NODE_TOKEN_FILE: /run/secrets/node_token
+      REDIS_URL: ${RECX_REDIS_URL:?the app host's Redis, over the judge network}
+    secrets:
+      - node_token
+    volumes:
+      # The toolchains are part of the image (pinned, Phase 2) and the blob
+      # cache is a volume: 40 GB of sha256-named files, LRU, verified on
+      # write. A rebuilt host refetches what it needs.
+      - blob-cache:/var/cache/recjudge/blobs
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    ports:
+      # Bound to the host's monitoring interface rather than 0.0.0.0: the
+      # listener inside the container is already 127.0.0.1-only, and this is
+      # the second half of the same decision.
+      - "${RECX_MONITORING_IP:?this host's address on the monitoring network}:9103:9103"
+    networks: [judge, monitoring]
+    logging: *logging
+
+  # The host's own CPU, memory and disk, for the two node_exporter metrics
+  # the alert rules read. It is here rather than inside the app because this
+  # is the thing that still works when the worker process is the problem.
+  node-exporter:
+    image: ${RECX_NODE_EXPORTER_IMAGE:?set to quay.io/prometheus/node-exporter:v1.8.2@sha256:...}
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "${RECX_MONITORING_IP:?this host's address on the monitoring network}:9100:9100"
+    networks: [monitoring]
+    logging: *logging
+
+networks:
+  # Outbound to the app host and MinIO. No inbound.
+  judge:
+  # Prometheus scrapes the worker and the node exporter over this.
+  monitoring:
+
+volumes:
+  blob-cache:
+
+secrets:
+  # Narrowly scoped: this token can heartbeat, claim, fetch the bundle for
+  # its claimed job, post a result and release. It cannot read a student, a
+  # problem it has not claimed, or anything else.
+  node_token:
+    file: /run/recx/secrets/node_token

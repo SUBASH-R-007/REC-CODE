@@ -1,0 +1,97 @@
+{
+  "$comment": "Front-end size budgets, checked by scripts/size-budget.mjs against a production build (`pnpm --filter @recx/web build && pnpm --filter @recx/web size`). Sizes are gzip level 9; 1 KB = 1,024 bytes. App Router routes (`entry`): first-load JS = Next's rootMainFiles + every client chunk of the route's layout chain (layouts, templates, error/loading/not-found boundaries, global-error) + the page. Pages Router routes (`page`): the scripts the SERVED HTML loads (the build is served in-process and the page fetched signed out); `zeroJs` additionally requires no <script src>, no script preload, no __NEXT_DATA__ and a compiled unstable_runtimeJS: false. A route with `shared: false` is budgeted but left out of the shared first-party measure. Measured numbers and their history: docs/CAPACITY.md, 'Front-end budgets'.",
+  "routes": [
+    { "route": "/login", "page": "/login", "zeroJs": true, "maxKb": 90 },
+    { "route": "/dashboard", "entry": "/(student)/dashboard/page", "maxKb": 160 },
+    { "route": "/problems", "entry": "/(student)/problems/page", "maxKb": 170 },
+    { "route": "/leaderboard", "entry": "/(student)/leaderboard/page", "maxKb": 150 },
+    { "route": "/problems/[slug] shell", "entry": "/(student)/problems/[slug]/page", "maxKb": 220 },
+    { "route": "/judge", "entry": "/(public)/judge/page", "maxKb": 125, "shared": false },
+    { "route": "/contests", "entry": "/(student)/contests/page", "maxKb": 130 },
+    { "route": "/contests/[slug]/arena", "entry": "/(student)/contests/[slug]/arena/page", "maxKb": 135 },
+    { "route": "/assessments", "entry": "/(student)/assessments/page", "maxKb": 130 },
+    { "route": "/assessments/[slug]/readiness", "entry": "/(exam)/assessments/[slug]/readiness/page", "maxKb": 130 },
+    { "route": "/assessments/[slug]/attempt", "entry": "/(exam)/assessments/[slug]/attempt/page", "maxKb": 160 },
+    { "route": "/aptitude", "entry": "/(student)/aptitude/page", "maxKb": 140 },
+    { "route": "/aptitude/[topic]", "entry": "/(student)/aptitude/[topic]/page", "maxKb": 145 },
+    {
+      "route": "/aptitude/mock/attempt/[attemptId]",
+      "entry": "/(student)/aptitude/mock/attempt/[attemptId]/page",
+      "maxKb": 150
+    },
+    {
+      "$comment": "Phase 8a. A form and a list, and it must stay that: this is the page somebody opens on a phone from a hospital bed, and from Phase 8e it is part of the route out of an inactivity restriction.",
+      "route": "/account/leave",
+      "entry": "/(student)/account/leave/page",
+      "maxKb": 135
+    },
+    {
+      "$comment": "Phase 8e. The route OUT of an inactivity restriction: one button and two lists. It must stay small, because the student who needs it most is the one on the worst connection.",
+      "route": "/account/reactivate",
+      "entry": "/(student)/account/reactivate/page",
+      "maxKb": 135
+    },
+    {
+      "$comment": "Phase 9c. Readiness: three cards, a component table each. It is also in monacoFree below. The route does ship the export-links control, which is the student's own share-and-withdraw UI.",
+      "route": "/placement",
+      "entry": "/(student)/placement/page",
+      "maxKb": 140
+    },
+    {
+      "$comment": "Phase 9f. The PUBLIC verification page: read by recruiters who have never seen this product and will not look twice, often on a phone. It is in serverRendered below, so the PAGE ships 0.2 KB of its own and renders fully without JavaScript, as SPEC §5 requires. The 117 KB measured here is Next's framework bundle plus the (public) layout chain, which the page does not need but the App Router sends anyway — recorded in docs/OPEN-QUESTIONS.md as a candidate for the zero-JS Pages Router treatment /login already uses.",
+      "route": "/verify/[code]",
+      "entry": "/(public)/verify/[code]/page",
+      "maxKb": 125,
+      "shared": false
+    }
+  ],
+  "zeroJsSelfCheck": {
+    "$comment": "A public App Router page served alongside the zero-JS routes: it MUST show script tags, or the HTML detector has gone blind.",
+    "path": "/offline"
+  },
+  "sharedFirstParty": {
+    "$comment": "First-party code (apps/web/src, packages/*) in the chunks that two or more budgeted routes load (design system, shells, shared libraries). A chunk that mixes first- and third-party modules counts in proportion to its first-party source bytes.",
+    "maxKb": 120
+  },
+  "monaco": {
+    "$comment": "The Monaco chunk of the spec ('<= 1,050 KB lazy'): the main-thread code the editor fetches from /monaco/vs on a cold workspace load — the AMD loader, the editor core and one tokenizer grammar (the largest offered, so any language fits). The editor web worker is a separate worker script, not part of this chunk; it has its own line (monacoWorker). CSS and the codicon font are reported, not budgeted (not JS). Decision: docs/OPEN-QUESTIONS.md, Phase 3, 'Front-end budgets'.",
+    "maxKb": 1050,
+    "dir": "public/monaco/vs",
+    "files": ["loader.js", "editor/editor.main.js"],
+    "largestOf": "basic-languages",
+    "report": ["editor/editor.main.css", "base/browser/ui/codicons/codicon/codicon.ttf"]
+  },
+  "monacoWorker": {
+    "$comment": "The generic editor worker (the only Monaco worker shipped: no TS/JSON/CSS/HTML language services), started by the editor after it mounts. Budgeted on its own so it stays measured.",
+    "maxKb": 120,
+    "file": "base/worker/workerMain.js"
+  },
+  "codemirror": {
+    "$comment": "The phone editor (< 768 px): the lazy CodeMirror 6 chunk set plus its largest language grammar.",
+    "maxKb": 190,
+    "dynamicImport": "@/components/editor/codemirror",
+    "grammarsFrom": "components/editor/codemirror.ts"
+  },
+  "monacoFree": {
+    "$comment": "No Monaco module (the monaco-editor package or the editor's own Monaco loader/controller/theme) may appear in these routes' chunk graphs, first-load or lazy.",
+    "entries": [
+      "/(student)/problems/page",
+      "/(student)/dashboard/page",
+      "/(student)/leaderboard/page",
+      "/(public)/judge/page",
+      "/(student)/aptitude/page",
+      "/(student)/aptitude/[topic]/page",
+      "/(student)/aptitude/mock/attempt/[attemptId]/page",
+      "/(student)/account/leave/page",
+      "/(student)/account/reactivate/page",
+      "/(student)/placement/page",
+      "/(public)/verify/[code]/page"
+    ],
+    "entryPrefixes": ["/admin/", "/placement-cell/", "/mentor/"]
+  },
+  "serverRendered": {
+    "$comment": "Pages that add no client JS of their own: the page's chunks beyond the framework and its layout chain may hold only Next's page stub (one module named exactly \"apps/web\"), at most maxOwnKb gzip. Any first-party or third-party client module there is a failure.",
+    "maxOwnKb": 1,
+    "entries": ["/(public)/judge/page", "/(public)/verify/[code]/page"]
+  }
+}
