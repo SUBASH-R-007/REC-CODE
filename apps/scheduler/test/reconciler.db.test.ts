@@ -24,7 +24,7 @@ import { FakeQueues } from "./support/fake-queues";
  */
 const ENABLED = process.env.RECX_DB_TESTS === "1";
 const REDIS_ENABLED = process.env.RECX_REDIS_TESTS === "1";
-const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 
 const MIN = 60_000;

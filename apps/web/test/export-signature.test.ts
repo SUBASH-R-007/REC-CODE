@@ -25,7 +25,7 @@ import {
 
 process.env.EXPORT_SIGNING_SECRET ??= "test-only-export-signing-secret-at-least-32-chars";
 process.env.IP_HASH_PEPPER ??= "test-pepper-at-least-16-chars";
-process.env.DATABASE_URL ??= "postgresql://recx:recx@localhost:5433/recx_test";
+process.env.DATABASE_URL ??= "postgresql://recx:recx@127.0.0.1:5433/recx_test";
 
 let signPayload: typeof import("@/lib/export/signature").signPayload;
 let verifyStored: typeof import("@/lib/export/signature").verifyStored;

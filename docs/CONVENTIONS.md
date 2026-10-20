@@ -460,6 +460,21 @@ So, while developing on Windows:
 
 A restart also resyncs the clock, which fixes the skew above at the same time.
 
+**Two of the ingredients were measured later** (2026-10-21, while chasing a
+sign-in that answered `?error=unavailable` on every attempt), and both make
+the same P1001 appear with no parallelism at all, so check them before
+blaming saturation:
+
+- Windows resolves `localhost` to `::1` first, and WSL2 serves only the IPv4
+  loopback — `127.0.0.1:5433` connects on the first try while
+  `localhost:5433` waits out a timeout. The `.env.example` files and
+  `docs/RUNBOOK.md` now say `127.0.0.1` everywhere for this reason; the
+  per-file `RECX_TEST_DATABASE_URL` fallbacks in `*.db.test.ts` still say
+  `localhost`, which is correct where they run (inside WSL2).
+- The distribution stops within seconds of its last `wsl` session exiting,
+  so a check run from Windows starts it, finds everything healthy, and lets
+  it stop again. `scripts/dev/stack-up.ps1` holds it open.
+
 ## A test that sweeps a shared table globally must drain it first
 
 `recx_test` is one database and vitest runs test files in parallel, so a

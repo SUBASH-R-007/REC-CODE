@@ -14,12 +14,12 @@ import type { SeededPlan } from "../scripts/content/study-plans";
  * name a *_test database).
  */
 const ENABLED = process.env.RECX_DB_TESTS === "1";
-const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 
 vi.hoisted(() => {
   if (process.env.RECX_DB_TESTS === "1") {
     process.env.DATABASE_URL =
-      process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+      process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
   }
 });
 

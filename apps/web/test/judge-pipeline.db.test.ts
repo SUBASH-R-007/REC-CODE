@@ -24,12 +24,12 @@ import {
  * by in-memory fakes, so nothing reaches a local judge worker's queues.
  */
 const ENABLED = process.env.RECX_DB_TESTS === "1";
-const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 
 const fakes = vi.hoisted(() => {
   if (process.env.RECX_DB_TESTS === "1") {
     process.env.DATABASE_URL =
-      process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+      process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
   }
   const objects = new Map<string, Buffer>();
   return {

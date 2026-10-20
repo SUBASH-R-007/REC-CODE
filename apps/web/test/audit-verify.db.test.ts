@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  */
 const ENABLED = process.env.RECX_DB_TESTS === "1";
 if (ENABLED) {
-  process.env.DATABASE_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+  process.env.DATABASE_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 }
 
 describe.skipIf(!ENABLED)("audit chain verification against recx_test", () => {

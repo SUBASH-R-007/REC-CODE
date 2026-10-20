@@ -22,7 +22,7 @@ import {
  */
 
 process.env.IP_HASH_PEPPER ??= "metrics-test-pepper-16+";
-process.env.DATABASE_URL ??= "postgresql://recx:recx@localhost:5433/recx_test";
+process.env.DATABASE_URL ??= "postgresql://recx:recx@127.0.0.1:5433/recx_test";
 
 /** The ten SPEC §10 names, so the eleventh cannot quietly displace one. */
 const SPEC_TEN = [

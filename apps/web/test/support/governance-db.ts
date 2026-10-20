@@ -8,7 +8,7 @@ import type { Db, Role } from "@recx/db";
  * rows, re-enable, then assert no trigger is left disabled. Never TRUNCATE.
  */
 
-export const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+export const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 
 export function assertTestDatabase(): void {
   if (!new URL(TEST_URL).pathname.endsWith("_test")) {

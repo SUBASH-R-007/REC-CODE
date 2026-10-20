@@ -26,7 +26,7 @@ import { bucketKeys, dayAsDate, PROGRESS_BADGES, PROGRESS_NOTIFICATION_KIND } fr
  * the global DailyChallenge rows it writes never meet real dates.
  */
 const ENABLED = process.env.RECX_DB_TESTS === "1";
-const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@localhost:5433/recx_test";
+const TEST_URL = process.env.RECX_TEST_DATABASE_URL ?? "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test";
 
 type ApplyModule = typeof import("@/lib/progress/apply");
 

@@ -18,7 +18,10 @@ evening before an assessment.
 | Redis 7 | WSL2, port 6379 | AOF `everysec`, as in production |
 | isolate 2.7, toolchains, `apps/judge-worker` | WSL2 | Linux-only: cgroup v2, namespaces, setuid isolate |
 
-Windows reaches the WSL2 services as `localhost` (WSL forwards them). Docker
+Windows reaches the WSL2 services at `127.0.0.1` — not at `localhost`, which
+Windows resolves to `::1` first, where nothing in WSL2 is listening (§1.1).
+The distribution also has to be held open, or those services are up only
+while some `wsl` command happens to be running (§1.5). Docker
 Desktop does not start on the main development machine, so these services
 run natively in WSL2 (`docs/OPEN-QUESTIONS.md` item 9); `compose.yaml` is the
 container alternative on machines where Docker works (§1.7).
@@ -31,7 +34,7 @@ of the checkout at `~/recx` inside WSL2, refreshed by
 ### 1.1 One-time setup — WSL2 side
 
 1. Install Ubuntu 24.04 under WSL2 (the distribution is named `Ubuntu`
-   below). Recommended: **mirrored networking**, so `localhost` works in both
+   below). Use **mirrored networking**, so `localhost` works in both
    directions — the judge worker in WSL2 must reach the web app on Windows.
    In `%UserProfile%\.wslconfig`:
 
@@ -45,6 +48,20 @@ of the checkout at `~/recx` inside WSL2, refreshed by
    (`ip route show default | awk '{print $3}'` inside WSL2) in
    `RECX_APP_URL`, and allow port 3000 through the Windows firewall for the
    WSL adapter.
+
+   Two things about this direction — Windows reaching WSL2 — are worth
+   knowing before they cost an afternoon, because both look like a broken
+   application and neither is (§1.8 has the symptoms):
+
+   - **Dial `127.0.0.1`, never `localhost`.** Windows resolves `localhost`
+     to `::1` first and WSL2 serves only the IPv4 loopback, so a connection
+     to `localhost:5433` waits for a timeout on `::1` and Prisma reports
+     `P1001 Can't reach database server` with the database running. Every
+     `.env.example` here is written with `127.0.0.1` for that reason.
+   - **The distribution does not stay up by itself.** WSL stops it within
+     seconds of its last session exiting — systemd being PID 1 does not
+     prevent it — and PostgreSQL, Redis and isolate go with it. Hold it open
+     with `scripts/dev/stack-up.ps1` (§1.5), once per Windows session.
 
 2. Services — PostgreSQL 17 (PGDG), Redis 7, Node 22 (checksum-verified),
    the `recx` role and the `recx` + `recx_test` databases:
@@ -131,7 +148,7 @@ For the opt-in database tests, migrate `recx_test` once by overriding the
 URLs for one command:
 
 ```powershell
-$env:DATABASE_URL = "postgresql://recx:recx-dev-only@localhost:5433/recx_test"
+$env:DATABASE_URL = "postgresql://recx:recx-dev-only@127.0.0.1:5433/recx_test"
 $env:DATABASE_URL_DIRECT = $env:DATABASE_URL
 npx pnpm@9.15.9 db:migrate
 Remove-Item Env:DATABASE_URL, Env:DATABASE_URL_DIRECT
@@ -218,7 +235,8 @@ filesystem, which is one more reason the Linux gate is the authoritative one.
 
 | Process | Command | Notes |
 |---|---|---|
-| WSL2 services | `wsl -d Ubuntu -- systemctl is-active postgresql redis-server isolate` | all three start with WSL2 (systemd); this also wakes the distribution |
+| WSL2 stack | `powershell -ExecutionPolicy Bypass -File scripts/dev/stack-up.ps1` | **first, once per Windows session.** Holds the distribution open (it stops seconds after the last `wsl` session exits, taking all three services with it), starts PostgreSQL, Redis and isolate, and proves from Windows that 5433 and 6379 answer. `-Stop` releases it |
+| WSL2 services | `wsl -d Ubuntu -- systemctl is-active postgresql redis-server isolate` | all three start with WSL2 (systemd). Note that this command *starts* the distribution in order to run, so on its own it always looks healthy — which is why the script checks the ports from the Windows side instead |
 | Web | `npx pnpm@9.15.9 dev` | Windows; <http://localhost:3000> |
 | Scheduler | `npx pnpm@9.15.9 scheduler:dev` | Windows; reconciler every 10 s |
 | Judge worker | the §1.4 form with `<command>` = `pnpm --filter @recx/judge-worker dev` | WSL2, `RECX_DRIVER=isolate`. The mirror is a copy: after editing worker code on Windows, stop and re-run the command so it re-syncs |
@@ -342,6 +360,9 @@ still needs a Linux host with isolate.
 
 | Symptom | Cause / fix |
 |---|---|
+| Sign-in answers "Something went wrong. Please try again — if it keeps happening, quote reference …" | an unexpected error reached `POST /api/auth/login`; the reference is printed beside the exception in the web log. In development it is almost always the database — check `/api/health` first, and the two rows below |
+| `/api/health` says `"db":"down"`, or Prisma `P1001 Can't reach database server`, while `pg_isready` inside WSL2 answers happily | either `DATABASE_URL` dials `localhost` (Windows tries `::1`, which WSL2 does not serve) — use `127.0.0.1` — or the distribution had stopped and the `wsl` command you checked with is what started it again. `scripts/dev/stack-up.ps1` settles both (§1.1, §1.5) |
+| Services were up a minute ago and are refused now | the WSL2 distribution stopped when the last `wsl` session exited. Hold it open: `scripts/dev/stack-up.ps1` |
 | `ECONNREFUSED 127.0.0.1:5432` | wrong port: local Postgres is on **5433** |
 | `ERR_PNPM_…` / pnpm cannot switch version | use `npx pnpm@9.15.9 …` |
 | Prisma: query engine for the wrong platform | a Windows `node_modules` used from Linux (or the reverse); Linux work happens in `~/recx` only |
@@ -1417,3 +1438,4 @@ coordinator from actual runs — never in advance.
 | 10 (CI) | 2026-10-20 | A database test that quietly depended on seed data | **FIXED.** `packages/db/test/inactivity-apply.db.test.ts` built its submission fixture with `db.problem.findFirstOrThrow()` — which passes on any database that has been seeded or that another suite has written to, and fails with `P2025 No record was found` on a fresh one. CI's gate job applies the migrations and does **not** seed, so this was the first time it ever met a clean database (the file is from Phase 8, and the remote was at the Phase 1–4 commit until today). The fixture now creates its own problem, version and language config, and the teardown removes them. Proved against CI's condition rather than against the mirror: a scratch database created with migrations only (0 problems, 0 language configs) runs **the whole db project 1,445/1,445** and **the whole web project 3,762/3,762**, both green | Claude |
 | 10 (CI) | 2026-10-20 | Two e2e tests lost to `next dev` compile time on a two-core runner | **FIXED.** `page.goto: Timeout 90000ms exceeded` on the RBAC test that walks all twelve `/super` pages in one test, and on one axe scan of `/bookmarks`; 199 of 201 passed. `next dev` compiles a route on its first request, and the suite visits about sixty — the same cost §1.5 documents locally, several times larger on a runner. Three changes, none of which weakens what the suite asserts: the CI dev server now runs with `--disable-source-maps` (§1.5: most of the heap fix), a new committed `scripts/dev/warm-routes.sh` pre-compiles the routes the suite visits **before** Playwright starts, so a slow compile is a slow build step rather than a test failure, and the CI-only navigation budget is 180 s. How fast a page arrives is asserted against a PRODUCTION build by Lighthouse and the `perf` project; this suite checks axe violations, RBAC and the keyboard journey | Claude |
 | 10 (CI) | 2026-10-20 | `promtool check config` refused the config for being right | **FIXED.** "error checking authorization credentials or bearer token file `/run/secrets/recx_metrics_token`: no such file or directory" — `check config` validates that every file the config REFERENCES exists, and `prometheus.yml` points at the metrics bearer token as a Docker secret on the monitoring host. The token must never be inline (`tests/repo/deploy-topology.test.ts` refuses that), so the fix is on CI's side: the job now creates an empty file where the host has a secret, and the **full** check runs rather than a syntax-only one — which also proves `alerts.yml` is reachable from `prometheus.yml`, since `check config` resolves `rule_files` relative to it. This is the first time any Prometheus has read these rules | Claude |
+| dev | 2026-10-21 | A sign-in that refused every attempt on the development machine — and what it was not | **FIXED, and nothing was wrong with the product.** `RECADMIN01` was answered with "Something went wrong. Please try again — if it keeps happening, quote reference …" on every attempt. That page is `POST /api/auth/login`'s answer to ANY unexpected exception (`?error=unavailable`, §1.8): the code is deliberately the same for a database outage as for a bug, and the reference is printed beside the exception in the web log, which is where this one was — Prisma `P1001 Can't reach database server at localhost:5433`. Two independent causes, both on the Windows↔WSL2 boundary. **One:** Windows resolves `localhost` to `::1` first and WSL2 serves only the IPv4 loopback, so the connection waited out a timeout on `::1` while `127.0.0.1:5433` connected on the first try — measured 20/20 against `127.0.0.1`, `ETIMEDOUT` against `[::1]`, with Redis unaffected because `REDIS_URL` already said `127.0.0.1`. **Two:** WSL stops the distribution within seconds of its last session exiting (16 s, measured), taking PostgreSQL, Redis and isolate with it — and `wsl -d Ubuntu -- pg_isready`, the obvious way to check, *starts* the distribution in order to run and so always answers happily. Fixes: `127.0.0.1` in both `.env.example` files, the RUNBOOK's own snippets and the 37 files holding a `RECX_TEST_DATABASE_URL` fallback; mirrored networking actually set in `%UserProfile%\.wslconfig`; a new `scripts/dev/stack-up.ps1` that holds the distribution open, starts the three services and proves from **Windows** that 5433 and 6379 answer; and `tests/repo/dev-stack.test.ts` so the examples cannot drift back. Verified: `/api/health` `{"ok":true,"db":"up","redis":"up","migrations":"current"}`, six consecutive admin sign-ins landing on `/admin`, a student sign-in landing on `/dashboard`, and the holder released and re-taken with the stack coming back both times | Claude |
