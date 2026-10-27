@@ -1,12 +1,13 @@
 import "server-only";
 import { z } from "zod";
+import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
 
 /**
  * Validated server environment. Parsed lazily (first access) so `next build`
  * can run without a live database, and parsed once so every request sees the
  * same configuration.
  */
-const schema = z.object({
+const shape = {
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required."),
@@ -59,7 +60,9 @@ const schema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
-}).superRefine((value, ctx) => {
+} as const;
+
+const schema = z.object(shape).superRefine((value, ctx) => {
   /**
    * The dev default is a KNOWN string, so a production deployment that never
    * set the variable would be signing public claims with a key published in
@@ -84,11 +87,50 @@ const schema = z.object({
 
 export type Env = z.infer<typeof schema>;
 
+/**
+ * Every variable above may arrive as `KEY_FILE` instead — the Docker-secret
+ * convention `deploy/compose.app.yml` uses, because
+ * `tests/repo/deploy-topology.test.ts` refuses a credential written as a
+ * value (`@recx/shared/env-file`). The whole schema is eligible rather than
+ * a hand-kept subset: which variables are secret is a property of the
+ * deployment, not of this file.
+ */
+export const FILE_BACKED = Object.keys(shape);
+
+/**
+ * Variables whose DEVELOPMENT DEFAULT is not merely unhelpful in production
+ * but silently wrong, so an unset variable is refused there rather than
+ * defaulted:
+ *
+ * - `APP_URL` would make every absolute link and every judge callback point
+ *   at `localhost:3000`.
+ * - `REDIS_URL` would point the rate limiter and the queues at a Redis that
+ *   is not there. The limiter fails OPEN by design (a cache outage must not
+ *   become a sign-in outage), so the failure mode is a production deployment
+ *   with no rate limiting at all and nothing on fire to say so.
+ *
+ * A deployment that genuinely runs Redis on the loopback still sets the
+ * variable; only *forgetting* it is refused.
+ */
+const REQUIRED_IN_PRODUCTION = ["APP_URL", "REDIS_URL"] as const;
+
 let cached: Env | null = null;
 
 export function env(): Env {
   if (cached) return cached;
-  const parsed = schema.safeParse(process.env);
+  // Fills in any KEY whose value arrived as KEY_FILE, in process.env itself,
+  // so that readers which resolve the environment on their own — Prisma with
+  // DATABASE_URL — see the same values this schema validates.
+  hydrateFileBackedSecrets(FILE_BACKED);
+  const source = process.env;
+  if (source.NODE_ENV === "production") {
+    const missing = REQUIRED_IN_PRODUCTION.filter((key) => !source[key]);
+    if (missing.length > 0) {
+      const issues = missing.map((key) => `  - ${key}: is required in production (it has a development default).`);
+      throw new Error(`Invalid server environment:\n${issues.join("\n")}`);
+    }
+  }
+  const parsed = schema.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Invalid server environment:\n${issues}`);

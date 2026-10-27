@@ -1,0 +1,92 @@
+# REC Code — a TEMPORARY hosted test deployment. Not the production
+# topology: that is deploy/compose.*.yml on a Linux server, and
+# docs/DEPLOY-HOSTED-TEST.md explains every difference, including the one
+# that matters most — nothing here can judge a submission, because isolate
+# needs a setuid sandbox and cgroup v2 on a host you control, which a
+# managed container platform does not give you.
+#
+# What this blueprint creates:
+#   recx-db         PostgreSQL 17  — the database (Postgres is truth)
+#   recx-redis      Key Value      — BullMQ queues and the rate limiter only
+#   recx-scheduler  worker         — the reconciler, sweeps and nightly jobs
+#
+# The web app is NOT here: it is deployed to Vercel from apps/web
+# (apps/web/vercel.json). Both halves must share IP_HASH_PEPPER and
+# EXPORT_SIGNING_SECRET, so both are `sync: false` — Render asks for them
+# when the blueprint is applied, and you paste the same values into Vercel.
+#
+# NOT RUN HERE. This file has never been applied: it is written from
+# Render's blueprint reference, and the first apply is the test of it.
+# Read docs/DEPLOY-HOSTED-TEST.md before applying it.
+
+databases:
+  - name: recx-db
+    databaseName: recx
+    user: recx
+    plan: free
+    postgresMajorVersion: "17"
+    # Free Postgres is deleted after 30 days. That is acceptable for a test
+    # deployment and unacceptable for anything else; §2.13 covers backups on
+    # the real server.
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: migrations, the seed and Vercel's functions dial in from anywhere
+
+services:
+  # Transport only. A flush loses queue position and zero submissions,
+  # because the scheduler's reconciler re-enqueues from Postgres (§2.1) —
+  # which is why free Key Value having no persistence is survivable here.
+  - type: keyvalue
+    name: recx-redis
+    plan: free
+    region: singapore
+    # BullMQ refuses to run against an evicting Redis: a dropped key is a
+    # lost job. noeviction turns a full instance into write errors the
+    # reconciler recovers from instead.
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  - type: worker
+    name: recx-scheduler
+    runtime: node
+    plan: starter
+    region: singapore
+    # One instance, always. The reconciler takes a Postgres advisory lock,
+    # so a second instance would be safe but pointless, and every tick it
+    # skipped would read as a stall.
+    numInstances: 1
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @recx/scheduler build
+    startCommand: pnpm --filter @recx/scheduler start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # The scheduler holds advisory locks and leases rows with SKIP LOCKED,
+      # so it uses the direct, non-pooled URL. Render has no pooler, so both
+      # URLs are the same string here; on the real server they are not.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: recx-db
+          property: connectionString
+      - key: DATABASE_URL_DIRECT
+        fromDatabase:
+          name: recx-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: recx-redis
+          type: keyvalue
+          property: connectionString
+      - key: APP_URL
+        sync: false
+      # Shared with the Vercel deployment: the same value in both places, or
+      # an IP hash written by one is not the hash the other computes.
+      - key: IP_HASH_PEPPER
+        sync: false
+      - key: EXPORT_SIGNING_SECRET
+        sync: false
+      # log in a test deployment: the subject and body go to the scheduler
+      # log and no address is printed. Never `log` on the real server.
+      - key: MAIL_TRANSPORT
+        value: log

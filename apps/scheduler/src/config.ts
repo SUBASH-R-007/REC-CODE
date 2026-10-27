@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAIL_TRANSPORTS, type MailTransportName } from "@recx/shared";
+import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
 import { z } from "zod";
 
 /**
@@ -60,21 +61,21 @@ const postgresUrl = z
     message: "must be the direct, non-pooled URL (advisory locks and SKIP LOCKED leases do not survive PgBouncer)",
   });
 
-const schema = z
-  .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-    DATABASE_URL_DIRECT: postgresUrl.optional(),
-    DATABASE_URL: z.string().optional(),
-    REDIS_URL: z.string().regex(/^rediss?:\/\//, "must be a redis:// or rediss:// URL").optional(),
-    LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-    /** Phase 10a. 0 (the default) means no `/metrics` listener at all. */
-    METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(0),
-    // Security email (EmailOutbox drain). Default: log in development, disabled elsewhere.
-    MAIL_TRANSPORT: z.enum(MAIL_TRANSPORTS).optional(),
-    SMTP_URL: z.string().regex(/^smtps?:\/\//, "must be an smtp:// or smtps:// URL").optional(),
-    MAIL_FROM: z.string().min(3).max(200).optional(),
-  })
-  .superRefine((env, ctx) => {
+const shape = {
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  DATABASE_URL_DIRECT: postgresUrl.optional(),
+  DATABASE_URL: z.string().optional(),
+  REDIS_URL: z.string().regex(/^rediss?:\/\//, "must be a redis:// or rediss:// URL").optional(),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  /** Phase 10a. 0 (the default) means no `/metrics` listener at all. */
+  METRICS_PORT: z.coerce.number().int().min(0).max(65535).default(0),
+  // Security email (EmailOutbox drain). Default: log in development, disabled elsewhere.
+  MAIL_TRANSPORT: z.enum(MAIL_TRANSPORTS).optional(),
+  SMTP_URL: z.string().regex(/^smtps?:\/\//, "must be an smtp:// or smtps:// URL").optional(),
+  MAIL_FROM: z.string().min(3).max(200).optional(),
+} as const;
+
+const schema = z.object(shape).superRefine((env, ctx) => {
     if (!env.DATABASE_URL_DIRECT) {
       if (env.NODE_ENV !== "development") {
         ctx.addIssue({
@@ -144,6 +145,11 @@ export const DEFAULT_MAIL_FROM = "REC Code <no-reply@rec-code.invalid>";
 
 /** Validate the environment. Throws one readable error listing every problem. */
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): SchedulerConfig {
+  // Any of these may arrive as KEY_FILE — a Docker secret on the app host
+  // (deploy/compose.app.yml hands this process its direct database URL and
+  // its SMTP URL that way). Written back into the environment it was given,
+  // because Prisma reads DATABASE_URL for itself.
+  hydrateFileBackedSecrets(Object.keys(shape), source);
   const parsed = schema.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");

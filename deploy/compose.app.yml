@@ -79,21 +79,24 @@ services:
       PORT: "3000"
       APP_URL: ${RECX_APP_URL:?the public origin, e.g. https://code.rajalakshmi.edu.in}
       REDIS_URL: redis://redis:6379
+      # Caddy sets X-Real-IP from the socket address. Without this the app
+      # deliberately reads no address at all (src/lib/ip.ts), which would
+      # leave every per-address rate limit inert and every audit row
+      # without an ipHash.
+      TRUST_PROXY: "true"
       TESTDATA_DRIVER: s3
-      TESTDATA_S3_ENDPOINT: http://minio:9000
-      TESTDATA_S3_BUCKET: recx-testdata
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: recx-testdata
       # Reads go through the pooled URL and migrations through the direct one;
       # both are files so the password never appears in `docker inspect`.
       DATABASE_URL_FILE: /run/secrets/database_url
-      AUTH_SECRET_FILE: /run/secrets/auth_secret
       IP_HASH_PEPPER_FILE: /run/secrets/ip_hash_pepper
       EXPORT_SIGNING_SECRET_FILE: /run/secrets/export_signing_secret
       METRICS_TOKEN_FILE: /run/secrets/metrics_token
-      TESTDATA_S3_ACCESS_KEY_FILE: /run/secrets/minio_access_key
-      TESTDATA_S3_SECRET_KEY_FILE: /run/secrets/minio_secret_key
+      S3_ACCESS_KEY_ID_FILE: /run/secrets/minio_access_key
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/minio_secret_key
     secrets:
       - database_url
-      - auth_secret
       - ip_hash_pepper
       - export_signing_secret
       - metrics_token
@@ -131,7 +134,7 @@ services:
       REDIS_URL: redis://redis:6379
       METRICS_PORT: "9101"
       MAIL_TRANSPORT: smtp
-      DATABASE_URL_FILE: /run/secrets/database_url_direct
+      DATABASE_URL_DIRECT_FILE: /run/secrets/database_url_direct
       SMTP_URL_FILE: /run/secrets/smtp_url
     secrets:
       - database_url_direct
@@ -218,8 +221,6 @@ secrets:
     file: /run/recx/secrets/database_url
   database_url_direct:
     file: /run/recx/secrets/database_url_direct
-  auth_secret:
-    file: /run/recx/secrets/auth_secret
   ip_hash_pepper:
     file: /run/recx/secrets/ip_hash_pepper
   export_signing_secret:

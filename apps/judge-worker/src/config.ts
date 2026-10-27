@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { QUEUE_NAME } from "@recx/shared";
+import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
 
 /**
  * Judge worker environment. Deliberately credential-free: there is no
@@ -201,6 +202,11 @@ export class ConfigError extends Error {
 }
 
 export function parseConfig(env: NodeJS.ProcessEnv): WorkerConfig {
+  // RECX_NODE_TOKEN arrives as RECX_NODE_TOKEN_FILE on a judge host
+  // (deploy/compose.judge.yml), which is the only secret this process has.
+  // The whole shape is eligible so that nothing has to remember to add the
+  // next one.
+  hydrateFileBackedSecrets(Object.keys(workerEnvShape), env);
   const parsed = workerEnvSchema.safeParse(env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join(".") || "env"}: ${i.message}`).join("\n");

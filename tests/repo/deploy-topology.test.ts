@@ -237,3 +237,153 @@ describe("the ops scripts", () => {
     );
   });
 });
+
+/**
+ * Every variable the compose files hand a REC Code process is one that
+ * process actually reads (2026-10-27).
+ *
+ * This is the fence for a failure that cost nothing to write and would have
+ * cost a deployment: the compose files were drafted in Phase 10e against
+ * variable names nobody checked, so `compose.app.yml` set
+ * `TESTDATA_S3_ENDPOINT` while the app reads `S3_ENDPOINT`, passed an
+ * `AUTH_SECRET_FILE` for a variable this application has never had, and gave
+ * the scheduler the direct database URL under the pooled URL's name — which
+ * the scheduler refuses outside development. Each of those is a process that
+ * does not start, discovered on the night of the first real deploy.
+ *
+ * The compose files say "not run here" precisely because nothing has
+ * executed them; a static check is therefore the only check available, and
+ * it is a good one, because the names are the whole interface.
+ */
+describe("the compose files and the processes agree on variable names", () => {
+  /** Keys of a `const shape = {` / `export const workerEnvShape = {` block. */
+  function schemaKeys(rel: string, declaration: string): string[] {
+    const source = readRepoFile(rel);
+    const start = source.indexOf(declaration);
+    expect(start, `${rel}: no ${declaration}`).toBeGreaterThanOrEqual(0);
+    // The block ends at the first line that closes an object at column 0,
+    // written either way: `} as const;` or `};`.
+    const close = /^\}( as const)?;/m.exec(source.slice(start));
+    expect(close, `${rel}: ${declaration} is not closed at column 0`).not.toBeNull();
+    const body = source.slice(start, start + close!.index);
+    const keys = [...body.matchAll(/^ {2}([A-Z][A-Z0-9_]*):/gm)].map((m) => m[1]!);
+    expect(keys.length, `${rel}: no keys found in ${declaration}`).toBeGreaterThan(3);
+    return keys;
+  }
+
+  /** The `environment:` keys of one service in a compose file. */
+  function serviceEnv(rel: string, service: string): string[] {
+    const lines = readRepoFile(rel).replace(/\r\n/g, "\n").split("\n");
+    const at = lines.findIndex((line) => line === `  ${service}:`);
+    expect(at, `${rel}: no service ${service}`).toBeGreaterThanOrEqual(0);
+    const keys: string[] = [];
+    let inEnv = false;
+    for (const line of lines.slice(at + 1)) {
+      if (/^ {2}\S/.test(line)) break; // the next service
+      if (/^ {4}environment:\s*$/.test(line)) {
+        inEnv = true;
+        continue;
+      }
+      if (inEnv && /^ {4}\S/.test(line)) inEnv = false;
+      const match = inEnv ? /^ {6}([A-Z][A-Z0-9_]*):/.exec(line) : null;
+      if (match) keys.push(match[1]!);
+    }
+    expect(keys.length, `${rel}: service ${service} sets no environment`).toBeGreaterThan(2);
+    return keys;
+  }
+
+  /**
+   * Variables the runtime reads rather than our schemas: Next's own server
+   * listens on PORT. Anything else must be in a schema, or it is a typo with
+   * no effect.
+   */
+  const PLATFORM = new Set(["PORT", "NODE_OPTIONS", "TZ"]);
+
+  const PROCESSES = [
+    {
+      what: "the web app",
+      file: "deploy/compose.app.yml",
+      service: "web",
+      schema: () => schemaKeys("apps/web/src/lib/env.ts", "const shape = {"),
+    },
+    {
+      what: "the scheduler",
+      file: "deploy/compose.app.yml",
+      service: "scheduler",
+      schema: () => schemaKeys("apps/scheduler/src/config.ts", "const shape = {"),
+    },
+    {
+      what: "the judge worker",
+      file: "deploy/compose.judge.yml",
+      service: "judge-worker",
+      schema: () => schemaKeys("apps/judge-worker/src/config.ts", "export const workerEnvShape = {"),
+    },
+  ] as const;
+
+  it.each(PROCESSES)("$what is given nothing it does not read", ({ file, service, schema }) => {
+    const known = new Set(schema());
+    const unknown = serviceEnv(file, service)
+      // KEY_FILE is the Docker-secret form of KEY (@recx/shared/env-file).
+      .map((key) => ({ key, base: key.replace(/_FILE$/, "") }))
+      .filter(({ base }) => !known.has(base) && !PLATFORM.has(base))
+      .map(({ key }) => key);
+    expect(unknown, `${file}: ${service} is handed variables it never reads`).toEqual([]);
+  });
+
+  it("gives the scheduler the direct URL under the name it requires", () => {
+    /**
+     * Not interchangeable, and the failure is total rather than subtle: the
+     * scheduler takes a session advisory lock and leases rows with SKIP
+     * LOCKED, so outside development its config REFUSES a missing
+     * DATABASE_URL_DIRECT rather than falling back to the pooled URL.
+     */
+    const scheduler = serviceEnv("deploy/compose.app.yml", "scheduler");
+    expect(scheduler.some((key) => key.replace(/_FILE$/, "") === "DATABASE_URL_DIRECT")).toBe(true);
+    expect(readRepoFile("apps/scheduler/src/config.ts")).toContain(
+      "is required outside development (the scheduler needs the direct, non-pooled URL)",
+    );
+  });
+
+  it("turns on the proxy trust that Caddy's X-Real-IP is there for", () => {
+    /**
+     * `src/lib/ip.ts` reads NO client address unless TRUST_PROXY is set,
+     * deliberately — a forwarding header is client-controlled unless
+     * something overwrites it. Caddy does overwrite it, so on this host the
+     * variable must be on, or every per-address rate limit is inert and
+     * every audit row loses its ipHash while looking perfectly healthy.
+     */
+    expect(serviceEnv("deploy/compose.app.yml", "web")).toContain("TRUST_PROXY");
+    expect(readRepoFile("deploy/compose.app.yml")).toMatch(/TRUST_PROXY:\s*"true"/);
+  });
+
+  it("passes every secret a process reads as a file, not as a value", () => {
+    /**
+     * The sibling of the no-secrets-in-the-repository test above: that one
+     * says a credential must not be written here, this one says the file
+     * form is actually wired up. Until `@recx/shared/env-file` existed,
+     * every `*_FILE` in these files was read by nobody.
+     */
+    const helper = readRepoFile("packages/shared/src/env-file.ts");
+    expect(helper).toContain("export function hydrateFileBackedSecrets");
+    for (const rel of ["apps/web/src/lib/env.ts", "apps/scheduler/src/config.ts", "apps/judge-worker/src/config.ts"]) {
+      expect(readRepoFile(rel), `${rel} ignores *_FILE secrets`).toContain("hydrateFileBackedSecrets");
+    }
+    /**
+     * And the database URL is resolved where Prisma is CONSTRUCTED, not
+     * only where env() is read: Prisma takes DATABASE_URL from the
+     * environment itself, and `src/lib/db-client.ts` builds the client the
+     * first time any server module touches `db`, which can happen before
+     * anything has called env().
+     *
+     * It lives there rather than in a Next start-up hook because
+     * `src/middleware.ts` exists, so Next compiles `instrumentation.ts` for
+     * the edge runtime too, where `node:fs` cannot be bundled at all
+     * ("UnhandledSchemeError"). The one place that constructs a client is a
+     * better place for the guarantee than a hook that has to dodge a
+     * bundler.
+     */
+    const dbClient = readRepoFile("apps/web/src/lib/db-client.ts");
+    expect(dbClient).toContain("hydrateFileBackedSecrets");
+    expect(dbClient.indexOf("hydrateFileBackedSecrets([")).toBeLessThan(dbClient.indexOf("createPrismaClient({"));
+  });
+});

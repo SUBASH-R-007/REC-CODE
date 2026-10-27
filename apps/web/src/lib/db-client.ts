@@ -1,3 +1,4 @@
+import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
 import { createPrismaClient, type Db } from "@recx/db";
 
 /**
@@ -16,6 +17,11 @@ import { createPrismaClient, type Db } from "@recx/db";
 const globalForDb = globalThis as unknown as { recxDb?: Db };
 
 export function processDb(): Db {
+  // Prisma resolves DATABASE_URL from the environment as the client is
+  // constructed, so a URL that arrived as DATABASE_URL_FILE has to be in
+  // place BEFORE this line — and this is the only line in the application
+  // that constructs a client (@recx/shared/env-file, docs/RUNBOOK.md §2.14).
+  hydrateFileBackedSecrets(["DATABASE_URL"]);
   globalForDb.recxDb ??= createPrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
