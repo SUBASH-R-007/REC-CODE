@@ -57,17 +57,16 @@ describe("the Vercel project", () => {
 
 describe("the Render blueprint", () => {
   const render = readRepoFile(RENDER);
+  const doc = readRepoFile(DOC);
 
   it("says it has not been run here", () => {
     expect(render).toMatch(/NOT RUN HERE/);
   });
 
-  it("creates the database, the queue and the scheduler, and nothing that judges", () => {
+  it("creates the database and the queue, and nothing that judges", () => {
     expect(render).toMatch(/^databases:/m);
     expect(render).toMatch(/name: recx-db/);
     expect(render).toMatch(/type: keyvalue/);
-    expect(render).toMatch(/type: worker/);
-    expect(render).toMatch(/name: recx-scheduler/);
     /**
      * No judge worker, and the file has to say why rather than leave its
      * absence to be read as an oversight: isolate needs a setuid binary and
@@ -78,14 +77,39 @@ describe("the Render blueprint", () => {
     expect(render).toMatch(/isolate/);
   });
 
+  it("costs nothing: every plan is a free one", () => {
+    const plans = [...render.matchAll(/^\s*plan:\s*(\S+)/gm)].map((m) => m[1]!);
+    expect(plans.length, "render.yaml declares no plan at all").toBeGreaterThan(1);
+    expect([...new Set(plans)], "a paid plan crept into the free-tier blueprint").toEqual(["free"]);
+  });
+
+  it("runs no background worker, because Render has no free one — and says what that costs", () => {
+    /**
+     * The honest version of a free deployment: Render's free tier covers
+     * web services and static sites, not workers, and a free web service
+     * sleeps after fifteen minutes without traffic — useless for a process
+     * whose whole job is to tick. So the blueprint leaves the scheduler out
+     * and the file has to name the hole rather than let somebody discover
+     * it when a flagged submission is never released by the 72-hour SLA.
+     */
+    expect(render).not.toMatch(/type:\s*worker/);
+    expect(render).toMatch(/reconciler/);
+    expect(render).toMatch(/--once/);
+  });
+
+  it("opens the database and the queue to the clients that are all outside Render", () => {
+    // Every consumer is external — Vercel's functions, the migrations and
+    // seed from a laptop, a judge worker attached from outside. An
+    // internal-only allow list would leave the deployment unable to reach
+    // its own database, which is a confusing way to spend an evening.
+    expect([...render.matchAll(/ipAllowList:/g)].length).toBe(2);
+    expect(render).not.toMatch(/ipAllowList:\s*\[\]/);
+  });
+
   it("gives BullMQ a Redis that does not evict", () => {
     // An evicted key is a lost job. The reconciler re-enqueues from
     // Postgres, but a queue that silently drops work is not a queue.
     expect(render).toMatch(/maxmemoryPolicy:\s*noeviction/);
-  });
-
-  it("runs exactly one scheduler", () => {
-    expect(render).toMatch(/numInstances:\s*1/);
   });
 
   it("passes no credential as a value", () => {
@@ -112,9 +136,11 @@ describe("the Render blueprint", () => {
     expect(offenders, "wire it from a service, or ask for it with `sync: false`").toEqual([]);
   });
 
-  it("gives the scheduler the direct database URL under its own name", () => {
-    // Its config refuses a missing DATABASE_URL_DIRECT outside development.
-    expect(render).toMatch(/key: DATABASE_URL_DIRECT/);
+  it("tells a tick to use the direct database URL", () => {
+    // The scheduler's config refuses a missing DATABASE_URL_DIRECT outside
+    // development: advisory locks and SKIP LOCKED leases do not survive a
+    // pooler, so the pooled URL is not a substitute.
+    expect(doc).toMatch(/DATABASE_URL_DIRECT="<render external url>"/);
   });
 });
 
