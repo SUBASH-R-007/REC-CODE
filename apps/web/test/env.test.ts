@@ -7,10 +7,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
  * The server environment: what it accepts, what it refuses, and where a
  * secret may come from.
  *
- * Two of these refusals exist because of what a hosted deployment made
- * obvious (docs/DEPLOY-HOSTED-TEST.md): `APP_URL` and `REDIS_URL` have
- * development defaults that are not merely unhelpful in production but
- * silently wrong — links to `localhost`, and a rate limiter whose Redis is
+ * Two of these refusals exist because of what reviewing the deployment made
+ * obvious: `APP_URL` and `REDIS_URL` have development defaults that are not
+ * merely unhelpful in production but silently wrong — links to `localhost`, and a rate limiter whose Redis is
  * not there, failing open exactly as designed and so leaving a production
  * deployment with no rate limiting and nothing to say so.
  *

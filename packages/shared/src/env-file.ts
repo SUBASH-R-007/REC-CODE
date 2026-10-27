@@ -21,10 +21,8 @@ import { readFileSync } from "node:fs";
  * refused to start in production. The artefacts were right and the
  * plumbing was missing.
  *
- * It is deliberately NOT needed on a platform with a secret store of its
- * own: Vercel and Render hand the process real environment variables, so
- * `KEY` is set, `KEY_FILE` is not, and this function changes nothing
- * (docs/DEPLOY-HOSTED-TEST.md).
+ * Where a platform hands the process real environment variables instead,
+ * `KEY` is set, `KEY_FILE` is not, and this function changes nothing.
  */
 
 /** Thrown when `KEY_FILE` is set and its file cannot be used. Never quotes the contents. */
