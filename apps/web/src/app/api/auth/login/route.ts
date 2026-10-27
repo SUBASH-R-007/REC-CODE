@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isProduction } from "@/lib/env";
 import { referenceId } from "@/lib/errors";
+import { readFormBody, seeOther } from "@/lib/http/form-body";
 import { isSameOrigin } from "@/lib/help/same-origin";
 import { loginFailed } from "@/lib/metrics";
 import { signIn } from "@/lib/auth/sign-in";
@@ -8,15 +9,6 @@ import { LOGIN_IDENTIFIER_COOKIE } from "@/lib/auth/login-cookie";
 import type { SignInFailure } from "@/lib/auth/sign-in-errors";
 
 export const dynamic = "force-dynamic";
-
-/**
- * The sign-in form's whole body: a ≤ 254-character identifier and a
- * ≤ 1,024-character password, percent-encoded (at most 9 bytes per
- * character) — comfortably under this. Anything larger is not our form, and
- * is refused without being buffered (the server action this replaced had
- * Next's 1 MB body limit; a route handler has none).
- */
-const MAX_BODY_BYTES = 16 * 1024;
 
 /**
  * POST /api/auth/login — the sign-in form's target. /login is a plain HTML
@@ -38,7 +30,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 export async function POST(request: Request): Promise<Response> {
   if (!isSameOrigin(request)) return failed("cross-site");
 
-  const form = await readForm(request);
+  const form = await readFormBody(request);
   if (!form) return failed("identifier-missing");
   const identifier = form.get("identifier");
   const typed = typeof identifier === "string" ? identifier.trim().slice(0, 254) : "";
@@ -59,44 +51,14 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 /**
- * The urlencoded form body (what an HTML form sends), read with a size cap.
- * null for any other content type, or a body over MAX_BODY_BYTES.
+ * The 303 again, as a NextResponse: this route sets and clears a cookie on
+ * the redirect, which needs NextResponse's cookie helpers. Same status and
+ * headers as `seeOther()` in lib/http/form-body.ts, which the other two
+ * auth routes use directly.
  */
-async function readForm(request: Request): Promise<URLSearchParams | null> {
-  const type = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  if (type !== "application/x-www-form-urlencoded") return null;
-  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null;
-  if (!request.body) return new URLSearchParams();
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        return null;
-      }
-      chunks.push(value);
-    }
-  } catch {
-    return null;
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new URLSearchParams(new TextDecoder().decode(body));
-}
-
-/** 303 See Other: the browser follows with a GET. A relative Location stays on whatever host the student used. */
 function see(location: string): NextResponse {
-  return new NextResponse(null, { status: 303, headers: { Location: location, "Cache-Control": "no-store" } });
+  const shared = seeOther(location);
+  return new NextResponse(null, { status: shared.status, headers: shared.headers });
 }
 
 function failed(failure: SignInFailure, extra: { typed?: string; retry?: number; ref?: string } = {}): NextResponse {

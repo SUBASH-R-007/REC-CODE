@@ -80,6 +80,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_eligibility_change",
   "recx_refuse_eligibility_without_audit",
   "recx_refuse_profile_export_change",
+  // 20261027190048_phase11a_password_reset
+  "recx_refuse_password_reset_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -515,6 +517,7 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
   ...TRUNCATE_GUARDED.map(
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
+  { name: "PasswordReset_spend_once", timing: "BEFORE UPDATE", table: "PasswordReset", fn: "recx_refuse_password_reset_change", level: "ROW" },
 ];
 
 /** Every table that has at least one guard trigger. */
@@ -563,7 +566,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261020270200_phase9f_drives_exports";
+export const CHECK_CATALOG_THROUGH = "20261027190048_phase11a_password_reset";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -955,6 +958,12 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProfileExport_code_check", "ProfileExport"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261020270200_phase9f_drives_exports" })),
+  ...(
+    [
+      ["PasswordReset_window_check", "PasswordReset"],
+      ["PasswordReset_consumed_check", "PasswordReset"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261027190048_phase11a_password_reset" })),
 ];
 
 /**

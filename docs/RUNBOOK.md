@@ -360,6 +360,8 @@ still needs a Linux host with isolate.
 
 | Symptom | Cause / fix |
 |---|---|
+| A student says they cannot sign in and have never had a password | expected, and now answerable: a roster import creates accounts without one. Send them to `/forgot-password`; the link is mailed, lasts an hour and works once (`docs/SECURITY.md` §2). In development `MAIL_TRANSPORT=log` means the mail is printed by the scheduler instead of sent — read the link out of its log |
+| The reset link never arrives | the mail is queued in `EmailOutbox` and sent by the scheduler, so check that the scheduler is running (§1.5) and what `/super/settings/integrations` says about the outbox. A queued row with `status=FAILED` keeps its last error |
 | A long local Playwright run starts answering 500s, and the dev log says `P1001 … can't reach 127.0.0.1:5433` | the WSL2 loopback can still drop under a run that holds many connections for minutes, with the distribution up and `pg_isready` happy inside it (seen on a 14-minute `--project=rbac`). `scripts/dev/stack-up.ps1` reports it and it clears on its own; the Linux gate and CI do not have this boundary at all (docs/CONVENTIONS.md) |
 | A local e2e navigation times out and the dev log says `Compiled /problems in 84.9s` | `next dev` compile time on a loaded machine, not the page. Warm first — `scripts/dev/warm-routes.sh` — which is what the CI job does before Playwright starts |
 | Sign-in answers "Something went wrong. Please try again — if it keeps happening, quote reference …" | an unexpected error reached `POST /api/auth/login`; the reference is printed beside the exception in the web log. In development it is almost always the database — check `/api/health` first, and the two rows below |

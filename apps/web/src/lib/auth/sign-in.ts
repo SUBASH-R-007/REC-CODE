@@ -43,8 +43,13 @@ const loginSchema = z.object({
     .max(1024, "password-long"),
 });
 
-/** Account states that may sign in (mirrors the session check). */
-const SIGN_IN_STATUSES = new Set<User["status"]>(["ACTIVE", "SOFT_RESTRICTED"]);
+/**
+ * Account states that may sign in (mirrors the session check). Exported
+ * because a password reset must answer the same question — a link is worth
+ * nothing to an account that could not sign in with it — and there must be
+ * exactly one answer in the codebase.
+ */
+export const SIGN_IN_STATUSES = new Set<User["status"]>(["ACTIVE", "SOFT_RESTRICTED"]);
 
 export type SignInResult =
   | { ok: true; home: string }
@@ -54,8 +59,12 @@ export type SignInResult =
  * Look the account up by email (contains "@") or roll number. Both columns
  * are unique; the candidate list covers the common case variants while
  * staying on the unique index.
+ *
+ * Exported for the password-reset request, which has to resolve exactly the
+ * same identifiers this page accepts — if the two ever disagreed, somebody
+ * could sign in with an identifier they could not reset, or the reverse.
  */
-async function findAccount(identifier: string): Promise<User | null> {
+export async function findAccount(identifier: string): Promise<User | null> {
   const variants = [...new Set([identifier, identifier.toLowerCase(), identifier.toUpperCase()])];
   return identifier.includes("@")
     ? db.user.findFirst({ where: { email: { in: variants } } })

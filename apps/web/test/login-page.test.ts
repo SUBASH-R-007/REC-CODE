@@ -22,7 +22,7 @@ const LoginPage = page.default;
 
 type Props = Parameters<typeof LoginPage>[0];
 const render = (props: Props) => renderToStaticMarkup(createElement(LoginPage, props));
-const NONE: Props = { error: null, identifier: "", invalid: [], focus: null };
+const NONE: Props = { error: null, notice: null, identifier: "", invalid: [], focus: null };
 
 /** The opening tag of the input with this id. */
 function input(html: string, id: string): string {
@@ -62,7 +62,7 @@ describe("login page markup", () => {
   });
 
   it("a credential failure: the alert, both fields invalid and described by it, focus on the password", () => {
-    const html = render({ error: "Roll number/email or password is incorrect.", identifier: "2116231001001", invalid: ["identifier", "password"], focus: "password" });
+    const html = render({ error: "Roll number/email or password is incorrect.", notice: null, identifier: "2116231001001", invalid: ["identifier", "password"], focus: "password" });
     expect(html).toMatch(/<p id="login-error" role="alert"[^>]*>Roll number\/email or password is incorrect\.<\/p>/);
     for (const id of ["identifier", "password"]) {
       expect(input(html, id)).toContain('aria-invalid="true"');
@@ -75,7 +75,7 @@ describe("login page markup", () => {
   });
 
   it("a field error marks only that field invalid; both fields still point at the message", () => {
-    const html = render({ error: "Enter your password.", identifier: "2116231001001", invalid: ["password"], focus: "password" });
+    const html = render({ error: "Enter your password.", notice: null, identifier: "2116231001001", invalid: ["password"], focus: "password" });
     expect(input(html, "password")).toContain('aria-invalid="true"');
     expect(input(html, "identifier")).not.toContain("aria-invalid");
     expect(input(html, "identifier")).toContain('aria-describedby="login-error"');
@@ -83,7 +83,7 @@ describe("login page markup", () => {
   });
 
   it("the echoed identifier is escaped", () => {
-    const html = render({ error: "Enter your password.", identifier: '"><script>alert(1)</script>', invalid: ["password"], focus: "password" });
+    const html = render({ error: "Enter your password.", notice: null, identifier: '"><script>alert(1)</script>', invalid: ["password"], focus: "password" });
     expect(html).not.toContain("<script>");
     expect(input(html, "identifier")).toContain('value="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
   });
@@ -108,6 +108,7 @@ describe("login getServerSideProps", () => {
     expect(result).toEqual({
       props: {
         error: "Roll number/email or password is incorrect.",
+        notice: null,
         identifier: "2116231001001",
         invalid: ["identifier", "password"],
         focus: "password",
@@ -120,7 +121,7 @@ describe("login getServerSideProps", () => {
   it("an unknown code or a message in the URL renders the plain form", async () => {
     for (const error of ["<b>you have been hacked</b>", "toString", "Roll number/email or password is incorrect."]) {
       const { ctx } = context({ recx_login_id: "someone" }, { error });
-      expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, identifier: "", invalid: [], focus: null } });
+      expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null } });
     }
   });
 
@@ -153,7 +154,7 @@ describe("login getServerSideProps", () => {
     h.live.mockRejectedValue(new Error("database down"));
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { ctx } = context({ recx_session: "token" }, {});
-    expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, identifier: "", invalid: [], focus: null } });
+    expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null } });
     logged.mockRestore();
   });
 });

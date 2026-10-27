@@ -32,7 +32,7 @@ PASSES="${WARM_PASSES:-2}"
 # walks. Kept in one place so the runbook, CI and a developer warm the same
 # set; a route added to the suite belongs here too.
 ROUTES="
-/login /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
+/login /forgot-password /reset-password /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
 /leaderboard /sheets /learn /profile /notes /bookmarks /help /judge /offline
 /contests /aptitude /placement /notifications /accessibility /api/health
 /account/leave /account/reactivate

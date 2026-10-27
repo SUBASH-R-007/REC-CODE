@@ -539,6 +539,7 @@ model User {
   editorPrefs       Json              @default("{}")
 
   sessions             Session[]
+  passwordResets       PasswordReset[]
   submissions          Submission[]
   runRequests          RunRequest[]
   judgeUsage           UserJudgeUsage[]
@@ -635,6 +636,36 @@ model Session {
 /// trigger AuditLog_no_truncate refuses TRUNCATE (20261010100080). Row
 /// DELETE stays allowed on purpose: the retention purge deletes rows older
 /// than 3 years that are not under legal hold.
+/// A one-time link that lets an account set its own password: created by
+/// POST /api/auth/forgot-password, spent by POST /api/auth/reset-password.
+///
+/// It exists because a roster import creates students with `passwordHash`
+/// NULL (packages/db ../../apps/web/src/lib/admin/roster.ts) — the LMS is
+/// the identity source and no password crosses that boundary — so without
+/// this, an imported student has no way to obtain one.
+///
+/// The token itself is NEVER stored, only sha256(token): the same rule as a
+/// session token, a judge node token and a client address. A row is spent by
+/// ONE conditional UPDATE (`consumedAt IS NULL`), and a trigger refuses any
+/// attempt to un-spend it or to move it to another account.
+model PasswordReset {
+  id        String @id @default(cuid())
+  userId    String
+  /// sha256(token). Unique, so a presented token is one indexed lookup.
+  tokenHash String @unique
+  expiresAt DateTime
+  /// Set once, by the UPDATE that spends it. Never cleared (trigger).
+  consumedAt DateTime?
+  /// sha256(ip + pepper) of whoever asked. Never a raw address.
+  requestIpHash String?
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
 model AuditLog {
   id           BigInt           @id @default(autoincrement())
   actorId      String?

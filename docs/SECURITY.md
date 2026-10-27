@@ -29,7 +29,9 @@ credential-free judge hosts (§6).
 ## 2. Authentication
 
 * **No public sign-up.** Accounts come from the LMS roster (the identity
-  source of record) or the development seed.
+  source of record) or the development seed. A roster account arrives with
+  no password; the owner sets one through the one-time link below, so no
+  password is ever chosen for a student by somebody else.
 * **Passwords: Argon2id, m=19456 KiB, t=2, p=1** (the OWASP minimum),
   via `@node-rs/argon2` (`apps/web/src/lib/auth/password.ts`). Minimum 10
   characters with at least one letter and one number.
@@ -82,6 +84,55 @@ logic in `apps/web/src/lib/auth/sign-in.ts`; tested in
   (`auth.login_failed`, `SECURITY`) and successes too (`auth.login`).
 * **Session rotation.** A successful sign-in deletes whatever session the
   browser carried and mints a new token (§3) before redirecting.
+
+### Setting a password: the one-time link (Phase 11a)
+
+A roster import creates every student with no password at all — the LMS is
+the identity source and no password crosses that boundary
+(`apps/web/src/lib/admin/roster.ts`) — so until Phase 11a an imported
+student had no way to obtain one and only the seed's accounts could sign
+in. `/forgot-password` → mail → `/reset-password` is that way, and it is
+the same mechanism for "I never had one" and "I forgot mine"
+(`apps/web/src/lib/auth/password-reset.ts`).
+
+* **The token is never stored.** A row holds sha256(token), like a session
+  token, a judge node token and a client address. Somebody who reads the
+  table cannot sign in as anybody.
+* **256 bits, one hour, one use.** 32 CSPRNG bytes, base64url. Spending a
+  link is a single conditional `UPDATE … WHERE "consumedAt" IS NULL AND
+  "expiresAt" > now`, whose row count decides the race between two browsers
+  holding the same link; the loser is told the link is not valid, which is
+  true. A trigger (`PasswordReset_spend_once`) refuses clearing
+  `consumedAt`, and refuses moving a row to another account or token, so no
+  code path can replay or redirect a link.
+* **Asking tells the asker nothing.** `?sent=1` is the answer for an
+  account that exists, one that may not sign in, and an identifier that was
+  never here — including when the rate limit refuses, because a "too many
+  requests" answer would confirm the identifier was worth asking about. The
+  budget is spent on sha256(identifier), not on the account, so asking
+  repeatedly about an address with no account is bounded too.
+* **Refusals do not say which.** Expired, already spent, superseded and
+  never-existed are one message
+  (`apps/web/src/lib/auth/reset-errors.ts`). The page does not validate the
+  token before showing the form either: checking first would hand out a
+  free oracle for walking tokens.
+* **Asking again supersedes.** The earlier links are marked spent, so a
+  link mailed an hour ago stops working the moment a fresh one is asked
+  for — the state an attacker with old mailbox access would want.
+* **Setting a password ends every session** of that account
+  (`destroyAllSessions`), after the new hash is committed. If somebody else
+  was signed in, that is the moment to remove them.
+* **A super-admin reset is announced** to every active super-admin by
+  security mail, and both halves are audited as `SECURITY`
+  (`auth.password_reset_requested`, `auth.password_reset_completed`) with
+  the hashed address.
+* **Rate limits:** 3 requests per hashed identifier and 10 per hashed
+  address per hour; 20 spend attempts per hashed address per hour.
+* **Mail is transactional.** The link is queued in `EmailOutbox` inside the
+  same transaction that creates the row, so a rolled-back request never
+  sends and a committed one always has its mail queued; the scheduler
+  drains it. Nothing but the link is in the body, and the address is
+  resolved at send time rather than stored.
 
 ## 3. Sessions
 
@@ -210,7 +261,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 
-Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`.
+Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/auth/forgot-password/route.ts#POST`, `app/api/auth/reset-password/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`.
 <!-- capability-matrix:end -->
 
 ## 5. Browser hardening

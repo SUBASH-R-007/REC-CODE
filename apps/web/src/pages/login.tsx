@@ -2,8 +2,9 @@ import type { GetServerSideProps, PageConfig } from "next";
 import Head from "next/head";
 import { CircleCheck, CodeXml, LogIn } from "lucide-react";
 import { Button, Field, Input } from "@recx/design";
-import { COLLEGE_NAME, LMS_NAME, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand/names";
+import { COLLEGE_NAME, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand/names";
 import { LOGIN_IDENTIFIER_COOKIE } from "@/lib/auth/login-cookie";
+import { PASSWORD_SET_NOTICE } from "@/lib/auth/reset-errors";
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors";
 import { SESSION_COOKIE } from "@/lib/auth/session-token";
 import { hasLiveSession } from "@/lib/pages-server";
@@ -32,6 +33,8 @@ const ERROR_ID = "login-error";
 type FieldName = "identifier" | "password";
 type Props = {
   error: string | null;
+  /** Shown after /reset-password set one (`?reset=1`): a success, not a failure. */
+  notice: string | null;
   identifier: string;
   /** The fields the error is about (aria-invalid); credential errors name both — never which part was wrong. */
   invalid: FieldName[];
@@ -68,14 +71,18 @@ export const getServerSideProps: GetServerSideProps<Props> = async ({ req, res, 
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
     res.setHeader("Set-Cookie", `${LOGIN_IDENTIFIER_COOKIE}=; Path=/login; Max-Age=0; HttpOnly; SameSite=Lax${secure}`);
   }
+  // A password was just set (POST /api/auth/reset-password lands here).
+  const notice = first(query.reset) === "1" ? PASSWORD_SET_NOTICE : null;
   const code = first(query.error);
   const error = signInErrorMessage(code, first(query.retry), first(query.ref));
-  if (!error || !code) return { props: { error: null, identifier: "", invalid: [], focus: null } };
+  if (!error || !code) {
+    return { props: { error: null, notice, identifier: "", invalid: [], focus: notice ? "identifier" : null } };
+  }
   const typed = (carried ?? "").slice(0, 254);
-  return { props: { error, identifier: typed, ...fieldsFor(code, typed) } };
+  return { props: { error, notice, identifier: typed, ...fieldsFor(code, typed) } };
 };
 
-export default function LoginPage({ error, identifier, invalid, focus }: Props) {
+export default function LoginPage({ error, notice, identifier, invalid, focus }: Props) {
   // Every field points at the message; the ones it is about are marked invalid.
   const describe = (field: FieldName) =>
     error ? { "aria-describedby": ERROR_ID, ...(invalid.includes(field) ? { "aria-invalid": true } : {}) } : {};
@@ -134,6 +141,14 @@ export default function LoginPage({ error, identifier, invalid, focus }: Props) 
             <div className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">
               <h1 className="font-display text-2xl font-bold tracking-tight">Welcome back</h1>
               <p className="mt-1 text-sm text-text-secondary">Sign in with your roll number or college email.</p>
+              {notice && (
+                <p
+                  role="status"
+                  className="mt-4 rounded-xl border border-success/25 bg-success-subtle px-3.5 py-2.5 text-sm text-success"
+                >
+                  {notice}
+                </p>
+              )}
               <form method="post" action="/api/auth/login" className="mt-6 space-y-4">
                 <Field label="Roll number or college email" htmlFor="identifier">
                   <Input
@@ -181,13 +196,16 @@ export default function LoginPage({ error, identifier, invalid, focus }: Props) 
                   Sign in
                 </Button>
               </form>
-              <div className="mt-6 rounded-xl border border-border bg-background px-4 py-3">
-                <p className="text-sm font-medium text-text">Forgot your password?</p>
-                <p className="mt-0.5 text-sm text-text-secondary">
-                  Contact your department coordinator. Your {PRODUCT_NAME} account comes from the {LMS_NAME} roster,
-                  so they can reset it for you.
-                </p>
-              </div>
+              {/*
+                A plain anchor, not next/link: this page ships no JavaScript
+                (unstable_runtimeJS: false) and a router that cannot run is
+                not worth the markup.
+              */}
+              <p className="mt-6 text-center text-sm">
+                <a href="/forgot-password" className="font-medium text-primary underline-offset-2 hover:underline">
+                  Forgot your password, or never set one?
+                </a>
+              </p>
             </div>
 
             <p className="mt-6 text-center text-xs text-muted">

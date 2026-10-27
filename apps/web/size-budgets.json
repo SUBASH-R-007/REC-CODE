@@ -7,6 +7,19 @@
     { "route": "/leaderboard", "entry": "/(student)/leaderboard/page", "maxKb": 150 },
     { "route": "/problems/[slug] shell", "entry": "/(student)/problems/[slug]/page", "maxKb": 220 },
     { "route": "/judge", "entry": "/(public)/judge/page", "maxKb": 125, "shared": false },
+    {
+      "$comment": "Phase 11a. The two pages somebody reaches when they CANNOT sign in — a student whose roster account has never had a password, on the worst connection they own. Both are in serverRendered below, so each ships 0.2 KB of its own; the rest is Next's framework and the (public) layout chain, the same bill /verify pays and recorded in docs/OPEN-QUESTIONS.md as a candidate for the zero-JS treatment /login already has.",
+      "route": "/forgot-password",
+      "entry": "/(public)/forgot-password/page",
+      "maxKb": 125,
+      "shared": false
+    },
+    {
+      "route": "/reset-password",
+      "entry": "/(public)/reset-password/page",
+      "maxKb": 125,
+      "shared": false
+    },
     { "route": "/contests", "entry": "/(student)/contests/page", "maxKb": 130 },
     { "route": "/contests/[slug]/arena", "entry": "/(student)/contests/[slug]/arena/page", "maxKb": 135 },
     { "route": "/assessments", "entry": "/(student)/assessments/page", "maxKb": 130 },
@@ -92,6 +105,11 @@
   "serverRendered": {
     "$comment": "Pages that add no client JS of their own: the page's chunks beyond the framework and its layout chain may hold only Next's page stub (one module named exactly \"apps/web\"), at most maxOwnKb gzip. Any first-party or third-party client module there is a failure.",
     "maxOwnKb": 1,
-    "entries": ["/(public)/judge/page", "/(public)/verify/[code]/page"]
+    "entries": [
+      "/(public)/judge/page",
+      "/(public)/verify/[code]/page",
+      "/(public)/forgot-password/page",
+      "/(public)/reset-password/page"
+    ]
   }
 }

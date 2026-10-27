@@ -72,6 +72,16 @@ const ROUTE_EXEMPT_PREFIXES = [
    * `apps/web/test/vitals.test.ts` asserts all of that.
    */
   "apps/web/src/app/api/vitals/",
+  /**
+   * Phase 11a: forgot-password and reset-password. There is no actor to
+   * authenticate — one is asked for by somebody who cannot sign in, and the
+   * other IS the credential. What stands in for a guard is the same-origin
+   * check, the body cap, a rate limit on the hashed identifier and the
+   * hashed address, and an answer that is identical whether or not the
+   * account exists (apps/web/test/password-reset.test.ts).
+   */
+  "apps/web/src/app/api/auth/forgot-password/",
+  "apps/web/src/app/api/auth/reset-password/",
 ];
 
 const actionFiles = findFiles({ under: [ACTIONS_DIR], extensions: [".ts"] }).filter(

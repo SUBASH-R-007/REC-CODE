@@ -1363,6 +1363,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // reaches without a link, and it must carry no canary either.
     "(public)/verify/[code]/page.tsx": () => ({ params: { code: "a".repeat(24) } }),
     "(public)/layout.tsx": () => ({}),
+    /**
+     * Phase 11a. Both are reached signed out, so the sweep's question for
+     * them is narrower than usual and sharper: a token must never come back
+     * in the HTML except in the hidden field that carries it, and nothing
+     * about an account may appear at all. The token here matches nothing,
+     * which is also the render an attacker gets.
+     */
+    "(public)/forgot-password/page.tsx": () => ({ searchParams: {} }),
+    "(public)/reset-password/page.tsx": () => ({ searchParams: { token: "a".repeat(43) } }),
     "(student)/accessibility/page.tsx": () => ({}),
     "(student)/bookmarks/page.tsx": () => ({}),
     "(student)/dashboard/loading.tsx": () => ({}),

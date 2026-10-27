@@ -85,6 +85,11 @@ function workspaceStates(viewport: Viewport): readonly State[] {
 
 const TARGETS: readonly Target[] = [
   { path: "/login", as: null, gating: true },
+  // Phase 11a: the two pages a student reaches when they cannot sign in —
+  // which is exactly when an accessibility failure is unrecoverable, since
+  // there is no other way in.
+  { path: "/forgot-password", as: null, gating: true },
+  { path: "/reset-password?token=not-a-real-token", as: null, gating: true },
   { path: "/dashboard", as: "student", gating: true },
   { path: "/problems", as: "student", gating: true },
   {

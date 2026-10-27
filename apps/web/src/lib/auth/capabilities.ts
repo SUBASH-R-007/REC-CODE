@@ -865,6 +865,15 @@ export const PUBLIC_ACTIONS: readonly ActionRef[] = Object.freeze(["auth#logout"
  */
 export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
   "app/api/auth/login/route.ts#POST",
+  /**
+   * Phase 11a: the two halves of "set a password". Unauthenticated by
+   * nature — the people who need them have never signed in, or cannot —
+   * and neither can be guarded without making it useless. Asking for a
+   * link answers identically whether or not the account exists, and
+   * spending one requires the link itself (lib/auth/password-reset.ts).
+   */
+  "app/api/auth/forgot-password/route.ts#POST",
+  "app/api/auth/reset-password/route.ts#POST",
   "app/api/health/route.ts#GET",
   "app/api/metrics/route.ts#GET",
   "app/api/vitals/route.ts#POST",

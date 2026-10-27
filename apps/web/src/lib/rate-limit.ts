@@ -28,6 +28,29 @@ export const LOGIN_RATE_LIMITS = {
 } as const satisfies Record<string, RateLimitRule>;
 
 /**
+ * Asking for a password-reset link: per account (the hashed identifier,
+ * whether or not it matched) and per hashed client address.
+ *
+ * Tighter than sign-in on purpose. A sign-in attempt costs the asker an
+ * Argon2id verification and tells them nothing; a reset request sends mail
+ * to somebody else's inbox, so the thing to bound is not guessing but the
+ * ability to fill a mailbox — or to use ours to send it. Three an hour is
+ * generous for forgetting a password and useless as a flood.
+ */
+export const PASSWORD_RESET_RATE_LIMITS = {
+  identifier: { limit: 3, windowMs: 60 * 60_000 },
+  ip: { limit: 10, windowMs: 60 * 60_000 },
+} as const satisfies Record<string, RateLimitRule>;
+
+/**
+ * Spending a link: per hashed client address only, because the link itself
+ * is the secret and a wrong one is cheap to answer. This bounds walking
+ * tokens, which 256 bits already makes hopeless; it is here so that trying
+ * is also slow.
+ */
+export const PASSWORD_RESET_ATTEMPT_LIMIT = { limit: 20, windowMs: 60 * 60_000 } as const satisfies RateLimitRule;
+
+/**
  * Field vitals (Phase 10d): per hashed client address.
  *
  * 120 a minute is a generous page-load rate for one browser — a student
