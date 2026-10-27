@@ -4,30 +4,33 @@ import { PROCTOR_EVENT_KINDS } from "../src/proctor";
 import {
   CADENCE_BURST_MIN_CHARS,
   CADENCE_BURST_WINDOW_MS,
+  classifyInsertion,
+  classifyPaste,
+  CLIENT_EMITTED_KINDS,
   CLIENT_EVENT_KINDS,
+  clientProctorEventSchema,
   EVENT_FLUSH_COUNT,
   EVENT_FLUSH_INTERVAL_MS,
   EVENT_PAYLOAD_MAX_BYTES,
   EVENT_PAYLOAD_TARGET_BYTES,
   FOCUS_LOSS_NOISE_MS,
+  focusWarningOutcome,
   FULLSCREEN_REENTRY_GRACE_MS,
   IDLE_GAP_MS,
-  MAX_RAW_EVENTS_PER_ATTEMPT,
-  MAX_SNAPSHOTS_PER_ATTEMPT,
-  PROGRAMMATIC_INSERT_MIN_CHARS,
-  SERVER_ONLY_EVENT_KINDS,
-  SNAPSHOT_INTERVAL_MS,
-  classifyInsertion,
-  classifyPaste,
-  clientProctorEventSchema,
-  focusWarningOutcome,
   isClientReportableKind,
   isExemptSignal,
   isIdleGap,
   isNoiseFocusLoss,
+  MAX_RAW_EVENTS_PER_ATTEMPT,
+  MAX_SNAPSHOTS_PER_ATTEMPT,
   overlayBody,
   proctorEventBatchSchema,
+  PROGRAMMATIC_INSERT_MIN_CHARS,
+  RESERVED_EVENT_KINDS,
+  SERVER_DERIVED_KINDS,
+  SERVER_ONLY_EVENT_KINDS,
   shouldFlush,
+  SNAPSHOT_INTERVAL_MS,
 } from "../src/exam-telemetry";
 
 const SHA = "a".repeat(64);
@@ -334,5 +337,53 @@ describe("client-reportable kinds", () => {
   it("partitions the 25 kinds exactly, with nothing lost or double-counted", () => {
     expect(CLIENT_EVENT_KINDS.length + SERVER_ONLY_EVENT_KINDS.length).toBe(PROCTOR_EVENT_KINDS.length);
     expect([...CLIENT_EVENT_KINDS, ...SERVER_ONLY_EVENT_KINDS].sort()).toEqual([...PROCTOR_EVENT_KINDS].sort());
+  });
+});
+
+describe("what the engine produces is written down (Phase 11b)", () => {
+  /**
+   * The audit that produced these lists found seven of twenty-five declared
+   * kinds emitted by nothing, with nothing to say so — and a signal a
+   * reviewer believes exists and does not is worse than one that was never
+   * offered, because its absence reads as evidence.
+   *
+   * These assertions are what stops that returning: a kind added to the
+   * vocabulary now fails here until somebody answers "who emits this?".
+   */
+  it("partitions the vocabulary: client, server, or reserved with a reason", () => {
+    const client = new Set(CLIENT_EMITTED_KINDS);
+    const server = new Set(SERVER_DERIVED_KINDS);
+    const reserved = new Set(Object.keys(RESERVED_EVENT_KINDS));
+
+    for (const kind of PROCTOR_EVENT_KINDS) {
+      const buckets = [client.has(kind), server.has(kind), reserved.has(kind)].filter(Boolean).length;
+      expect(buckets, `${kind} is in ${buckets} buckets; it must be in exactly one`).toBe(1);
+    }
+    expect(client.size + server.size + reserved.size).toBe(PROCTOR_EVENT_KINDS.length);
+  });
+
+  it("gives every reserved kind a reason worth reading", () => {
+    for (const [kind, reason] of Object.entries(RESERVED_EVENT_KINDS)) {
+      expect(PROCTOR_EVENT_KINDS as readonly string[]).toContain(kind);
+      expect(reason!.length, `${kind}'s reason is too short to be one`).toBeGreaterThan(60);
+    }
+  });
+
+  it("keeps the client out of the server's business", () => {
+    // A client claiming HEARTBEAT_GAP is broken or lying; either way the
+    // server knows that one from its own facts.
+    for (const kind of SERVER_DERIVED_KINDS) {
+      expect(isClientReportableKind(kind), `${kind} must not be client-reportable`).toBe(false);
+    }
+    for (const kind of CLIENT_EMITTED_KINDS) {
+      expect(isClientReportableKind(kind), `${kind} is emitted by the client and must be reportable`).toBe(true);
+    }
+  });
+
+  it("does not emit what it reserves", () => {
+    for (const kind of Object.keys(RESERVED_EVENT_KINDS)) {
+      expect(CLIENT_EMITTED_KINDS as readonly string[]).not.toContain(kind);
+      expect(SERVER_DERIVED_KINDS as readonly string[]).not.toContain(kind);
+    }
   });
 });

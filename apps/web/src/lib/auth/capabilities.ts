@@ -290,13 +290,20 @@ export const STAFF_CAPABILITIES = deepFreeze([
   },
   {
     key: "exam.invigilate",
-    label: "Invigilate a hall: message, grant time, end a sitting",
+    label: "Invigilate a hall: message, grant time, record what you saw, end a sitting",
     // Every action here carries a written reason and an audit row, and
     // terminate takes a SECOND staff member (a CHECK, not a route).
     roles: ["ADMIN", "SUPER_ADMIN"],
     actions: [
       "invigilate#messageCandidate",
       "invigilate#grantExtraTime",
+      /**
+       * Phase 11b. The control docs/PROCTORING.md §4 rates highest is "a
+       * physical invigilator in the room", and until now what they saw had
+       * no way into the record a reviewer reads. It is context, never a
+       * finding: INVIGILATOR_NOTE cannot raise a band.
+       */
+      "invigilate#recordObservation",
       "invigilate#requestTermination",
       "invigilate#confirmTermination",
     ],
@@ -364,11 +371,28 @@ export const STAFF_CAPABILITIES = deepFreeze([
     pages: ["app/admin/students/[id]/page.tsx"],
   },
   {
+    /**
+     * The roster, in both sizes. Phase 11a added one student at a time
+     * (`/admin/students/new`) for the late admission and the transfer, and
+     * it is the SAME capability rather than a new one because it is the
+     * same act with the same rules: the add action validates, plans and
+     * writes through the import's own code, and refuses anything that is
+     * not a clean creation inside the admin's scope.
+     */
     key: "roster.import",
-    label: "Import the student roster (CSV preview, commit, discard)",
+    label: "Add students to the roster (one at a time, or a CSV preview and commit)",
     roles: STAFF,
-    actions: ["admin-roster#previewRosterImport", "admin-roster#commitRosterImport", "admin-roster#discardRosterImport"],
-    pages: ["app/admin/students/import/page.tsx", "app/admin/students/import/[importId]/page.tsx"],
+    actions: [
+      "admin-roster#previewRosterImport",
+      "admin-roster#commitRosterImport",
+      "admin-roster#discardRosterImport",
+      "admin-roster#addStudent",
+    ],
+    pages: [
+      "app/admin/students/import/page.tsx",
+      "app/admin/students/import/[importId]/page.tsx",
+      "app/admin/students/new/page.tsx",
+    ],
   },
   {
     key: "plans.manage",
@@ -653,6 +677,21 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     label: "Edit my profile settings",
     roles: EVERY_SIGNED_IN_ROLE,
     actions: ["profile#saveProfileSettings"],
+  },
+  {
+    /**
+     * Phase 11b. Every signed-in role, because a password is not a student
+     * thing: until this existed, nobody at all could change the password
+     * they sign in with, super-admins included.
+     *
+     * It is a capability of its own rather than part of `profile.manage`
+     * because a password is not a profile setting — it needs the current
+     * password, it is rate-limited, and it ends every session.
+     */
+    key: "account.password",
+    label: "Change my own password",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["profile#changeMyPassword"],
   },
   {
     /**

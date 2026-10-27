@@ -77,6 +77,22 @@ export const CONTEXT_ONLY_KINDS: readonly ProctorEventKind[] = Object.freeze([
   "DEVTOOLS_HEURISTIC",
   "MULTI_MONITOR",
   "AUTOMATION_HINT",
+  /**
+   * Phase 11b. Both are evidence a reviewer should see and neither may move
+   * a band by itself.
+   *
+   * An invigilator's note is a human sentence about a human: it belongs in
+   * front of the person who decides, not in an arithmetic that decides for
+   * them. A note that raised a band would be an invigilator passing sentence
+   * from the hall, which is the opposite of what §3 promises.
+   *
+   * A submission-rate anomaly is a weak signal with an innocent
+   * explanation — a candidate who writes the whole solution offline and
+   * submits twice to fix a typo looks the same as a script. It orders a
+   * queue; it does not accuse anybody.
+   */
+  "INVIGILATOR_NOTE",
+  "SUBMISSION_RATE_ANOMALY",
 ]);
 
 export function isContextOnly(kind: ProctorEventKind): boolean {

@@ -85,6 +85,25 @@ logic in `apps/web/src/lib/auth/sign-in.ts`; tested in
 * **Session rotation.** A successful sign-in deletes whatever session the
   browser carried and mints a new token (§3) before redirecting.
 
+### Changing a password you know (Phase 11b)
+
+`/profile/settings` → "Password", for every signed-in role. Until Phase 11b
+nobody could change their own password at all: a super-admin who suspected
+theirs was known had to ask for a reset link to replace it.
+
+* **The current password is required** and verified with Argon2id. A change
+  that only needed a live session would turn any unlocked laptop in a lab
+  into a permanent account takeover.
+* That makes the form a guessing oracle, so it is **rate-limited per
+  account** (5 per 15 minutes) and a wrong current password is audited as
+  `auth.password_change_failed` (`SECURITY`).
+* **Every session ends, including the one making the change**, and the
+  person signs in again. Keeping the current session alive would be
+  friendlier and would leave whoever prompted the change still signed in on
+  their own machine.
+* An account with no password is told to use the sign-in page's link rather
+  than asked for a password it does not have.
+
 ### Setting a password: the one-time link (Phase 11a)
 
 A roster import creates every student with no password at all — the LMS is
@@ -217,13 +236,13 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `calendar.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
 | `integrity.review` | staff | - | - | yes | - | yes | 2 actions, 2 pages |
-| `exam.invigilate` | staff | - | - | yes | - | yes | 4 actions, 1 route, 2 pages |
+| `exam.invigilate` | staff | - | - | yes | - | yes | 5 actions, 1 route, 2 pages |
 | `exam.device.enrol` | staff | - | - | yes | - | yes | 1 action, 1 route, 1 page |
 | `judge.operate` | staff | - | - | yes | - | yes | 3 actions, 1 page |
 | `students.view` | staff | - | - | yes | - | yes | 5 pages |
 | `inactivity.review` | staff | - | - | yes | - | yes | 2 actions, 1 page |
 | `students.signOut` | staff | - | - | yes | - | yes | 1 action, 1 page |
-| `roster.import` | staff | - | - | yes | - | yes | 3 actions, 2 pages |
+| `roster.import` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `plans.manage` | staff | - | - | yes | - | yes | 11 actions, 6 pages |
 | `contests.manage` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `announcements.manage` | staff | - | - | yes | - | yes | 3 actions, 3 pages |
@@ -258,6 +277,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
+| `account.password` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 

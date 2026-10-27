@@ -165,3 +165,74 @@ The engine will never include, enable by default, or quietly add:
 `apps/web/next.config.ts` already denies the camera, microphone, geolocation
 and display-capture permissions to every page (`Permissions-Policy`), so
 none of these can be switched on without a deliberate, reviewed change.
+
+---
+
+## 6. What is proctored, and what is not (Phase 11b)
+
+**Only an assessment is.** The engine is attached to an
+`AssessmentAttempt` and nothing else: `IntegrityFlag` hangs off one, a
+proctor mode belongs to an `Assessment`, and the telemetry client runs on
+the exam surface alone.
+
+**A contest is not proctored, and that is a decision rather than an
+omission.** A contest has no proctor mode, the arena emits no telemetry,
+and no contest result can be flagged. Three reasons:
+
+1. Nobody is told they are being watched in a contest, and §1 means that
+   literally — a monitored sitting is announced as monitored. Adding
+   collection without disclosure would break the first promise in this
+   document.
+2. A contest is practice with stakes, and the product never treats its
+   output as a credential. The signed student export says so in its own
+   words: readiness "is not a prediction of job performance, and REC Code
+   does not use it to decide who may sit a drive".
+3. The controls that make an assessment worth proctoring — a supervised
+   lab, a managed machine, an invigilator in the room — are exactly what a
+   contest does not have. Browser signals without them produce a queue of
+   flags nobody can act on, which costs students queue position and buys
+   nothing.
+
+`tests/repo/proctoring-posture.test.ts` holds that line: it fails if the
+contest surface starts collecting proctoring telemetry, so the decision
+cannot be reversed quietly.
+
+**Practice is not proctored either**, for the same reasons and more
+plainly: there is nothing at stake but the student's own record.
+
+## 7. The vocabulary says who produces it
+
+Twenty-five signal kinds are declared. Which of them the product actually
+produces is written down in code —
+`CLIENT_EMITTED_KINDS`, `SERVER_DERIVED_KINDS` and `RESERVED_EVENT_KINDS`
+in `packages/shared/src/exam-telemetry.ts` — and they partition the
+vocabulary, with a test that fails if they stop doing so.
+
+This exists because of what an audit found in Phase 11b: **seven declared
+kinds were produced by nothing at all**, and nothing said so. A reviewer
+could not tell a signal that was absent because the candidate did not
+trigger it from one that was absent because the product never emits it, and
+those mean opposite things. The worst case was `SNAPSHOT_JUMP` — the
+heaviest substantive signal in the triage engine, the one §5 of SPEC calls
+"the most probative artefact" and "the one piece of evidence that survives
+client tampering". Its derivation was written and tested in Phase 6, and
+never called. Every exam before Phase 11b was reviewed without it.
+
+Five of the seven now have producers: `FIRST_KEYSTROKE`, `IDLE_GAP`,
+`NETWORK_DROP` and `CLIENT_SCRIPT_ERROR` from the exam client, and
+`SNAPSHOT_JUMP` derived at submit, when the final solution — which the rule
+is a share of — first exists. `INVIGILATOR_NOTE` gained one too: an
+invigilator can now record what they saw against the attempt, which the
+control §4 rates highest previously had no way to do.
+
+Two are reserved, with their reasons in the code:
+
+* `DEVTOOLS_HEURISTIC` — unreliable in both directions (§2). A signal that
+  fires because a student zoomed to 150 % to read the question is worse
+  than no signal.
+* `SUBMISSION_RATE_ANOMALY` — a sitting submits once, at the end, so an
+  attempt has no submission rate for anything to be anomalous about.
+
+Neither an invigilator's note nor a rate anomaly may raise a triage band:
+both are in `CONTEXT_ONLY_KINDS`. A human's sentence belongs in front of
+the human who decides, not inside the arithmetic that decides for them.

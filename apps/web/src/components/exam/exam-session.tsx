@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   EXAM_HEARTBEAT_INTERVAL_MS,
+  IDLE_GAP_MS,
   SNAPSHOT_INTERVAL_MS,
   classifyInsertion,
   classifyPaste,
@@ -98,6 +99,12 @@ export function ExamSession({
   // ── Refs for things the loops read without re-subscribing ──────────────
   const queue = useRef<TelemetryQueue | null>(null);
   const copiedHashes = useRef<Set<string>>(new Set());
+  /** Phase 11b: the first edit, the last edit, and whether this idle gap was already recorded. */
+  const firstKeystrokeAt = useRef<number | null>(null);
+  const lastEditAt = useRef<number | null>(null);
+  const idleRecorded = useRef(false);
+  /** A tight error loop must not become a telemetry flood; three is enough to say "the page is broken". */
+  const scriptErrors = useRef(0);
   const sourcesRef = useRef(sources);
   const questionIdRef = useRef(questionId);
   const dirty = useRef(false);
@@ -247,9 +254,21 @@ export function ExamSession({
           : state,
       );
       if (dirty.current && Date.now() - lastSavedAt.current >= SNAPSHOT_INTERVAL_MS) void persist("TICK");
+
+      /**
+       * One IDLE_GAP per gap, recorded when the gap becomes notable rather
+       * than when editing resumes: a candidate who stops for the last forty
+       * minutes of a sitting never resumes, and that is precisely the gap a
+       * reviewer wants to see.
+       */
+      const idleSince = lastEditAt.current;
+      if (idleSince !== null && !idleRecorded.current && Date.now() - idleSince >= IDLE_GAP_MS) {
+        idleRecorded.current = true;
+        record({ kind: "IDLE_GAP", atMs: atMs(), durationMs: IDLE_GAP_MS });
+      }
     }, 1_000);
     return () => window.clearInterval(id);
-  }, [persist]);
+  }, [persist, record, atMs]);
 
   // ── Focus, visibility and fullscreen ───────────────────────────────────
   useEffect(() => {
@@ -374,6 +393,38 @@ export function ExamSession({
     if (screenWithExtended.isExtended === true) record({ kind: "MULTI_MONITOR", atMs: 0 });
   }, [record, revoked]);
 
+  /**
+   * Phase 11b: the network and the page itself.
+   *
+   * Both are context for the candidate's benefit as much as the
+   * reviewer's. A sitting that lost the network for four minutes explains a
+   * heartbeat gap the server will otherwise record against them, and a
+   * script error explains work that went missing — the reviewer sees that
+   * the page broke rather than that the candidate did something.
+   *
+   * Neither carries any text: the event is the fact, and the message of a
+   * script error stays in the browser.
+   */
+  useEffect(() => {
+    if (revoked) return;
+
+    const onOffline = () => record({ kind: "NETWORK_DROP", atMs: atMs() });
+    const onError = () => {
+      if (scriptErrors.current >= 3) return;
+      scriptErrors.current += 1;
+      record({ kind: "CLIENT_SCRIPT_ERROR", atMs: atMs() });
+    };
+
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onError);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onError);
+    };
+  }, [record, atMs, revoked]);
+
   // The last flush, as the page goes away.
   useEffect(() => {
     const onHide = () => {
@@ -397,8 +448,22 @@ export function ExamSession({
     (next: string) => {
       setSources((previous) => ({ ...previous, [questionIdRef.current]: next }));
       dirty.current = true;
+
+      /**
+       * Phase 11b. FIRST_KEYSTROKE and IDLE_GAP were in the vocabulary from
+       * Phase 4 and emitted by nothing, so a reviewer could not see the two
+       * plainest facts about a sitting: when the candidate started, and
+       * whether they stopped. Both are INFO and neither can move a band.
+       */
+      const at = atMs();
+      if (firstKeystrokeAt.current === null) {
+        firstKeystrokeAt.current = at;
+        record({ kind: "FIRST_KEYSTROKE", atMs: at });
+      }
+      lastEditAt.current = Date.now();
+      idleRecorded.current = false;
     },
-    [],
+    [atMs, record],
   );
 
   /** CodeMirror's own account of where an insertion came from. */

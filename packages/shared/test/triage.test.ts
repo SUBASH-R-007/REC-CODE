@@ -114,8 +114,23 @@ describe("the points are the spec's", () => {
 });
 
 describe("context-only signals cannot lift an attempt above NONE", () => {
-  it("names the three the spec names", () => {
-    expect([...CONTEXT_ONLY_KINDS].sort()).toEqual(["AUTOMATION_HINT", "DEVTOOLS_HEURISTIC", "MULTI_MONITOR"]);
+  it("names the three the spec names, and the two Phase 11b added", () => {
+    /**
+     * The spec's three are the ones the banding arithmetic has to exclude
+     * (they have points and must not reach a band). Phase 11b added two
+     * that score nothing at all and are listed anyway, so that the
+     * classification is a decision in one place rather than a consequence
+     * of `triage()` not happening to read them: an invigilator's note and a
+     * submission-rate anomaly are a reviewer's context, and if either ever
+     * acquires points it must still be unable to accuse anybody.
+     */
+    expect([...CONTEXT_ONLY_KINDS].sort()).toEqual([
+      "AUTOMATION_HINT",
+      "DEVTOOLS_HEURISTIC",
+      "INVIGILATOR_NOTE",
+      "MULTI_MONITOR",
+      "SUBMISSION_RATE_ANOMALY",
+    ]);
     for (const kind of CONTEXT_ONLY_KINDS) expect(isContextOnly(kind)).toBe(true);
     expect(isContextOnly("EXTERNAL_PASTE")).toBe(false);
   });

@@ -5,6 +5,7 @@ import {
   confirmTermination,
   grantExtraTime,
   messageCandidate,
+  recordObservation,
   requestTermination,
 } from "@/server/actions/invigilate";
 
@@ -22,7 +23,7 @@ import {
  * student most needs to be true.
  */
 
-type Open = "none" | "message" | "time" | "terminate" | "confirm";
+type Open = "none" | "message" | "time" | "observe" | "terminate" | "confirm";
 
 export function CandidateActions({
   attemptId,
@@ -73,6 +74,7 @@ export function CandidateActions({
           <>
             <Small onClick={() => setOpen("message")}>Message</Small>
             <Small onClick={() => setOpen("time")}>Grant time</Small>
+            <Small onClick={() => setOpen("observe")}>Record what you saw</Small>
             {!terminationPending ? (
               <Small onClick={() => setOpen("terminate")} danger>
                 Terminate
@@ -102,6 +104,8 @@ export function CandidateActions({
             () => grantExtraTime({ attemptId, minutes, reason: text }),
             `${minutes} minutes granted.`,
           );
+        } else if (open === "observe") {
+          run(() => recordObservation({ attemptId, note: text }), "Observation recorded.");
         } else if (open === "terminate") {
           run(
             () => requestTermination({ attemptId, reason: text }),
@@ -117,9 +121,11 @@ export function CandidateActions({
           ? `Message ${name} — they must acknowledge it before continuing.`
           : open === "time"
             ? `Grant ${name} extra minutes. Say why; this is recorded.`
-            : open === "terminate"
-              ? `Ask to end ${name}'s sitting. A second staff member must confirm, and this does NOT void their result — the work stands and a human decides what it means.`
-              : `Confirm ending ${name}'s sitting, as the second staff member. This does NOT void their result.`}
+            : open === "observe"
+              ? `What did you see? It goes on ${name}'s record for the reviewer, as context — it cannot flag them by itself, and ${name} never sees it.`
+              : open === "terminate"
+                ? `Ask to end ${name}'s sitting. A second staff member must confirm, and this does NOT void their result — the work stands and a human decides what it means.`
+                : `Confirm ending ${name}'s sitting, as the second staff member. This does NOT void their result.`}
       </p>
 
       <div className="mt-2 flex flex-wrap items-end gap-2">

@@ -2259,3 +2259,24 @@ What to do when the host exists: add the DSN as a Docker secret, initialise
 in `instrumentation.ts`, and **scrub before send** — the same label rule the
 metrics follow, because a stack trace carries local variables and those
 include a student's code.
+
+## An expired sitting is not banded (Phase 11b)
+
+`submitAttempt` bands a sitting when the candidate submits, which is where
+the integrity engine was finally connected. An attempt that runs out of
+time is auto-submitted by the scheduler's sweep
+(`autoSubmitExpired` in `@recx/db`), and that path does NOT band it.
+
+Why that is acceptable rather than a hole: the sweep moves a status and
+nothing else — an expired attempt has no `Submission` rows at all, because
+the only place a sitting's submissions are created is `submitAttempt`. A
+band's one consequence is withholding a result from the public
+leaderboard, and there is no result to withhold.
+
+Why it is still written down: the two paths live in different processes.
+The engine is `apps/web/src/lib/integrity/flag.ts`, which the scheduler
+cannot import, so if an expired sitting ever starts producing a result —
+the more interesting question, and a real one for a candidate whose
+browser died at minute 55 — banding it needs either the engine moved into
+`@recx/db` or an internal endpoint for the scheduler to call. Neither is
+worth building before the first case exists.

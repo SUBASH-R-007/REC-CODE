@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { Card, CardBody } from "@recx/design";
+import { Card, CardBody, CardHeader } from "@recx/design";
 import { requireUser } from "@/lib/auth/guards";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password";
 import { profileSettingsOf } from "@/server/queries/profile";
+import { ChangePasswordForm } from "@/components/profile/change-password-form";
 import { SettingsForm } from "@/components/profile/settings-form";
 
 export const metadata: Metadata = { title: "Profile settings" };
@@ -44,6 +46,18 @@ export default async function ProfileSettingsPage() {
               tabSize: settings.editor.tabSize,
             }}
           />
+        </CardBody>
+      </Card>
+
+      {/*
+        Phase 11b. Until now nobody could change a password they knew — a
+        student, an admin or a super-admin who suspected theirs was known
+        had to ask for a reset link to replace it.
+      */}
+      <Card className="mt-6">
+        <CardHeader title="Password" subtitle="Change the password you sign in with" />
+        <CardBody>
+          <ChangePasswordForm minLength={PASSWORD_MIN_LENGTH} />
         </CardBody>
       </Card>
     </div>

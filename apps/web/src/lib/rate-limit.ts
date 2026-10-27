@@ -48,6 +48,14 @@ export const PASSWORD_RESET_RATE_LIMITS = {
  * tokens, which 256 bits already makes hopeless; it is here so that trying
  * is also slow.
  */
+/**
+ * Changing a password you know: per account. The action verifies the
+ * CURRENT password, which makes it a guessing oracle for somebody at an
+ * unlocked machine, so it is bounded like sign-in is — generously, because
+ * mistyping your own password twice is normal.
+ */
+export const PASSWORD_CHANGE_RATE_LIMIT = { limit: 5, windowMs: 15 * 60_000 } as const satisfies RateLimitRule;
+
 export const PASSWORD_RESET_ATTEMPT_LIMIT = { limit: 20, windowMs: 60 * 60_000 } as const satisfies RateLimitRule;
 
 /**

@@ -49,6 +49,9 @@ async function liveAttempt(attemptId: string) {
       pausedMs: true,
       examSessionId: true,
       assessmentId: true,
+      // recordObservation needs it: a ProctorEvent's atMs is milliseconds
+      // from the attempt's start, and the CHECK refuses a negative one.
+      startedAt: true,
     },
   });
   if (!attempt) throw new NotFoundError("That sitting was not found.");
@@ -289,4 +292,81 @@ export async function confirmTermination(input: unknown): Promise<ActionResult<{
 function revalidateHall(examSessionId: string | null): void {
   if (examSessionId) revalidatePath(`/admin/invigilate/${examSessionId}`);
   revalidatePath("/admin/invigilate");
+}
+
+// ── Record what the invigilator saw ──────────────────────────────────────
+
+const observationSchema = z
+  .object({
+    attemptId: z.string().min(1).max(64),
+    note: z
+      .string()
+      .trim()
+      .min(5, "Write at least a few words — a reviewer will read this months from now.")
+      .max(1_000, "Keep the note under 1,000 characters."),
+  })
+  .strict();
+
+/**
+ * An invigilator's own observation, recorded as evidence on the attempt.
+ *
+ * Why it was missing and why it matters: `docs/PROCTORING.md` §4 calls a
+ * physical invigilator "the only control that addresses a second device",
+ * and `INVIGILATOR_NOTE` has been in the signal vocabulary since Phase 4 —
+ * but nothing ever wrote one. So the one control the posture rates highest
+ * could not reach the person who decides: a reviewer opening a flagged
+ * attempt saw focus losses and pastes, and never "the candidate had a phone
+ * under the desk, I asked them to put it away at 10:42".
+ *
+ * Three things keep it inside the posture:
+ *
+ *   * It is **context, never a finding.** `INVIGILATOR_NOTE` is in
+ *     `CONTEXT_ONLY_KINDS`, so it cannot raise a triage band on its own —
+ *     a human's sentence is for a human to weigh, and a note that moved a
+ *     band would be an invigilator passing sentence from the hall.
+ *   * It is recorded, attributed and audited, like every other invigilator
+ *     action (SPEC §5).
+ *   * It may be written after the sitting ends. An invigilator who writes
+ *     up what they saw five minutes later must not lose it to a status
+ *     check — the alternative is the note living in somebody's notebook.
+ *
+ * The note is never shown to the candidate (`tests/repo/integrity-isolation.test.ts`).
+ */
+export async function recordObservation(input: unknown): Promise<ActionResult<{ recorded: true }>> {
+  return runAction(async () => {
+    const staff = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = observationSchema.parse(input);
+    const attempt = await liveAttempt(parsed.attemptId);
+
+    const now = new Date();
+    const started = attempt.startedAt ?? now;
+    // Clamped like every other atMs: the CHECK refuses a negative one, and a
+    // note written before the clock started belongs at zero.
+    const atMs = Math.max(0, Math.min(now.getTime() - started.getTime(), 2_147_483_647));
+
+    await db.proctorEvent.create({
+      data: {
+        attemptId: attempt.id,
+        kind: "INVIGILATOR_NOTE",
+        source: "SERVER",
+        severity: "INFO",
+        atMs,
+        meta: { note: parsed.note, byStaffId: staff.id },
+        occurredAt: now,
+      },
+      select: { attemptId: true },
+    });
+
+    await audit({
+      actorId: staff.id,
+      action: "invigilate.observation_recorded",
+      entityType: "AssessmentAttempt",
+      entityId: attempt.id,
+      targetUserId: attempt.userId,
+      sensitivity: "SENSITIVE",
+      metadata: { attemptId: attempt.id, note: parsed.note },
+    });
+    revalidateHall(attempt.examSessionId);
+    return { recorded: true as const };
+  }, "recordObservation");
 }

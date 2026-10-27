@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FileUp, UsersRound } from "lucide-react";
+import { FileUp, UserPlus, UsersRound } from "lucide-react";
 import { ButtonLink, Card, EmptyState } from "@recx/design";
 import { describeScope, isEmptyScope, requireAdminScopePage } from "@/lib/auth/scope";
 import { filtersToQuery, hasFilters, parseStudentFilters } from "@/lib/admin/student-filters";
@@ -33,10 +33,16 @@ export default async function AdminStudentsPage({ searchParams }: { searchParams
           </>
         }
         actions={
-          <ButtonLink href="/admin/students/import" variant="outline">
-            <FileUp className="h-4 w-4" aria-hidden />
-            Import a roster
-          </ButtonLink>
+          <div className="flex flex-wrap gap-2">
+            <ButtonLink href="/admin/students/new" variant="outline">
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Add a student
+            </ButtonLink>
+            <ButtonLink href="/admin/students/import" variant="outline">
+              <FileUp className="h-4 w-4" aria-hidden />
+              Import a roster
+            </ButtonLink>
+          </div>
         }
       />
       <Card className="p-5">

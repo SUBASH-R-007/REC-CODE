@@ -304,6 +304,85 @@ export function isClientReportableKind(kind: ProctorEventKind): boolean {
 }
 
 /**
+ * What the engine actually produces today, written down (Phase 11b).
+ *
+ * The vocabulary and the implementation had drifted: of twenty-five declared
+ * kinds, seven were produced by nothing at all, and nothing said so. A
+ * reviewer reading a flagged attempt had no way to tell a signal that was
+ * absent because the candidate did not trigger it from one that was absent
+ * because the product never emits it — and those mean opposite things.
+ *
+ * So the three lists below partition `PROCTOR_EVENT_KINDS`, and
+ * `exam-telemetry.test.ts` holds them to it. Adding a kind now forces the
+ * question "who emits this?" at the moment it is added, which is the only
+ * moment anybody knows the answer.
+ */
+
+/** Emitted by the exam client (components/exam, lib/exam). */
+export const CLIENT_EMITTED_KINDS: readonly ProctorEventKind[] = Object.freeze([
+  "FOCUS_LOSS",
+  "FULLSCREEN_EXIT",
+  "EXTERNAL_PASTE",
+  "INTERNAL_PASTE",
+  "PROGRAMMATIC_INSERT",
+  "COPY",
+  "CUT",
+  "CONTEXT_MENU",
+  "CADENCE_BURST",
+  "WINDOW_RESIZE",
+  "MULTI_MONITOR",
+  "AUTOMATION_HINT",
+  // Phase 11b: declared since Phase 4, emitted from Phase 11b.
+  "FIRST_KEYSTROKE",
+  "IDLE_GAP",
+  "NETWORK_DROP",
+  "CLIENT_SCRIPT_ERROR",
+]);
+
+/** Derived by the server from its own facts (lib/exam, the invigilator surface). */
+export const SERVER_DERIVED_KINDS: readonly ProctorEventKind[] = Object.freeze([
+  "HEARTBEAT_GAP",
+  "IP_CHANGED",
+  "UA_CHANGED",
+  "SEQUENCE_GAP",
+  "CONCURRENT_SESSION",
+  "SNAPSHOT_JUMP",
+  // Phase 11b: an invigilator's own observation, which until then had no way
+  // into the record a reviewer reads.
+  "INVIGILATOR_NOTE",
+]);
+
+/**
+ * Declared, produced by nothing, and why. A reason is the whole point: it
+ * separates "not built yet" from "cannot mean anything here", and a
+ * reviewer deserves to know which.
+ */
+export const RESERVED_EVENT_KINDS: Readonly<Partial<Record<ProctorEventKind, string>>> = Object.freeze({
+  /**
+   * The posture already says this one is near worthless, in its own words:
+   * "Devtools detection is unreliable in both directions. Size heuristics
+   * and debugger timing produce false positives (docked panels, zoom, slow
+   * machines) and are trivially defeated (undocked or remote devtools)."
+   * A signal that fires because a student zoomed to 150% to read the
+   * question is worse than no signal: it costs them queue position and
+   * tells a reviewer nothing. The band engine still scores it as context if
+   * one ever arrives (an invigilator-reported case, say), so the weight
+   * stays where it is.
+   */
+  DEVTOOLS_HEURISTIC:
+    "Unreliable in both directions (docs/PROCTORING.md §2): the browser-visible heuristics misfire on zoom, docked panels and small screens, and are trivially defeated. Scored as context if one ever arrives; never emitted by us.",
+  /**
+   * A sitting submits ONCE, at the end: `lib/exam/submit.ts` writes every
+   * Submission in one transaction. There is no rate within an attempt for
+   * anything to be anomalous about. It stays in the enum because
+   * `ProctorEventKind` and `Accommodation.exemptSignals` are shared with
+   * live data, and removing an enum value is a migration that buys nothing.
+   */
+  SUBMISSION_RATE_ANOMALY:
+    "A sitting submits once, at the end (lib/exam/submit.ts), so an attempt has no submission rate. Kept in the enum because it is shared with live data through Accommodation.exemptSignals.",
+});
+
+/**
  * What the events route answers. The overlay is the reason this is a
  * response and not a fire-and-forget: SPEC §5 requires the event to be
  * "written server-side BEFORE the overlay becomes dismissible", so the

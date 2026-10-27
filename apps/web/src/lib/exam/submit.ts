@@ -4,6 +4,8 @@ import type { AttemptLayout } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
+import { flagAttemptIfNeeded } from "@/lib/integrity/flag";
+import { deriveSnapshotJumps } from "@/lib/exam/snapshot-jump";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import type { AttemptGuardOk } from "@/lib/exam/attempt";
 
@@ -131,6 +133,57 @@ export async function submitAttempt(
   const moved = await finalise(attempt.id, now);
   if (!moved) return { submitted: false, submissionIds, blank, reason: "already_finished" };
   await record(attempt.id, attempt.userId, submissionIds, blank, now);
+
+  /**
+   * Phase 11b: derive SNAPSHOT_JUMP, now that the final solution exists.
+   *
+   * It has to be here and not earlier: the rule is a share of the FINAL
+   * solution's token count, which nothing knows until the sitting ends. It
+   * is after `finalise` because an attempt that did not move is one somebody
+   * else already closed, and deriving against it twice would double a
+   * candidate's evidence — the derivation refuses that too.
+   *
+   * A failure here must not fail a submission. The work is recorded, the
+   * judge is about to run, and a missing derived signal is a weaker review,
+   * not a lost exam.
+   */
+  try {
+    const jumps = await deriveSnapshotJumps(attempt);
+    if (jumps.length > 0) {
+      console.info(`[exam] attempt ${attempt.id}: ${jumps.length} SNAPSHOT_JUMP event(s) derived`);
+    }
+  } catch (error) {
+    console.error(`[exam] attempt ${attempt.id}: SNAPSHOT_JUMP derivation failed`, error);
+  }
+
+  /**
+   * Phase 11b: band the sitting — which nothing did either.
+   *
+   * `flagAttemptIfNeeded` was written in Phase 6, complete, idempotent and
+   * audited, and the audit behind `tests/repo/proctoring-posture.test.ts`
+   * found that NO code path in the repository called it. So no attempt was
+   * ever flagged, no result was ever withheld, the 72-hour SLA had nothing
+   * to act on, and the review queue, the reviews and the appeals were a
+   * surface over an empty table. The whole integrity engine was inert.
+   *
+   * Here, and after the derivation above, because the band counts
+   * SNAPSHOT_JUMP events. Here and not in the scheduler's expiry sweep
+   * because an expired sitting creates no Submission at all — there is no
+   * result to withhold — and this is the one place a sitting's results are
+   * created (docs/OPEN-QUESTIONS.md).
+   *
+   * The ceiling is unchanged and worth restating: the most this can do is
+   * raise a flag and keep the result off the PUBLIC leaderboard until a
+   * human looks or 72 hours pass, whichever comes first.
+   */
+  try {
+    const flag = await flagAttemptIfNeeded(attempt.id);
+    if (flag.flagged) {
+      console.info(`[exam] attempt ${attempt.id}: flagged ${flag.triage.band} for review`);
+    }
+  } catch (error) {
+    console.error(`[exam] attempt ${attempt.id}: banding failed`, error);
+  }
 
   // ── 4. The judge, after the sitting is closed ──────────────────────────
   for (const id of submissionIds) {

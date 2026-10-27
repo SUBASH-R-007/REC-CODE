@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { Prisma } from "@recx/db";
-import { ROSTER_IMPORT_LIMITS } from "@recx/shared";
+import { ROSTER_IMPORT_LIMITS, rosterRowSchema } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { describeScope, requireAdminScopeAction } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
@@ -17,12 +17,13 @@ import { applyRosterPlan, loadRosterMatches, parseStoredLines } from "@/lib/admi
 import { planRosterImport, rosterPlanSha256 } from "@/lib/admin/roster-plan";
 
 /**
- * /admin/students/import: an LMS roster export, previewed first and
- * committed separately.
+ * The roster: an LMS export previewed and committed separately, and one
+ * student typed in by hand.
  *
  *   previewRosterImport  ADMIN  dry run: writes only a RosterImport (60-minute preview)
  *   commitRosterImport   ADMIN  re-plans; refuses unless the plan's hash equals what was shown
  *   discardRosterImport  ADMIN  closes a preview and drops its rows
+ *   addStudent           ADMIN  one row, same validation and same write path
  *
  * The import never changes a role, an account status or a password, and
  * accounts it creates have no password (docs/OPEN-QUESTIONS.md). The
@@ -244,4 +245,93 @@ export async function discardRosterImport(input: DiscardRosterImportInput): Prom
     revalidatePath(`/admin/students/import/${importId}`);
     return { importId };
   }, "discardRosterImport");
+}
+
+/**
+ * One student, typed in rather than imported: `/admin/students/new`.
+ *
+ * It exists because a roster export is the wrong instrument for a late
+ * admission or a transfer — an ADMIN had either to edit a CSV and import a
+ * file of one row, or to wait for the next roster sync — and because
+ * "add a student" was the obvious hole in the admin surface.
+ *
+ * What makes it safe is that it is not a second way to create a student.
+ * The field validation is `rosterRowSchema`, the conflict and scope
+ * decisions are `planRosterImport`, and the write is `applyRosterPlan` —
+ * the same three as a file. The only thing it does differently is refuse
+ * anything that is not a clean CREATE: a row that would update, link,
+ * skip, or that collides with an account the importer cannot see, comes
+ * back as the plan's own message instead of quietly changing somebody.
+ *
+ * No RosterImport row is written. A manual add has no file name and no file
+ * hash, and inventing them would put a lie in a provenance field; the audit
+ * entry (`student.added`, with the actor and the scope) is the provenance.
+ */
+const ADD_STUDENT_FIELDS = ["lmsUserId", "collegeId", "email", "firstName", "lastName", "batchYear", "departmentCode", "section"] as const;
+
+/**
+ * A `<form action>` entry point, like the upload above: it takes FormData,
+ * so the page works before hydration — the one moment an admin is most
+ * likely to be on a bad connection is the start of term, which is also
+ * when this page is used.
+ */
+export async function addStudent(
+  _previous: ActionResult<{ userId: string }> | null,
+  formData: FormData,
+): Promise<ActionResult<{ userId: string }>> {
+  return runAction(async () => {
+    const { user, scope } = await requireAdminScopeAction();
+    const entries = Object.fromEntries(
+      ADD_STUDENT_FIELDS.map((field) => {
+        const value = formData.get(field);
+        return [field, typeof value === "string" ? value : ""];
+      }),
+    );
+    const row = rosterRowSchema.parse(entries);
+    await bulkRateLimit(user.id);
+    const now = new Date();
+
+    const userId = await db.$transaction(async (tx) => {
+      // The same advisory lock an import takes, so a manual add and a file
+      // cannot interleave and both decide a roll number is free.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('roster-import'))`;
+      const matches = await loadRosterMatches(tx, scope, [row]);
+      const plan = planRosterImport([{ line: 1, row, error: null }], matches, scope);
+      const outcome = plan.lines[0]!.outcome;
+
+      if (outcome.kind === "REJECTED") throw new ValidationError(outcome.message);
+      if (outcome.kind !== "CREATE") {
+        /**
+         * UPDATE, UNCHANGED and SKIPPED all mean the same thing here: this
+         * roll number, email or LMS id already belongs to an account. An
+         * ADMIN may see their own students, so naming the collision is not
+         * a disclosure — and a collision OUTSIDE their scope never reaches
+         * this branch, because the plan rejects it with no detail.
+         */
+        throw new ConflictError(
+          "An account already exists for that roll number, email or LMS id. Open it from the student list instead.",
+        );
+      }
+
+      const applied = await applyRosterPlan(tx, plan, scope, now);
+      const created = applied.results.find((r) => r.outcome === "CREATE")?.userId;
+      if (!created) throw new ConflictError("The student was not created — try again.");
+      return created;
+    });
+
+    await audit({
+      actorId: user.id,
+      action: "student.added",
+      entityType: "User",
+      entityId: userId,
+      targetUserId: userId,
+      sensitivity: "SENSITIVE",
+      metadata: { collegeId: row.collegeId, scope: describeScope(scope), source: "manual" },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath("/admin/students");
+    // Straight to the student that now exists, which is where the admin was
+    // going: the list would make them search for the person they just typed.
+    redirect(`/admin/students/${userId}`);
+  }, "addStudent");
 }
