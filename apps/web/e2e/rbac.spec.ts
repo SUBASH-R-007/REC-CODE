@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { ACCOUNTS, type AccountKey } from "./support/accounts";
 import { contextAs, expectLandedOn, signInWithForm, signedOutContext } from "./support/session";
-import { settle } from "./support/page";
+import { openPage, settle } from "./support/page";
 
 /**
  * Phase 4 RBAC, end to end against the running stack (no judge needed):
@@ -90,7 +90,7 @@ async function bounces(browser: Browser, key: AccountKey, paths: readonly string
   try {
     for (const path of paths) {
       await test.step(`${ACCOUNTS[key].identifier} → ${path}`, async () => {
-        await page.goto(path, { waitUntil: "commit" });
+        await openPage(page, path, { waitUntil: "commit" });
         try {
           await expectLandedOn(page, home, 60_000);
         } catch {
@@ -106,7 +106,7 @@ async function bounces(browser: Browser, key: AccountKey, paths: readonly string
 
 /** The /admin/students/<id> link of the row showing this roll number, as a super-admin sees it. */
 async function studentIdOf(page: Page, roll: string): Promise<string> {
-  await page.goto(`/admin/students?q=${encodeURIComponent(roll)}`);
+  await openPage(page, `/admin/students?q=${encodeURIComponent(roll)}`);
   const row = page.locator("table tbody tr").filter({ hasText: roll });
   await expect(row, `the student list finds ${roll}`).toHaveCount(1);
   const href = await row.locator('a[href^="/admin/students/"]').first().getAttribute("href");
@@ -146,7 +146,7 @@ test.describe("a scoped ADMIN (RECADMIN02)", () => {
     const page = await context.newPage();
     try {
       // Unfiltered list: CSE rows only.
-      const list = await page.goto("/admin/students");
+      const list = await openPage(page, "/admin/students");
       expect(list?.status()).toBe(200);
       expect(new URL(page.url()).pathname).toBe("/admin/students");
       await settle(page);
@@ -159,11 +159,11 @@ test.describe("a scoped ADMIN (RECADMIN02)", () => {
 
       // Exact searches: CSE found, ECE not.
       for (const roll of CSE_STUDENTS) {
-        await page.goto(`/admin/students?q=${encodeURIComponent(roll)}`);
+        await openPage(page, `/admin/students?q=${encodeURIComponent(roll)}`);
         await expect(page.locator("table tbody tr").filter({ hasText: roll }), `CSE ${roll} is in scope`).toHaveCount(1);
       }
       for (const query of [`q=${ECE_STUDENT}`, `q=${ECE_STUDENT_2}`, "dept=ECE"]) {
-        await page.goto(`/admin/students?${query}`);
+        await openPage(page, `/admin/students?${query}`);
         await settle(page);
         const text = (await page.locator("table tbody").allInnerTexts()).join("\n");
         expect(text, `/admin/students?${query} lists no ECE student`).not.toMatch(new RegExp(`${ECE_STUDENT}|${ECE_STUDENT_2}`));
@@ -171,7 +171,7 @@ test.describe("a scoped ADMIN (RECADMIN02)", () => {
 
       // In scope: a CSE student's page renders. Out of scope: 404, exactly like a missing id.
       const cseId = await (async () => {
-        await page.goto(`/admin/students?q=${encodeURIComponent(CSE_STUDENTS[0]!)}`);
+        await openPage(page, `/admin/students?q=${encodeURIComponent(CSE_STUDENTS[0]!)}`);
         const href = await page
           .locator("table tbody tr")
           .filter({ hasText: CSE_STUDENTS[0]! })
@@ -181,10 +181,10 @@ test.describe("a scoped ADMIN (RECADMIN02)", () => {
         return href?.split("/").pop() ?? "";
       })();
       expect(cseId, "RECADMIN02's row links to the CSE student's page").toMatch(/^[A-Za-z0-9_-]+$/);
-      const inScope = await page.goto(`/admin/students/${cseId}`);
+      const inScope = await openPage(page, `/admin/students/${cseId}`);
       expect(inScope?.status(), "a CSE student's page answers 200").toBe(200);
 
-      const outOfScope = await page.goto(`/admin/students/${eceId}`);
+      const outOfScope = await openPage(page, `/admin/students/${eceId}`);
       expect(outOfScope?.status(), "an ECE student's page answers 404 for RECADMIN02").toBe(404);
       await expect(page.getByText("That student was not found")).toBeVisible();
       await expect(page.getByText(ECE_STUDENT)).toHaveCount(0);
@@ -203,7 +203,7 @@ test.describe("a super-admin", () => {
       try {
         for (const path of key === "admin" ? SUPER_PATHS : (["/super"] as const)) {
           await test.step(`${ACCOUNTS[key].identifier} ${path}`, async () => {
-            const response = await page.goto(path);
+            const response = await openPage(page, path);
             expect(response?.status(), `${path} loads`).toBe(200);
             expect(new URL(page.url()).pathname).toBe(path);
             await expect(page.getByRole("note").filter({ hasText: SUPER_STRIP })).toBeVisible();
@@ -228,7 +228,7 @@ test.describe("a super-admin", () => {
       await signInWithForm(page, ACCOUNTS.admin);
 
       await test.step("start a read-only view of the ECE student", async () => {
-        await page.goto(`/super/impersonate?q=${encodeURIComponent(ECE_STUDENT)}`);
+        await openPage(page, `/super/impersonate?q=${encodeURIComponent(ECE_STUDENT)}`);
         await expect(page.getByRole("note").filter({ hasText: SUPER_STRIP })).toBeVisible();
         await page.getByLabel(/^Why do you need to view as /).fill(reason);
         await page.getByRole("button", { name: "Start read-only view (15 minutes)" }).click();
@@ -248,7 +248,7 @@ test.describe("a super-admin", () => {
         expect(response.status(), "POST /api/drafts while impersonating").toBe(403);
         expect(((await response.json()) as { error?: string }).error).toBe(READ_ONLY_MESSAGE);
         // Every page still shows the banner.
-        await page.goto("/problems");
+        await openPage(page, "/problems");
         await expect(banner).toBeVisible();
       });
 
@@ -259,7 +259,7 @@ test.describe("a super-admin", () => {
       });
 
       await test.step("the start and the end are in the audit log", async () => {
-        await page.goto(`/super/audit?target=${encodeURIComponent(ECE_STUDENT)}&sensitivity=SECURITY`);
+        await openPage(page, `/super/audit?target=${encodeURIComponent(ECE_STUDENT)}&sensitivity=SECURITY`);
         const rows = page.locator("table tbody tr");
         const started = rows.filter({ hasText: "impersonation.started" }).filter({ hasText: runId });
         await expect(started, "one impersonation.started row carries this run's reason").toHaveCount(1);

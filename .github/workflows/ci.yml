@@ -222,7 +222,21 @@ jobs:
       # growth that makes `next dev` restart itself mid-request, and a
       # restart surfaces as ERR_EMPTY_RESPONSE inside whichever assertion
       # was loading.
+      #
+      # That is exactly what happened on run 39480760114, in Next's own
+      # words — "⚠ Server is approaching the used memory threshold,
+      # restarting..." — one minute after the warm pass, so the global
+      # setup's first navigation got an empty response and the job failed
+      # before a single assertion ran. Next sizes that threshold from the V8
+      # heap limit, so the limit is now explicit and generous rather than
+      # whatever the runner's memory implies: this suite compiles most of
+      # the app's module graph in one process, which is the one case in this
+      # repository that genuinely needs the room. The suite tolerates a
+      # restart anyway (apps/web/e2e/support/page.ts), but a restart it
+      # never has to tolerate is better.
       - name: Start the web app (next dev, background)
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           nohup pnpm --filter @recx/web exec next dev -p 3000 --disable-source-maps > "$RUNNER_TEMP/web.log" 2>&1 &
           for i in $(seq 1 120); do

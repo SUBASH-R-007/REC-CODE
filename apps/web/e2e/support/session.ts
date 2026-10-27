@@ -1,5 +1,6 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { ACCOUNTS, passwordFor, type Account, type AccountKey } from "./accounts";
+import { openPage } from "./page";
 
 /**
  * How long to wait for the sign-in POST to answer. A two-core CI runner
@@ -20,7 +21,7 @@ const SIGN_IN_TIMEOUT_MS = process.env.CI ? 180_000 : 120_000;
  * no alert appeared, which means something other than the credentials.
  */
 export async function signInWithForm(page: Page, acct: Account): Promise<void> {
-  await page.goto("/login");
+  await openPage(page, "/login");
   await page.getByLabel("Roll number or college email").fill(acct.identifier);
   await page.getByLabel("Password", { exact: true }).fill(passwordFor(acct));
   await page.getByRole("button", { name: "Sign in" }).click();

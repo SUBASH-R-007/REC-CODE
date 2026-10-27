@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { chromium, type FullConfig } from "@playwright/test";
 import { ACCOUNTS, AUTH_DIR, STAFF_ACCOUNT_KEYS, type Account, type AccountKey } from "./support/accounts";
 import { signInWithForm } from "./support/session";
+import { openPage } from "./support/page";
 
 /** rename() over a file another process has open can fail briefly on Windows. */
 async function replaceFile(from: string, to: string): Promise<void> {
@@ -45,12 +46,12 @@ async function signIn(baseURL: string, channel: string | undefined, acct: Accoun
   try {
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
-    page.setDefaultNavigationTimeout(120_000);
+    page.setDefaultNavigationTimeout(process.env.CI ? 180_000 : 120_000);
     page.setDefaultTimeout(60_000);
 
     await signInWithForm(page, acct);
     for (const path of warm) {
-      await page.goto(path, { waitUntil: "load" });
+      await openPage(page, path, { waitUntil: "load" });
     }
 
     // Written atomically: another run may be reading the previous file.

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { ACCOUNTS } from "./support/accounts";
 import { contextAs } from "./support/session";
+import { openPage } from "./support/page";
 
 /**
  * Phase 5 end to end: a staff member authors a contest, a student enters it,
@@ -61,7 +62,7 @@ test.describe("contest journey", () => {
     const staff = await contextAs(browser, "admin");
     const admin = await staff.newPage();
 
-    await admin.goto("/admin/contests");
+    await openPage(admin, "/admin/contests");
     await expect(admin.getByRole("heading", { name: "Contests", level: 1 })).toBeVisible();
     await admin.getByRole("link", { name: "New contest" }).click();
 
@@ -85,9 +86,9 @@ test.describe("contest journey", () => {
     // ── 2. A draft is invisible to students ──
     const studentContext = await contextAs(browser, "student");
     const student = await studentContext.newPage();
-    await student.goto("/contests");
+    await openPage(student, "/contests");
     await expect(student.getByText(TITLE)).toHaveCount(0);
-    await student.goto(`/contests/${SLUG}`);
+    await openPage(student, `/contests/${SLUG}`);
     await expect(student.getByText("404").or(student.getByText(/not found/i)).first()).toBeVisible();
 
     // ── 3. Publishing needs a problem ──
@@ -115,7 +116,7 @@ test.describe("contest journey", () => {
     await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });
 
     // ── 6. A stranger cannot enter the arena ──
-    await student.goto(`/contests/${SLUG}/arena`);
+    await openPage(student, `/contests/${SLUG}/arena`);
     await expect(student).toHaveURL(new RegExp(`/contests/${SLUG}$`), { timeout: 60_000 });
 
     // ── 7. The student registers and enters ──
@@ -144,14 +145,14 @@ test.describe("contest journey", () => {
     await student.setViewportSize({ width: 1366, height: 768 });
 
     // ── 9. Standings render before anybody has scored ──
-    await student.goto(`/contests/${SLUG}/standings`);
+    await openPage(student, `/contests/${SLUG}/standings`);
     await expect(student.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible();
     await expect(
       student.getByText(/Nobody on the board yet/i).or(student.getByRole("table")).first(),
     ).toBeVisible();
 
     // ── 10. The contest is listed for the student now ──
-    await student.goto("/contests");
+    await openPage(student, "/contests");
     await expect(student.getByRole("link", { name: TITLE })).toBeVisible();
     await expect(student.getByText("You are registered").first()).toBeVisible();
 
@@ -163,7 +164,7 @@ test.describe("contest journey", () => {
     const context = await contextAs(browser, "student");
     const page = await context.newPage();
     for (const path of ["/admin/contests", "/admin/contests/new"]) {
-      await page.goto(path, { waitUntil: "commit" });
+      await openPage(page, path, { waitUntil: "commit" });
       await page.waitForURL((url) => url.pathname === "/dashboard", { timeout: 60_000, waitUntil: "commit" });
     }
     await context.close();
@@ -174,7 +175,7 @@ test.describe("contest journey", () => {
     // cheaply: an ECE student DOES see a PUBLIC contest.
     const context = await contextAs(browser, "ece");
     const page = await context.newPage();
-    await page.goto("/contests");
+    await openPage(page, "/contests");
     await expect(page.getByRole("link", { name: TITLE })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(ACCOUNTS.ece.identifier)).toHaveCount(0);
     await context.close();

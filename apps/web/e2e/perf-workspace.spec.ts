@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test, type BrowserContext, type CDPSession, type Page, type TestInfo } from "@playwright/test";
 import { passwordFor, type Account } from "./support/accounts";
+import { openPage } from "./support/page";
 
 /**
  * Throttled workspace performance (the Phase 3 "manual" checks, automated).
@@ -183,7 +184,7 @@ async function instrument(context: BrowserContext, page: Page, opts: { throttle:
 }
 
 async function signIn(page: Page) {
-  await page.goto("/login");
+  await openPage(page, "/login");
   await page.getByLabel("Roll number or college email").fill(STUDENT.identifier);
   await page.getByLabel("Password", { exact: true }).fill(passwordFor(STUDENT));
   await page.getByRole("button", { name: "Sign in" }).click();
@@ -400,7 +401,7 @@ test.describe("workspace performance (throttled)", () => {
     // compiled it — the cold measurement is about the browser, not the compiler.
     const setup = await context.newPage();
     await signIn(setup);
-    await setup.goto(PROBLEM, { waitUntil: "load" });
+    await openPage(setup, PROBLEM, { waitUntil: "load" });
     await waitForMark(setup, "monaco", 180_000);
     const production = await isProductionBuild(setup);
     await setup.close();
@@ -412,7 +413,7 @@ test.describe("workspace performance (throttled)", () => {
     // ── (a)(b)(d) COLD: HTTP cache disabled, throttled ─────────────────
     const cold = await context.newPage();
     const coldNet = await instrument(context, cold, { throttle: true, cache: false });
-    await cold.goto(PROBLEM, { waitUntil: "commit", timeout: 180_000 });
+    await openPage(cold, PROBLEM, { waitUntil: "commit", timeout: 180_000 });
     await waitForMark(cold, "textareaTypable", 180_000);
     await waitForMark(cold, "monaco", 180_000);
     await cold.waitForTimeout(1_500); // let late shifts / LCP candidates land
@@ -554,14 +555,14 @@ test.describe("workspace performance (throttled)", () => {
     // not covered by the page's network throttling, which would flatter
     // the number.
     const prime = await context.newPage();
-    await prime.goto(PROBLEM, { waitUntil: "load" });
+    await openPage(prime, PROBLEM, { waitUntil: "load" });
     await waitForMark(prime, "monaco", 180_000);
     await prime.waitForTimeout(2_000);
     await prime.close();
 
     const warm = await context.newPage();
     const warmNet = await instrument(context, warm, { throttle: true, cache: true });
-    await warm.goto(PROBLEM, { waitUntil: "commit", timeout: 180_000 });
+    await openPage(warm, PROBLEM, { waitUntil: "commit", timeout: 180_000 });
     await waitForMark(warm, "textareaTypable", 180_000);
     await waitForMark(warm, "monaco", 180_000);
     await warm.waitForTimeout(1_000);
@@ -629,7 +630,7 @@ test.describe("workspace performance (throttled)", () => {
     await signIn(page);
     // Monaco never arrives: the textarea is the editor for the whole test.
     await page.route("**/monaco/vs/**", (route) => route.abort());
-    await page.goto(PROBLEM, { waitUntil: "load" });
+    await openPage(page, PROBLEM, { waitUntil: "load" });
     const textarea = page.locator("[data-editor-root] > textarea");
     await expect(textarea).toBeVisible();
     await expect
@@ -706,7 +707,7 @@ test.describe("workspace performance (throttled)", () => {
     // Throttled from the first byte of the problem page to the last verdict.
     const page = await context.newPage();
     const net = await instrument(context, page, { throttle: true, cache: true });
-    await page.goto(PROBLEM, { waitUntil: "commit", timeout: 180_000 });
+    await openPage(page, PROBLEM, { waitUntil: "commit", timeout: 180_000 });
 
     // The fallback is typable before Monaco: type into it while it is still the editor.
     await waitForMark(page, "textareaTypable", 180_000);

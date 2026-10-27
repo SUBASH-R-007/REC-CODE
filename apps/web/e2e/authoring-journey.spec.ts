@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Browser, type BrowserContext, type Page, type Response } from "@playwright/test";
 import { expectActionSuccess, toast } from "./support/actions";
 import { authoringFixture, type AuthoringFixture, type ReferenceSpec } from "./support/authoring";
-import { settle, waitForEditor } from "./support/page";
+import { openPage, settle, waitForEditor } from "./support/page";
 import { contextAs, expectLandedOn } from "./support/session";
 
 /**
@@ -73,7 +73,7 @@ async function waitForValidation(page: Page, id: string, done: (text: string) =>
   const deadline = Date.now() + VALIDATION_TIMEOUT;
   let last = "";
   for (let poll = 0; ; poll++) {
-    await page.goto(`${problemUrl(id)}/validate`);
+    await openPage(page, `${problemUrl(id)}/validate`);
     last = (await readiness(page).innerText()).replace(/\s+/g, " ").trim();
     if (done(last)) return last;
     if (Date.now() > deadline) {
@@ -88,7 +88,7 @@ async function waitForValidation(page: Page, id: string, done: (text: string) =>
 }
 
 async function startValidation(page: Page, id: string, step: string): Promise<void> {
-  await page.goto(`${problemUrl(id)}/validate`);
+  await openPage(page, `${problemUrl(id)}/validate`);
   await page.getByRole("button", { name: "Start validation" }).click();
   await expectActionSuccess(page, toast(page, /^Validation started:/), step);
 }
@@ -117,14 +117,14 @@ async function saveReference(page: Page, ref: ReferenceSpec, step: string): Prom
 }
 
 async function submitForReview(page: Page, id: string, revision: number): Promise<void> {
-  await page.goto(problemUrl(id));
+  await openPage(page, problemUrl(id));
   await page.getByRole("checkbox", { name: /originally authored for REC Code/ }).check();
   await page.getByRole("button", { name: "Submit for review" }).click();
   await expectActionSuccess(page, toast(page, `Revision ${revision} submitted for review.`), `submit r${revision}`);
 }
 
 async function approve(page: Page, id: string, revision: number): Promise<void> {
-  await page.goto(problemUrl(id));
+  await openPage(page, problemUrl(id));
   const button = page.getByRole("button", { name: "Approve", exact: true });
   await expect(button, "RECADMIN02 did not author this revision, so may approve it").toBeEnabled();
   await button.click();
@@ -132,7 +132,7 @@ async function approve(page: Page, id: string, revision: number): Promise<void> 
 }
 
 async function publish(page: Page, id: string, revision: number): Promise<void> {
-  await page.goto(`${problemUrl(id)}/validate`);
+  await openPage(page, `${problemUrl(id)}/validate`);
   await expect(publishButton(page), `r${revision} is approved and validated: Publish is available`).toBeEnabled();
   await publishButton(page).click();
   await expectActionSuccess(page, page.getByText(`Published revision ${revision}.`), `publish r${revision}`);
@@ -140,7 +140,7 @@ async function publish(page: Page, id: string, revision: number): Promise<void> 
 }
 
 async function retire(page: Page, id: string): Promise<void> {
-  await page.goto(problemUrl(id));
+  await openPage(page, problemUrl(id));
   await page.getByRole("button", { name: "Retire problem" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Reason", { exact: true }).fill(fx.retireReason);
@@ -164,7 +164,7 @@ async function editorValue(page: Page): Promise<string> {
  * (never mistaken for the new one).
  */
 async function submitAccepted(page: Page, step: string, earlier: readonly string[] = []): Promise<string> {
-  await page.goto(`/problems/${fx.slug}`);
+  await openPage(page, `/problems/${fx.slug}`);
   await settle(page);
   await waitForEditor(page, "monaco");
   await page.getByLabel("Language", { exact: true }).selectOption("py312");
@@ -195,7 +195,7 @@ async function submitAccepted(page: Page, step: string, earlier: readonly string
 
 /** The "Problem version" value on a submission page. */
 async function expectPinnedRevision(page: Page, url: string, revision: number, who: string): Promise<void> {
-  const response = await page.goto(url);
+  const response = await openPage(page, url);
   expect(response?.status(), `${who} opens ${url}`).toBe(200);
   const value = page.locator("dt", { hasText: "Problem version" }).locator("xpath=following-sibling::dd[1]");
   await expect(value, `${who}: the submission shows the revision it was judged against`).toHaveText(`Revision ${revision}`);
@@ -309,7 +309,7 @@ test.describe("authoring journey", () => {
       let secondSubmission = "";
 
       await test.step("1. RECADMIN01 creates the draft, its tests and references (a WRONG cpp20 model first)", async () => {
-        await admin.goto("/admin/problems/new");
+        await openPage(admin, "/admin/problems/new");
         await admin.getByLabel("Title", { exact: true }).fill(fx.title);
         await admin.getByLabel("Slug", { exact: true }).fill(fx.slug);
         await admin.getByLabel("Difficulty", { exact: true }).selectOption("EASY");
@@ -326,7 +326,7 @@ test.describe("authoring journey", () => {
         state.problemId = id;
         testInfo.annotations.push({ type: "problem", description: `${id} (${fx.slug})` });
 
-        await admin.goto(`${problemUrl(id)}/testcases`);
+        await openPage(admin, `${problemUrl(id)}/testcases`);
         for (const [index, t] of fx.tests.entries()) {
           await admin.getByLabel("Input", { exact: true }).fill(t.input);
           await admin.getByLabel("Expected output", { exact: true }).fill(t.output);
@@ -335,7 +335,7 @@ test.describe("authoring journey", () => {
           await expectActionSuccess(admin, toast(admin, `Test ${index} added.`), `add test ${index}`);
         }
 
-        await admin.goto(problemUrl(id));
+        await openPage(admin, problemUrl(id));
         for (const ref of fx.references) await saveReference(admin, ref, `reference ${ref.label}`);
       });
 
@@ -353,7 +353,7 @@ test.describe("authoring journey", () => {
       });
 
       await test.step("3. fix the model, revalidate until complete, submit for review (originality attested)", async () => {
-        await admin.goto(problemUrl(id));
+        await openPage(admin, problemUrl(id));
         await admin.getByRole("button", { name: `Edit ${fx.wrongModel.label} (${fx.wrongModel.language})` }).click();
         const source = admin.getByLabel("Source", { exact: true });
         await expect(source, "the form holds the wrong model").toHaveValue(new RegExp(fx.refCanary));
@@ -380,7 +380,7 @@ test.describe("authoring journey", () => {
       });
 
       await test.step('7. a new revision with a statement marker; validate; RECADMIN02 approves; "Published revision 2"', async () => {
-        await admin.goto(problemUrl(id));
+        await openPage(admin, problemUrl(id));
         await admin.getByRole("button", { name: "Create new revision" }).click();
         await expectActionSuccess(admin, toast(admin, /Draft revision 2 created\.|Revision 2 is already open\./), "new revision");
         // Only a DRAFT revision is editable, and revision 1 is frozen: this is revision 2.
@@ -403,7 +403,7 @@ test.describe("authoring journey", () => {
         await expect(student.getByText("it is now at revision 2")).toBeVisible();
         await expectPinnedRevision(admin, firstUrl, 1, "the admin");
 
-        await student.goto(`/problems/${fx.slug}`);
+        await openPage(student, `/problems/${fx.slug}`);
         await settle(student);
         await expect(student.getByText(fx.r2Marker).first(), "the workspace statement is revision 2").toBeVisible();
 
@@ -415,7 +415,7 @@ test.describe("authoring journey", () => {
         const leaks: string[] = [];
         const request = studentCtx!.request;
 
-        await student.goto("/profile");
+        await openPage(student, "/profile");
         const handleHref = await student
           .locator('a[href^="/u/"]')
           .first()
@@ -477,7 +477,7 @@ test.describe("authoring journey", () => {
         // In the browser: every HTML, flight and JSON response each page pulls in.
         const settleResponses = collectResponses(student, origin, leaks);
         for (const path of pages) {
-          await student.goto(path);
+          await openPage(student, path);
           await settle(student);
           await settleResponses();
         }
@@ -486,7 +486,7 @@ test.describe("authoring journey", () => {
         expect(leaks, "secrets in student-reachable responses").toEqual([]);
 
         // A staff page sends the student home; the judge's blob route wants a judge node.
-        await student.goto(problemUrl(id), { waitUntil: "commit" });
+        await openPage(student, problemUrl(id), { waitUntil: "commit" });
         await expectLandedOn(student, "/dashboard");
 
         const blobPath = `/api/judge/blob/${fx.hiddenInputSha256}`;

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { ACCOUNTS, type AccountKey } from "./support/accounts";
-import { appliedTheme, presetTheme, settle, waitForEditor, type Theme } from "./support/page";
+import { appliedTheme, openPage, presetTheme, settle, type Theme, waitForEditor } from "./support/page";
 
 /**
  * The axe gate (docs/ACCESSIBILITY.md §6): ZERO serious or critical
@@ -257,7 +257,7 @@ for (const target of TARGETS) {
           test(`axe ${target.path} [${viewport.name}, ${theme}]`, async ({ page }, testInfo) => {
             const label = `${target.path} [${viewport.name} ${viewport.width}x${viewport.height}, ${theme}]`;
             await presetTheme(page, theme);
-            const response = await page.goto(target.path);
+            const response = await openPage(page, target.path);
             expect(response?.status(), `${target.path} should load`).toBeLessThan(400);
             // A guarded page that bounced to /login would scan the wrong page.
             if (target.as) expect(new URL(page.url()).pathname).not.toBe("/login");

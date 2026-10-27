@@ -10,7 +10,7 @@ import {
   tabTo,
   type FocusDesc,
 } from "./support/keyboard";
-import { settle, waitForEditor } from "./support/page";
+import { openPage, settle, waitForEditor } from "./support/page";
 
 /**
  * The keyboard-only solving journey (docs/ACCESSIBILITY.md §5–§6). After
@@ -125,7 +125,7 @@ test("keyboard-only solving journey", async ({ page }, testInfo) => {
   let solutions: Solutions | undefined;
 
   await test.step("filter the catalogue to Easy and apply, by keyboard", async () => {
-    await page.goto("/problems");
+    await openPage(page, "/problems");
     await settle(page);
     // Focus starts at the top of the document: the first Tab is the skip link.
     await pressTab(page);

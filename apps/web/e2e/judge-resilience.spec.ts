@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { contextAs } from "./support/session";
+import { openPage } from "./support/page";
 
 /**
  * SPEC §10's two manual items, as a driven drill (Phase 10f).
@@ -30,7 +31,7 @@ test.describe("judge resilience", () => {
     const context = await contextAs(browser, "admin", { viewport: { width: 1366, height: 768 } });
     const page = await context.newPage();
     try {
-      await page.goto("/admin/judge");
+      await openPage(page, "/admin/judge");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
       /**
@@ -85,7 +86,7 @@ test.describe("judge resilience", () => {
       // The workspace, which is where a student watches a verdict arrive.
       // There is no submissions INDEX route (only /submissions/[id]), which
       // is itself the answer to "where would they be looking".
-      await page.goto("/problems/two-sum");
+      await openPage(page, "/problems/two-sum");
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 60_000 });
       const text = await page.locator("main").innerText();
       // Whatever the state of the queue, the page must not be claiming an

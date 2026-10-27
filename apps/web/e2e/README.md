@@ -52,6 +52,26 @@ server's routes: the student pages, and for staff `/admin`, `/admin/problems`,
 | `SEED_STUDENT_PASSWORD`, `SEED_ADMIN_PASSWORD` | — | seed passwords (environment or `apps/web/.env.local`) |
 | account overrides | see Accounts | |
 
+## Navigating: always `openPage`, never `page.goto`
+
+Every navigation in this suite goes through `openPage(page, path)` from
+`support/page.ts`. `next dev` restarts itself when it approaches its memory
+threshold — it prints "⚠ Server is approaching the used memory threshold,
+restarting..." — and a request in flight at that moment comes back with
+nothing: `net::ERR_EMPTY_RESPONSE`. That is the development server's
+lifecycle, not the application's behaviour, and it cost a whole CI run
+(docs/RUNBOOK.md §3, 2026-10-21) by killing the global setup's first
+`page.goto` before any assertion had run.
+
+`openPage` retries **only** connection-level failures — empty response,
+refused, reset — and only while its budget lasts (180 s on CI, 60 s
+locally). Everything else is rethrown as it is. In particular a navigation
+**timeout** is never retried: a page that takes too long to arrive is a
+finding, and no helper here may turn a finding into a pass.
+
+So: a new spec calls `openPage`, and `page.goto` in a spec is a mistake —
+it will pass locally and fail a run eventually.
+
 ## Running it locally
 
 ```powershell

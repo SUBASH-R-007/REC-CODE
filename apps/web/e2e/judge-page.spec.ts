@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ACCOUNTS } from "./support/accounts";
-import { settle } from "./support/page";
+import { openPage, settle } from "./support/page";
 
 /**
  * The public /judge transparency page (Phase 4) and the workspace footer
@@ -18,7 +18,7 @@ test.describe("signed out", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
   test("/judge is public and lists the enabled languages", async ({ page }) => {
-    const response = await page.goto("/judge");
+    const response = await openPage(page, "/judge");
     expect(response?.status(), "/judge should answer 200 signed out").toBe(200);
     expect(new URL(page.url()).pathname).toBe("/judge");
     await settle(page);
@@ -36,7 +36,7 @@ test.describe("workspace footer", () => {
   test.use({ storageState: ACCOUNTS.student.storageState });
 
   test("links the active language to its /judge section", async ({ page, context }) => {
-    await page.goto(process.env.E2E_PROBLEM ? `/problems/${process.env.E2E_PROBLEM}` : "/problems/two-sum");
+    await openPage(page, process.env.E2E_PROBLEM ? `/problems/${process.env.E2E_PROBLEM}` : "/problems/two-sum");
     expect(new URL(page.url()).pathname).not.toBe("/login");
     await settle(page);
 
@@ -51,7 +51,7 @@ test.describe("workspace footer", () => {
     expect(shown.length).toBeGreaterThan(0);
 
     const judge = await context.newPage();
-    const response = await judge.goto(href);
+    const response = await openPage(judge, href);
     expect(response?.status()).toBe(200);
     const heading = judge.locator(`h3#${anchor}`);
     await expect(heading).toBeVisible();
