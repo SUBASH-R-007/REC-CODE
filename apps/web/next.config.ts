@@ -69,6 +69,21 @@ class ClientChunkMapPlugin {
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: path.join(process.cwd(), "../.."),
+  /**
+   * `.next`, unless RECX_DIST_DIR says otherwise. Unset everywhere that
+   * matters — the deployment, CI and `pnpm size` all read `.next`.
+   *
+   * It exists so a second Next server can run beside the first on this
+   * laptop without destroying its build, because `next dev` and `next start`
+   * otherwise share one directory and the dev server overwrites a production
+   * build in place. The case that needs it: showing the production bundle
+   * while a judge node is attached. The judge's heartbeat is refused by a
+   * production web app (an unhardened WSL2 kernel, `docs/RUNBOOK.md` §1.5),
+   * so the node heartbeats to a development server on another port instead,
+   * and the production app dispatches to the same Redis and reads the same
+   * Postgres. A demo arrangement for one machine, never a deployment.
+   */
+  distDir: process.env.RECX_DIST_DIR ?? ".next",
   poweredByHeader: false,
   reactStrictMode: true,
   // Workspace packages ship TypeScript source.

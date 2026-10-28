@@ -23,6 +23,10 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/.next/**",
+      // A second Next build directory, for running a dev server beside a
+      // production one on the same checkout (RECX_DIST_DIR in
+      // apps/web/next.config.ts). Generated output, like .next itself.
+      "**/.next-dev/**",
       "**/dist/**",
       "**/coverage/**",
       "apps/web/public/**",

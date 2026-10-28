@@ -51,7 +51,8 @@ function arg(name) {
 }
 const flag = (name) => process.argv.includes(name);
 
-// The build is served from .next (next.config.ts sets no distDir).
+// The build is served from .next (next.config.ts defaults distDir to it;
+// RECX_DIST_DIR is for running a second dev server beside a production one).
 const nextDir = resolve(webDir, ".next");
 const budgets = JSON.parse(readFileSync(join(webDir, "size-budgets.json"), "utf8"));
 const verbose = flag("--verbose");
