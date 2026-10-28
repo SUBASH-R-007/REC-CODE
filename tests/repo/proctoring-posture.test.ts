@@ -301,3 +301,52 @@ describe("a contest is not an exam, and nothing pretends otherwise", () => {
     expect(doc).toMatch(/contest/i);
   });
 });
+
+describe("the browser is not the control (PROCTORING.md §8, Phase 11c)", () => {
+  /**
+   * "Can proctor mode require an incognito window, so no extensions can be
+   * plugged in?" is the most-asked proctoring question, and the answer is
+   * no three times over (§8): a page cannot detect private mode, a private
+   * window is not extension-free, and a page cannot see extensions at all.
+   *
+   * The reason this needs a fence rather than a paragraph is that the
+   * failure mode is attractive. Somebody will find a heuristic that works
+   * on the laptop in front of them, and it will ship as a *gate* — and a
+   * gate built on a self-reported value does not add a line a reviewer can
+   * discount, it stops an honest student from sitting the paper. The
+   * heuristics misreport Guest mode and some ordinary profiles, so the
+   * students it stops are chosen at random on exam morning.
+   *
+   * Same shape as the §5 fence, and deliberately beside it.
+   */
+  const SNIFFERS: ReadonlyArray<[string, RegExp]> = [
+    ["private-mode detection by storage quota", /storage\s*\.\s*estimate\s*\(/],
+    ["private-mode detection by the FileSystem probe", /webkitRequestFileSystem|\brequestFileSystem\b/],
+    ["a private-mode detection library or flag", /detectIncognito|isIncognito|incognitoMode|isPrivateMode|privateBrowsing/i],
+    ["extension sniffing by resource probe", /chrome-extension:\/\//],
+    ["the extension management API", /chrome\s*\.\s*management/],
+  ];
+
+  const web = findFiles({ under: [WEB], extensions: [".ts", ".tsx"] }).filter((rel) => !rel.includes(".test."));
+
+  it.each(SNIFFERS)("%s appears nowhere in apps/web/src", (_what, pattern) => {
+    const offenders = web.filter((rel) => pattern.test(readRepoFile(rel)));
+    expect(
+      offenders,
+      "docs/PROCTORING.md §8: the window type is not detectable and not a control. The operational answer is deploy/lab-policy/ on a machine the college owns.",
+    ).toEqual([]);
+  });
+
+  it("answers the question in the document, and points at the control that works", () => {
+    const doc = readRepoFile("docs/PROCTORING.md");
+    const section = doc.slice(doc.indexOf("## 8."));
+    expect(section.length, "§8 is missing from docs/PROCTORING.md").toBeGreaterThan(1_000);
+    // The three walls, each named.
+    expect(section).toMatch(/no API|there is no API/i);
+    expect(section).toMatch(/Allow in incognito/);
+    expect(section).toMatch(/cannot see extensions/i);
+    // And the place the answer actually lives.
+    expect(section).toContain("deploy/lab-policy/");
+    expect(section).toContain("RUNBOOK.md");
+  });
+});

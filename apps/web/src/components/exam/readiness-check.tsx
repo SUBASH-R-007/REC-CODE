@@ -115,6 +115,17 @@ export function ReadinessCheck({
             {proctorNote}
           </p>
         ) : null}
+        {/*
+          Not a check, because it is not checkable: a page cannot tell which
+          kind of window it is in (docs/PROCTORING.md §8). It is here for the
+          candidate's sake rather than ours — a private window drops the
+          session when it closes, and finding that out mid-sitting costs time
+          against their own clock.
+        */}
+        <p className="mt-3 text-xs text-text-secondary">
+          Use an ordinary browser window. A private or incognito window forgets your sign-in the moment it
+          closes, and your clock would still be running.
+        </p>
       </header>
 
       <ol className="flex flex-col gap-5">

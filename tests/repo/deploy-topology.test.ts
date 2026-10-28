@@ -387,3 +387,128 @@ describe("the compose files and the processes agree on variable names", () => {
     expect(dbClient.indexOf("hydrateFileBackedSecrets([")).toBeLessThan(dbClient.indexOf("createPrismaClient({"));
   });
 });
+
+describe("the exam lab browser policy (Phase 11c)", () => {
+  /**
+   * `deploy/lab-policy/` is `docs/PROCTORING.md` §4's first control — "a
+   * supervised lab on college-managed machines" — as files somebody can
+   * install. It answers the question §8 of that document asks: a page
+   * cannot require a private window, cannot detect one, and cannot see
+   * extensions at all, so "no extensions" is available to the owner of the
+   * machine and to nobody else.
+   *
+   * Like the compose files above, this is an artefact nobody here has
+   * started: there is one laptop and no lab. That is the reason it needs a
+   * fence. Two files have to say the same thing in two syntaxes, and the
+   * ways they drift are exactly the ways no reviewer catches by eye — a key
+   * set on Linux and forgotten on Windows, or a placeholder host that
+   * resolves somewhere real.
+   */
+  const POLICY_DIR = "deploy/lab-policy";
+  const json = JSON.parse(readRepoFile(`${POLICY_DIR}/chrome-policy.json`)) as Record<string, unknown>;
+  const reg = readRepoFile(`${POLICY_DIR}/recx-exam-policy.reg`);
+  const readme = readRepoFile(`${POLICY_DIR}/README.md`);
+
+  it("disables private windows rather than requiring them, and says why", () => {
+    /**
+     * 1 is "disabled"; 2 would be "forced". Forcing it is the instinct and
+     * it is the wrong way round: what the idea wants is a clean browser for
+     * the next candidate, which `ClearBrowsingDataOnExitList` does without
+     * private mode's own hazard — a window closed by accident takes the
+     * candidate's session with it, mid-sitting, against a running clock.
+     */
+    expect(json.IncognitoModeAvailability).toBe(1);
+    expect(json.ClearBrowsingDataOnExitList).toEqual(
+      expect.arrayContaining(["cookies_and_other_site_data", "password_signin"]),
+    );
+  });
+
+  it("blocks every extension, and allows none by default", () => {
+    expect(json.ExtensionInstallBlocklist).toEqual(["*"]);
+    // An exception is a decision somebody signs for, not a default.
+    expect(json.ExtensionInstallAllowlist).toEqual([]);
+    // SPEC §5: the platform must be fully functional with no college extension.
+    expect(json.ExtensionInstallForcelist).toEqual([]);
+  });
+
+  it("closes the sync hole that would undo the blocklist", () => {
+    /**
+     * The part that is easy to miss: without these two, one Google sign-in
+     * reinstalls the candidate's own extension set on arrival and the
+     * blocklist above was theatre.
+     */
+    expect(json.BrowserSignin).toBe(0);
+    expect(json.SyncDisabled).toBe(true);
+    // And no unmanaged profile to escape into.
+    expect(json.BrowserGuestModeEnabled).toBe(false);
+    expect(json.BrowserAddPersonEnabled).toBe(false);
+  });
+
+  it("leaves the invigilator a way to verify all of this", () => {
+    // A blocklist of "*" covers chrome:// pages too, and chrome://policy is
+    // the whole of the per-hall check in RUNBOOK §2.14.
+    expect(json.URLBlocklist).toEqual(["*"]);
+    expect(json.URLAllowlist).toEqual(expect.arrayContaining(["chrome://policy"]));
+  });
+
+  it("ships a host that cannot resolve, so a forgotten placeholder fails loudly", () => {
+    const urls = JSON.stringify(json).match(/https?:\/\/[^"]+/g) ?? [];
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url, "use a .invalid placeholder: a real-looking host would be allowed by accident").toMatch(
+        /^https:\/\/[^/]*\.invalid(\/|$)/,
+      );
+    }
+    expect(reg).not.toMatch(/https?:\/\/(?![^"\s]*\.invalid)/);
+  });
+
+  it("one allowlisted host is enough, because the app is same-origin", () => {
+    /**
+     * The allowlist is sound only while the app loads nothing from
+     * elsewhere. The content security policy is where that is true or
+     * false, so read it rather than assume it: if a CDN ever appears in a
+     * directive, this policy silently stops the exam from loading.
+     */
+    const csp = readRepoFile("apps/web/src/middleware.ts");
+    const builder = csp.slice(csp.indexOf("export function buildCsp"));
+    const body = builder.slice(0, builder.indexOf("\n}"));
+    expect(body).toContain("default-src 'self'");
+    expect(body, "an external host in the CSP means URLAllowlist needs it too").not.toMatch(
+      /`[a-z-]+-src [^`]*https:\/\//,
+    );
+  });
+
+  it("says the same thing on Windows as on Linux", () => {
+    const missing: string[] = [];
+    for (const [key, value] of Object.entries(json)) {
+      if (Array.isArray(value)) {
+        // A list is a subkey; an empty one has no subkey to write.
+        if (value.length > 0 && !reg.includes(`\\Google\\Chrome\\${key}]`)) missing.push(key);
+        continue;
+      }
+      const expected =
+        typeof value === "boolean"
+          ? `"${key}"=dword:0000000${value ? 1 : 0}`
+          : typeof value === "number"
+            ? `"${key}"=dword:${value.toString(16).padStart(8, "0")}`
+            : `"${key}"="${value as string}"`;
+      if (!reg.includes(expected)) missing.push(`${key} (${expected})`);
+    }
+    expect(missing, "deploy/lab-policy/recx-exam-policy.reg has drifted from chrome-policy.json").toEqual([]);
+  });
+
+  it("explains every key it sets", () => {
+    // A policy added without a sentence about it is a policy nobody can
+    // review, and this file is read by whoever locks down the lab.
+    const unexplained = Object.keys(json).filter((key) => !readme.includes(key));
+    expect(unexplained, "document it in deploy/lab-policy/README.md").toEqual([]);
+  });
+
+  it("claims nothing about the sitting", () => {
+    // The policy raises the cost of the easy routes on one machine. The
+    // phone on the candidate's lap is untouched by all of it, and the
+    // README has to keep saying so.
+    expect(readme).toMatch(/phone/i);
+    expect(readme).toMatch(/does not claim|Nothing here claims/i);
+  });
+});

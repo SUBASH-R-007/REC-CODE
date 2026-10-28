@@ -1218,6 +1218,70 @@ placement cell has asked for, needs it.
 
 ---
 
+### 2.14 Preparing a lab machine for a sitting (Phase 11c)
+
+`docs/PROCTORING.md` §4 lists "a supervised lab on college-managed
+machines" as the first control that actually enforces anything.
+`deploy/lab-policy/` is that control as files: `chrome-policy.json` for
+Linux and ChromeOS, `recx-exam-policy.reg` for Windows, and a README
+explaining every key and what it does not do.
+
+This is also the answer to "can proctor mode require a private window so no
+extensions load". It cannot: a page cannot detect private mode (Chrome
+closes each leak as a bug, and the heuristics that remain misreport Guest
+mode and some ordinary profiles), a private window is not extension-free
+anyway (*Allow in incognito* is a per-extension toggle), and a page cannot
+enumerate extensions at all. "No extensions" is available to the owner of
+the machine and to nobody else, which is why it lives here in operations
+rather than in the exam client. `deploy/lab-policy/README.md` has the long
+form.
+
+**Per image, once.** Replace `exam.rec.invalid` with the real exam host
+first — it is a reserved name that can never resolve, so a machine deployed
+with the placeholder fails visibly instead of quietly allowing some other
+domain.
+
+```sh
+# Linux (Google Chrome). Chromium: /etc/chromium/policies/managed/
+sudo install -D -m 0644 deploy/lab-policy/chrome-policy.json \
+  /etc/opt/chrome/policies/managed/recx-exam.json
+ls -l /etc/opt/chrome/policies/managed/recx-exam.json   # root-owned, 0644
+```
+
+Windows: import `recx-exam-policy.reg` as an administrator, or push the same
+keys through Group Policy with Google's ADMX templates. ChromeOS: set them
+in the Admin console against the device organisational unit. Restart Chrome
+either way.
+
+The file must be root-owned and not writable by the account the candidate
+signs in as. That ownership *is* the enforcement — a policy file a candidate
+can edit is a suggestion. Check it; do not assume it.
+
+**Per hall, before the sitting.** Five minutes, and the last two matter most:
+
+1. `chrome://policy` → **Reload policies**. Every key from the file is
+   listed with source **Platform** and status **OK**. A missing key, or one
+   whose source reads **Cloud** or **User**, is not in force.
+2. `chrome://extensions` is empty, and says extensions are blocked by the
+   administrator.
+3. The exam host loads; anything else does not.
+4. The candidate's own account cannot write the policy file (above).
+5. Record that you did this. From the invigilation page, *Record what you
+   saw* against any candidate in the hall writes an `INVIGILATOR_NOTE` —
+   context for a reviewer, and by design unable to raise a band on its own.
+   A sitting whose hall check was never recorded is not wrong; it is
+   unevidenced, and that is what the note fixes.
+
+**What this does not do**, in the same breath as installing it: nothing
+about a phone on the candidate's lap, a second laptop, a VM, a remote
+desktop, or a helper on a messaging app on another device. `docs/PROCTORING.md`
+§2 calls the second device the largest hole and says it is unclosable by
+software. The policy raises the cost of the easy routes on the machine the
+college owns. The invigilator in the room is still the control that matters
+most.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -1450,3 +1514,5 @@ coordinator from actual runs — never in advance.
 | 11a | 2026-10-28 | One student, typed in | **DONE.** `/admin/students/new`: the late admission and the transfer, which until now needed a CSV of one row. It is deliberately not a second way to create a student — the field validation is `rosterRowSchema`, the conflict and scope decisions are `planRosterImport`, the write is `applyRosterPlan`, and the same advisory lock an import takes — so anything that is not a clean creation inside the admin's scope comes back as the planner's own refusal. No `RosterImport` row: a manual add has no file name and no file hash, and inventing them would put a lie in a provenance field, so the audit entry (`student.added`, with the actor and the scope) is the provenance. 5 database tests, including that the account arrives with no password, exactly like an imported one | Claude |
 | 11b | 2026-10-28 | **The proctoring audit, and what it found** | **FIXED.** `docs/PROCTORING.md` is the most load-bearing prose in the repository and was prose alone; turning it into `tests/repo/proctoring-posture.test.ts` found that prose and code had drifted badly. **(1) The integrity engine was inert.** `flagAttemptIfNeeded` — written in Phase 6, complete, idempotent, audited — was called by NOTHING. No attempt was ever flagged, no result was ever withheld, the 72-hour SLA had nothing to act on, and the review queue, the reviews and the appeals were a surface over an empty table. Every test passed, because every test called the engine directly. It is now called at submit, after the derivation below, and a fence asserts both. **(2) Seven of twenty-five declared signals were produced by nothing**, with nothing to say so — and a signal a reviewer believes exists and does not is worse than one never offered, because its absence reads as evidence. The worst was `SNAPSHOT_JUMP`, the heaviest substantive contribution in the triage engine (30 points), which SPEC §5 calls "the most probative artefact" and "the one piece of evidence that survives client tampering": its derivation was written and tested in Phase 6 and never called, so no exam has ever been reviewed with it. Now derived at submit, when the final solution the rule is a share of first exists, with a grace window so an ordinary paste explains its own interval, exemptions from the attempt's frozen accommodation flags, and a refusal to run twice. `FIRST_KEYSTROKE`, `IDLE_GAP`, `NETWORK_DROP` and `CLIENT_SCRIPT_ERROR` are now emitted by the exam client; `INVIGILATOR_NOTE` gained a producer (`invigilate#recordObservation`), so the control §4 rates highest — a physical invigilator — can finally put what they saw in front of the reviewer, as context that cannot raise a band. `DEVTOOLS_HEURISTIC` and `SUBMISSION_RATE_ANOMALY` are reserved with their reasons in code (one is unreliable in both directions; the other has no referent, because a sitting submits once). The three lists partition the vocabulary and a test holds them to it, so a kind added now fails until somebody answers "who emits this?". **(3) Contests:** no proctor mode, no telemetry, no flags — a decision, not an omission, now written in §6 with its three reasons and fenced, so nobody half-builds collection a student was never told about. 10 new database tests (snapshot jumps derived, not derived when a paste explains them, not derived from steady work, never doubled; banding that leaves a clean sitting alone, refuses to flag on context alone, withholds with a 72-hour deadline, is idempotent, and touches no score, status or account) | Claude |
 | 11b | 2026-10-28 | Changing a password you already know | **DONE.** `/profile/settings` → "Password", for every signed-in role. Until now nobody could change their own password at all — a super-admin who suspected theirs was known had to ask for a reset link to replace it. The current password is required and verified with Argon2id (a change that needed only a live session would turn an unlocked laptop in a lab into a permanent takeover), which makes the form a guessing oracle, so it is rate-limited per account and a wrong current password is audited as `auth.password_change_failed`. Every session ends including the one making the change, because the friendlier alternative leaves whoever prompted the change still signed in. An account with no password is sent to the sign-in page's link instead of being asked for one it does not have. 4 database tests | Claude |
+| 11c | 2026-10-28 | "Can proctor mode require an incognito window, so no extensions load?" | **ANSWERED, AND THE REAL CONTROL SHIPPED.** No, three times over, and the reasons are in `docs/PROCTORING.md` §8 with the §2 limitation beside the extension one: a page cannot detect private mode (no API; Chrome treats detectability as a leak and has closed each one found — the FileSystem probe in Chrome 76, the storage-quota probe after it — and the heuristics that survive misreport Guest mode and some ordinary profiles), a private window is not extension-free anyway (*Allow in incognito* is a per-extension toggle; unpacked developer-mode extensions ignore the question), and a page cannot enumerate extensions in any window. The general form, which is the part worth keeping: **what the candidate's browser reports about the candidate's browser is not a control**, and a gate built on a self-reported value is strictly worse than a signal — when it is wrong it stops an honest student from sitting the paper instead of adding a line a reviewer can discount, and it chooses who on exam morning at random. So nothing was added to the exam client. What shipped instead is the control §4 lists first, which until now was a sentence: `deploy/lab-policy/` — `chrome-policy.json` (Linux/ChromeOS), `recx-exam-policy.reg` (Windows) and a README explaining every key — plus `docs/RUNBOOK.md` §2.14 with the install, the root-ownership check and a five-step per-hall verification at `chrome://policy`. `ExtensionInstallBlocklist: ["*"]` is the real "no extensions", and it holds because the college owns the policy file. Two findings worth the row: **Chrome Sync is the hole that would have undone it** — without `BrowserSignin: 0` and `SyncDisabled: true`, one Google sign-in reinstalls the candidate's own extension set on arrival and the blocklist is theatre; and the policy **disables** private mode rather than forcing it, because what the idea actually wants is a clean browser for the next candidate, which `ClearBrowsingDataOnExitList` does without private mode's own hazard (a window closed by accident takes the session with it, mid-sitting, against a running clock — the hazard the `/assessments/[slug]/readiness` page now warns the candidate about in one line). Fenced: 6 tests in `tests/repo/proctoring-posture.test.ts` (§8 — no storage-quota probe, FileSystem probe, detection library, `chrome-extension://` probe or `chrome.management` anywhere in `apps/web/src`, beside the §5 `getUserMedia` fence) and 9 in `tests/repo/deploy-topology.test.ts` (the two policy files must agree key-for-key across two syntaxes, every key must be explained in the README — which caught `HomepageIsNewTabPage` undocumented — the placeholder host must be `.invalid` so a forgotten one fails loudly, and the one-host allowlist must stay sound, read from the CSP in `apps/web/src/middleware.ts` rather than assumed). NOT RUN: the policy itself. There is one laptop and no lab, so no machine has had it installed; §2.14 is written to be verified in front of a candidate, and that is where it must first be run | PASS (gate; policy NOT RUN) | Claude |
+| 11c | 2026-10-28 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` — Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted | PASS (lint 0 warnings; **7,462 tests passed, 0 failed**, 1,376 DB/Redis tests skipped by default: shared 1,730, judge-worker 414, db 301, design 84, scheduler 246, web 3,651, repo 1,036 — +15 over Phase 11b, all of them the new fences; `next build` exit 0; all size budgets met, `/assessments/[slug]/readiness` 118.7 KB of 130 after the private-window line, zero-JS `/login` confirmed from the served build) | Claude (coordinator) |
