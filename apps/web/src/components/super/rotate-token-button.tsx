@@ -47,6 +47,11 @@ export function RotateTokenButton({ nodeId, hostname }: { nodeId: string; hostna
         <Dialog
           open
           title={`New token for ${nodeId}`}
+          // Shown once and held only in memory, so Escape or a stray click on
+          // the backdrop would lose it and force another rotation — with the
+          // node unable to claim jobs in between. The only way out is the
+          // button below, after the operator has copied it.
+          dismissible={false}
           onClose={() => {
             setToken(null);
             router.refresh();

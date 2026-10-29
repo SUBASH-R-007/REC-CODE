@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { appendAuditEntriesInTx } from "@recx/db/audit";
 import { BREAK_GLASS_JUSTIFICATION_MIN } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
@@ -13,6 +14,7 @@ import { requestIpHash } from "@/lib/ip";
 import { activeSuperAdminIds, enqueueEmail } from "@/lib/outbox";
 import { executePrivilegedOperation, privilegedSensitivity } from "@/lib/privileged/operations";
 import { PRIVILEGED_KIND_LABEL } from "@/lib/privileged/payloads";
+import { REQUESTER_IS_ACTIVE_SUPER_ADMIN_SQL, requesterIsActiveSuperAdmin } from "@/lib/privileged/requester";
 import {
   canApprove,
   canCancel,
@@ -75,6 +77,9 @@ function enforce(check: DecisionCheck): void {
 async function refusalAfterRace(id: string): Promise<never> {
   const op = await loadOperation(id);
   const status = effectiveStatus(op, new Date());
+  if (status === "PENDING" && !(await requesterIsActiveSuperAdmin(op.requestedById))) {
+    throw new AppError(DECISION_MESSAGES.requesterGone, 409);
+  }
   throw new AppError(status === "EXPIRED" ? DECISION_MESSAGES.expired : DECISION_MESSAGES.decided, 409);
 }
 
@@ -109,27 +114,37 @@ export async function approvePrivilegedOperation(
     const actor = await requireSuperAdmin();
     const parsed = approveSchema.parse(input);
     const op = await loadOperation(parsed.id);
-    enforce(canApprove(op, actor.id, parsed.payloadSha256, new Date()));
+    enforce(canApprove(op, actor.id, parsed.payloadSha256, new Date(), await requesterIsActiveSuperAdmin(op.requestedById)));
     const note = parsed.note ? parsed.note : null;
+    const ipHash = await requestIpHash();
+    // The decision and its SECURITY audit row commit together (or not at all).
     await decide(op.id, () =>
-      db.$executeRaw`
-        UPDATE "PrivilegedOperation"
-           SET status = 'APPROVED', "decidedById" = ${actor.id},
-               "decidedAt" = GREATEST((statement_timestamp() AT TIME ZONE 'UTC'), "requestedAt"),
-               "decisionNote" = ${note}, "breakGlass" = false
-         WHERE id = ${op.id} AND status = 'PENDING' AND "payloadSha256" = ${parsed.payloadSha256}
-           AND "requestedById" <> ${actor.id}
-           AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')`,
+      db.$transaction(async (tx) => {
+        const decided = await tx.$executeRaw`
+          UPDATE "PrivilegedOperation"
+             SET status = 'APPROVED', "decidedById" = ${actor.id},
+                 "decidedAt" = GREATEST((statement_timestamp() AT TIME ZONE 'UTC'), "requestedAt"),
+                 "decisionNote" = ${note}, "breakGlass" = false
+           WHERE id = ${op.id} AND status = 'PENDING' AND "payloadSha256" = ${parsed.payloadSha256}
+             AND "requestedById" <> ${actor.id}
+             AND "expiresAt" > (statement_timestamp() AT TIME ZONE 'UTC')
+             AND ${REQUESTER_IS_ACTIVE_SUPER_ADMIN_SQL}`;
+        if (decided === 1) {
+          await appendAuditEntriesInTx(tx, [
+            {
+              actorId: actor.id,
+              action: "privileged.approved",
+              entityType: "PrivilegedOperation",
+              entityId: op.id,
+              sensitivity: "SECURITY",
+              metadata: { kind: op.kind, summary: op.summary, requestedById: op.requestedById, note },
+              ipHash,
+            },
+          ]);
+        }
+        return decided;
+      }),
     );
-    await audit({
-      actorId: actor.id,
-      action: "privileged.approved",
-      entityType: "PrivilegedOperation",
-      entityId: op.id,
-      sensitivity: "SECURITY",
-      metadata: { kind: op.kind, summary: op.summary, requestedById: op.requestedById, note },
-      ipHash: await requestIpHash(),
-    });
     const outcome = await executePrivilegedOperation(op.id, actor);
     revalidatePath("/super");
     return outcome;
@@ -164,7 +179,10 @@ export async function selfApprovePrivilegedOperation(
     const actorName = `${actor.firstName} ${actor.lastName}`.trim();
     let emailed = 0;
     let decided = 0;
+    const ipHash = await requestIpHash();
     try {
+      // The decision, the emails, the notifications and the SECURITY audit
+      // row commit together: break-glass is never quiet.
       await db.$transaction(async (tx) => {
         decided = await tx.$executeRaw`
           UPDATE "PrivilegedOperation"
@@ -199,21 +217,23 @@ export async function selfApprovePrivilegedOperation(
             link: "/super",
           })),
         });
+        await appendAuditEntriesInTx(tx, [
+          {
+            actorId: actor.id,
+            action: "privileged.break_glass",
+            entityType: "PrivilegedOperation",
+            entityId: op.id,
+            sensitivity: "SECURITY",
+            metadata: { kind: op.kind, summary: op.summary, justification: parsed.justification, emailed },
+            ipHash,
+          },
+        ]);
       });
     } catch (error) {
       if (isCheckViolation(error)) await refusalAfterRace(op.id);
       throw error;
     }
     if (decided !== 1) await refusalAfterRace(op.id);
-    await audit({
-      actorId: actor.id,
-      action: "privileged.break_glass",
-      entityType: "PrivilegedOperation",
-      entityId: op.id,
-      sensitivity: "SECURITY",
-      metadata: { kind: op.kind, summary: op.summary, justification: parsed.justification, emailed },
-      ipHash: await requestIpHash(),
-    });
     const outcome = await executePrivilegedOperation(op.id, actor);
     revalidatePath("/super");
     return { ...outcome, emailed };

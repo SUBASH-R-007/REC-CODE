@@ -2334,3 +2334,74 @@ by 77 commits?
 **Do not merge the branch.** It is 77 commits behind and its tests are older
 than the ones here; merging would take back the weaker versions. Port file
 by file, with the branch's tests, as above.
+
+### The second pass over PR #1, and what is left after it
+
+Eleven more of that branch's fixes are in, each with the branch's own tests,
+each checked against this tree before porting rather than applied on trust.
+
+**Governance and the two-person rule.**
+
+* An approval now requires the REQUESTER to still be an active super-admin.
+  Without it, a super-admin who is demoted or disabled — say because the
+  account was compromised — leaves pending requests that a second
+  super-admin can still approve, which is the two-person rule holding in
+  form and not in substance. The check is in the action (with a message that
+  says what to do: reject it, or ask again) and in the approve UPDATE's own
+  WHERE, so a demotion that commits during the approval is refused too.
+* A PII export names its accounts at request time. The payload carried only
+  a filter, and the filter was evaluated again at execution, so the set of
+  accounts exported was not necessarily the set the approver reviewed — a
+  roster import, a status change or a role change in between would quietly
+  change it. The approved payload now carries `userIds` (at most
+  `PII_EXPORT_MAX_ACCOUNTS`, 10,000), and the download streams exactly those.
+* The decision and its SECURITY audit row commit together. They were two
+  statements; a crash between them left a decided operation with no audit
+  trail of who decided it.
+* An operation APPROVED but never executed is swept to FAILED after 15
+  minutes. Nothing else could move it: the process that died between the
+  approval and the claim left the row APPROVED forever.
+
+**Purge versus rejudge.** A submission whose source was archived — by a
+`SUBMISSION_PURGE` or by retention — keeps its verdict row forever, and
+rejudging it would compile an empty file and overwrite that verdict with a
+compile error. Rejudge selection now excludes archived sources (global and
+single), and the claim refuses one outright, so neither path can reach the
+judge.
+
+**The scheduler's tick.**
+
+* SMTP gets explicit timeouts (10 s to connect, 10 s for the greeting, 20 s
+  on the socket) instead of nodemailer's defaults of 2 minutes and 10
+  minutes. The outbox drains inside the tick that also runs the judge
+  reconciler.
+* The drain has a 30-second send budget. Rows it does not reach go back to
+  PENDING with their attempt refunded, rather than the tick stretching to
+  the length of the slowest relay.
+* Every outbox UPDATE matches the `attempts` value it claimed with, so a row
+  another instance reclaimed after a lease expired is not finished twice.
+
+**A lost update in the study-plan recount.** The recount counted enrolment
+progress in one statement that read the count before waiting on a finalise's
+lock and wrote it after — losing the solve the finalise was committing. The
+enrolments are now locked in their own statement first.
+
+**The design system.** A derived theme's `--muted` is clamped to the spec's
+DO-NOT bounds (never lighter than #6f6a87 in light, never darker than
+#9c95b4 in dark); the contrast clamp alone could stop short for some hues,
+and a super-admin's brand colour is what runs through that code. `Dialog`
+gained `dismissible={false}`, closes itself on unmount so focus returns to
+the control that opened it, and asks the parent on Escape instead of closing
+natively. Its one caller is the judge-node token, shown once and held only
+in memory, where Escape or a stray backdrop click lost it and forced another
+rotation — with the node unable to claim jobs in between.
+
+**Still not ported**, and still worth a read: `lib/authoring/import/{run,spool}.ts`
+and `lib/authoring/tests.ts` with the new `function-tests.ts` (the import
+spool and lock, canonical FUNCTION tests), `lib/admin/roster{,-plan}.ts`
+(the roster preview), `server/queries/submissions.ts` and
+`server/queries/super-dashboard.ts` (AdminScope on submission views), and
+about twenty one-to-two-line edits across `/super` and `/admin` pages. The
+same question applies to each: is the defect still here, and does the fix
+still apply after 77 commits? The branch stays open until somebody answers
+that for all of them; it still must not be merged.

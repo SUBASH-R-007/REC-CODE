@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useLayoutEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "../utils";
 
 /**
  * Accessible modal built on the native <dialog> element —
  * focus trapping, Esc handling and backdrop come for free.
+ *
+ * Controlled: `open` alone decides whether it shows. Escape, the backdrop
+ * and the close button only ask (`onClose`); a parent that refuses (say,
+ * while an action is pending) keeps it open, so the native element never
+ * drifts out of step with the parent's state. Unmounting an open dialog
+ * closes it first, so focus returns to the control that opened it.
+ * `dismissible={false}` turns off Escape, the backdrop and the close button;
+ * the content must then offer its own way out.
  */
 export function Dialog({
   open,
@@ -15,6 +23,7 @@ export function Dialog({
   children,
   size = "md",
   hideTitle,
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +31,7 @@ export function Dialog({
   children: React.ReactNode;
   size?: "sm" | "md" | "lg";
   hideTitle?: boolean;
+  dismissible?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -33,15 +43,39 @@ export function Dialog({
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
+  // Most callers unmount the dialog instead of passing open={false}: close the
+  // element while it is still in the document, which restores focus.
+  useLayoutEffect(() => {
+    const dialog = ref.current;
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
+  }, []);
+
   // A visible title is wired up via aria-labelledby; without it titled modals
   // were announced with no accessible name at all.
   return (
     <dialog
       ref={ref}
-      onClose={onClose}
+      onClose={() => {
+        // The browser may still close it on its own (a second Escape without
+        // user activation is not cancelable). A non-dismissible dialog opens
+        // again; otherwise the parent, which still thinks it is open, is told.
+        if (!open) return;
+        if (!dismissible) {
+          ref.current?.showModal();
+          return;
+        }
+        onClose();
+      }}
+      onCancel={(e) => {
+        // Escape: ask the parent instead of closing natively (see above).
+        e.preventDefault();
+        if (dismissible) onClose();
+      }}
       onClick={(e) => {
-        // Click on the backdrop (the dialog element itself) closes.
-        if (e.target === ref.current) onClose();
+        // Click on the backdrop (the dialog element itself) asks to close.
+        if (dismissible && e.target === ref.current) onClose();
       }}
       aria-label={hideTitle ? title : undefined}
       aria-labelledby={hideTitle ? undefined : titleId}
@@ -60,17 +94,19 @@ export function Dialog({
               {title}
             </h2>
           )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close dialog"
-            className={cn(
-              "rounded-lg p-1.5 text-muted transition-colors hover:bg-primary-subtle hover:text-text",
-              hideTitle && "absolute right-3 top-3 z-10",
-            )}
-          >
-            <X className="h-4 w-4" aria-hidden />
-          </button>
+          {dismissible && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close dialog"
+              className={cn(
+                "rounded-lg p-1.5 text-muted transition-colors hover:bg-primary-subtle hover:text-text",
+                hideTitle && "absolute right-3 top-3 z-10",
+              )}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          )}
         </div>
         {children}
       </div>

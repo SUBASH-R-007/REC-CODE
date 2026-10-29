@@ -121,6 +121,42 @@ describe.skipIf(!ENABLED)("outbox drain against recx_test", () => {
     expect(states.every((s) => s.status === "SENT" && s.attempts === 1)).toBe(true);
   });
 
+  it("stops sending when the tick's budget runs out; untried rows go back to PENDING with their attempt refunded", async () => {
+    const rows = [await enqueue("budget-1"), await enqueue("budget-2"), await enqueue("budget-3")];
+    const transport = new FakeTransport();
+    // A fake clock: every reading moves 100 ms on; the budget allows one send.
+    let t = 0;
+    const now = () => (t += 100);
+    const report = await new OutboxDrainJob({ db, log, dryRun: false, transport, batch: 50, sendBudgetMs: 150, now }).tick();
+    expect(report.deferred).toBeGreaterThanOrEqual(2);
+    const states = await db.emailOutbox.findMany({ where: { id: { in: rows.map((r) => r.id) } }, orderBy: { createdAt: "asc" } });
+    expect(states.filter((r) => r.status === "SENT")).toHaveLength(1);
+    const back = states.filter((r) => r.status === "PENDING");
+    expect(back).toHaveLength(2);
+    expect(back.every((r) => r.attempts === 0 && r.lockedUntil === null)).toBe(true);
+    // The next tick (no budget pressure) sends them.
+    await new OutboxDrainJob({ db, log, dryRun: false, transport, batch: 50 }).tick();
+    const after = await db.emailOutbox.findMany({ where: { id: { in: rows.map((r) => r.id) } } });
+    expect(after.every((r) => r.status === "SENT" && r.attempts === 1)).toBe(true);
+  });
+
+  it("a row reclaimed by another instance mid-send is not finished by the first claimer", async () => {
+    const row = await enqueue("reclaimed");
+    const transport = new FakeTransport();
+    const slowSend = transport.send.bind(transport);
+    transport.send = async (message) => {
+      if (message.subject === subject("reclaimed")) {
+        // Our lease ran out during a slow send and another instance claimed the row.
+        await db2.$executeRaw`UPDATE "EmailOutbox" SET attempts = attempts + 1,
+          "lockedUntil" = (now() AT TIME ZONE 'UTC') + interval '2 minutes' WHERE id = ${row.id}`;
+      }
+      await slowSend(message);
+    };
+    await new OutboxDrainJob({ db, log, dryRun: false, transport, batch: 50 }).tick();
+    // Still the other instance's: SENDING under its claim (attempts 2), not SENT by us.
+    expect(await db.emailOutbox.findUniqueOrThrow({ where: { id: row.id } })).toMatchObject({ status: "SENDING", attempts: 2 });
+  });
+
   it("a dry run claims and writes nothing", async () => {
     const row = await enqueue("dry");
     await new OutboxDrainJob({ db, log, dryRun: true, transport: new FakeTransport() }).tick();

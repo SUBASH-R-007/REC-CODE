@@ -135,6 +135,29 @@ describe.skipIf(!ENABLED)("governance sweep against recx_test", () => {
     expect(await db.auditLog.count({ where: { action: "privileged.failed", entityId: op.id } })).toBe(1);
   });
 
+  it("fails an operation APPROVED but never started (EXECUTING → FAILED in one transaction)", async () => {
+    const now = Date.now();
+    const op = await pending({ requestedAt: new Date(now - 60_000), expiresAt: new Date(now + 3_600_000) });
+    await db.$executeRaw`UPDATE "PrivilegedOperation" SET status = 'APPROVED', "decidedById" = ${approver},
+      "decidedAt" = (now() AT TIME ZONE 'UTC') WHERE id = ${op.id}`;
+    // A fresh approval is left alone (the web app is about to claim it).
+    const early = await new GovernanceSweepJob({ db, log, dryRun: false }).tick();
+    expect(early.failedUnstarted).toBe(0);
+    expect((await db.privilegedOperation.findUniqueOrThrow({ where: { id: op.id } })).status).toBe("APPROVED");
+    // decidedAt cannot be back-dated (decidedAt >= requestedAt, requestedAt near the clock): shorten the wait instead.
+    await new Promise((r) => setTimeout(r, 1_200));
+    const dry = await new GovernanceSweepJob({ db, log, dryRun: true, unstartedAfterMs: 1_000 }).tick();
+    expect(dry.failedUnstarted).toBeGreaterThanOrEqual(1);
+    const report = await new GovernanceSweepJob({ db, log, dryRun: false, unstartedAfterMs: 1_000 }).tick();
+    expect(report.failedUnstarted).toBeGreaterThanOrEqual(1);
+    const row = await db.privilegedOperation.findUniqueOrThrow({ where: { id: op.id } });
+    expect(row.status).toBe("FAILED");
+    expect(row.executionStartedAt).not.toBeNull();
+    expect(row.executedAt).not.toBeNull();
+    expect(row.error).toMatch(/never started/);
+    expect(await db.auditLog.count({ where: { action: "privileged.failed", entityId: op.id } })).toBe(1);
+  });
+
   it("ends lapsed impersonations once, even with two sweeps racing", async () => {
     const now = Date.now();
     const imp = await db.impersonationSession.create({

@@ -24,6 +24,14 @@ export async function recountStudyPlan(
     RETURNING "itemsTotal"`;
   const itemsTotal = plan?.itemsTotal ?? 0;
 
+  // Lock the plan's enrolments first, in their own statement. A finalise
+  // that is counting a solve holds its enrolment row until it commits; this
+  // waits for it, and the recount below then starts with a fresh snapshot
+  // that sees the solve. In one statement, the count was read before the
+  // wait and written after it, which lost the solve.
+  await tx.$queryRaw`
+    SELECT 1 FROM "StudyPlanEnrollment" WHERE "planId" = ${planId} ORDER BY "userId" FOR UPDATE`;
+
   const enrollmentsUpdated = await tx.$executeRaw`
     WITH counted AS (
       SELECT e."userId",

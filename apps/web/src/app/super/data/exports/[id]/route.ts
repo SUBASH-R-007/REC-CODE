@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
 import { csvRow } from "@/lib/privileged/csv";
-import { parsePrivilegedPayload, userFilterWhere, type PiiExportColumn } from "@/lib/privileged/payloads";
+import { parsePrivilegedPayload, type PiiExportColumn } from "@/lib/privileged/payloads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,10 +73,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   });
 
   const columns: readonly PiiExportColumn[] = payload.columns;
-  const where = userFilterWhere(payload.filter);
+  // Exactly the accounts the approver approved (resolved at request time,
+  // sorted by id), in pages; an account deleted since is simply absent.
+  const ids = payload.userIds;
   const select = Object.fromEntries([["id", true], ...columns.map((c) => [c, true])]) as Record<string, true>;
   const encoder = new TextEncoder();
-  let cursor: string | null = null;
+  let offset = 0;
   let headerSent = false;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -87,19 +89,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
           controller.enqueue(encoder.encode(csvRow(columns)));
           return;
         }
-        const rows = (await db.user.findMany({
-          where: cursor ? { AND: [where, { id: { gt: cursor } }] } : where,
-          orderBy: { id: "asc" },
-          take: PAGE,
-          select,
-        })) as Array<Record<string, unknown> & { id: string }>;
-        if (rows.length === 0) {
+        if (offset >= ids.length) {
           controller.close();
           return;
         }
-        cursor = rows[rows.length - 1]!.id;
-        controller.enqueue(encoder.encode(rows.map((r) => csvRow(columns.map((c) => r[c]))).join("")));
-        if (rows.length < PAGE) controller.close();
+        const slice = ids.slice(offset, offset + PAGE);
+        offset += slice.length;
+        const rows = (await db.user.findMany({
+          where: { id: { in: slice } },
+          orderBy: { id: "asc" },
+          select,
+        })) as Array<Record<string, unknown> & { id: string }>;
+        if (rows.length > 0) controller.enqueue(encoder.encode(rows.map((r) => csvRow(columns.map((c) => r[c]))).join("")));
+        if (offset >= ids.length) controller.close();
       } catch (error) {
         console.error("[pii-export] stream failed:", error instanceof Error ? error.message : error);
         controller.error(error);

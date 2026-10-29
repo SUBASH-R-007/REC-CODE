@@ -10,6 +10,7 @@ import {
   CardBody,
   CardHeader,
   CardSkeleton,
+  Dialog,
   DifficultyBadge,
   Dropdown,
   DropdownItem,
@@ -216,5 +217,32 @@ describe("barrel", () => {
     const source = readPackageFile("src/index.ts");
     expect(source).not.toMatch(/from "\.\/(derive|presets|contrast|cvd|palette)"/);
     expect(source).not.toContain("culori");
+  });
+});
+
+/**
+ * Ported from PR #1 (the Phase 4 adversarial review). `dismissible={false}`
+ * exists for one real case: the judge-node token, shown once and held only
+ * in memory, where Escape or a stray backdrop click loses it.
+ */
+describe("Dialog", () => {
+  it("offers a labelled close button by default", () => {
+    const markup = renderToStaticMarkup(
+      <Dialog open onClose={() => undefined} title="Rotate">
+        body
+      </Dialog>,
+    );
+    expect(markup).toContain('aria-label="Close dialog"');
+    expect(markup).toMatch(/<h2 id="[^"]+"[^>]*>Rotate<\/h2>/);
+  });
+
+  it("dismissible={false} has no close button (the content must offer the way out)", () => {
+    const markup = renderToStaticMarkup(
+      <Dialog open dismissible={false} onClose={() => undefined} title="New token">
+        <button type="button">I have copied it</button>
+      </Dialog>,
+    );
+    expect(markup).not.toContain("Close dialog");
+    expect(markup).toContain("I have copied it");
   });
 });

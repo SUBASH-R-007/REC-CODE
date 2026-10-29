@@ -1,4 +1,5 @@
 import "server-only";
+import { RETENTION_SETTING_KEY } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { ValidationError } from "@/lib/errors";
@@ -28,6 +29,16 @@ export const executeSubmissionPurge: Executor<"SUBMISSION_PURGE"> = async (op, a
   let details = 0;
   for (;;) {
     const ids = await db.$transaction(async (tx) => {
+      // A legal hold set while this runs stops the remaining batches. The
+      // shared lock conflicts with setLegalHold's exclusive one on the same
+      // key, so a hold either commits before this batch (and is seen here)
+      // or waits for it to finish.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${"setting:" + RETENTION_SETTING_KEY}))`;
+      if ((await readRetention(tx)).legalHold) {
+        throw new ValidationError(
+          `${LEGAL_HOLD_MESSAGE} The purge stopped after ${sources} source(s); those stay archived.`,
+        );
+      }
       const picked = await tx.$queryRaw<{ id: string }[]>`
         SELECT s.id FROM "Submission" s
           JOIN "SubmissionSource" src ON src."submissionId" = s.id
@@ -39,7 +50,7 @@ export const executeSubmissionPurge: Executor<"SUBMISSION_PURGE"> = async (op, a
            AND (${includeAccepted} OR s.verdict IS DISTINCT FROM 'AC')
          ORDER BY s.id
          LIMIT ${EXECUTOR_BATCH}
-         FOR UPDATE OF src SKIP LOCKED`;
+         FOR UPDATE OF s, src SKIP LOCKED`;
       const list = picked.map((r) => r.id);
       if (list.length === 0) return list;
       const archived = await tx.submissionSource.updateMany({

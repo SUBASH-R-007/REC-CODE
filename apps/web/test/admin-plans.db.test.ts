@@ -161,6 +161,34 @@ describe.skipIf(!ENABLED)("admin study plans against recx_test", () => {
     );
   });
 
+  it("a recount racing a solve being counted keeps the solve (the recount waits for it)", async () => {
+    const { recountStudyPlan } = await import("@/lib/plans/recount");
+    expect(await enrollment(planId)).toMatchObject({ itemsTotal: 2, itemsDone: 1 });
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    // What finalise does when a submission solves p2: the status row, then the enrolment, in one transaction.
+    const finalise = m.db.$transaction(
+      async (tx) => {
+        const now = new Date();
+        await tx.userProblemStatus.create({
+          data: { userId: u.stu.id, problemId: p[2]!.id, status: "SOLVED", attempts: 1, firstAttemptAt: now, lastAttemptAt: now, firstAcceptedAt: now },
+        });
+        await tx.studyPlanEnrollment.update({
+          where: { userId_planId: { userId: u.stu.id, planId } },
+          data: { itemsDone: { increment: 1 } },
+        });
+        await sleep(400);
+      },
+      { timeout: 10_000 },
+    );
+    await sleep(100);
+    // An admin edit's recount starts while that transaction is still open.
+    const recount = m.db.$transaction((tx) => recountStudyPlan(tx, planId), { timeout: 10_000 });
+    await Promise.all([finalise, recount]);
+    const e = await enrollment(planId);
+    expect(e).toMatchObject({ itemsTotal: 2, itemsDone: 2 });
+    expect(e.completedAt).not.toBeNull();
+  });
+
   it("a seed-managed plan is read-only until detached, and the seed sync then leaves it alone", async () => {
     const slug = `${tag}-seeded`;
     const seeded: Parameters<M["seed"]["syncStudyPlans"]>[1][number] = {

@@ -77,6 +77,8 @@ export const BULK_STATUS_MAX = 5_000;
 export const GLOBAL_REJUDGE_MAX = 25_000;
 export const PII_EXPORT_WINDOW_MS = 24 * 3_600_000;
 export const PII_EXPORT_MAX_DOWNLOADS = 3;
+/** A PII export names its accounts at request time; at most this many (narrow the filter beyond it). */
+export const PII_EXPORT_MAX_ACCOUNTS = 10_000;
 
 // ── Email outbox and scheduler jobs ─────────────────────────────────────
 

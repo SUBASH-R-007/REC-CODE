@@ -318,13 +318,15 @@ async function loadSpecInput(
       select: {
         lane: true,
         language: true,
-        source: { select: { source: true } },
+        source: { select: { source: true, archivedAt: true } },
         languageConfig: { select: { runtime: true } },
         problemVersion: { select: versionSelect },
       },
     });
     if (!row) throw new JobSpecError("The submission disappeared after it was claimed.");
     if (!row.source) throw new JobSpecError("The submission has no stored source.");
+    // Rejudge selection already skips purged submissions; never judge an empty file.
+    if (row.source.archivedAt || row.source.source === "") throw new JobSpecError("The submission's source was purged.");
     return {
       ...common,
       lane: row.lane,

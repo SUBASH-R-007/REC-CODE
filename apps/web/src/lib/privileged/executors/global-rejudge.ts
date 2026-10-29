@@ -3,7 +3,7 @@ import { Prisma } from "@recx/db";
 import { GLOBAL_REJUDGE_MAX } from "@recx/shared";
 import { auditMany } from "@/lib/audit";
 import { db } from "@/lib/db";
-import { resetForRejudge } from "@/lib/judge/rejudge";
+import { resetForRejudge, SOURCE_NOT_ARCHIVED_SQL } from "@/lib/judge/rejudge";
 import { EXECUTOR_BATCH, type Executor } from "@/lib/privileged/types";
 
 /**
@@ -23,6 +23,7 @@ export const executeGlobalRejudge: Executor<"GLOBAL_REJUDGE"> = async (op, actor
     Prisma.sql`"problemId" = ${problemId}`,
     Prisma.sql`status IN ('DONE', 'INTERNAL_ERROR')`,
     Prisma.sql`"queuedAt" < ${op.decidedAt}`,
+    SOURCE_NOT_ARCHIVED_SQL,
   ];
   if (problemVersionId) filters.push(Prisma.sql`"problemVersionId" = ${problemVersionId}`);
   if (languages.length > 0) filters.push(Prisma.sql`language = ANY(${[...languages]}::text[])`);

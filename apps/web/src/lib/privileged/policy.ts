@@ -25,6 +25,8 @@ export const DECISION_MESSAGES = {
     "You requested this operation, so a second super-admin must approve it. Use break-glass only in an emergency.",
   notRequester: "Only the super-admin who requested this operation can do that.",
   changed: "This request is not the one you reviewed. Reload the page and review it again.",
+  requesterGone:
+    "The super-admin who requested this is no longer an active super-admin, so it cannot be approved. Reject it, or ask for it again.",
   breakGlassOff: "Break-glass self-approval is switched off (Super-admin → Flags).",
   ownReject: "You requested this operation. Cancel it instead of rejecting it.",
 } as const;
@@ -45,11 +47,23 @@ function pending(op: DecidableOperation, now: Date): DecisionCheck {
   return { ok: true };
 }
 
-/** A second super-admin approves the exact payload they reviewed. */
-export function canApprove(op: DecidableOperation, actorId: string, sha: string, now: Date): DecisionCheck {
+/**
+ * A second super-admin approves the exact payload they reviewed, while the
+ * requester is still an ACTIVE SUPER_ADMIN — both people of the two-person
+ * rule are current super-admins. A demoted or disabled requester's pending
+ * requests can only be rejected or left to expire.
+ */
+export function canApprove(
+  op: DecidableOperation,
+  actorId: string,
+  sha: string,
+  now: Date,
+  requesterIsActiveSuperAdmin: boolean,
+): DecisionCheck {
   const open = pending(op, now);
   if (!open.ok) return open;
   if (op.requestedById === actorId) return { ok: false, reason: DECISION_MESSAGES.ownRequest };
+  if (!requesterIsActiveSuperAdmin) return { ok: false, reason: DECISION_MESSAGES.requesterGone };
   if (op.payloadSha256 !== sha) return { ok: false, reason: DECISION_MESSAGES.changed };
   return { ok: true };
 }
