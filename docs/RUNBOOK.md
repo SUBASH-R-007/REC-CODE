@@ -1282,6 +1282,72 @@ most.
 
 ---
 
+### 2.15 Building the application image (Phase 11e)
+
+`deploy/compose.app.yml` has always taken `RECX_WEB_IMAGE` by digest and
+nothing built it. The `Dockerfile` at the repository root does, and one image
+carries all three entrypoints the deployment runs:
+
+| Service | Command |
+|---|---|
+| web (×2) | `node apps/web/server.js` |
+| scheduler (×1) | `node apps/scheduler/dist/main.js` |
+| judge worker | `node apps/judge-worker/dist/main.js` (only on a judge host, which supplies isolate and the toolchains) |
+
+```sh
+docker build -t recx-web:"$(git rev-parse --short HEAD)" .
+docker push …                                   # then read the digest back
+RECX_WEB_IMAGE=registry/recx-web@sha256:… scripts/ops/deploy.sh
+```
+
+`deploy.sh` refuses a tag: everything is deployed by digest (§2.13).
+
+**What the image does and does not contain.** It contains the Next standalone
+build, the Prisma client generated for Debian's OpenSSL 3, the migrations
+folder (the health endpoint counts it), and the two bundled services with
+their production dependencies. It contains **no compiler, no interpreter and
+no isolate** — nothing in it can execute student code. A judge host is built
+from `infra/judge` and runs the worker entrypoint on top of that.
+
+**Credentials never enter it.** Every secret arrives at run time as a file
+(`DATABASE_URL_FILE`, `IP_HASH_PEPPER_FILE`, …) that
+`packages/shared/env-file` reads, and `.dockerignore` keeps `.env` files out
+of the build context so a careless `COPY` cannot bake one into a layer.
+
+**The one thing to know if you change the install.** The build installs with
+`--config.node-linker=hoisted`. pnpm's default layout is a symlink farm whose
+links are absolute paths into the build directory, and `next build` copies
+those links into `.next/standalone` as links — so the tree resolves only
+while that exact path exists. Copied into the runtime stage it fails on the
+first require, as `Cannot find module 'styled-jsx/package.json'`. Hoisting
+makes them real directories. `tests/repo/deploy-topology.test.ts` holds the
+flag in place.
+
+**The other two traps, both in the image's `node_modules`.** The bundles'
+dependencies are not the web app's: `pino` and `nodemailer` are in the
+scheduler and nowhere in the standalone tree, so each service gets its own
+production tree from `pnpm deploy` (hoisted, for the reason above). And
+`pnpm deploy` re-runs the db package's postinstall in that new tree, which
+writes a 40 KB **stub** Prisma client in place of the ~50 MB generated one —
+`Prisma.sql` and `Prisma.raw` are simply absent, and the scheduler dies on
+its first raw query with `Prisma2.raw is not a function`. The build copies
+the real client over it and asserts it landed.
+
+**What has and has not been run.** `docker build` has not: there is no
+engine on the development machine. Everything the Dockerfile decides was
+verified another way — a clean `git archive` tree, the same hoisted install,
+the same generate and builds, the same `pnpm deploy`, assembled into the
+same layout, and then both entrypoints started from it. The web answered
+`/login` 200, `/api/health` with `"migrations":"current"`, a `.next/static`
+chunk 200 and `/monaco/vs/loader.js` 200; the scheduler connected to
+Postgres and Redis and ran a tick; the judge worker loaded, ran its
+hardening check and refused for the right reason (no Linux, no isolate).
+What remains unproven is the base image itself: the Debian packages, and the
+Prisma query engine built for `debian-openssl-3.0.x` rather than Windows.
+Run it once against a registry and record it in §3.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.

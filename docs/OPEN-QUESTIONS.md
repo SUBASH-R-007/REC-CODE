@@ -2194,7 +2194,7 @@ and those are different mechanisms — a dump is a snapshot, WAL replay is a
 sequence. A college that wants the 5-minute RPO must run `pgbackrest
 restore --type=time` once on the real host before believing it.
 
-### There is no Dockerfile in this repository.
+### There is no Dockerfile in this repository. *(Closed in Phase 11e — see below.)*
 
 Mentioned twice because it is the thing somebody will look for. CI builds the
 application and runs the gates; it does not produce an image. The compose
@@ -2457,3 +2457,61 @@ in CI.
 So PR #1 is done: everything from it that is still a defect here is fixed,
 with its tests, and the rest is recorded above. The branch can be closed
 without merging.
+
+## The Dockerfile exists now, and what "verified" means for it (Phase 11e)
+
+The earlier entry argued against writing one: an image nobody had built
+would have been "the third unverified artefact in a phase already carrying
+two". That argument was right about the risk and wrong about the cost of
+the alternative — `deploy/compose.app.yml` names `RECX_WEB_IMAGE` and
+`scripts/ops/deploy.sh` refuses anything that is not a digest, so until
+something built that image the whole deployment path was theory.
+
+`docker build` still cannot run here: there is no engine on this machine.
+So the Dockerfile was verified by **reproducing it without Docker** — a
+clean `git archive` tree, the same hoisted install, the same `prisma
+generate` and the same three builds, the same `pnpm deploy`, assembled into
+the same layout the `COPY` lines produce, and then every entrypoint started
+from it. That found three defects, each of which would have produced an
+image that builds and then fails on its first request:
+
+1. **pnpm's symlinks are absolute.** The default layout links each package
+   to an absolute path under the build directory, and `next build` copies
+   those links into `.next/standalone` as links. In the runtime stage they
+   point at nothing, and the server dies on its first require with
+   `Cannot find module 'styled-jsx/package.json'`. Fixed with
+   `--config.node-linker=hoisted`, which makes them real directories.
+2. **The bundles' dependencies are not the web app's.** The standalone tree
+   carries what the web imports; `pino` and `nodemailer` are in the
+   scheduler and in no part of it, so `node apps/scheduler/dist/main.js`
+   could not resolve them. Each service now gets its own production tree
+   from `pnpm deploy`.
+3. **`pnpm deploy` writes a stub Prisma client.** It re-runs the db
+   package's postinstall in the new tree and leaves a 40 KB stub where the
+   ~50 MB generated client should be — `Prisma.sql` and `Prisma.raw` absent
+   — so the scheduler died on its first raw query with
+   `Prisma2.raw is not a function`. The build copies the generated client
+   over it and asserts it landed.
+
+Also found and fixed: the bundles need their own `package.json` beside them
+or Node reparses them on every start (`MODULE_TYPELESS_PACKAGE_JSON`).
+
+What the dry run proved: `/login` 200, `/api/health` with `"db":"up"`,
+`"redis":"up"` and `"migrations":"current"` — the migrations folder resolves
+inside the standalone tree, which is the one thing the health endpoint's
+`../../packages/db/prisma/migrations` depends on — a `.next/static` chunk
+200, `/monaco/vs/loader.js` 200 from `public/`, the scheduler connected to
+Postgres and Redis and running a tick, and the judge worker loading, running
+its hardening check and refusing for the right reason.
+
+What it did not prove, and what the first real build must: the base image
+(`node:22.17.1-bookworm-slim`), the two apt packages, and the Prisma query
+engine built for `debian-openssl-3.0.x` instead of Windows. The assembled
+tree was 254 MB before the base image, which is the number to compare the
+first `docker build` against.
+
+`tests/repo/deploy-topology.test.ts` holds the parts that are easy to undo
+by accident: the hoisting flag, the Prisma copy, the per-service
+`node_modules` and `package.json`, a non-root `USER`, one `ARG` for the base
+image, no toolchain in any `apt-get install`, and no path by which a `.env`
+could enter a layer.

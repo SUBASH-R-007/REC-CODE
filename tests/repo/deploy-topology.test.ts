@@ -512,3 +512,105 @@ describe("the exam lab browser policy (Phase 11c)", () => {
     expect(readme).toMatch(/does not claim|Nothing here claims/i);
   });
 });
+
+describe("the application image (Phase 11e)", () => {
+  /**
+   * `deploy/compose.app.yml` took `RECX_WEB_IMAGE` by digest for a whole
+   * phase and nothing built it. Now something does, and the two have to keep
+   * agreeing: the compose file names the commands, the Dockerfile decides
+   * where those paths exist, and nobody runs either here.
+   */
+  const dockerfile = readRepoFile("Dockerfile");
+  const dockerignore = readRepoFile(".dockerignore");
+  const app = readRepoFile("deploy/compose.app.yml");
+
+  it("builds every command the compose file runs", () => {
+    // ["node", "apps/web/server.js"] → the image must put that path under
+    // its WORKDIR. The standalone tree IS the WORKDIR, so apps/web/server.js
+    // arrives with it; the bundles are copied in beside it.
+    const commands = [...app.matchAll(/command:\s*\["node",\s*"([^"]+)"\]/g)].map((m) => m[1]!);
+    expect(commands).toContain("apps/web/server.js");
+    expect(commands).toContain("apps/scheduler/dist/main.js");
+    expect(dockerfile).toMatch(/COPY --from=build[^\n]*\/\.next\/standalone\/ \.\//);
+    for (const command of commands) {
+      const dir = command.replace(/\/[^/]+$/, "");
+      if (dir === "apps/web") continue; // part of the standalone tree itself
+      expect(dockerfile, `nothing in the Dockerfile creates ${dir} for "${command}"`).toContain(`./${dir}`);
+    }
+  });
+
+  it("copies what tracing leaves behind", () => {
+    // `next build` does not put either of these in .next/standalone, and the
+    // server reads both from disk at request time.
+    expect(dockerfile).toContain("/.next/static ./apps/web/.next/static");
+    expect(dockerfile).toContain("/public ./apps/web/public");
+  });
+
+  it("installs the way the gates do, and hoists so the tree can be copied", () => {
+    expect(dockerfile).toContain("pnpm@9.15.9");
+    expect(dockerfile).toContain("--frozen-lockfile");
+    /**
+     * The flag that makes the image work at all: pnpm's default symlink farm
+     * uses ABSOLUTE links into the build directory, which `next build` copies
+     * into the standalone output as links. Copied to the runtime stage they
+     * point at nothing, and the first require fails on styled-jsx. Verified
+     * by assembling the tree and running both entrypoints (docs/RUNBOOK.md
+     * §2.15, docs/OPEN-QUESTIONS.md).
+     */
+    expect(dockerfile).toContain("node-linker=hoisted");
+  });
+
+  it("carries no toolchain: nothing in it can run student code", () => {
+    const forbidden = [/\bgcc\b/, /\bg\+\+\b/, /\bbuild-essential\b/, /\bpython3?\b/, /\bopenjdk\b/, /\bisolate\b/i, /\bgolang\b/];
+    const installs = dockerfile
+      .split("\n")
+      .filter((line) => /apt-get install|apk add/.test(line))
+      .join("\n");
+    for (const pattern of forbidden) {
+      expect(installs, `the judge host supplies toolchains (infra/judge), never this image`).not.toMatch(pattern);
+    }
+  });
+
+  it("runs as a non-root user and pins its base in one place", () => {
+    expect(dockerfile).toMatch(/^USER node$/m);
+    expect(dockerfile).toMatch(/^ARG NODE_IMAGE=/m);
+    // Every FROM uses that ARG, so there is one line to change (and one to
+    // pin by digest in CI).
+    const froms = [...dockerfile.matchAll(/^FROM (\S+)/gm)].map((m) => m[1]!);
+    expect(froms.length).toBeGreaterThan(1);
+    for (const from of froms) {
+      expect(from === "${NODE_IMAGE}" || from === "base").toBe(true);
+    }
+  });
+
+
+  it("gives each bundle the dependencies the web app does not pull in", () => {
+    // The standalone tree's modules are what the WEB imports; pino and
+    // nodemailer are not among them, so the scheduler needs its own.
+    expect(dockerfile).toMatch(/pnpm deploy --filter @recx\/scheduler --prod/);
+    expect(dockerfile).toContain("/out/scheduler/node_modules ./apps/scheduler/node_modules");
+    // And its package.json, which is how Node knows the bundle is ESM.
+    expect(dockerfile).toContain("/out/scheduler/package.json ./apps/scheduler/package.json");
+  });
+
+  it("replaces the stub Prisma client pnpm deploy leaves behind", () => {
+    /**
+     * `pnpm deploy` re-runs the db package's postinstall in the new tree and
+     * writes a 40 KB stub where the generated client should be: Prisma.sql
+     * and Prisma.raw are missing, and the scheduler dies on its first raw
+     * query with "Prisma2.raw is not a function". Found by running the
+     * assembled tree (docs/OPEN-QUESTIONS.md).
+     */
+    expect(dockerfile).toMatch(/cp -r node_modules\/\.prisma \/out\/scheduler\/node_modules\/\.prisma/);
+  });
+
+  it("cannot bake a credential into a layer", () => {
+    // The build context never contains one...
+    expect(dockerignore).toMatch(/^\.env$/m);
+    expect(dockerignore).toMatch(/^\*\*\/\.env\.\*$/m);
+    // ...and nothing copies one even by name.
+    expect(dockerfile).not.toMatch(/COPY[^\n]*\.env/);
+    // Secrets arrive as files at run time, which is the compose file's job.
+    expect(app).toContain("DATABASE_URL_FILE");
+  });
+});
