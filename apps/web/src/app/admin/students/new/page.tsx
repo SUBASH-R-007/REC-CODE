@@ -4,6 +4,7 @@ import { ROSTER_COLUMNS } from "@recx/shared";
 import { describeScope, requireAdminScopePage } from "@/lib/auth/scope";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { AddStudentForm } from "@/components/admin/roster/add-student-form";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password";
 
 export const metadata: Metadata = { title: "Add a student" };
 
@@ -44,7 +45,11 @@ export default async function AddStudentPage() {
       />
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="p-5 lg:col-span-3">
-          <AddStudentForm batchYear={grant?.batchYear ?? campusYear} departmentCode={grant?.departmentCode ?? null} />
+          <AddStudentForm
+            batchYear={grant?.batchYear ?? campusYear}
+            departmentCode={grant?.departmentCode ?? null}
+            minLength={PASSWORD_MIN_LENGTH}
+          />
         </Card>
         <Card className="lg:col-span-2">
           <CardHeader title="What this does" />

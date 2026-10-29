@@ -40,7 +40,19 @@ import ts from "typescript";
  */
 
 const ACTIONS_DIR = "apps/web/src/server/actions";
-const BASE_GUARDS = new Set(["requireActionUser", "requireActionRole", "requireSuperAdmin"]);
+/**
+ * `requireActionUserSettingInitialPassword` is a base guard rather than a
+ * composite, and has to be: it admits exactly the accounts the others refuse
+ * — one still holding the initial password an admin set (Phase 11f) — so it
+ * cannot delegate to `requireActionUser`. It carries the same signed-in and
+ * impersonation checks itself, which is what being a base guard means here.
+ */
+const BASE_GUARDS = new Set([
+  "requireActionUser",
+  "requireActionRole",
+  "requireSuperAdmin",
+  "requireActionUserSettingInitialPassword",
+]);
 /**
  * Composite guards and the file that defines each. Each is checked below to
  * start with a base guard, which is what makes delegating to one safe: the

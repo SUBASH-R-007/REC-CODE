@@ -35,7 +35,7 @@ ROUTES="
 /login /forgot-password /reset-password /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
 /leaderboard /sheets /learn /profile /notes /bookmarks /help /judge /offline
 /contests /aptitude /placement /notifications /accessibility /api/health
-/account/leave /account/reactivate
+/account/leave /account/reactivate /account/new-password
 /admin /admin/students /admin/students/import /admin/cohorts /admin/sheets
 /admin/tracks /admin/reports /admin/announcements /admin/announcements/new
 /admin/accommodations /admin/problems /admin/problems/new /admin/problems/import

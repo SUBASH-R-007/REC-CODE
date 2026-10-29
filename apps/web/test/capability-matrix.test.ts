@@ -89,6 +89,16 @@ vi.mock("@/lib/auth/guards", async (importActual) => {
     requirePageRole: wrap("requirePageRole", actual.requirePageRole),
     requireSuperAdminPage: wrap("requireSuperAdminPage", actual.requireSuperAdminPage),
     requireActionUser: wrap("requireActionUser", actual.requireActionUser),
+    // Phase 11f. The one guard that admits an account still holding the
+    // initial password an admin set; every other one refuses it.
+    requireUserSettingInitialPassword: wrap(
+      "requireUserSettingInitialPassword",
+      actual.requireUserSettingInitialPassword,
+    ),
+    requireActionUserSettingInitialPassword: wrap(
+      "requireActionUserSettingInitialPassword",
+      actual.requireActionUserSettingInitialPassword,
+    ),
     requireActionRole: wrap("requireActionRole", actual.requireActionRole),
     requireSuperAdmin: wrap("requireSuperAdmin", actual.requireSuperAdmin),
     requireImpersonator: wrap("requireImpersonator", actual.requireImpersonator),

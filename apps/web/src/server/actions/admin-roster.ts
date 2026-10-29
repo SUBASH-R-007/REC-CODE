@@ -8,6 +8,7 @@ import { Prisma } from "@recx/db";
 import { ROSTER_IMPORT_LIMITS, rosterRowSchema } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { describeScope, requireAdminScopeAction } from "@/lib/auth/scope";
+import { hashInitialPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db";
 import { ConflictError, NotFoundError, RateLimitError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
@@ -121,9 +122,26 @@ export async function previewRosterImport(
 
 const importIdSchema = z.string().trim().min(1).max(64);
 
+/**
+ * The initial password an admin may set on the accounts an import CREATES
+ * (Phase 11f). Optional, and blank keeps the older behaviour: accounts with
+ * no password, who choose one through the sign-in page's one-time link.
+ *
+ * It is NOT part of the previewed plan and so not part of its hash: it
+ * changes no outcome, only what a created row's passwordHash holds, and
+ * including it would mean carrying a plaintext password through the stored
+ * preview.
+ */
+const initialPasswordField = z
+  .string()
+  .max(1024)
+  .optional()
+  .transform((v) => (v && v.trim().length > 0 ? v : null));
+
 const commitSchema = z.object({
   importId: importIdSchema,
   diffSha256: z.string().regex(/^[0-9a-f]{64}$/, "This preview is out of date. Reload the page."),
+  initialPassword: initialPasswordField,
 });
 export type CommitRosterImportInput = z.input<typeof commitSchema>;
 
@@ -139,6 +157,10 @@ export async function commitRosterImport(input: CommitRosterImportInput): Promis
     const parsed = commitSchema.parse(input);
     await bulkRateLimit(user.id);
     const now = new Date();
+    // Hashed once for the whole batch, outside the transaction: Argon2id is
+    // deliberately slow, and five hundred rows inside an advisory lock is not
+    // where that cost belongs.
+    const initialPasswordHash = parsed.initialPassword === null ? null : await hashInitialPassword(parsed.initialPassword);
 
     const outcome = await db.$transaction(
       async (tx) => {
@@ -164,7 +186,7 @@ export async function commitRosterImport(input: CommitRosterImportInput): Promis
         if (rosterPlanSha256(plan) !== parsed.diffSha256) {
           throw new ConflictError("The data changed since your preview — review the new diff and commit again.");
         }
-        const applied = await applyRosterPlan(tx, plan, scope, now);
+        const applied = await applyRosterPlan(tx, plan, scope, now, { initialPasswordHash });
         const resultsJson = JSON.stringify(applied.results);
         const resultsSha256 = createHash("sha256").update(resultsJson).digest("hex");
         const closed = await tx.rosterImport.updateMany({
@@ -288,8 +310,12 @@ export async function addStudent(
       }),
     );
     const row = rosterRowSchema.parse(entries);
+    const initialPassword = initialPasswordField.parse(
+      typeof formData.get("initialPassword") === "string" ? String(formData.get("initialPassword")) : undefined,
+    );
     await bulkRateLimit(user.id);
     const now = new Date();
+    const initialPasswordHash = initialPassword === null ? null : await hashInitialPassword(initialPassword);
 
     const userId = await db.$transaction(async (tx) => {
       // The same advisory lock an import takes, so a manual add and a file
@@ -313,7 +339,7 @@ export async function addStudent(
         );
       }
 
-      const applied = await applyRosterPlan(tx, plan, scope, now);
+      const applied = await applyRosterPlan(tx, plan, scope, now, { initialPasswordHash });
       const created = applied.results.find((r) => r.outcome === "CREATE")?.userId;
       if (!created) throw new ConflictError("The student was not created — try again.");
       return created;
@@ -326,7 +352,13 @@ export async function addStudent(
       entityId: userId,
       targetUserId: userId,
       sensitivity: "SENSITIVE",
-      metadata: { collegeId: row.collegeId, scope: describeScope(scope), source: "manual" },
+      // Whether an initial password was set, never what it was.
+      metadata: {
+        collegeId: row.collegeId,
+        scope: describeScope(scope),
+        source: "manual",
+        initialPassword: initialPasswordHash === null ? "none" : "set",
+      },
       ipHash: await requestIpHash(),
     });
     revalidatePath("/admin/students");

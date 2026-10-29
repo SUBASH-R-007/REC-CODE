@@ -151,8 +151,9 @@ describe.skipIf(!ENABLED)("adding one student against recx_test", () => {
     });
     expect(created.role).toBe("STUDENT");
     expect(created.status).toBe("ACTIVE");
-    // The whole reason the one-time link exists: nobody chooses a password
-    // for somebody else, here or in an import.
+    // Blank initial-password field: the account arrives without one and its
+    // owner sets it through the one-time link, which is still the better
+    // path wherever email works.
     expect(created.passwordHash).toBeNull();
     expect(created.handle.length).toBeGreaterThan(0);
     expect(created.handle).not.toContain(fields.collegeId);
@@ -161,6 +162,31 @@ describe.skipIf(!ENABLED)("adding one student against recx_test", () => {
     expect(created.section).toBe("A");
     expect(created.lmsUserId).toBe(fields.lmsUserId);
     expect(created.email).toBe(fields.email.toLowerCase());
+  }, 60_000);
+
+  it("takes an initial password, and makes the student replace it", async () => {
+    const fields = row("initial");
+    const result = await add({ ...fields, initialPassword: "a-given-password-1" });
+    expect(result.ok, "ok" in result && !result.ok ? result.error : "").toBe(true);
+
+    const { verifyPassword } = await import("@/lib/auth/password");
+    const created = await db.user.findUniqueOrThrow({
+      where: { collegeId: fields.collegeId },
+      select: { passwordHash: true, mustChangePassword: true },
+    });
+    expect(created.passwordHash).not.toBeNull();
+    expect(await verifyPassword("a-given-password-1", created.passwordHash!)).toBe(true);
+    // The flag is the whole mitigation: a department may give the same
+    // password to a whole class, so it is good for one sign-in.
+    expect(created.mustChangePassword).toBe(true);
+  }, 60_000);
+
+  it("refuses an initial password the student could not have chosen either", async () => {
+    const fields = row("weak");
+    const result = await add({ ...fields, initialPassword: "short" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/initial password/i);
+    expect(await db.user.findUnique({ where: { collegeId: fields.collegeId } })).toBeNull();
   }, 60_000);
 
   it("records who added them, with the roll number and the scope", async () => {

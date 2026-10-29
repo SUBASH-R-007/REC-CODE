@@ -13,10 +13,23 @@ import { addStudent } from "@/server/actions/admin-roster";
  *
  * The fields and their bounds are `rosterRowSchema`'s, and the names match
  * the CSV columns, so what an admin learns here is what a roster file
- * needs. Nothing about a password: an account arrives without one and its
- * owner sets it through the one-time link (docs/SECURITY.md §2).
+ * needs.
+ *
+ * The password is optional and last (Phase 11f). Left blank, the account
+ * arrives without one and its owner sets it through the one-time link
+ * (docs/SECURITY.md §2) — still the better path where email works. Filled
+ * in, it is what the student signs in with once, and they are made to
+ * replace it before they can reach any other page.
  */
-export function AddStudentForm({ batchYear, departmentCode }: { batchYear: number; departmentCode: string | null }) {
+export function AddStudentForm({
+  batchYear,
+  departmentCode,
+  minLength,
+}: {
+  batchYear: number;
+  departmentCode: string | null;
+  minLength: number;
+}) {
   const [state, formAction, pending] = useActionState(addStudent, null);
   const error = state && !state.ok ? state.error : null;
 
@@ -77,6 +90,27 @@ export function AddStudentForm({ batchYear, departmentCode }: { batchYear: numbe
         <Field label="Section" htmlFor="section" hint="Optional.">
           <Input id="section" name="section" maxLength={4} autoCapitalize="characters" spellCheck={false} />
         </Field>
+      </div>
+
+      <div className="rounded-xl border border-border bg-elevated p-4">
+        <Field
+          label="Initial password (optional)"
+          htmlFor="initialPassword"
+          hint={`At least ${minLength} characters, with a letter and a number. The student replaces it the first time they sign in. Leave it blank to let them set their own through the link on the sign-in page.`}
+        >
+          <Input
+            id="initialPassword"
+            name="initialPassword"
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={1024}
+            placeholder="Leave blank to send them a link instead"
+          />
+        </Field>
+        <p className="mt-2 text-xs text-text-secondary">
+          Tell the student this password yourself. It is stored only as a hash, so it cannot be read back from here.
+        </p>
       </div>
 
       <Button type="submit" loading={pending}>

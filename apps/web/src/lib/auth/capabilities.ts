@@ -695,6 +695,20 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
   },
   {
     /**
+     * Phase 11f. Replacing the initial password an admin set, which is the
+     * one thing an account in that state may do — every other guard refuses
+     * it. Separate from `account.password` because its guard is a different
+     * one (`requireUserSettingInitialPassword`): the ordinary change needs
+     * the current password and this one does not, because the sign-in that
+     * led here already took it.
+     */
+    key: "account.initial-password",
+    label: "Replace the initial password I was given",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["profile#setMyFirstPassword"],
+  },
+  {
+    /**
      * Phase 8a. A student asks for their own leave and calls off their own
      * leave; a super-admin decides it, under `calendar.manage`.
      *

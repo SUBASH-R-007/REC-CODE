@@ -522,6 +522,12 @@ model User {
   status         AccountStatus @default(ACTIVE)
   /// Argon2id (m=19456, t=2, p=1). Null for LMS-SSO-only accounts.
   passwordHash   String?
+  /// Set when an account is created with an initial password an admin chose.
+  /// Every authenticated surface refuses until the holder replaces it
+  /// (lib/auth/guards), so a shared initial password is good for exactly one
+  /// sign-in per account. A CHECK keeps it false while passwordHash is NULL:
+  /// a password you do not have cannot be the one you must change.
+  mustChangePassword Boolean   @default(false)
   batchYear      Int?
   departmentCode String?
   section        String?

@@ -2515,3 +2515,64 @@ by accident: the hoisting flag, the Prisma copy, the per-service
 `node_modules` and `package.json`, a non-root `USER`, one `ARG` for the base
 image, no toolchain in any `apt-get install`, and no path by which a `.env`
 could enter a layer.
+
+## An admin-set initial password, and why it is good for one sign-in (Phase 11f)
+
+The request was plain: adding a user should work one at a time and in bulk,
+each account should get a default password, and a new user should replace
+that password with their own while everybody else changes theirs with the
+old one first.
+
+Both halves of the first part already existed — `/admin/students/new` (Phase
+11b) and the roster CSV import (Phase 4) — but both created accounts with no
+password at all, on the reasoning that nobody should choose a password for
+somebody else; the holder set one through the one-time link (Phase 11a).
+That reasoning is still right where email works, and blank is still the
+default. What it could not do is a lab of first-years signing in on day one
+with no mail flowing.
+
+**The danger, stated plainly.** A default password is almost always ONE
+password given to a whole batch. Every account that still holds it is an
+account anyone in that batch can open — including, if the list leaks, from
+outside. A feature that stops there would be worse than no feature.
+
+**So the password is good for exactly one sign-in.** `User.mustChangePassword`
+is set when an admin supplies one, and while it is set:
+
+* `requireUser` redirects every page to `/account/new-password`, and
+  `requireActionUser` throws on every action. The two guards that admit such
+  an account (`requireUserSettingInitialPassword` and its action half) are
+  used by that page and that action and by nothing else;
+* the replacement is refused if it IS the password they were given — which
+  is the single thing this flow exists to prevent;
+* a database CHECK refuses the flag on an account with no password at all:
+  a password you do not have cannot be the one you must change;
+* sign-out still works, because it reads the session directly rather than
+  through a guard — an account should always be able to leave.
+
+The flag is the gate rather than the login page deciding where to send
+somebody, because a session minted with that password would otherwise
+outlive the sign-in that made it.
+
+**What was deliberately not built.**
+
+*Per-account generated passwords, handed back to the admin.* It is the
+stronger design — one leak is one account — but it needs a way to carry five
+hundred plaintext passwords from the import to the admin and then to the
+students, and every version of that (a CSV in the response, a column in the
+import report, an email per student) is a worse place for them than the
+admin's own mouth. The one-time link already solves the same problem
+properly wherever mail works. If the credentials path ever has to exist,
+generate at import, hand it back ONCE in the response, and never store it.
+
+*An expiry on the initial password.* An account that never signs in keeps it
+indefinitely. A sweep that disabled such accounts after N days would be
+easy, and is not obviously right: the account that never signs in is usually
+the student who has not been told the platform exists yet. Revisit with the
+placement cell after the first intake.
+
+*Changing an initial password an admin already set.* There is no "reset this
+student's password" button for an admin, and that is unchanged: the holder
+uses the one-time link. An admin who set a password and wants a different
+one deletes nothing and sets nothing — they tell the student to use the
+link.

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { CircleCheck, Clock } from "lucide-react";
 import { ButtonLink, Card, CardHeader, EmptyState } from "@recx/design";
 import { requireAdminScopePage } from "@/lib/auth/scope";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password";
 import { getImportPreview } from "@/server/queries/admin-roster";
 import { AdminPageHeader, TableFrame, TBODY_ROW, TD, TH, THEAD_ROW, formatDateTime } from "@/components/admin/admin-ui";
 import { RosterCountsList, RosterDiff } from "@/components/admin/roster/diff-table";
@@ -123,7 +124,13 @@ export default async function RosterImportPreviewPage({ params }: { params: Para
       <Card className="p-5">
         <RosterCountsList counts={view.plan.counts} />
         <div className="mt-5 border-t border-border pt-5">
-          <RosterCommitForm importId={s.id} diffSha256={view.diffSha256} changes={changes} />
+          <RosterCommitForm
+            importId={s.id}
+            diffSha256={view.diffSha256}
+            changes={changes}
+            creates={view.plan.counts.create}
+            minLength={PASSWORD_MIN_LENGTH}
+          />
         </div>
       </Card>
       <Card className="mt-6 py-5">

@@ -41,6 +41,10 @@ const STUDENT_SURFACES = [
   `${SRC}/components/account/reactivate-button.tsx`,
   `${SRC}/components/account/leave-form.tsx`,
   `${SRC}/components/account/dormancy-chip.tsx`,
+  // Phase 11f. Not a Phase 8 surface, but it is in components/account and a
+  // student reads it on their very first sign-in, so the same rule about
+  // what the product says to them applies.
+  `${SRC}/components/account/first-password-form.tsx`,
   `${SRC}/server/queries/account.ts`,
   "packages/shared/src/inactivity-copy.ts",
 ];

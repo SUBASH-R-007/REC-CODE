@@ -278,6 +278,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `account.password` | self-service | yes | yes | yes | yes | yes | 1 action |
+| `account.initial-password` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 

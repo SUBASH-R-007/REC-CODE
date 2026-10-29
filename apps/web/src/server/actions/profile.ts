@@ -4,9 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { Prisma, ProfileVisibility } from "@recx/db";
-import { requireActionUser } from "@/lib/auth/guards";
+import { homeForRole, requireActionUser, requireActionUserSettingInitialPassword } from "@/lib/auth/guards";
 import { hashPassword, passwordIssues, verifyPassword } from "@/lib/auth/password";
-import { destroyAllSessions } from "@/lib/auth/session";
+import { createSession, destroyAllSessions } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { RateLimitError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
@@ -189,4 +189,81 @@ export async function changeMyPassword(
     await destroyAllSessions(user.id);
     redirect("/login?reset=1");
   }, "changeMyPassword");
+}
+
+const initialPasswordSchema = z.object({
+  next: z.string().min(1, "Choose a password.").max(1024),
+  confirm: z.string().max(1024),
+});
+
+/**
+ * Replace the initial password an admin set (`setMyFirstPassword`, Phase
+ * 11f). The other half of `changeMyPassword`, and deliberately a different
+ * action rather than a flag on it:
+ *
+ *   * It asks for no current password. The holder proved it a moment ago at
+ *     the sign-in that sent them here, and asking again for a password a
+ *     department read out loud teaches nothing.
+ *   * It is the ONE action an account in this state may call
+ *     (`requireUserSettingInitialPassword`); every other guard refuses until
+ *     the flag is clear.
+ *   * It refuses the password they arrived with. A whole batch may share
+ *     one, so "changing" it to itself would leave the account open to
+ *     everyone who was told it — which is the single thing this flow exists
+ *     to prevent.
+ *
+ * The session is rotated rather than destroyed: the student stays signed in
+ * and lands on their own home, while every other session minted with the
+ * initial password is dropped.
+ */
+export async function setMyFirstPassword(
+  _previous: ActionResult<{ changed: true }> | null,
+  formData: FormData,
+): Promise<ActionResult<{ changed: true }>> {
+  return runAction(async () => {
+    const user = await requireActionUserSettingInitialPassword();
+    const input = initialPasswordSchema.parse({
+      next: String(formData.get("next") ?? ""),
+      confirm: String(formData.get("confirm") ?? ""),
+    });
+
+    const hit = await hitRateLimit(`password-change:${user.id}`, PASSWORD_CHANGE_RATE_LIMIT);
+    if (!hit.allowed) throw new RateLimitError();
+
+    const row = await db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { passwordHash: true, mustChangePassword: true, role: true },
+    });
+    // Not in this state: the ordinary change (current + new) is the one to use.
+    if (!row.mustChangePassword || row.passwordHash === null) {
+      throw new ValidationError("Your password is already your own. Change it from Profile → Settings.");
+    }
+
+    if (input.next !== input.confirm) throw new ValidationError("The two passwords do not match.");
+    const issues = passwordIssues(input.next);
+    if (issues.length > 0) throw new ValidationError(`Choose a longer password: ${issues.join(", ").toLowerCase()}.`);
+    if (await verifyPassword(input.next, row.passwordHash)) {
+      throw new ValidationError("Choose a password different from the one you were given.");
+    }
+
+    await db.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(input.next), mustChangePassword: false },
+    });
+    await audit({
+      actorId: user.id,
+      action: "auth.initial_password_replaced",
+      entityType: "User",
+      entityId: user.id,
+      targetUserId: user.id,
+      sensitivity: "SECURITY",
+      ipHash: await requestIpHash(),
+    });
+    // Drop every session the initial password minted, then mint one for the
+    // browser in front of us: the student is already here and has just
+    // proved who they are.
+    await destroyAllSessions(user.id);
+    await createSession(user.id);
+    redirect(homeForRole(row.role));
+  }, "setMyFirstPassword");
 }

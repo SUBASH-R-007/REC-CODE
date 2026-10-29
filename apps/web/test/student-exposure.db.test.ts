@@ -1414,6 +1414,13 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // Phase 8a. Renders the caller's own leave reasons, which is exactly
     // the kind of text that must not be somebody else's.
     "(student)/account/leave/page.tsx": () => ({}),
+    /**
+     * Phase 11f. S's password is already their own, so this page redirects
+     * them home — which is the render every account but a brand-new one
+     * gets, and the one worth sweeping: it must not become a way to read
+     * anything about the account on the way past.
+     */
+    "(onboarding)/account/new-password/page.tsx": () => ({}),
     // Phase 8e. The route OUT of a restriction, and the page that renders a
     // student's own status history.
     "(student)/account/reactivate/page.tsx": () => ({}),
@@ -1684,6 +1691,12 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * worth sweeping: a refusal must not say whether the account has a
      * password, nor echo anything of S's record.
      */
+    /**
+     * Phase 11f. S holds a password of their own, so the action refuses —
+     * and the refusal is the thing to sweep: it must say that the password
+     * is already theirs without saying anything else about the account.
+     */
+    "profile#setMyFirstPassword": [() => [null, form({ next: "a-new-password-1", confirm: "a-new-password-1" })]],
     "profile#changeMyPassword": [
       () => [null, form({ current: "not-my-password", next: "a-new-password-1", confirm: "a-new-password-1" })],
     ],

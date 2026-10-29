@@ -126,11 +126,23 @@ async function takenHandles(tx: DbTx, bases: readonly string[]): Promise<Set<str
  * are never written. The open-period XpBucket rows of moved students get
  * their new cohort, so this week's and month's boards follow the move.
  */
+export interface ApplyRosterOptions {
+  /**
+   * Argon2id hash of the initial password the admin chose for the accounts
+   * this import CREATES, or null to create them without one (they then use
+   * the one-time link on the sign-in page). Never a plaintext password: the
+   * caller hashes it once for the whole batch rather than per row, because a
+   * five-hundred-row import would otherwise spend minutes in Argon2id.
+   */
+  initialPasswordHash?: string | null;
+}
+
 export async function applyRosterPlan(
   tx: DbTx,
   plan: RosterPlan,
   scope: StudentScope,
   now: Date,
+  options: ApplyRosterOptions = {},
 ): Promise<{ results: RosterResult[]; moves: CohortMove[] }> {
   const results: RosterResult[] = [];
   const moves: CohortMove[] = [];
@@ -151,7 +163,12 @@ export async function applyRosterPlan(
         handle,
         role: "STUDENT" as const,
         status: "ACTIVE" as const,
-        passwordHash: null,
+        // An account created with no password is not locked out: the sign-in
+        // page's "never set one?" link mints a one-time link to choose one.
+        // With an initial password it must be replaced at first sign-in, and
+        // the CHECK on User refuses the flag without a hash.
+        passwordHash: options.initialPasswordHash ?? null,
+        mustChangePassword: options.initialPasswordHash != null,
         batchYear: row.batchYear,
         departmentCode: row.departmentCode,
         section: row.section,

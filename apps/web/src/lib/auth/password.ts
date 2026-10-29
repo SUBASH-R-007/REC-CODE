@@ -1,6 +1,7 @@
 import "server-only";
 import { hash, verify, type Algorithm } from "@node-rs/argon2";
 import { randomBytes } from "node:crypto";
+import { ValidationError } from "@/lib/errors";
 
 /**
  * Argon2id, OWASP-recommended minimum: m=19456 KiB, t=2, p=1.
@@ -47,4 +48,21 @@ export function passwordIssues(password: string): string[] {
   if (!/[a-zA-Z]/.test(password)) issues.push("At least one letter");
   if (!/[0-9]/.test(password)) issues.push("At least one number");
   return issues;
+}
+
+/**
+ * Validate and hash an initial password an admin chose for accounts they are
+ * creating (Phase 11f). The same policy a student's own password must meet,
+ * refused with the same words, so a department cannot hand out "rec123" and
+ * discover the rule only when the first student tries to replace it.
+ *
+ * The caller hashes once per batch, not once per row: Argon2id is
+ * deliberately slow.
+ */
+export async function hashInitialPassword(password: string): Promise<string> {
+  const issues = passwordIssues(password);
+  if (issues.length > 0) {
+    throw new ValidationError(`Choose a longer initial password: ${issues.join(", ").toLowerCase()}.`);
+  }
+  return hashPassword(password);
 }

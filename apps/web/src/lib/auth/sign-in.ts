@@ -8,7 +8,7 @@ import { audit } from "@/lib/audit";
 import { requestIpHash } from "@/lib/ip";
 import { dummyPasswordHash, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroySession } from "@/lib/auth/session";
-import { homeForRole } from "@/lib/auth/guards";
+import { homeForRole, INITIAL_PASSWORD_PATH } from "@/lib/auth/guards";
 import type { SignInFailure } from "@/lib/auth/sign-in-errors";
 import {
   hitRateLimit,
@@ -138,5 +138,11 @@ export async function signIn(input: { identifier: unknown; password: unknown }):
     entityId: account.id,
     ipHash,
   });
-  return { ok: true, home: homeForRole(account.role) };
+  /**
+   * An account still holding the initial password an admin set lands on the
+   * page that replaces it, not on its home. The guards refuse everything
+   * else anyway (Phase 11f); this is so the first thing the student sees is
+   * the form, rather than a bounce.
+   */
+  return { ok: true, home: account.mustChangePassword ? INITIAL_PASSWORD_PATH : homeForRole(account.role) };
 }

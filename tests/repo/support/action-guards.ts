@@ -300,7 +300,20 @@ export function createGuardRoleResolver(
   allRoles: readonly string[],
   definitions: ReadonlyArray<{ source: string; fileName: string }>,
 ): (call: GuardCall | null) => string[] | null {
-  const everyone = new Set(["requireActionUser", "requireUser"]);
+  /**
+   * Guards that admit every signed-in role. `requireUserSettingInitialPassword`
+   * is one of them (Phase 11f): it is the gate on replacing an admin-set
+   * initial password, which every role can be given. It is listed here rather
+   * than resolved because it reads the session itself instead of delegating
+   * to another guard — deliberately, so an account the other guards refuse
+   * can still reach exactly this one.
+   */
+  const everyone = new Set([
+    "requireActionUser",
+    "requireUser",
+    "requireUserSettingInitialPassword",
+    "requireActionUserSettingInitialPassword",
+  ]);
   const byArgs = new Set(["requireActionRole", "requirePageRole"]);
   const composites = new Map<string, GuardCall | null>();
   for (const { source, fileName } of definitions) {

@@ -38,6 +38,22 @@ export class ImpersonationReadOnlyError extends ForbiddenError {
   }
 }
 
+export const INITIAL_PASSWORD_MESSAGE =
+  "Set your own password before you use REC Code. You signed in with the password your department gave you.";
+
+/**
+ * Refused while an account still holds the initial password an admin set
+ * (Phase 11f). The whole point of that password is that it survives exactly
+ * one sign-in: a department may hand the same one to a whole batch, so an
+ * account that keeps it is an account anybody in the batch can open.
+ */
+export class InitialPasswordRequiredError extends ForbiddenError {
+  constructor(message = INITIAL_PASSWORD_MESSAGE) {
+    super(message);
+    this.name = "InitialPasswordRequiredError";
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = "That resource was not found.") {
     super(message, 404);

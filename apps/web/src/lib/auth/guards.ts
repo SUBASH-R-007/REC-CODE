@@ -2,7 +2,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import type { Role, User } from "@recx/db";
 import { getCurrentUser, type ImpersonationContext } from "@/lib/auth/session";
-import { ForbiddenError, ImpersonationReadOnlyError, UnauthorizedError } from "@/lib/errors";
+import { ForbiddenError, ImpersonationReadOnlyError, InitialPasswordRequiredError, UnauthorizedError } from "@/lib/errors";
 
 /**
  * The one guards module. RBAC is enforced server-side in every page guard and
@@ -33,10 +33,50 @@ export function homeForRole(role: Role): string {
   }
 }
 
+/**
+ * Where an account that still holds its admin-set initial password is sent,
+ * and the only authenticated page it may reach (Phase 11f).
+ */
+export const INITIAL_PASSWORD_PATH = "/account/new-password";
+
 /** Page guard: redirects to /login when unauthenticated. */
 export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  /**
+   * An initial password is good for one sign-in and nothing else. A
+   * department may hand the same one to a whole batch, so every page in the
+   * product bounces here until the holder has replaced it — the flag is the
+   * gate, not the login page, because a session minted with that password
+   * would otherwise outlive the sign-in.
+   */
+  if (user.mustChangePassword) redirect(INITIAL_PASSWORD_PATH);
+  return user;
+}
+
+/**
+ * Page guard for the set-your-own-password page, and one of the two guards
+ * that admit an account still holding its initial password. Deliberately a
+ * separate function rather than a flag on `requireUser`: a page cannot opt
+ * out of the bounce by accident, only by naming this.
+ */
+export async function requireUserSettingInitialPassword(): Promise<User> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (user.impersonation) throw new ImpersonationReadOnlyError();
+  return user;
+}
+
+/**
+ * The action half of the pair, and the only action guard that admits such an
+ * account. It throws where the page guard redirects, because that is the
+ * difference between the two halves everywhere else in this module — an
+ * action answers its caller, it does not navigate them.
+ */
+export async function requireActionUserSettingInitialPassword(): Promise<User> {
+  const user = await getCurrentUser();
+  if (!user) throw new UnauthorizedError();
+  if (user.impersonation) throw new ImpersonationReadOnlyError();
   return user;
 }
 
@@ -63,6 +103,10 @@ export async function requireActionUser(): Promise<User> {
   const user = await getCurrentUser();
   if (!user) throw new UnauthorizedError();
   if (user.impersonation) throw new ImpersonationReadOnlyError();
+  // Same rule as requireUser, and for the same reason: a session minted with
+  // an initial password may do nothing but replace it (and sign out, which
+  // reads the session directly rather than going through a guard).
+  if (user.mustChangePassword) throw new InitialPasswordRequiredError();
   return user;
 }
 

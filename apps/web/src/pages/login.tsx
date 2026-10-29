@@ -206,6 +206,16 @@ export default function LoginPage({ error, notice, identifier, invalid, focus }:
                   Forgot your password, or never set one?
                 </a>
               </p>
+              {/*
+                Phase 11f. A department may create accounts with a password it
+                hands out, and the holder is made to replace it before they
+                can reach anything — so the first sign-in needs one sentence
+                here rather than a support call.
+              */}
+              <p className="mt-2 text-center text-xs text-muted">
+                Signing in for the first time? Use the password your department gave you — you will be asked to choose
+                your own straight away.
+              </p>
             </div>
 
             <p className="mt-6 text-center text-xs text-muted">

@@ -120,6 +120,13 @@ const TARGETS: readonly Target[] = [
   { path: "/account/leave", as: "student", gating: true },
   { path: "/account/reactivate", as: "student", gating: true },
   /**
+   * Phase 11f. A student whose password is already their own is redirected
+   * home from here, so what axe scans is that landing — which is the right
+   * thing to keep clean anyway, and the page itself is covered by the
+   * exposure sweep and the database tests.
+   */
+  { path: "/account/new-password", as: "student", gating: true },
+  /**
    * Phase 9c, GATING. The page is a grid of three cards with a progress bar
    * per component, which is exactly the shape that goes wrong for a screen
    * reader: every bar carries its own label with the denominator in it, and
