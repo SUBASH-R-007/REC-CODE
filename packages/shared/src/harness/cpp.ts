@@ -89,7 +89,7 @@ struct In {
         ws(); size_t st = p;
         while (p < s.size() && (isdigit((unsigned char)s[p]) || strchr("+-.eE", s[p]))) ++p;
         if (st == p) fail("expected number");
-        return stod(s.substr(st, p - st));
+        string t = s.substr(st, p - st); char* e = nullptr; double v = strtod(t.c_str(), &e); if (e != t.c_str() + t.size()) fail("expected number"); return v;
     }
     string str() {
         expect('"'); string out;

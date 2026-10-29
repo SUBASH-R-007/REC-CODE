@@ -189,15 +189,20 @@ class Decoder {
       this.fail("expected an integer (no decimal point or exponent)");
     }
     const text = m[0];
+    const range = kind === "int" ? "32-bit int" : "64-bit long";
+    // A sign and 19 digits is the longest int64 (no leading zeros allowed).
+    // Anything longer is out of range: say so without BigInt, which would
+    // spend seconds on a multi-megabyte token printed by student code.
+    if (text.length > 20) this.fail(`${text.slice(0, 24)}… is outside the ${range} range`);
     let canonical: string;
     if (text.length <= 15) {
       const n = Number(text);
-      if (kind === "int" && (n < INT32_MIN || n > INT32_MAX)) this.fail(`${text} is outside the 32-bit int range`);
+      if (kind === "int" && (n < INT32_MIN || n > INT32_MAX)) this.fail(`${text} is outside the ${range} range`);
       canonical = String(n === 0 ? 0 : n);
     } else {
       const n = BigInt(text);
       const [lo, hi] = kind === "int" ? [BigInt(INT32_MIN), BigInt(INT32_MAX)] : [INT64_MIN, INT64_MAX];
-      if (n < lo || n > hi) this.fail(`${text} is outside the ${kind === "int" ? "32-bit int" : "64-bit long"} range`);
+      if (n < lo || n > hi) this.fail(`${text} is outside the ${range} range`);
       canonical = n.toString();
     }
     this.pos += text.length;
@@ -571,7 +576,37 @@ export function validateFunctionTest(sig: FunctionSignature, input: string, outp
       issues.push(`The expected output is not a valid ${typeToString(compared)}: ${r.reason} at character ${r.offset + 1}.`);
     } else if (r.canonical !== body) {
       issues.push(`The expected output is not in canonical form: write ${excerpt(r.canonical)}.`);
+    } else {
+      const lengthIssue = inPlaceLengthIssue(sig, lines, body);
+      if (lengthIssue) issues.push(lengthIssue);
     }
   }
   return issues.slice(0, MAX_ISSUES);
+}
+
+/** Element kinds Java spells as a fixed-length array (java.ts `spelled`: list<leaf> is S[], matrix<leaf> is S[][]). */
+const JAVA_ARRAY_ELEMENT = new Set(["int", "long", "double", "bool", "char", "string", "TreeNode", "ListNode"]);
+
+/**
+ * IN_PLACE_MUTATION of a list<leaf> or matrix<leaf>: Java receives a
+ * fixed-length array, so a method cannot change its (outer) length, while
+ * C++ and Python can. A test whose expected value has another length than
+ * the input could never be passed in Java — which is a problem to catch
+ * while the test is being authored, not when a student's correct solution
+ * fails in one language only.
+ */
+function inPlaceLengthIssue(sig: FunctionSignature, lines: readonly string[], expected: string): string | null {
+  if (sig.comparator !== "IN_PLACE_MUTATION" || sig.mutatedParam === null) return null;
+  const index = sig.params.findIndex((p) => p.name === sig.mutatedParam);
+  if (index < 0 || lines[index] === undefined) return null;
+  const type = parseType(sig.params[index]!.type);
+  if ((type.kind !== "list" && type.kind !== "matrix") || !JAVA_ARRAY_ELEMENT.has(type.of.kind)) return null;
+  try {
+    const before = JSON.parse(lines[index]!) as unknown;
+    const after = JSON.parse(expected) as unknown;
+    if (!Array.isArray(before) || !Array.isArray(after) || before.length === after.length) return null;
+    return `The expected ${sig.mutatedParam} has ${after.length} element${after.length === 1 ? "" : "s"} but the input has ${before.length}: an in-place ${typeToString(type)} keeps its length (Java passes a fixed-length array).`;
+  } catch {
+    return null;
+  }
 }

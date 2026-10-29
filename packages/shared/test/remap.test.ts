@@ -347,3 +347,62 @@ describe("property: no output line ever shows a line number outside 1..userLineC
     }
   });
 });
+
+/**
+ * Ported from PR #1 (the Phase 4 adversarial review), whose fixes to this
+ * file were never merged. Both cases are about the same failure: a student
+ * leaves something open, the generated driver is swallowed into it, and the
+ * compiler then reports the judge's own code at them.
+ */
+describe("CPython: a string left open", () => {
+  it("maps CPython's \"(detected at line N)\", and never shows a driver line there", () => {
+    const inside = [
+      `  File "main.py", line ${at(py, 3)}`,
+      "    s = 'abc",
+      "        ^",
+      `SyntaxError: unterminated string literal (detected at line ${at(py, 3)})`,
+    ].join("\n");
+    expect(remapDiagnostics(inside, py, "main.py").split("\n")).toEqual([
+      '  File "solution.py", line 3',
+      "    s = 'abc",
+      "        ^",
+      "SyntaxError: unterminated string literal (detected at line 3)",
+    ]);
+    // An unclosed triple-quoted string is only detected in the generated driver.
+    const after = [
+      `  File "main.py", line ${at(py, 3)}`,
+      '    s = """abc',
+      "        ^",
+      `SyntaxError: unterminated triple-quoted string literal (detected at line ${driverLine(py, 18)})`,
+    ].join("\n");
+    const out = remapDiagnostics(after, py, "main.py");
+    expect(out.split("\n").at(-1)).toBe("SyntaxError: unterminated triple-quoted string literal (detected after your last line)");
+    expectInRange(out, py);
+  });
+});
+
+describe("gcc: a scope left open", () => {
+  // Real g++ 13 output for the two-sum reference with its closing "};"
+  // removed: the driver lands inside class Solution and fails in a cascade.
+  const unclosedUser = TWO_SUM_REFERENCE.cpp20![0]!.source.replace(/\};\s*$/, "\n");
+  const unclosed = buildHarness("cpp20", sig, unclosedUser);
+  const raw = "main.cpp:16:1: error: expected unqualified-id before 'namespace'\n   16 | namespace recx_harness {\n      | ^~~~~~~~~\nmain.cpp:122:1: error: expected unqualified-id before 'namespace'\n  122 | namespace recx_harness {\n      | ^~~~~~~~~\nmain.cpp:148:2: error: expected '}' at end of input\n  148 | }\n      |  ^\nmain.cpp:3:16: note: to match this '{'\n    3 | class Solution {\n      |                ^\nmain.cpp: In member function 'int Solution::main()':\nmain.cpp:140:98: error: 'recx_harness' has not been declared\n  140 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 1\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a0); }\n      |                                                                                                  ^~~~~~~~~~~~\nmain.cpp:140:125: error: 'recx_harness' has not been declared\n  140 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 1\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a0); }\n      |                                                                                                                             ^~~~~~~~~~~~\nmain.cpp:140:145: error: 'in' was not declared in this scope; did you mean 'yn'?\n  140 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 1\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a0); }\n      |                                                                                                                                                 ^~\n      |                                                                                                                                                 yn\nmain.cpp:142:98: error: 'recx_harness' has not been declared\n  142 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 2\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a1); }\n      |                                                                                                  ^~~~~~~~~~~~\nmain.cpp:142:125: error: 'recx_harness' has not been declared\n  142 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 2\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a1); }\n      |                                                                                                                             ^~~~~~~~~~~~\nmain.cpp:142:145: error: 'in' was not declared in this scope; did you mean 'yn'?\n  142 |     { if (!getline(cin, line)) { fprintf(stderr, \"harness: missing input line 2\\n\"); return 3; } recx_harness::In in(line); recx_harness::parse(in, a1); }\n      |                                                                                                                                                 ^~\n      |                                                                                                                                                 yn\nmain.cpp:145:5: error: 'recx_harness' has not been declared\n  145 |     recx_harness::write(cout, result);\n      |     ^~~~~~~~~~~~\nmain.cpp: At global scope:\nmain.cpp:148:2: error: expected unqualified-id at end of input\n  148 | }\n      |  ^";
+
+  it("keeps only the missing-brace error and the student's own note", () => {
+    expect(unclosed.userStartLine).toBe(3);
+    const out = remapDiagnostics(raw, unclosed, "main.cpp");
+    expect(out.split("\n")).toEqual([
+      "[generated driver code]: error: expected '}' at end of input",
+      "solution.cpp:1:16: note: to match this '{'",
+      "    1 | class Solution {",
+      "      |                ^",
+    ]);
+    expect(diagnosticHints(out)).toContain(UNCLOSED_HINT);
+    expectInRange(out, unclosed);
+  });
+
+  it("never shows the bare harness namespace or the driver's member-function banner", () => {
+    const out = remapDiagnostics(raw, unclosed, "main.cpp");
+    expect(out).not.toMatch(/recx_harness|Solution::main|'in' was not declared/);
+  });
+});

@@ -81,6 +81,8 @@ function inlineLocations(line: string, m: Mapper): string {
 
 // ── gcc ─────────────────────────────────────────────────────────────────
 
+const UNCLOSED_AT_END = /expected '}' at end of input/;
+
 function remapGcc(lines: string[], m: Mapper): string[] {
   const out: string[] = [];
   /** Whether excerpt lines under the current header belong to the student's code. */
@@ -89,6 +91,17 @@ function remapGcc(lines: string[], m: Mapper): string[] {
   // "file:line[:col]: message" — a gcc location never contains a space.
   const header = /^(\S+?):(\d+)(?::(\d+))?:(\s*)(.*)$/;
   const banner = /^(\S+): ((?:In |At ).*)$/;
+  /**
+   * The student left a scope open — a missing `}` or `};`. The generated
+   * driver then lands inside their class, and gcc reports a cascade about
+   * the judge's own code: a student who forgot one brace is told their
+   * `main` is a member function and that `recx_harness` does not exist.
+   *
+   * So when the compiler says the input ended inside a scope, that message
+   * is the only one about generated code worth showing. `UNCLOSED_HINT`
+   * below still fires on it, which is the sentence that actually helps.
+   */
+  const unclosed = lines.some((l) => UNCLOSED_AT_END.test(l));
 
   for (const line of lines) {
     if (/^In file included from /.test(line) || /^\s+from \S+:\d+[,:]?\s*$/.test(line)) continue;
@@ -118,6 +131,7 @@ function remapGcc(lines: string[], m: Mapper): string[] {
         }
         excerpts = "drop";
         if (/^note:/.test(rest) || /required from|In instantiation of/.test(rest)) continue;
+        if (unclosed && !UNCLOSED_AT_END.test(rest)) continue;
         out.push(`${GENERATED}: ${inlineLocations(rest, m)}`);
         continue;
       }
@@ -132,7 +146,10 @@ function remapGcc(lines: string[], m: Mapper): string[] {
       const [, file, rest] = b as unknown as [string, string, string];
       excerpts = "drop";
       if (file === m.file) {
-        if (/^In function '(?:int )?main\(\)'/.test(rest)) {
+        if (unclosed) continue;
+        // "In member function 'Solution::main()'" is the same banner once an
+        // unclosed brace has swallowed the driver into the student's class.
+        if (/^In function '(?:int )?main\(\)'/.test(rest) || /^In member function '[^']*::main\(\)'/.test(rest)) {
           out.push(`In ${JUDGE_CALL}:`);
           continue;
         }
@@ -145,8 +162,10 @@ function remapGcc(lines: string[], m: Mapper): string[] {
     }
     out.push(inlineLocations(line, m));
   }
-  // The harness's own namespace means nothing to a student.
-  return out.map((l) => l.replace(/\brecx_harness::/g, ""));
+  // The harness's own namespace means nothing to a student: strip the
+  // qualifier, and drop a line that still names it — "'recx_harness' has not
+  // been declared" would otherwise become "'' has not been declared".
+  return out.map((l) => l.replace(/\brecx_harness::/g, "")).filter((l) => !/\brecx_harness\b/.test(l));
 }
 
 // ── javac and JVM stack traces ──────────────────────────────────────────
@@ -245,11 +264,17 @@ function remapPython(lines: string[], m: Mapper): string[] {
     }
 
     // "IndentationError: expected an indented block after function definition on line 7"
+    // "SyntaxError: unterminated string literal (detected at line 6)"
     let text = /^(?:\w+\.)*\w*(?:Error|Warning)\b/.test(line)
-      ? line.replace(/\bon line (\d+)/g, (_x, ln: string) => {
-          const mapped = m.map(Number(ln));
-          return mapped === null ? `in ${JUDGE_CALL}` : `on line ${mapped}`;
-        })
+      ? line
+          .replace(/\bon line (\d+)/g, (_x, ln: string) => {
+            const mapped = m.map(Number(ln));
+            return mapped === null ? `in ${JUDGE_CALL}` : `on line ${mapped}`;
+          })
+          .replace(/\(detected at line (\d+)\)/g, (_x, ln: string) => {
+            const mapped = m.map(Number(ln));
+            return mapped === null ? "(detected after your last line)" : `(detected at line ${mapped})`;
+          })
       : line;
     text = text.replace(new RegExp(`\\((?:/box/)?${m.fileRe}, line (\\d+)\\)`, "g"), (_x, ln: string) => {
       const mapped = m.map(Number(ln));

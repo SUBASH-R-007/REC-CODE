@@ -2280,3 +2280,57 @@ the more interesting question, and a real one for a candidate whose
 browser died at minute 55 — banding it needs either the engine moved into
 `@recx/db` or an internal endpoint for the scheduler to call. Neither is
 worth building before the first case exists.
+
+## PR #1 was never merged, and it still holds work (Phase 11d)
+
+`phase4/integration-aenby5` — the Phase 4 adversarial review — is open as
+pull request #1 against `phase4/integration`. It is **14 commits ahead and
+77 behind**, and the assumption that it had been superseded is wrong. Some
+of it was re-implemented on the integration branch, usually more thoroughly:
+`tests/repo/render-read-only.test.ts` is 183 lines here against its 107, and
+`tests/repo/admin-scope.test.ts` 742 against 710. Some of it was not
+re-implemented at all.
+
+The triage: for each of the 29 source files the branch touches, take the
+distinctive lines it adds and ask how many appear in our copy of that file.
+Full coverage means the change landed by another route; near-zero means it
+did not. Every low score still needs reading, because a file the integration
+branch restructured for Phases 5–10 scores zero whether the change is
+missing or obsolete.
+
+**Ported in Phase 11d**, with the branch's own tests, all four about the
+same failure — a student leaves something open, the generated driver is
+swallowed into it, and the compiler reports the judge's own code at them:
+
+* `remap.ts`: when g++ says `expected '}' at end of input`, that is now the
+  only generated-code message shown. The fixture in the ported test is real
+  g++ 13 output for the two-sum reference with its closing `};` removed — 14
+  errors about `recx_harness` and `Solution::main()`, which collapse to one
+  error and the student's own `to match this '{'` note.
+* `remap.ts`: a line still naming `recx_harness` after the qualifier is
+  stripped is dropped, rather than becoming `'' has not been declared`.
+* `remap.ts`: CPython's `(detected at line N)` is mapped like `on line N`,
+  so an unterminated string reports the student's line — or
+  `(detected after your last line)` when only the driver noticed.
+* `values.ts`: an integer token longer than 20 characters is refused without
+  constructing a BigInt from it. A four-million-digit token printed by
+  student code took seconds; it now fails in under 200 ms.
+* `values.ts`: a FUNCTION test whose `IN_PLACE_MUTATION` expected value has
+  a different length from the input is refused at authoring time, because
+  Java passes a fixed-length array and no Java solution could ever pass it.
+* `cpp.ts`: the harness reads doubles with `strtod` and checks the whole
+  token was consumed, instead of `stod`, which accepts trailing garbage.
+
+**Not yet assessed**: the other 26 source files, which are concentrated in
+`lib/privileged/**`, `server/actions/privileged.ts`, `server/queries/submissions.ts`,
+`apps/scheduler/src/{mail,outbox,governance}.ts`, the import spool, and
+`packages/design`'s dialog and `derive.ts`. Their commit titles name real
+defects — "purge vs rejudge", "SMTP stall", "legal hold", "governance
+races", "AdminScope on submission views", "a non-dismissible dialog reopens
+if the browser force-closes it" — and each needs the same read: is this
+defect still present, and does the fix still apply to code that has moved on
+by 77 commits?
+
+**Do not merge the branch.** It is 77 commits behind and its tests are older
+than the ones here; merging would take back the weaker versions. Port file
+by file, with the branch's tests, as above.
