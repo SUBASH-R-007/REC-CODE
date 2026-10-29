@@ -13,6 +13,7 @@ import { effectiveVerdict, validationOutcome } from "@recx/shared/harness";
 import { audit } from "@/lib/audit";
 import { loadVersionContentInput } from "@/lib/authoring/content-input";
 import { testSetFingerprint } from "@/lib/authoring/fingerprint";
+import { functionTestIssues } from "@/lib/authoring/function-tests";
 import { db } from "@/lib/db";
 import { revalidateProblems } from "@/lib/problems/cache";
 import { ConflictError } from "@/lib/errors";
@@ -344,6 +345,7 @@ const runSelect = {
   createdAt: true,
   judgeNodeId: true,
   calibrationScore: true,
+  languageConfigId: true,
 } satisfies Prisma.ValidationRunSelect;
 
 type RunRow = Prisma.ValidationRunGetPayload<{ select: typeof runSelect }>;
@@ -394,8 +396,19 @@ async function loadState(client: Client, versionId: string): Promise<LoadedState
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: runSelect,
   });
+  // ...and only runs on the language's CURRENT toolchain: after a compiler or
+  // interpreter upgrade (a new current LanguageConfig) a revision needs a
+  // fresh validation before it can be approved or published, and its time
+  // limits come from the new toolchain.
+  const refLanguage = new Map(version.referenceSolutions.map((r) => [r.id, r.language]));
   const latestRuns = new Map<string, RunRow>();
-  for (const run of runs) if (!latestRuns.has(run.referenceSolutionId)) latestRuns.set(run.referenceSolutionId, run);
+  for (const run of runs) {
+    if (latestRuns.has(run.referenceSolutionId)) continue;
+    const language = refLanguage.get(run.referenceSolutionId);
+    const current = language === undefined ? undefined : configs.get(language)?.id;
+    if (current !== undefined && run.languageConfigId !== current) continue;
+    latestRuns.set(run.referenceSolutionId, run);
+  }
 
   const enabled = new Set(configs.keys());
   const refs: ReferenceState[] = version.referenceSolutions.map((r) => {
@@ -654,6 +667,8 @@ interface VersionBundle {
   /** testSetFingerprint of the tests the bundle was built from. */
   fingerprint: string;
   prepared: PreparedBundle;
+  /** FUNCTION revisions: tests that are not exactly canonical for the signature (publish blockers). */
+  functionTestIssues: string[];
 }
 
 /** Read a version's tests from the store and compute (not write) its bundle. */
@@ -666,6 +681,8 @@ async function computeVersionBundle(versionId: string, store: TestDataStore): Pr
       frozenAt: true,
       bundleKey: true,
       manifestSha256: true,
+      ioMode: true,
+      functionSignature: true,
       testCases: { orderBy: { index: "asc" }, select: bundleTestSelect },
     },
   });
@@ -689,6 +706,10 @@ async function computeVersionBundle(versionId: string, store: TestDataStore): Pr
     manifestSha256: version.manifestSha256,
     fingerprint: testSetFingerprint(version.testCases),
     prepared,
+    functionTestIssues: functionTestIssues(
+      version,
+      tests.map((t) => ({ label: `Test ${t.index}`, input: t.input, output: t.output })),
+    ),
   };
 }
 
@@ -799,6 +820,8 @@ export async function publishVersion(versionId: string, options: PublishOptions)
         const blockers = [
           ...summary.blockers,
           ...(content ? contentErrors(versionContentIssues(content)).map((i) => i.message) : ["The revision has no content."]),
+          // Read with the bundle; the fingerprint check below pins that set of tests.
+          ...bundle.functionTestIssues,
         ];
         if (requireApproval && !(state.version.status === "IN_REVIEW" && state.version.approvedAt !== null)) {
           blockers.push(NOT_APPROVED_BLOCKER);

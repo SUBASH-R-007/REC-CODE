@@ -442,6 +442,28 @@ const EXEMPTIONS: readonly Exemption[] = [
     reason: "fleet run-lane latency aggregate; no per-student rows",
   },
   {
+    file: "apps/web/src/server/queries/submissions.ts",
+    rule: "R1",
+    call: "submission.findUnique",
+    count: 2,
+    reason:
+      "the student-facing submission view and page, keyed by id: canView admits only the owner, a SUPER_ADMIN or an ADMIN for whom findScopedStudent (a scoped query) finds the owner, and an ADMIN never receives the source (sourceWithheld)",
+  },
+  {
+    file: "apps/web/src/server/queries/submissions.ts",
+    rule: "R1",
+    call: "runRequest.findUnique",
+    count: 1,
+    reason: "the student-facing run view, keyed by id and gated by the same canView",
+  },
+  {
+    file: "apps/web/src/server/queries/submissions.ts",
+    rule: "R1",
+    call: "submission.findMany",
+    count: 1,
+    reason: "recentSubmissions: the signed-in user's own history (its one caller passes user.id)",
+  },
+  {
     file: "apps/web/src/lib/admin/roster.ts",
     rule: "R1",
     call: "user.findMany",

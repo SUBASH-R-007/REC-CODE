@@ -2405,3 +2405,55 @@ about twenty one-to-two-line edits across `/super` and `/admin` pages. The
 same question applies to each: is the defect still here, and does the fix
 still apply after 77 commits? The branch stays open until somebody answers
 that for all of them; it still must not be merged.
+
+### PR #1 is finished, and can be closed
+
+The third pass took the rest. What it brought, beyond the eleven above:
+
+* **An ADMIN could see any student's submission.** `canView` on the
+  submission and run views admitted any staff role, so an ADMIN whose
+  AdminScope covers one department could open a submission belonging to a
+  student in another — through the page and through
+  `/api/submissions/[id]`. It now resolves the owner through the scope
+  (`findScopedStudent`), and an ADMIN with no active grant matches nobody.
+  Separately, an ADMIN now sees a submission's metadata and verdicts but
+  never its code: `sourceWithheld`, the same rule the admin student page
+  already followed. The owner and a SUPER_ADMIN still see everything.
+* **FUNCTION tests are canonical on every path into a revision.** Only bulk
+  import checked. A test added in the editor, or already stored when a
+  signature changed, could be accepted by the C++ reader ("009", "+9",
+  "9.0", trailing text) and rejected by the Python and Java harnesses — so a
+  correct solution failed in two languages out of three. `addDraftTests` and
+  publish now run the same check.
+* **A validation run on a superseded toolchain no longer counts.** After a
+  compiler or interpreter upgrade a revision could be approved and published
+  on measurements taken with the old one. Only runs on the language's
+  current `LanguageConfig` are read.
+* **The import read the problem before taking its lock**, so a revision
+  another admin started a moment earlier could be missed. It re-reads after
+  the lock.
+* **`countActiveSuperAdminsLocked`** replaces an unlocked count in the bulk
+  status executor, so two concurrent operations cannot each believe a
+  super-admin remains.
+* **The roster preview stopped going stale for no reason.** Its hash
+  included each matched account's `updatedAt`, so a student signing in or
+  submitting between preview and commit invalidated the whole plan. The hash
+  now covers what the plan actually depends on — every change's current
+  value, the link, and the outcome kind — and not `updatedAt`.
+* A PENDING bulk status change now shows the approver who is in it (counts
+  by role, every non-student named), the mobile admin menu closes on
+  navigation, two focusable scroll regions got a `role`, and `/super/` is
+  now in the Monaco-free budget (79 routes checked, up from 64).
+
+**Deliberately not taken:** `tests/repo/render-read-only.test.ts`,
+`tests/repo/student-exposure.test.ts` and `tests/repo/support/exposure-rules.ts`,
+where this branch's versions are the later and larger ones (183 lines
+against 107, for instance) — applying the branch's would be a regression.
+Also `apps/web/test/seed-content.test.ts`, a test-runtime optimisation
+(caching generated inputs, explicit timeouts) that no longer applies to the
+file as it stands; worth redoing from scratch if that suite ever gets slow
+in CI.
+
+So PR #1 is done: everything from it that is still a defect here is fixed,
+with its tests, and the rest is recorded above. The branch can be closed
+without merging.

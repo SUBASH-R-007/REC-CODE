@@ -180,6 +180,8 @@ export default async function SubmissionPage({ params }: Params) {
         </h2>
         {detail.source !== null ? (
           <SourceView source={detail.source} language={detail.editorLanguage} label={`Submitted code, ${view.languageLabel}`} />
+        ) : detail.sourceWithheld ? (
+          <p className="text-sm text-text-secondary">Only the student and super-admins can see the code of a submission.</p>
         ) : (
           <p className="text-sm text-text-secondary">The code of this submission has been archived and is no longer shown here.</p>
         )}

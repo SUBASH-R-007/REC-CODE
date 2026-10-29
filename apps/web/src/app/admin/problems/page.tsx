@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { FilePlus2, Upload } from "lucide-react";
-import { ButtonLink, Card, DifficultyBadge, EmptyState, Input, Select } from "@recx/design";
+import { ButtonLink, Card, cn, DifficultyBadge, EmptyState, Input, Select } from "@recx/design";
 import { REVIEW_STAGE_LABEL, REVIEW_STAGES } from "@recx/shared/authoring";
 import { requirePageRole } from "@/lib/auth/guards";
 import { listAdminProblems, parseStage } from "@/server/queries/admin-problems";
@@ -72,10 +72,15 @@ export default async function AdminProblemsPage({ searchParams }: { searchParams
               <Link
                 href={`/admin/problems?stage=${item.stage}`}
                 aria-current={stage === item.stage ? "page" : undefined}
-                className="block rounded-2xl border border-border bg-surface p-4 shadow-card hover:border-primary/40"
+                className={cn(
+                  "block rounded-2xl border bg-surface p-4 shadow-card hover:border-primary/40",
+                  // The current queue: a heavier border and a "Showing" line, not colour alone.
+                  stage === item.stage ? "border-2 border-primary" : "border-border",
+                )}
               >
                 <span className="block text-xs font-medium uppercase tracking-wide text-muted">{item.label}</span>
                 <span className="mt-1 block font-display text-2xl font-bold tabular-nums">{item.count}</span>
+                {stage === item.stage ? <span className="mt-1 block text-xs font-semibold text-primary">Showing</span> : null}
               </Link>
             </li>
           ))}
@@ -125,7 +130,7 @@ export default async function AdminProblemsPage({ searchParams }: { searchParams
         <EmptyState title="No problems match" description="Change the filters, create a problem, or import a package." />
       ) : (
         <Card className="p-0">
-          <div tabIndex={0} aria-label="Problems" className="overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Problems" className="overflow-x-auto">
             <table className="w-full min-w-[44rem] text-sm">
               <caption className="sr-only">
                 Problems, page {list.page} of {list.pageCount} ({list.total} in all)

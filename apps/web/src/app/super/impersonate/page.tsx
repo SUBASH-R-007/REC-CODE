@@ -108,7 +108,7 @@ export default async function SuperImpersonatePage({ searchParams }: { searchPar
           {history.length === 0 ? (
             <EmptyState compact title="No impersonation yet" />
           ) : (
-            <div tabIndex={0} aria-label="Recent impersonations" className="overflow-x-auto rounded-xl border border-border">
+            <div role="region" tabIndex={0} aria-label="Recent impersonations" className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full min-w-[44rem] text-left text-sm">
                 <caption className="sr-only">The last 50 impersonations</caption>
                 <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">

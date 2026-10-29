@@ -65,7 +65,7 @@ export default async function SuperJudgeSettingsPage() {
       <Card>
         <CardHeader title="Languages" subtitle="One row per pinned toolchain. Old rows stay so old submissions rejudge on their own toolchain." />
         <CardBody>
-          <div tabIndex={0} aria-label="Languages" className="overflow-x-auto rounded-xl border border-border">
+          <div role="region" tabIndex={0} aria-label="Languages" className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full min-w-[40rem] text-left text-sm">
               <caption className="sr-only">Language configurations</caption>
               <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">

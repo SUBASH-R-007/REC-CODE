@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,19 +18,21 @@ const h = vi.hoisted(() => ({
   after: [] as (() => unknown)[],
   audit: vi.fn(),
   spoolDir: "",
+  failCreate: false,
 }));
 
 vi.mock("@/lib/auth/session", () => ({ getCurrentUser: async () => h.user.current }));
 vi.mock("@/lib/audit", () => ({ audit: h.audit }));
 vi.mock("@/lib/ip", () => ({ requestIpHash: async () => null }));
 vi.mock("@/lib/env", () => ({ env: () => ({ IMPORT_SPOOL_DIR: h.spoolDir }) }));
-vi.mock("@/lib/authoring/import/run", () => ({ sweepStaleImports: async () => 0 }));
+vi.mock("@/lib/authoring/import/run", () => ({ sweepStaleImports: async () => 0, IMPORT_STALE_AFTER_MS: 30 * 60 * 1000 }));
 vi.mock("@/lib/authoring/import/process", () => ({ processSpooledImport: vi.fn(async () => undefined) }));
 vi.mock("@/lib/db", () => ({
   db: {
     problemImport: {
       findFirst: async () => h.running,
       create: async (args: unknown) => {
+        if (h.failCreate) throw new Error("database unavailable");
         h.created.push(args);
         return { id: "import-1" };
       },
@@ -45,7 +47,7 @@ vi.mock("next/server", async (orig) => ({
 }));
 
 const { POST } = await import("@/app/api/admin/problems/import/route");
-const { spoolRequestBody } = await import("@/lib/authoring/import/spool");
+const { ensurePrivateDir, spoolRequestBody, sweepSpoolFiles } = await import("@/lib/authoring/import/spool");
 
 beforeAll(async () => {
   h.spoolDir = await mkdtemp(path.join(os.tmpdir(), "recx-spool-test-"));
@@ -58,6 +60,7 @@ beforeEach(() => {
   h.running = null;
   h.created.length = 0;
   h.after.length = 0;
+  h.failCreate = false;
   h.audit.mockClear();
 });
 
@@ -110,6 +113,53 @@ describe("POST /api/admin/problems/import", () => {
     expect(h.audit).toHaveBeenCalledWith(expect.objectContaining({ action: "problem.import.started", sensitivity: "NORMAL", actorId: "admin-1" }));
     expect(h.after).toHaveLength(1);
     expect((await readdir(h.spoolDir)).length).toBe(1);
+  });
+
+  it("removes the spooled archive when recording the import fails", async () => {
+    const before = (await readdir(h.spoolDir)).length;
+    h.failCreate = true;
+    await expect(POST(request())).rejects.toThrow(/database unavailable/);
+    expect((await readdir(h.spoolDir)).length).toBe(before);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("the spool directory", () => {
+  it("tightens a directory this process owns to 0700", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "recx-spool-mode-"));
+    try {
+      await chmod(dir, 0o777);
+      await ensurePrivateDir(dir);
+      expect((await stat(dir)).mode & 0o777).toBe(0o700);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symlink in place of the directory", async () => {
+    const base = await mkdtemp(path.join(os.tmpdir(), "recx-spool-link-"));
+    try {
+      await mkdir(path.join(base, "real"));
+      await symlink(path.join(base, "real"), path.join(base, "link"));
+      await expect(ensurePrivateDir(path.join(base, "link"))).rejects.toMatchObject({ status: 500 });
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+
+  it("sweeps archives older than the stale window and keeps fresh ones", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "recx-spool-sweep-"));
+    try {
+      await writeFile(path.join(dir, "old.zip"), "x");
+      await writeFile(path.join(dir, "new.zip"), "x");
+      await writeFile(path.join(dir, "note.txt"), "x");
+      const hourAgo = new Date(Date.now() - 3_600_000);
+      await utimes(path.join(dir, "old.zip"), hourAgo, hourAgo);
+      expect(await sweepSpoolFiles(dir, 30 * 60 * 1000)).toBe(1);
+      expect((await readdir(dir)).sort()).toEqual(["new.zip", "note.txt"]);
+      expect(await sweepSpoolFiles(path.join(dir, "missing"), 1)).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

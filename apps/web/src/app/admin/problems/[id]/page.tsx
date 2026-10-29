@@ -93,7 +93,7 @@ export default async function AdminProblemPage({ params, searchParams }: Props) 
       <Card>
         <CardHeader title="Revisions" subtitle="Published revisions are frozen. Editing starts a new draft revision." />
         <CardBody className="space-y-4">
-          <div tabIndex={0} aria-label="Revisions" className="overflow-x-auto">
+          <div role="region" tabIndex={0} aria-label="Revisions" className="overflow-x-auto">
             <table className="w-full min-w-[36rem] text-sm">
               <caption className="sr-only">Revisions of {problem.title}</caption>
               <thead className="text-left text-xs uppercase tracking-wide text-muted">

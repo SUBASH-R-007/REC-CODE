@@ -6,6 +6,7 @@ import { NotFoundError, ValidationError } from "@/lib/errors";
 import { ensureTestBlob } from "@/lib/testdata/blobs";
 import { getTestDataStore } from "@/lib/testdata/store";
 import { touchDraft, type DraftHead } from "./draft";
+import { functionTestIssues } from "./function-tests";
 import { retryingTransaction } from "./retry";
 
 export { testSetFingerprint } from "./fingerprint";
@@ -32,6 +33,17 @@ interface EditBase {
 }
 
 export async function addDraftTests(input: EditBase & { tests: readonly NewTest[] }): Promise<{ indexes: number[]; head: DraftHead }> {
+  const version = await db.problemVersion.findUnique({
+    where: { id: input.versionId },
+    select: { ioMode: true, functionSignature: true },
+  });
+  if (!version) throw new NotFoundError("That revision was not found.");
+  const issues = functionTestIssues(
+    version,
+    input.tests.map((t, i) => ({ label: `New test ${i + 1}`, input: t.input, output: t.output })),
+    5,
+  );
+  if (issues.length > 0) throw new ValidationError(`Tests of a FUNCTION problem must be exactly canonical. ${issues.join(" ")}`);
   const store = getTestDataStore();
   const blobs: { input: string; output: string }[] = [];
   for (const t of input.tests) {

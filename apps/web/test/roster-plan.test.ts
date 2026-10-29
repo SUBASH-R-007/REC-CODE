@@ -15,7 +15,6 @@ import {
 const cse = buildStudentScope({ id: "adm", role: "ADMIN" }, [{ departmentCode: "CSE", batchYear: null }]);
 const all = buildStudentScope({ id: "sup", role: "SUPER_ADMIN" }, []);
 const nothing = buildStudentScope({ id: "adm", role: "ADMIN" }, []);
-const T0 = new Date("2026-10-01T10:00:00.000Z");
 
 function r(fields: Partial<RosterRow> = {}): RosterRow {
   return {
@@ -41,7 +40,6 @@ function u(fields: Partial<ExistingUser> = {}, detail: ExistingUser["detail"] | 
     email: "priya@example.edu",
     batchYear: 2027,
     departmentCode: "CSE",
-    updatedAt: T0,
     ...fields,
   };
   return detail ? { ...base, detail } : base;
@@ -80,7 +78,7 @@ describe("planRosterImport", () => {
   });
 
   it("UNCHANGED when nothing differs", () => {
-    expect(outcome([line(2, r())], [u()])).toEqual([{ kind: "UNCHANGED", userId: "u1", updatedAt: T0.toISOString() }]);
+    expect(outcome([line(2, r())], [u()])).toEqual([{ kind: "UNCHANGED", userId: "u1" }]);
   });
 
   it("SKIPPED for an account that is not active, never reactivated", () => {
@@ -172,10 +170,12 @@ describe("rosterPlanSha256", () => {
     expect(a).toBe(b);
   });
 
-  it("changes when a matched account changed since the preview (updatedAt)", () => {
+  it("changes when a value the plan depends on changed since the preview", () => {
     const before = rosterPlanSha256(planRosterImport(lines, [u()], cse));
-    const after = rosterPlanSha256(planRosterImport(lines, [u({ updatedAt: new Date(T0.getTime() + 1) })], cse));
-    expect(after).not.toBe(before);
+    const renamed = u();
+    renamed.detail = { ...renamed.detail!, lastName: "Renamed meanwhile" };
+    expect(rosterPlanSha256(planRosterImport(lines, [renamed], cse))).not.toBe(before);
+    expect(rosterPlanSha256(planRosterImport(lines, [u({ status: "DISABLED" })], cse))).not.toBe(before);
   });
 
   it("changes when the outcome changes (e.g. the scope)", () => {

@@ -46,7 +46,7 @@ export function ReferenceSolutions({
   return (
     <div className="space-y-5">
       {references.length > 0 ? (
-        <div tabIndex={0} aria-label="Reference solutions" className="overflow-x-auto rounded-xl border border-border">
+        <div role="region" tabIndex={0} aria-label="Reference solutions" className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[32rem] text-sm">
             <caption className="sr-only">Reference solutions of this revision</caption>
             <thead className="bg-primary-subtle/40 text-left text-xs uppercase tracking-wide text-muted">

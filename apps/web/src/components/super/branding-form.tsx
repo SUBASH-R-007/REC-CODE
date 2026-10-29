@@ -175,7 +175,7 @@ export function BrandingForm({
             </div>
           ) : null}
           {preview.simulations.length > 0 ? (
-            <div tabIndex={0} aria-label="Colour-vision simulation" className="overflow-x-auto rounded-xl border border-border">
+            <div role="region" tabIndex={0} aria-label="Colour-vision simulation" className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full min-w-[28rem] text-left text-xs">
                 <caption className="sr-only">How the primary and accent colours read under colour-vision simulations</caption>
                 <thead className="bg-primary-subtle/40 uppercase tracking-wide text-text-secondary">
@@ -208,7 +208,7 @@ export function BrandingForm({
               </table>
             </div>
           ) : null}
-          <div tabIndex={0} aria-label="Contrast checks" className="max-h-80 overflow-auto rounded-xl border border-border">
+          <div role="region" tabIndex={0} aria-label="Contrast checks" className="max-h-80 overflow-auto rounded-xl border border-border">
             <table className="w-full min-w-[28rem] text-left text-xs">
               <caption className="sr-only">Contrast checks in both themes</caption>
               <thead className="sticky top-0 bg-surface uppercase tracking-wide text-text-secondary">

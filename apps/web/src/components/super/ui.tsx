@@ -18,7 +18,7 @@ export function PageHeader({ title, description, action }: { title: string; desc
         <h1 className="font-display text-2xl font-bold tracking-tight">{title}</h1>
         <div className="mt-1 max-w-3xl text-sm text-text-secondary">{description}</div>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="min-w-0 max-w-full">{action}</div> : null}
     </div>
   );
 }

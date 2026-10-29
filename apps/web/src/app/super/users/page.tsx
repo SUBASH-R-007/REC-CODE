@@ -87,7 +87,7 @@ async function UserPanel({ userId }: { userId: string }) {
           {xp.length === 0 ? (
             <p className="text-sm text-text-secondary">No XP events.</p>
           ) : (
-            <div tabIndex={0} aria-label="XP ledger" className="overflow-x-auto rounded-xl border border-border">
+            <div role="region" tabIndex={0} aria-label="XP ledger" className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full min-w-[32rem] text-left text-sm">
                 <caption className="sr-only">The latest XP ledger rows of this account</caption>
                 <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">
@@ -207,6 +207,7 @@ export default async function SuperUsersPage({ searchParams }: { searchParams: P
         <EmptyState title="No account matches" description="Check the roll number, or widen the filters." />
       ) : (
         <BulkStatusTable
+          key={rows.map((r) => r.id).join(",")}
           filter={filter}
           filterLabel={filterLabel}
           rows={rows.map((r) => ({

@@ -89,7 +89,7 @@ export default async function ImportPage({ params }: { params: Promise<{ importI
               <Info className="h-4 w-4" aria-hidden /> No rows yet.
             </p>
           ) : (
-            <div tabIndex={0} aria-label="Import results" className="overflow-x-auto">
+            <div role="region" tabIndex={0} aria-label="Import results" className="overflow-x-auto">
               <table className="w-full min-w-[40rem] text-sm">
                 <caption className="sr-only">Result of every problem directory in this import</caption>
                 <thead className="text-left text-xs uppercase tracking-wide text-muted">
