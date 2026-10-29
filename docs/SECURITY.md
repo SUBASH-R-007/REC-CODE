@@ -245,6 +245,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `roster.import` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `plans.manage` | staff | - | - | yes | - | yes | 11 actions, 6 pages |
 | `contests.manage` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
+| `assessments.manage` | staff | - | - | yes | - | yes | 5 actions, 3 pages |
 | `announcements.manage` | staff | - | - | yes | - | yes | 3 actions, 3 pages |
 | `accommodations.request` | staff | - | - | yes | - | yes | 2 actions, 3 pages |
 | `aptitude.authoring` | staff | - | - | yes | - | yes | 6 actions, 2 routes, 5 pages |

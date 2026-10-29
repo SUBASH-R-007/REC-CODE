@@ -566,7 +566,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261029164131_phase11f_initial_password";
+export const CHECK_CATALOG_THROUGH = "20261029185421_phase12a_assessment_proctored";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -969,6 +969,12 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
     name: "User_must_change_password_check",
     table: "User",
     migration: "20261029164131_phase11f_initial_password",
+  },
+  // 20261029185421_phase12a_assessment_proctored
+  {
+    name: "Assessment_proctored_check",
+    table: "Assessment",
+    migration: "20261029185421_phase12a_assessment_proctored",
   },
 ];
 

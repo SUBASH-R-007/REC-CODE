@@ -38,6 +38,7 @@ describe("admin navigation", () => {
           "/admin/sheets",
           "/admin/tracks",
           "/admin/contests",
+          "/admin/assessments",
           "/admin/announcements",
         ],
       ],

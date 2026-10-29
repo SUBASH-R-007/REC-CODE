@@ -2431,7 +2431,10 @@ model Assessment {
   /// Markdown, sanitised server-side. Shown before the attempt starts.
   instructions                String           @db.Text
   status                      AssessmentStatus @default(DRAFT)
-  proctorMode                 ProctorMode      @default(NONE)
+  /// Phase 12a: an assessment is always proctored. NONE stays in the enum
+  /// for AssessmentAttempt (frozen on a sitting) and for the shared
+  /// telemetry type, but `Assessment_proctored_check` refuses it here.
+  proctorMode                 ProctorMode      @default(ADVISORY)
   /// THE HARD RULE: true requires proctorMode = LAB_SUPERVISED.
   affectsPlacementEligibility Boolean          @default(false)
   opensAt                     DateTime

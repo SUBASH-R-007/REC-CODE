@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSESSMENT_PROCTOR_MODES,
+  ASSESSMENT_PROCTORED_MESSAGE,
+  isAssessmentProctorMode,
   ASSESSMENT_LIMITS,
   assessmentPolicySchema,
   assessmentWindowSchema,
@@ -22,7 +25,7 @@ import {
  */
 
 const policy = (over: Partial<Record<string, unknown>> = {}) => ({
-  proctorMode: "NONE" as ProctorMode,
+  proctorMode: "ADVISORY" as ProctorMode,
   affectsPlacementEligibility: false,
   durationSec: 3600,
   maxAttempts: 1,
@@ -37,7 +40,7 @@ describe("the hard rule", () => {
     expect(PLACEMENT_PROCTOR_MODE).toBe("LAB_SUPERVISED");
   });
 
-  it.each(PROCTOR_MODES.filter((m) => m !== "LAB_SUPERVISED"))(
+  it.each(ASSESSMENT_PROCTOR_MODES.filter((m) => m !== "LAB_SUPERVISED"))(
     "refuses placement eligibility under %s",
     (mode) => {
       const result = assessmentPolicySchema.safeParse(
@@ -70,10 +73,41 @@ describe("the hard rule", () => {
     ).toBe(true);
   });
 
-  it.each(PROCTOR_MODES)("allows %s when placement eligibility is off", (mode) => {
+  it.each(ASSESSMENT_PROCTOR_MODES)("allows %s when placement eligibility is off", (mode) => {
     expect(
       assessmentPolicySchema.safeParse(policy({ proctorMode: mode, affectsPlacementEligibility: false })).success,
     ).toBe(true);
+  });
+});
+
+/**
+ * Phase 12a. The mode was never read by the engine, so a NONE assessment
+ * watched its candidates exactly as closely as any other while telling them
+ * nobody was. The enum keeps the value — a finished sitting froze it, and
+ * the type is shared with the telemetry vocabulary — but no assessment can
+ * be set to it.
+ */
+describe("an assessment is always proctored", () => {
+  it("offers every mode but NONE", () => {
+    expect([...ASSESSMENT_PROCTOR_MODES]).toEqual(["ADVISORY", "REMOTE_MONITORED", "KIOSK_SEB", "LAB_SUPERVISED"]);
+    expect(PROCTOR_MODES).toContain("NONE");
+    expect(isAssessmentProctorMode("NONE")).toBe(false);
+  });
+
+  it("refuses NONE, and says where an unwatched sitting belongs", () => {
+    const result = assessmentPolicySchema.safeParse(policy({ proctorMode: "NONE" }));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]!.message).toBe(ASSESSMENT_PROCTORED_MESSAGE);
+      expect(result.error.issues[0]!.path).toEqual(["proctorMode"]);
+      expect(result.error.issues[0]!.message).toMatch(/contest|practice/i);
+    }
+  });
+
+  it("refuses it whatever else is set, including placement eligibility off", () => {
+    for (const over of [{}, { affectsPlacementEligibility: false }, { strictMode: true }, { maxAttempts: 3 }]) {
+      expect(assessmentPolicySchema.safeParse(policy({ proctorMode: "NONE", ...over })).success).toBe(false);
+    }
   });
 });
 

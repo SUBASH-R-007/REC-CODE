@@ -308,7 +308,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
             seed: 1_234_567,
             layout: {} as never,
             tokenHash: randomBytes(32).toString("hex"),
-            proctorMode: "NONE",
+            proctorMode: "ADVISORY",
           } as never,
           select: { id: true },
         });
@@ -333,7 +333,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
           seed: 1_234_567,
           layout: {} as never,
           tokenHash: randomBytes(32).toString("hex"),
-          proctorMode: "NONE",
+          proctorMode: "ADVISORY",
         } as never,
         select: { id: true },
       });

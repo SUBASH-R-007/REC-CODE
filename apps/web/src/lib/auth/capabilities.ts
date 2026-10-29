@@ -437,6 +437,35 @@ export const STAFF_CAPABILITIES = deepFreeze([
     ],
   },
   {
+    /**
+     * Phase 12a. Authoring the thing the Phase 6 engine runs. Separate from
+     * `contests.manage` because the two differ in the way that matters: a
+     * contest is practice with stakes and is watched by nothing, while an
+     * assessment is always proctored and its result can be withheld from a
+     * leaderboard pending a human's review.
+     *
+     * Staff, not super-admin only: a department runs its own tests. What an
+     * ADMIN still cannot do is make one count towards placement without
+     * running it lab-supervised — that rule lives in the schema and in a
+     * database CHECK, not in this matrix.
+     */
+    key: "assessments.manage",
+    label: "Create assessments, pin their questions and schedule their halls",
+    roles: STAFF,
+    actions: [
+      "admin-assessments#createAssessment",
+      "admin-assessments#addAssessmentProblem",
+      "admin-assessments#removeAssessmentProblem",
+      "admin-assessments#scheduleExamSession",
+      "admin-assessments#setAssessmentStatus",
+    ],
+    pages: [
+      "app/admin/assessments/page.tsx",
+      "app/admin/assessments/new/page.tsx",
+      "app/admin/assessments/[id]/page.tsx",
+    ],
+  },
+  {
     key: "announcements.manage",
     label: "Draft, publish and archive announcements to in-scope students",
     roles: STAFF,

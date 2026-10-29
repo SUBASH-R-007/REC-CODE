@@ -2576,3 +2576,51 @@ student's password" button for an admin, and that is unchanged: the holder
 uses the one-time link. An admin who set a password and wants a different
 one deletes nothing and sets nothing — they tell the student to use the
 link.
+
+## Assessments can be created now, and are always proctored (Phase 12a)
+
+Two things, and the second is the reason the first could wait this long.
+
+**There was no way to create an assessment.** The sitting engine has existed
+since Phase 6 — the readiness check and its consent moment, the exam
+surface, the telemetry client, the attempt clock, the heartbeat and its
+allowlist re-check, the invigilation page, the integrity queue and its
+72-hour SLA — and every assessment that ever ran through it was made by a
+test fixture. `/admin/assessments` is the missing half: create a draft, pin
+its questions at their frozen revisions, schedule halls with their
+allowlists, publish, open, close.
+
+**An assessment is always proctored.** `NONE` is gone as a choice, in the
+schema (`ASSESSMENT_PROCTOR_MODES`), at the server boundary and as a
+database CHECK. The Phase 11b audit is why: the engine never read the mode
+at all. A `NONE` assessment collected the same sixteen client signals as any
+other, triaged them the same way, and could flag an attempt and withhold its
+result exactly the same. The mode told a student nobody was watching while
+the product watched.
+
+Of the two ways to make that true, collecting nothing under `NONE` would
+leave a sitting that counts for something with no record of how it went —
+and the thing a reviewer needs most when a student appeals is the record. So
+the other way: say what is actually happening. A sitting nobody watches
+already has two homes, practice and contests, and neither has a proctor mode
+at all.
+
+`NONE` stays in the `ProctorMode` enum, deliberately: `AssessmentAttempt`
+freezes the mode on a finished sitting, old rows hold it, and the type is
+shared with the telemetry vocabulary.
+
+**The migration refuses rather than rewrites.** A database that already
+holds a `NONE` assessment fails this migration, and should. Moving those
+rows would mean disabling `Assessment_published_immutable` to rewrite what a
+candidate was told — and `packages/db/test/frozen-coverage.test.ts` fails
+the build for a migration that disables a guard, which is exactly the fence
+working. An operator decides each row by hand. (Production holds none:
+nothing could create an assessment until now.)
+
+**Not built, and worth naming.** There is no edit for a DRAFT's terms — an
+admin who mistypes the window deletes the draft and makes another, which is
+cheap while it is a draft and impossible after. There is no seat mapping
+(SPEC §5 asks for a seat label per candidate; the hall exists, the seat does
+not). There is no way to remove a hall once scheduled, only to stop using
+it. And nobody has yet run a real assessment end to end: the drill that
+proves this is a cohort sitting one, not a fixture.

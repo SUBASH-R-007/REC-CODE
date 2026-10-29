@@ -21,6 +21,7 @@ export type AdminNavIcon =
   | "sheets"
   | "tracks"
   | "contests"
+  | "assessments"
   | "announcements"
   | "reports"
   | "judge"
@@ -69,6 +70,10 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = Object.freeze([
       item("/admin/sheets", "Sheets", "sheets"),
       item("/admin/tracks", "Tracks", "tracks"),
       item("/admin/contests", "Contests", "contests"),
+      // Phase 12a. Next to Contests because they are the same act seen from
+      // two sides — a paper a cohort sits — and different in the one way
+      // that matters: an assessment is always proctored.
+      item("/admin/assessments", "Assessments", "assessments"),
       item("/admin/announcements", "Announcements", "announcements"),
     ]),
   },

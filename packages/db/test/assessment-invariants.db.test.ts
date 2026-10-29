@@ -203,7 +203,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
     it("refuses switching the flag on after publishing (the other door)", async () => {
       const row = await db.assessment.create({
-        data: assessment({ proctorMode: "NONE", affectsPlacementEligibility: false }),
+        data: assessment({ proctorMode: "ADVISORY", affectsPlacementEligibility: false }),
         select: { id: true },
       });
       await db.assessment.update({ where: { id: row.id }, data: { status: "PUBLISHED" } });

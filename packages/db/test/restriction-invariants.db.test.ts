@@ -648,7 +648,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
           seed: 1_234_567,
           layout: {} as never,
           tokenHash: "b".repeat(64),
-          proctorMode: "NONE",
+          proctorMode: "ADVISORY",
         } as never,
         select: { id: true },
       });

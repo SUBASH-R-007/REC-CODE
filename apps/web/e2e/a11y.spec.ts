@@ -192,6 +192,11 @@ const TARGETS: readonly Target[] = [
   { path: "/admin/accommodations", as: "staffAdmin", gating: true },
   { path: "/admin/problems", as: "staffAdmin", gating: true },
   { path: "/admin/problems/new", as: "staffAdmin", gating: true },
+  // Phase 12a. The list and the create form: the form is the one with a
+  // radio group and a conditionally disabled checkbox, which is where an
+  // accessibility mistake would actually land.
+  { path: "/admin/assessments", as: "staffAdmin", gating: true },
+  { path: "/admin/assessments/new", as: "staffAdmin", gating: true },
   { path: "/admin/judge", as: "staffAdmin", gating: true },
   { path: "/super", as: "admin", gating: true },
   { path: "/super/users", as: "admin", gating: true },

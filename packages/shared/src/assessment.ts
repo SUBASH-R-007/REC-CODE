@@ -25,6 +25,37 @@ export const PROCTOR_MODES = ["NONE", "ADVISORY", "REMOTE_MONITORED", "KIOSK_SEB
 export type ProctorMode = (typeof PROCTOR_MODES)[number];
 
 /**
+ * The modes an ASSESSMENT may be set to (Phase 12a). Every one of them, in
+ * other words, except `NONE`.
+ *
+ * `NONE` stays in the enum because `AssessmentAttempt.proctorMode` is frozen
+ * on a sitting and old rows hold it, and because the type is shared with the
+ * telemetry vocabulary. It is no longer a thing an assessment can be set to,
+ * for a reason the Phase 11b audit made plain: the engine never read the
+ * mode at all. A `NONE` assessment collected the same sixteen client signals
+ * as any other, triaged them the same way, and could flag and withhold a
+ * result exactly the same — so the mode said "nobody is watching" while the
+ * product watched. Of the two ways to make that honest, collecting nothing
+ * would mean a sitting that counts for something with no record of how it
+ * went; so the other one: an assessment is proctored, and says so.
+ *
+ * Practice and contests are where an unwatched attempt belongs, and neither
+ * of them has a proctor mode at all (docs/PROCTORING.md §6).
+ */
+export const ASSESSMENT_PROCTOR_MODES = PROCTOR_MODES.filter((m) => m !== "NONE") as readonly Exclude<
+  ProctorMode,
+  "NONE"
+>[];
+export type AssessmentProctorMode = (typeof ASSESSMENT_PROCTOR_MODES)[number];
+
+export const ASSESSMENT_PROCTORED_MESSAGE =
+  "An assessment is always proctored. Choose how closely it is watched — a contest or a practice problem is the place for a sitting nobody watches.";
+
+export function isAssessmentProctorMode(mode: ProctorMode): mode is AssessmentProctorMode {
+  return mode !== "NONE";
+}
+
+/**
  * The ONE mode a placement-bearing assessment may use. Not a list: the spec
  * names exactly one, and a list invites a well-meaning addition later.
  * KIOSK_SEB is deliberately not here — Safe Exam Browser is the strongest
@@ -60,7 +91,7 @@ export const ASSESSMENT_LIMITS = Object.freeze({
 
 export const assessmentPolicySchema = z
   .object({
-    proctorMode: z.enum(PROCTOR_MODES),
+    proctorMode: z.enum(PROCTOR_MODES).refine(isAssessmentProctorMode, ASSESSMENT_PROCTORED_MESSAGE),
     affectsPlacementEligibility: z.boolean(),
     durationSec: z
       .number()
