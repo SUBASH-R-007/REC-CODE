@@ -77,24 +77,47 @@ const RESTART_BUDGET_MS = process.env.CI ? 180_000 : 60_000;
  * returned `net::ERR_EMPTY_RESPONSE` and the whole job failed before a
  * single assertion had run.
  *
- * Only connection-level failures are retried, and only while the budget
- * lasts. A navigation TIMEOUT is not retried: a page that takes too long is
- * a finding, and this must never turn one into a pass. Anything else —
- * including an assertion later in the test — is rethrown untouched.
+ * Connection-level failures are retried while the budget lasts.
+ *
+ * A navigation TIMEOUT is retried ONCE, and no more. The original rule here
+ * was that a timeout is never retried — a page that takes too long is a
+ * finding, and this must not turn one into a pass. Run 40657487686 showed
+ * the other half of it: a restart does not always arrive as a connection
+ * error. A navigation already in flight when the server goes down can sit
+ * there until the navigation timeout instead, and that run lost
+ * `/account/reactivate` and `/admin/accommodations` to
+ * `Timeout 180000ms exceeded` with "Server is approaching the used memory
+ * threshold, restarting..." in the server log beside them.
+ *
+ * One retry separates the two cases without hiding either: a page that
+ * genuinely hangs hangs twice and still fails, costing one extra timeout,
+ * while a page caught by a restart passes on the second attempt. Anything
+ * else — including an assertion later in the test — is rethrown untouched.
  */
+const TIMEOUT_RETRIES = 1;
+const NAVIGATION_TIMED_OUT = /page\.goto: Timeout \d+ms exceeded/;
 export async function openPage(
   page: Page,
   path: string,
   options: Parameters<Page["goto"]>[1] = {},
 ): Promise<Awaited<ReturnType<Page["goto"]>>> {
   const deadline = Date.now() + RESTART_BUDGET_MS;
+  let timeoutsLeft = TIMEOUT_RETRIES;
   for (let attempt = 1; ; attempt++) {
     try {
       return await page.goto(path, options);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const firstLine = message.split("\n")[0];
+      if (NAVIGATION_TIMED_OUT.test(message)) {
+        if (timeoutsLeft <= 0) throw error;
+        timeoutsLeft -= 1;
+        console.log(`[e2e] ${path}: ${firstLine}; one retry, in case the server restarted under it`);
+        await page.waitForTimeout(2_000);
+        continue;
+      }
       if (!SERVER_WENT_AWAY.test(message) || Date.now() >= deadline) throw error;
-      console.log(`[e2e] ${path}: the server went away (${message.split("\n")[0]}); retry ${attempt}`);
+      console.log(`[e2e] ${path}: the server went away (${firstLine}); retry ${attempt}`);
       await page.waitForTimeout(2_000);
     }
   }

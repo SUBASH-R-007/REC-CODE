@@ -237,14 +237,7 @@ jobs:
       - name: Start the web app (next dev, background)
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: |
-          nohup pnpm --filter @recx/web exec next dev -p 3000 --disable-source-maps > "$RUNNER_TEMP/web.log" 2>&1 &
-          for i in $(seq 1 120); do
-            if curl -sf -o /dev/null http://localhost:3000/login; then exit 0; fi
-            sleep 2
-          done
-          cat "$RUNNER_TEMP/web.log"
-          exit 1
+        run: bash scripts/dev/ci-web-server.sh start
 
       # `next dev` compiles a route on its first request, and this suite
       # visits about sixty. Warming moves that cost out of the assertions:
@@ -254,6 +247,21 @@ jobs:
       # compiles before its guard redirects.
       - name: Warm the routes the suite visits
         run: bash scripts/dev/warm-routes.sh http://localhost:3000
+
+      # Warming leaves those sixty routes compiled on disk AND retained in
+      # heap, so the suite would start already near the threshold Next
+      # restarts itself at. Restarting keeps the disk cache and hands the
+      # run a fresh heap; docs/RUNBOOK.md §1.5 calls this out as the fix.
+      #
+      # Run 40657487686 is why it is here: three navigations survived a
+      # restart through the retry in e2e/support/page.ts, and two more —
+      # /account/reactivate and /admin/accommodations — did not, because a
+      # navigation in flight when the server goes down hangs to the
+      # navigation timeout instead of failing fast.
+      - name: Restart it with a fresh heap, keeping the warm disk cache
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: bash scripts/dev/ci-web-server.sh restart
 
       # rbac and judge need no judge worker; authoring needs E2E_JUDGE=1 and
       # runs only against the live local stack.

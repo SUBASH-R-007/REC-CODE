@@ -917,12 +917,38 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ),
       status: [403],
     },
+    /**
+     * Phase 11a. Both are unauthenticated and deliberately answer the same
+     * thing whatever is true of the account, so the canary sweep is the
+     * check that matters: neither may echo an identifier back, and the
+     * reset page must not become an oracle for which tokens exist.
+     */
+    "api/auth/forgot-password/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: `identifier=${encodeURIComponent(tag.toUpperCase())}`,
+        }),
+      ),
+    },
     "api/auth/login/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/auth/login", {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body: `identifier=${encodeURIComponent(tag.toUpperCase())}&password=wrong-password`,
+        }),
+      ),
+    },
+    "api/auth/reset-password/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          // A token nobody minted: the invented, expired, spent and
+          // superseded cases all answer alike, which is the design.
+          body: `token=${"z".repeat(43)}&password=a-new-password-1&confirm=a-new-password-1`,
         }),
       ),
     },
@@ -1650,6 +1676,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "aptitude#recordPracticeQuestionServed": [() => [{ questionId: ids.aptitudeQuestion }]],
     "profile#saveProfileSettings": [
       () => [null, form({ handle: ids.handle, visibility: "PUBLIC", bio: "", fontSize: "14", tabSize: "4", keymap: "default" })],
+    ],
+    /**
+     * Phase 11b. Self-service by definition — every role changes its own
+     * password here — so the question is only what it says back. The
+     * fixture gives a current password that is not S's, which is the path
+     * worth sweeping: a refusal must not say whether the account has a
+     * password, nor echo anything of S's record.
+     */
+    "profile#changeMyPassword": [
+      () => [null, form({ current: "not-my-password", next: "a-new-password-1", confirm: "a-new-password-1" })],
     ],
   };
   const READ_ONLY_UNWRAPPED = new Set(["super-impersonate#endImpersonation"]);
