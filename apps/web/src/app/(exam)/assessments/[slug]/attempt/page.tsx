@@ -5,7 +5,7 @@ import { msRemaining } from "@recx/shared";
 import { requireUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
-import { startOrResumeAttempt } from "@/lib/exam/start";
+import { attemptLayoutOf } from "@/lib/exam/layout";
 import { ExamSession } from "@/components/exam/exam-session";
 import { getExamPaper } from "@/server/queries/exam";
 
@@ -41,28 +41,33 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
     ? await db.session.findUnique({ where: { tokenHash: hashSessionToken(token) }, select: { id: true } })
     : null;
 
-  const started = await startOrResumeAttempt({ slug, userId: user.id, sessionId: session?.id ?? null });
-  if (!started.ok) {
-    if (started.refusal === "not_found") notFound();
-    // Back to the readiness page, which is where a candidate can read why and
-    // what to do about it. Carrying the reason rather than a bare redirect:
-    // "this assessment is not open" and "you have used all your attempts" are
-    // different problems with different people to ask.
-    redirect(`/assessments/${slug}/readiness?refused=${started.refusal}`);
-  }
+  /**
+   * This page RENDERS a sitting; it does not create one. Starting mints an
+   * attempt token and writes it to an httpOnly cookie, and Next refuses a
+   * cookie write during a page render — so the arena used to die on its
+   * first load with "Cookies can only be modified in a Server Action or
+   * Route Handler", every time, for every candidate. `POST
+   * /api/exam/start/[slug]` does the starting now (Phase 12a); a candidate
+   * who arrives here without one is sent back to the readiness page, which
+   * is where the button that starts it lives.
+   */
+  const assessment = await db.assessment.findUnique({ where: { slug }, select: { id: true, proctorMode: true } });
+  if (!assessment) notFound();
+  const live = await db.assessmentAttempt.findFirst({
+    where: { assessmentId: assessment.id, userId: user.id, status: { in: ["IN_PROGRESS", "DISCONNECTED"] } },
+    orderBy: { attemptNumber: "desc" },
+  });
+  if (!live) redirect(`/assessments/${slug}/readiness`);
+  void session;
 
-  const { attempt, layout } = started;
+  const attempt = live;
+  const layout = attemptLayoutOf(attempt);
   const paper = await getExamPaper(layout);
   if (paper.missing.length > 0) {
     console.error(
       `[exam] attempt ${attempt.id}: ${paper.missing.length} of ${layout.questions.length} questions could not be read`,
     );
   }
-
-  const assessment = await db.assessment.findUniqueOrThrow({
-    where: { id: attempt.assessmentId },
-    select: { proctorMode: true },
-  });
 
   // Any work recovered from this browser's write-ahead store is merged on the
   // client, where IndexedDB lives; the server contributes the last snapshot it

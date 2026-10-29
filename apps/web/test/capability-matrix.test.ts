@@ -304,6 +304,14 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
       body: JSON.stringify({ step: "options", userId: "nope" }),
     }),
   ],
+  // Phase 12a. Starting a sitting: a form POST from the readiness page.
+  "app/api/exam/start/[slug]/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/exam/start/nothing-here", {
+      method: "POST",
+      headers: { host: "localhost:3100", origin: "http://localhost:3100" },
+    }),
+    { params: Promise.resolve({ slug: "nothing-here" }) },
+  ],
   "app/api/exam/[attemptId]/hb/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/att_1/hb", {
       method: "POST",

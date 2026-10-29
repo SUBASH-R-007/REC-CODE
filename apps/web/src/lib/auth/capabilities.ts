@@ -617,6 +617,9 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     roles: EVERY_SIGNED_IN_ROLE,
     actions: [],
     routes: [
+      // Phase 12a. Starting a sitting: a route handler because it writes the
+      // attempt-token cookie, which a page render may not do.
+      "app/api/exam/start/[slug]/route.ts#POST",
       "app/api/exam/[attemptId]/hb/route.ts#POST",
       "app/api/exam/[attemptId]/events/route.ts#POST",
       "app/api/exam/[attemptId]/snapshot/route.ts#POST",

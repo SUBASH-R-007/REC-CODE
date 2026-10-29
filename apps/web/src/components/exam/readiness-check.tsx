@@ -224,20 +224,28 @@ export function ReadinessCheck({
       </section>
 
       <div className="flex items-center gap-3">
-        <a
-          href={`/assessments/${slug}/attempt`}
-          aria-disabled={!ready}
-          onClick={(event) => {
-            if (!ready) event.preventDefault();
-          }}
-          className={`rounded-md px-4 py-2 text-sm font-semibold ${
-            ready
-              ? "bg-primary text-primary-fg"
-              : "pointer-events-none border border-border text-text-secondary opacity-60"
-          } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`}
-        >
-          Start the assessment
-        </a>
+        {/*
+          A real form, posting to the route that starts the sitting (Phase
+          12a). It has to be a POST to a route handler: starting mints the
+          attempt token and writes it to an httpOnly cookie, which Next
+          refuses during a page render — the arena used to try, and died on
+          its first load for every candidate. A form also means the button
+          works before this component hydrates, which on the worst connection
+          in the hostel is the moment it matters.
+        */}
+        <form method="post" action={`/api/exam/start/${slug}`}>
+          <button
+            type="submit"
+            disabled={!ready}
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+              ready
+                ? "bg-primary text-primary-fg"
+                : "cursor-not-allowed border border-border text-text-secondary opacity-60"
+            } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`}
+          >
+            Start the assessment
+          </button>
+        </form>
         {!ready ? (
           <p className="text-xs text-text-secondary">
             Finish the checks above and tick the box to start. Your clock starts when you do.
