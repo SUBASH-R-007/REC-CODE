@@ -253,6 +253,61 @@ the cluster must refuse — run at boot and every six hours, reported in
 every heartbeat. Calibration is the one that has no meaning here yet and is
 sent as null.
 
+## Debugging problems (Phase 12m)
+
+SPEC §11: *"debugging and output-only problem kinds"*. The first of the
+two, and it needed no engine at all — which is the finding worth writing
+down.
+
+**A debugging problem is an ordinary problem with an EDIT BUDGET.** The
+student is handed a program that is nearly right and asked to fix it in at
+most N changed lines; the fixed program then runs against the version's
+tests like any other STDIN or FUNCTION problem. The broken program is the
+`StarterCode` rows the version already has, so nothing new is stored but
+the number.
+
+**Non-null is the kind.** `ProblemVersion.maxEditedLines` — null for every
+other problem — and no `ProblemKind` enum beside it, because an enum value
+would invite code to ask "is this a debugging problem?" in places that
+should be asking "does this problem have an edit budget?", and the two
+could then disagree. The database says the rest: a whole number in 1..50,
+and never on a SQL or an interactive problem, neither of which hands the
+student a program to repair.
+
+**The budget is why it is a kind at all.** Without it the student deletes
+the program and writes their own, and the exercise — read somebody else's
+code, find the mistake — never happens. So the rule is enforced where a
+student can be told about it rather than where it would be cheapest: the
+submit and run actions refuse an over-budget source BEFORE the row, so a
+submission that cannot be judged on its merits never costs one of their
+daily submissions, and a Run cannot teach them that the rule does not
+apply until it suddenly does.
+
+**The judge never hears about it.** No field on the wire, nothing in the
+worker: a node has no starter and no business having one. A repository
+fence holds that true in both directions.
+
+**One count, three surfaces.** `countEditedLines` in `@recx/shared` is a
+line-level diff — `max(added, removed)` over the LCS, trimmed, blank lines
+dropped — read by the editor's live counter, by the submit refusal, and by
+the publish gate. A student told "4 lines" by the bar and "2" by the
+server can act on neither number, which is why there is one function and a
+fence refusing a second.
+
+**The gate proves the problem is solvable.** The two rules that cannot be
+CHECKs are the ones that matter: a budget with no starter is a question
+the workspace could offer in no language at all (a debugging problem is
+offered in exactly the languages its broken program is written in — each
+would be a different program with a different mistake), and a budget the
+author's OWN model solution does not fit is a question nobody can answer.
+The gate measures the model solution against the starter and says so.
+
+**Found while building it:** `updateDraftJudging` never forwarded
+`sqlOrdered`. Phase 12k asked the author whether the row order is part of
+a SQL answer *"rather than guessing it"*, the form sent the answer, the
+schema validated it — and the action dropped it, so every SQL problem was
+published as ordered. One line, and a test beside the new one.
+
 ## Interactive problems (Phase 12l, the engine)
 
 SPEC §11's last engine item, and its own description of it: *"the most

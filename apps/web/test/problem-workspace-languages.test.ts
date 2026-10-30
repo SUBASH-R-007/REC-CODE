@@ -63,6 +63,7 @@ function content(overrides: Record<string, unknown> = {}) {
     functionSignature: null,
     sqlDialect: null,
     sqlOrdered: null,
+    maxEditedLines: null,
     timeLimitMs: 1000,
     memoryLimitKb: 262_144,
     starterCodes: [],

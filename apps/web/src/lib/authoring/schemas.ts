@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import {
+  DEBUG_BUDGET,
   IO_MODES,
   LANGUAGE_KEYS,
   LIMITS,
@@ -134,6 +135,19 @@ export const updateJudgingSchema = z
     memoryLimitMb: memoryLimitMbSchema,
     /** SQL versions only (Phase 12k). */
     sqlOrdered: z.boolean().optional(),
+    /**
+     * DEBUGGING problems (Phase 12m): blank means "not a debugging
+     * problem", which is why this is nullable rather than defaulted — a
+     * budget of 0 is not a smaller budget, it is a problem nobody could
+     * submit to, and the database refuses it.
+     */
+    maxEditedLines: z.coerce
+      .number()
+      .int("The edit budget is a whole number of lines.")
+      .min(DEBUG_BUDGET.min, `The edit budget is at least ${DEBUG_BUDGET.min} line.`)
+      .max(DEBUG_BUDGET.max, `The edit budget is at most ${DEBUG_BUDGET.max} lines.`)
+      .nullable()
+      .default(null),
   })
   .superRefine((v, ctx) => {
     if (v.ioMode === "SQL" && v.sqlOrdered === undefined) {

@@ -56,6 +56,11 @@ export async function updateDraftJudging(
     memoryLimitKb: number;
     /** SQL versions only (Phase 12k): is the row order part of the answer? */
     sqlOrdered?: boolean | null;
+    /**
+     * DEBUGGING problems (Phase 12m): the most lines a student may change
+     * in the program they were given. Null for every other problem.
+     */
+    maxEditedLines?: number | null;
   },
 ): Promise<DraftHead> {
   const signature = input.ioMode === "FUNCTION" ? input.functionSignature : null;
@@ -78,6 +83,14 @@ export async function updateDraftJudging(
    * is the other half of the same mirror CHECK.
    */
   const interactive = compareMode === "INTERACTIVE";
+  /**
+   * Phase 12m. An edit budget belongs to a problem that has a program to
+   * repair: a SQL problem's starter is a comment and a conversation is not
+   * a program, so switching a version to either kind clears the budget
+   * rather than leaving a number nothing can measure (the database says so
+   * too: ProblemVersion_debug_budget_kind).
+   */
+  const budget = sql || interactive ? null : (input.maxEditedLines ?? null);
   return retryingTransaction(async (tx) => {
     const head = await touchDraft(tx, { ...input, kind: "judging" });
     await tx.problemVersion.update({
@@ -92,6 +105,7 @@ export async function updateDraftJudging(
         ...(sql ? { checkerSha256: null, testlibId: null } : {}),
         ...(interactive ? { checkerSha256: null } : { interactorSha256: null }),
         floatEpsilon: interactive ? null : input.floatEpsilon,
+        maxEditedLines: budget,
         scoringMode: input.scoringMode,
         stopOnFirstFailure: input.stopOnFirstFailure,
         timeLimitMs: input.timeLimitMs,

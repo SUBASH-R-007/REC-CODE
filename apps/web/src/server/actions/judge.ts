@@ -2,10 +2,13 @@
 
 import { createHash } from "node:crypto";
 import {
+  DEBUG_REFUSALS,
   INTERACTIVE_REFUSALS,
   LIMITS,
   SQL_LIMITS,
   SQL_REFUSALS,
+  countEditedLines,
+  debugOverBudget,
   isSqlLanguage,
   looksLikeMultipleStatements,
   utf8Length,
@@ -63,6 +66,10 @@ interface JudgeTarget {
   compareMode: CompareMode;
   /** FUNCTION problems: the live version signature (custom Run input is validated against it). */
   signature: FunctionSignature | null;
+  /** DEBUGGING problems (Phase 12m): the most lines this answer may change. */
+  editBudget: number | null;
+  /** DEBUGGING problems: the broken program, in the language being answered in. */
+  starter: string | null;
 }
 
 /** The published problem's live version + the current config for a language. */
@@ -78,7 +85,9 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     select: {
       id: true,
       status: true,
-      liveVersion: { select: { id: true, ioMode: true, compareMode: true, functionSignature: true } },
+      liveVersion: {
+        select: { id: true, ioMode: true, compareMode: true, functionSignature: true, maxEditedLines: true },
+      },
     },
   });
   if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersion) {
@@ -104,6 +113,24 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
   if (!config) throw new ValidationError("That language is not available right now. Choose another one.");
 
   const versionId = problem.liveVersion.id;
+  /**
+   * Phase 12m. A debugging problem is offered in the languages its broken
+   * program is written in and no others — the workspace builds its picker
+   * the same way — because a language with no program to repair would be
+   * an empty editor with a two-line budget. The starter comes back with
+   * the target so the budget is measured against the program the student
+   * was actually given.
+   */
+  const editBudget = problem.liveVersion.maxEditedLines;
+  let starter: string | null = null;
+  if (editBudget !== null) {
+    const row = await db.starterCode.findUnique({
+      where: { problemVersionId_language: { problemVersionId: versionId, language } },
+      select: { code: true },
+    });
+    starter = row?.code ?? null;
+    if (starter === null || starter.trim().length === 0) throw new ValidationError(DEBUG_REFUSALS.noProgram);
+  }
   const [totalCases, sampleCount] = await Promise.all([
     db.testCase.count({ where: { problemVersionId: versionId } }),
     db.testCase.count({ where: { problemVersionId: versionId, isSample: true } }),
@@ -120,7 +147,25 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     ioMode: problem.liveVersion.ioMode,
     compareMode: problem.liveVersion.compareMode,
     signature,
+    editBudget,
+    starter,
   };
+}
+
+/**
+ * The edit budget of a debugging problem (Phase 12m), checked before
+ * anything is written.
+ *
+ * Before the row on purpose: a submission that cannot be judged on its
+ * merits must not cost a student one of their daily submissions, and a Run
+ * that quietly judged an over-budget program would teach them that the rule
+ * does not apply until it suddenly does. The judge is not the place for
+ * this — it has no starter, and no business having one.
+ */
+function refuseOverBudget(target: JudgeTarget, source: string): void {
+  if (target.editBudget === null || target.starter === null) return;
+  const changed = countEditedLines(target.starter, source);
+  if (changed > target.editBudget) throw new ValidationError(debugOverBudget(changed, target.editBudget));
 }
 
 /**
@@ -164,6 +209,7 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
     const target = await loadTarget(parsed.slug, parsed.language);
     if (target.totalCases === 0) throw new ValidationError("This problem has no tests yet.");
     if (target.ioMode === "SQL") refuseBadSql(parsed.source);
+    refuseOverBudget(target, parsed.source);
 
     const sourceSha256 = createHash("sha256").update(parsed.source, "utf8").digest("hex");
     const sourceBytes = utf8Length(parsed.source);
@@ -225,6 +271,7 @@ export async function runCode(input: RunCodeInput): Promise<ActionResult<{ id: s
     if (parsed.customInput === null && target.sampleCount === 0) {
       throw new ValidationError("This problem has no sample tests. Run it with custom input instead.");
     }
+    refuseOverBudget(target, parsed.source);
     // FUNCTION custom input: one valid value per parameter line, checked before anything is queued.
     if (parsed.customInput !== null && target.signature) {
       const issues = validateFunctionInput(target.signature, parsed.customInput);

@@ -131,6 +131,89 @@ describe("allowed paths", () => {
     );
   });
 
+  it("a judging edit forwards the answers the form asked for: the SQL ordering and the edit budget", async () => {
+    h.user.current = { id: "admin-1", role: "ADMIN" };
+    const edits = await import("@/lib/authoring/edits");
+    vi.mocked(edits.updateDraftJudging).mockResolvedValue({
+      versionId: "v1",
+      problemId: "p1",
+      revision: 2,
+      editSeq: 6,
+      judgeSeq: 4,
+    });
+
+    /**
+     * Phase 12k asked the author whether the row order is part of a SQL
+     * answer "rather than guessing it" — and this action dropped the
+     * answer on the floor, defaulting it to true. Phase 12m found that
+     * while adding the edit budget beside it, so both are asserted here.
+     */
+    const sql = await content.updateDraftJudging({
+      versionId: "v1",
+      expectedEditSeq: 5,
+      ioMode: "SQL",
+      functionSignature: "",
+      compareMode: "TOKEN",
+      floatEpsilon: null,
+      scoringMode: "ICPC",
+      stopOnFirstFailure: true,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      sqlOrdered: false,
+    } as never);
+    expect(sql).toEqual({ ok: true, data: { editSeq: 6, judgeSeq: 4 } });
+    expect(edits.updateDraftJudging).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ioMode: "SQL", sqlOrdered: false, maxEditedLines: null }),
+    );
+
+    // The budget arrives as a string from the form, and blank means "not a
+    // debugging problem" rather than a budget of zero.
+    await content.updateDraftJudging({
+      versionId: "v1",
+      expectedEditSeq: 6,
+      ioMode: "STDIN",
+      functionSignature: "",
+      compareMode: "TOKEN",
+      floatEpsilon: "",
+      scoringMode: "ICPC",
+      stopOnFirstFailure: true,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      maxEditedLines: "3",
+    });
+    expect(edits.updateDraftJudging).toHaveBeenLastCalledWith(expect.objectContaining({ maxEditedLines: 3 }));
+
+    await content.updateDraftJudging({
+      versionId: "v1",
+      expectedEditSeq: 7,
+      ioMode: "STDIN",
+      functionSignature: "",
+      compareMode: "TOKEN",
+      floatEpsilon: "",
+      scoringMode: "ICPC",
+      stopOnFirstFailure: true,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      maxEditedLines: "",
+    });
+    expect(edits.updateDraftJudging).toHaveBeenLastCalledWith(expect.objectContaining({ maxEditedLines: null }));
+
+    const refused = (await content.updateDraftJudging({
+      versionId: "v1",
+      expectedEditSeq: 8,
+      ioMode: "STDIN",
+      functionSignature: "",
+      compareMode: "TOKEN",
+      floatEpsilon: "",
+      scoringMode: "ICPC",
+      stopOnFirstFailure: true,
+      timeLimitMs: 2000,
+      memoryLimitMb: 256,
+      maxEditedLines: "0",
+    })) as { ok: boolean };
+    expect(refused.ok).toBe(false);
+  });
+
   it("publish requires expectedProblemVersion and passes the approval gate and actor to the library", async () => {
     h.user.current = { id: "admin-2", role: "SUPER_ADMIN" };
     const missing = (await problems.publishProblemVersion({ versionId: "v1" } as never)) as { ok: boolean };

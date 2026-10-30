@@ -149,6 +149,7 @@ describe("the Description tab of an interactive problem", () => {
     signature: null,
     sqlDialect: null,
     sqlOrdered: null,
+    maxEditedLines: null,
     timeLimitMs: 2000,
     memoryLimitKb: 262_144,
     samples: [{ index: 0, input: DATA, output: "" }],

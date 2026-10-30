@@ -110,6 +110,8 @@ async function writeVersion(
       stopOnFirstFailure: meta.stopOnFirstFailure,
       timeLimitMs: meta.timeLimitMs,
       memoryLimitKb: meta.memoryLimitKb,
+      // Phase 12m: a debugging problem's edit budget; null for every other.
+      maxEditedLines: meta.maxEditedLines,
       checkerSha256: input.checkerSha256,
       interactorSha256: input.interactorSha256,
       testlibId: input.checkerSha256 || input.interactorSha256 ? TESTLIB_ID : null,

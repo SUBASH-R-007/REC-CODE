@@ -42,7 +42,7 @@ function sqlProblem(ioMode = "SQL") {
   h.problem.mockResolvedValue({
     id: "prob_sql",
     status: "PUBLISHED",
-    liveVersion: { id: "ver_1", ioMode, functionSignature: null },
+    liveVersion: { id: "ver_1", ioMode, functionSignature: null, maxEditedLines: null },
   });
   h.config.mockResolvedValue({ id: "cfg_sql" });
   h.count.mockResolvedValue(2);

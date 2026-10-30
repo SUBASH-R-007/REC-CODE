@@ -242,6 +242,7 @@ export default async function AdminProblemPage({ params, searchParams }: Props) 
                     memoryLimitMb={Math.round(sel.memoryLimitKb / 1024)}
                     compareModes={COMPARE_MODE_OPTIONS}
                     sqlOrdered={sel.sqlOrdered}
+                    maxEditedLines={sel.maxEditedLines}
                   />
                   {/* One or the other: compareMode is a single value, and the
                       database refuses a version that carries both. */}

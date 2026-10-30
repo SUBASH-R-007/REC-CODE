@@ -190,6 +190,7 @@ describe("the Description tab of a SQL question", () => {
     signature: null,
     sqlDialect: "postgres17",
     sqlOrdered: true,
+    maxEditedLines: null,
     timeLimitMs: 1000,
     memoryLimitKb: 262_144,
     samples: [{ index: 0, input: DATASET, output: ANSWER }],

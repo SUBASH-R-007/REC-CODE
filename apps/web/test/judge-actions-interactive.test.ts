@@ -41,7 +41,7 @@ function interactiveProblem(compareMode = "INTERACTIVE") {
   h.problem.mockResolvedValue({
     id: "prob_int",
     status: "PUBLISHED",
-    liveVersion: { id: "ver_1", ioMode: "STDIN", compareMode, functionSignature: null },
+    liveVersion: { id: "ver_1", ioMode: "STDIN", compareMode, functionSignature: null, maxEditedLines: null },
   });
   h.config.mockResolvedValue({ id: "cfg_cpp" });
   h.count.mockResolvedValue(2);

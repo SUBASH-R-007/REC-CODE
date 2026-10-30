@@ -23,6 +23,7 @@ export async function loadVersionContentInput(client: Db | DbTx, versionId: stri
       scoringMode: true,
       timeLimitMs: true,
       memoryLimitKb: true,
+      maxEditedLines: true,
       statementMd: true,
       testCases: {
         orderBy: { index: "asc" },
@@ -40,6 +41,27 @@ export async function loadVersionContentInput(client: Db | DbTx, versionId: stri
     },
   });
   if (!v) return null;
+  /**
+   * Phase 12m. A debugging version's rules are about SOURCE — the broken
+   * program, and whether the author's own fix fits the budget — so for one
+   * of those, and only for one of those, the starters and the model
+   * solutions are read. Every other problem's gate is unchanged, and no
+   * reference solution's source is loaded for it.
+   */
+  const debugging = v.maxEditedLines !== null;
+  const starters = debugging
+    ? await client.starterCode.findMany({
+        where: { problemVersionId: versionId },
+        select: { language: true, code: true },
+      })
+    : [];
+  const sources = debugging
+    ? await client.referenceSolution.findMany({
+        where: { problemVersionId: versionId, expectedVerdict: "AC" },
+        select: { language: true, source: true },
+      })
+    : [];
+  const sourceFor = new Map(sources.map((r) => [r.language, r.source]));
   return {
     ioMode: v.ioMode,
     compareMode: v.compareMode,
@@ -64,7 +86,13 @@ export async function loadVersionContentInput(client: Db | DbTx, versionId: stri
       sampleInlineable: t.input.storageKey === null && t.output.storageKey === null,
     })),
     subtasks: v.subtasks,
-    references: v.referenceSolutions,
+    references: v.referenceSolutions.map((r) =>
+      r.expectedVerdict === "AC" && sourceFor.has(r.language)
+        ? { ...r, source: sourceFor.get(r.language) }
+        : r,
+    ),
+    starters,
+    maxEditedLines: v.maxEditedLines,
   };
 }
 

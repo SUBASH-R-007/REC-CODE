@@ -295,6 +295,13 @@ export interface ProblemWorkspace {
   /** SQL problems only (Phase 12k): the dialect, and whether the row order is part of the answer. */
   sqlDialect: SqlDialect | null;
   sqlOrdered: boolean | null;
+  /**
+   * DEBUGGING problems (Phase 12m): the most lines a student may change in
+   * the program they were given. Null for every other problem, and
+   * non-null is what makes the workspace show the rule and count the
+   * lines as they type.
+   */
+  maxEditedLines: number | null;
   timeLimitMs: number;
   memoryLimitKb: number;
   samples: WorkspaceSample[];
@@ -349,6 +356,7 @@ interface WorkspaceContent {
   signature: FunctionSignature | null;
   sqlDialect: SqlDialect | null;
   sqlOrdered: boolean | null;
+  maxEditedLines: number | null;
   timeLimitMs: number;
   memoryLimitKb: number;
   samples: WorkspaceSample[];
@@ -395,6 +403,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
         functionSignature: true,
         sqlDialect: true,
         sqlOrdered: true,
+        maxEditedLines: true,
         timeLimitMs: true,
         memoryLimitKb: true,
         starterCodes: { select: { language: true, code: true } },
@@ -429,6 +438,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       signature,
       sqlDialect: version.sqlDialect,
       sqlOrdered: version.sqlOrdered,
+      maxEditedLines: version.maxEditedLines,
       timeLimitMs: version.timeLimitMs,
       memoryLimitKb: version.memoryLimitKb,
       samples: version.testCases.map((t) => ({
@@ -439,7 +449,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       starters: version.starterCodes.map((s) => ({ language: s.language, code: s.code })),
     };
   },
-  ["problem-workspace", "v3"],
+  ["problem-workspace", "v4"],
 );
 
 /**
@@ -477,6 +487,16 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
    * offering a door that is locked.
    */
   const sql = content.ioMode === "SQL";
+  /**
+   * Phase 12m: a debugging problem is offered in the languages its broken
+   * program is written in and no others. Each language would be a
+   * different program with a different mistake, so an author writes the
+   * ones they mean — and a language with no starter would open an empty
+   * editor on a question that allows two changed lines. `loadTarget`
+   * refuses the same pairing, so nothing offered here is a locked door and
+   * nothing hidden here is reachable by typing.
+   */
+  const budget = content.maxEditedLines;
   const languages: WorkspaceLanguage[] = [];
   const functionUnavailable: ProblemWorkspace["functionUnavailable"] = [];
   for (const config of configs) {
@@ -492,6 +512,7 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
       continue;
     }
     if (!isLanguageKey(config.key)) continue;
+    if (budget !== null && (starters.get(config.key) ?? "").trim().length === 0) continue;
     if (sig && !supportsFunctionMode(config.key)) {
       functionUnavailable.push({ key: config.key, label: config.label });
       continue;
@@ -518,6 +539,7 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
     constraints: content.constraints,
     ioMode: content.ioMode,
     compareMode: content.compareMode,
+    maxEditedLines: content.maxEditedLines,
     signature: sig,
     sqlDialect: content.sqlDialect,
     sqlOrdered: content.sqlOrdered,

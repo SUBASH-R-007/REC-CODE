@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { Button, Field, Input, Select, Textarea } from "@recx/design";
-import { SQL_DIALECT, SQL_DIALECT_LABEL, SQL_LIMITS } from "@recx/shared";
+import { DEBUG_BUDGET, DEBUG_NOTICES, SQL_DIALECT, SQL_DIALECT_LABEL, SQL_LIMITS } from "@recx/shared";
 import {
   removeStarterCode,
   setDraftChecker,
@@ -166,6 +166,7 @@ export function JudgingForm({
   memoryLimitMb,
   compareModes,
   sqlOrdered,
+  maxEditedLines,
 }: {
   ioMode: string;
   functionSignatureJson: string;
@@ -178,6 +179,8 @@ export function JudgingForm({
   compareModes: readonly Option[];
   /** SQL versions only (Phase 12k); null for every other io mode. */
   sqlOrdered: boolean | null;
+  /** DEBUGGING problems (Phase 12m): the edit budget, or null for every other problem. */
+  maxEditedLines: number | null;
 }) {
   const id = useId();
   const seq = useDraftSeq();
@@ -206,6 +209,7 @@ export function JudgingForm({
               timeLimitMs: text("timeLimitMs"),
               memoryLimitMb: text("memoryLimitMb"),
               ...(isSql ? { sqlOrdered: form.get("sqlOrdered") === "on" } : {}),
+              maxEditedLines: isSql ? null : text("maxEditedLines"),
             }),
           { success: "Judging settings saved. Validate again before publishing.", onSuccess: (d) => seq.setEditSeq(d.editSeq) },
         );
@@ -259,6 +263,24 @@ export function JudgingForm({
         <input type="checkbox" name="stopOnFirstFailure" defaultChecked={stopOnFirstFailure} className="h-4 w-4 accent-primary" />
         Stop judging at the first failing test
       </label>
+      {!isSql && (
+        <Field
+          label="Edit budget (debugging problems)"
+          htmlFor={`${id}-debug`}
+          hint={`Blank for an ordinary problem. A number from ${DEBUG_BUDGET.min} to ${DEBUG_BUDGET.max} makes this a debugging problem: the starter code is the broken program, and a student may change at most that many lines of it.`}
+        >
+          <Input
+            id={`${id}-debug`}
+            name="maxEditedLines"
+            type="number"
+            min={DEBUG_BUDGET.min}
+            max={DEBUG_BUDGET.max}
+            defaultValue={maxEditedLines ?? ""}
+            placeholder="—"
+          />
+        </Field>
+      )}
+      {maxEditedLines !== null && <p className="text-xs text-muted">{DEBUG_NOTICES.languages}</p>}
       {isSql && (
         <div className="space-y-2 rounded-xl border border-border bg-background p-3">
           <p className="text-sm text-text-secondary">

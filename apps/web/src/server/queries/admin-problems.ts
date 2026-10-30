@@ -229,6 +229,8 @@ export interface AdminProblemDetail {
     compareMode: CompareMode;
     /** SQL versions only (Phase 12k). */
     sqlOrdered: boolean | null;
+    /** DEBUGGING problems (Phase 12m): the edit budget, or null. */
+    maxEditedLines: number | null;
     floatEpsilon: number | null;
     scoringMode: "ICPC" | "SUBTASK" | "PER_TEST";
     stopOnFirstFailure: boolean;
@@ -313,6 +315,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
         functionSignature: true,
         compareMode: true,
         sqlOrdered: true,
+        maxEditedLines: true,
         floatEpsilon: true,
         scoringMode: true,
         stopOnFirstFailure: true,
@@ -365,6 +368,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       functionSignatureJson: v.functionSignature === null ? "" : JSON.stringify(v.functionSignature, null, 2),
       compareMode: v.compareMode,
       sqlOrdered: v.sqlOrdered,
+      maxEditedLines: v.maxEditedLines,
       floatEpsilon: v.floatEpsilon,
       scoringMode: v.scoringMode,
       stopOnFirstFailure: v.stopOnFirstFailure,

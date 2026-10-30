@@ -3460,3 +3460,42 @@ mind. And the two clean practice contests SPEC asks for before an
 ASSESSMENT may hold one have not happened — which is the whole reason the
 assessment trigger exists. An interactive problem is a practice problem
 today.
+
+## The edit budget of a debugging problem (Phase 12m, slice 1)
+
+**A kind that is one rule is that rule, not an enum.** `maxEditedLines`
+non-null IS a debugging problem. A `ProblemKind` enum beside it would be a
+second source of truth about the same fact, and the first time the two
+disagreed the student would see one and the judge the other.
+
+**The budget is checked before the row, and never by the judge.** A
+submission that cannot be judged on its merits must not cost a student one
+of their daily submissions, and the Run path is checked for the same
+reason — a Run that quietly judged an over-budget program would teach the
+rule's absence. The worker is told nothing: it has no starter, and a
+second place that could refuse a submission is a second place that could
+refuse it differently.
+
+**One count, or the number means nothing.** The editor's live counter, the
+refusal and the publish gate all call `countEditedLines`. Trimmed lines
+and dropped blank lines are a decision, not an accident: re-indenting is
+not a fix, and a student who spaces a program out while reading it has not
+spent part of their budget.
+
+**The languages are the starters.** A debugging problem is offered in the
+languages its broken program is written in — each language would be a
+different program with a different mistake, and an author who wrote one
+did not write nine. The picker and the submit action agree on this, so
+nothing offered is a locked door and nothing hidden is reachable by typing.
+
+**The gate proves solvability.** The author's own AC model solution must
+fit the budget against the starter it belongs to. It is the only check
+that can tell a question that cannot be answered from one that merely
+looks hard, and no CHECK could hold it: it spans three tables and compares
+source.
+
+**Still open: a debugging problem in a CONTEST or an ASSESSMENT.** The
+budget is enforced in `submitSolution` and `runCode`, which the practice
+workspace uses. A contest arena and an exam attempt build their own
+editors and their own submit paths; until those are read with a budget in
+mind, a debugging problem is a practice problem.

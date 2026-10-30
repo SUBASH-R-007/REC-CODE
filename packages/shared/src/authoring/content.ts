@@ -1,5 +1,6 @@
 import { comparatorIssues } from "../harness/declaration";
 import { FUNCTION_COMPARATORS, functionSignatureSchema, type FunctionComparator } from "../harness/signature";
+import { DEBUG_BUDGET, countEditedLines, isDebugBudget } from "../debug-problem";
 import { LIMITS } from "../limits";
 import type { CompareMode, IoMode, ScoringMode } from "../protocol";
 import type { Verdict } from "../verdict";
@@ -69,7 +70,11 @@ export type ContentIssueCode =
   | "SQL_ARTEFACT"
   | "INTERACTIVE_NO_INTERACTOR"
   | "INTERACTIVE_ARTEFACT"
-  | "INTERACTIVE_EXPECTED_OUTPUT";
+  | "INTERACTIVE_EXPECTED_OUTPUT"
+  | "DEBUG_BUDGET_RANGE"
+  | "DEBUG_NO_STARTER"
+  | "DEBUG_NOT_APPLICABLE"
+  | "DEBUG_UNSOLVABLE";
 
 export interface ContentIssue {
   code: ContentIssueCode;
@@ -106,7 +111,16 @@ export interface VersionContentInput {
   statementMd: string;
   tests: readonly VersionContentTest[];
   subtasks: ReadonlyArray<{ index: number; points: number; dependsOn: readonly number[] }>;
-  references: ReadonlyArray<{ language: string; expectedVerdict: Verdict }>;
+  references: ReadonlyArray<{ language: string; expectedVerdict: Verdict; source?: string }>;
+  /**
+   * The starter programs, per language (Phase 12m). A debugging problem's
+   * starter is the BROKEN program, so for one of those this list is the
+   * question itself — and the languages in it are the only ones the
+   * problem is offered in.
+   */
+  starters?: ReadonlyArray<{ language: string; code: string }>;
+  /** A debugging problem's edit budget (Phase 12m); null for every other problem. */
+  maxEditedLines?: number | null;
 }
 
 function subtaskIssues(v: VersionContentInput): string[] {
@@ -233,6 +247,66 @@ function interactiveIssues(v: VersionContentInput): Array<{ code: ContentIssueCo
   return out;
 }
 
+/**
+ * A debugging version's own rules (Phase 12m).
+ *
+ * The first two the database says as well (the CHECKs of migration
+ * 20261101150000), for the reason the SQL and interactive rules are said
+ * twice: an author should read a sentence rather than meet a constraint
+ * violation.
+ *
+ * The other two cannot be CHECKs, and they are the ones that matter. A
+ * budget with no broken program is a question with nothing to repair and
+ * no language to repair it in — the workspace offers exactly the languages
+ * that have a starter. And a budget the author's OWN fix does not fit is a
+ * question nobody can answer: the model solution is the proof that the
+ * mistake can be put right in the lines allowed, so it is measured here
+ * rather than discovered by the first student who tries.
+ */
+function debugIssues(v: VersionContentInput): Array<{ code: ContentIssueCode; message: string }> {
+  const budget = v.maxEditedLines ?? null;
+  if (budget === null) return [];
+  const out: Array<{ code: ContentIssueCode; message: string }> = [];
+  if (!isDebugBudget(budget)) {
+    out.push({
+      code: "DEBUG_BUDGET_RANGE",
+      message: `The edit budget must be a whole number of lines between ${DEBUG_BUDGET.min} and ${DEBUG_BUDGET.max} (got ${budget}).`,
+    });
+  }
+  if (v.ioMode === "SQL" || v.compareMode === "INTERACTIVE") {
+    out.push({
+      code: "DEBUG_NOT_APPLICABLE",
+      message:
+        "An edit budget belongs to a problem that hands the student a program to repair. A SQL query and a conversation are neither; remove the budget.",
+    });
+    return out;
+  }
+  const starters = v.starters ?? [];
+  const written = starters.filter((s) => s.code.trim().length > 0);
+  if (written.length === 0) {
+    out.push({
+      code: "DEBUG_NO_STARTER",
+      message:
+        "A debugging problem needs the broken program as starter code: it is the question, and the languages it is written in are the only ones the problem is offered in.",
+    });
+    return out;
+  }
+  for (const starter of written) {
+    const model = v.references.find(
+      (r) => r.language === starter.language && r.expectedVerdict === "AC" && typeof r.source === "string",
+    );
+    if (!model?.source) continue;
+    const changed = countEditedLines(starter.code, model.source);
+    if (changed > budget) {
+      out.push({
+        code: "DEBUG_UNSOLVABLE",
+        message: `The ${starter.language} model solution changes ${changed} lines of the ${starter.language} starter, and the budget allows ${budget}. Either the budget is too small or the model solution was rewritten rather than repaired.`,
+      });
+    }
+  }
+  return out;
+}
+
 /** Every structural problem of a revision's content. Empty of errors = may be approved and published. */
 export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   const issues: ContentIssue[] = [];
@@ -244,6 +318,7 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   if (v.compareMode === "INTERACTIVE" && v.ioMode === "STDIN") {
     for (const issue of interactiveIssues(v)) error(issue.code, issue.message);
   }
+  for (const issue of debugIssues(v)) error(issue.code, issue.message);
   if (v.ioMode === "STDIN" && v.functionSignature !== null && v.functionSignature !== undefined) {
     error("SIGNATURE_ON_STDIN", "A standard-input problem must not carry a function signature.");
   }

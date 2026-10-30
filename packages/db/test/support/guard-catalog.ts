@@ -1126,6 +1126,17 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProblemVersion_interactive_no_epsilon", "ProblemVersion"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261101140000_phase12l_interactive" })),
+  ...(
+    [
+      // Phase 12m. A debugging version's edit budget: a whole number of
+      // lines in a range an author may set, and never on a kind of problem
+      // that has no program to repair. That a PUBLISHED one has a starter
+      // to repair spans two tables, so it is the publish gate's rule
+      // rather than a CHECK here.
+      ["ProblemVersion_debug_budget_range", "ProblemVersion"],
+      ["ProblemVersion_debug_budget_kind", "ProblemVersion"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101150000_phase12m_debug_budget" })),
 ];
 
 /**

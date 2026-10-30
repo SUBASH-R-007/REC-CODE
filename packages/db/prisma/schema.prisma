@@ -887,6 +887,17 @@ model ProblemVersion {
   /// nobody could answer twice. (The wire carries it per case, because the
   /// judge has no opinion about where it came from.)
   sqlOrdered         Boolean?
+  /// A DEBUGGING problem's edit budget (Phase 12m): the most lines a
+  /// student may change in the program they were given. Null for every
+  /// other problem, and non-null IS the kind — there is no enum, because a
+  /// kind that is one rule is better expressed as that rule.
+  ///
+  /// 1..50 (ProblemVersion_debug_budget_range), and never on a SQL or an
+  /// interactive problem (ProblemVersion_debug_budget_kind): a SQL
+  /// problem's starter is a comment and a conversation is not a program to
+  /// repair. That a published debugging problem HAS a starter to repair is
+  /// the publish gate's rule, not a CHECK: it spans two tables.
+  maxEditedLines     Int?
   /// CHECKER compare mode: testlib-compatible checker source (C++20).
   checkerSha256      String?
   /// INTERACTIVE compare mode (Phase 12l): the author's testlib interactor

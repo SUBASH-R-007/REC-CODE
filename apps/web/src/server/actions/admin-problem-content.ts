@@ -99,12 +99,17 @@ export async function updateDraftJudging(input: {
   stopOnFirstFailure: boolean;
   timeLimitMs: number | string;
   memoryLimitMb: number | string;
+  /** DEBUGGING problems (Phase 12m); blank or null means "not one". */
+  maxEditedLines?: number | string | null;
 }): Promise<ActionResult<Edited>> {
   return runAction(async () => {
     const actor = await requireActionRole(...STAFF);
+    const blank = (value: number | string | null | undefined) =>
+      value === "" || value === null || value === undefined ? null : value;
     const data = updateJudgingSchema.parse({
       ...input,
-      floatEpsilon: input.floatEpsilon === "" || input.floatEpsilon === null ? null : input.floatEpsilon,
+      floatEpsilon: blank(input.floatEpsilon),
+      maxEditedLines: blank(input.maxEditedLines),
     });
     const head = await updateJudging({
       versionId: data.versionId,
@@ -118,6 +123,15 @@ export async function updateDraftJudging(input: {
       stopOnFirstFailure: data.stopOnFirstFailure,
       timeLimitMs: data.timeLimitMs,
       memoryLimitKb: data.memoryLimitMb * 1024,
+      maxEditedLines: data.maxEditedLines,
+      /**
+       * Phase 12k's ordering rule, which this call did not forward: the
+       * form asked the author whether the row order is part of the answer,
+       * the schema validated it, and then the edit defaulted it to true.
+       * An author who answered "no" had their answer reset, and the
+       * question SPEC asks to be asked rather than guessed was guessed.
+       */
+      sqlOrdered: data.sqlOrdered,
     });
     return edited(actor.id, "judging", head);
   }, "updateDraftJudging");

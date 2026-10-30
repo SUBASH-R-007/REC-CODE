@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEBUG_BUDGET } from "../debug-problem";
 import { deepFreeze } from "../freeze";
 import { FUNCTION_COMPARATORS, functionSignatureSchema } from "../harness/signature";
 import { LANGUAGE_KEYS } from "../languages";
@@ -164,6 +165,12 @@ export const problemPackageMetaSchema = z
     checker: packagePathSchema.nullable().default(null),
     /** INTERACTIVE only (Phase 12l). */
     interactor: packagePathSchema.nullable().default(null),
+    /**
+     * DEBUGGING problems (Phase 12m): the most lines a student may change
+     * in the starter. Null — the default — is every other problem, so an
+     * existing package imports unchanged.
+     */
+    maxEditedLines: intIn(DEBUG_BUDGET.min, DEBUG_BUDGET.max, "maxEditedLines").nullable().default(null),
   })
   .strict()
   .superRefine((meta, ctx) => {
@@ -209,6 +216,21 @@ export const problemPackageMetaSchema = z
       issue(["floatEpsilon"], "An interactive problem compares no output, so floatEpsilon would change nothing.");
     }
     if (meta.compareMode === "FLOAT" && meta.floatEpsilon === null) issue(["floatEpsilon"], "FLOAT comparison needs floatEpsilon.");
+    /**
+     * Phase 12m. A debugging problem's question is its starter: the broken
+     * program, in the languages the problem is offered in. A budget with no
+     * starter would import a problem the workspace could offer in no
+     * language at all, and the publish gate would refuse it later — better
+     * here, naming the file that is missing.
+     */
+    if (meta.maxEditedLines !== null) {
+      if (Object.keys(meta.starters).length === 0) {
+        issue(["starters"], "A debugging problem (maxEditedLines) needs the broken program under starters/.");
+      }
+      if (meta.ioMode === "SQL" || interactive) {
+        issue(["maxEditedLines"], "An edit budget belongs to a problem that hands the student a program to repair.");
+      }
+    }
 
     if ((meta.scoringMode === "SUBTASK") !== (meta.subtasks.length > 0)) {
       issue(["subtasks"], meta.scoringMode === "SUBTASK" ? "SUBTASK scoring needs subtasks." : "Subtasks are only used with SUBTASK scoring.");

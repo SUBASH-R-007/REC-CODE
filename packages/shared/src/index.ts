@@ -20,6 +20,7 @@ export * from "./editor-keymap";
 export * from "./interactive";
 export * from "./sql-problem";
 export * from "./sql-language";
+export * from "./debug-problem";
 export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";
