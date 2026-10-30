@@ -43,9 +43,18 @@ const SPEC_EIGHT = [
   "e2e p95 >30s",
 ];
 
+/**
+ * Rules this repository added because the thing they watch did not exist
+ * when SPEC's eight were written. Each still names the SPEC phrase it
+ * extends, so the list above stays the list above.
+ */
+const BEYOND_SPEC = ["queue depth >200 for 2 min (the per-engine half of it, Phase 12k)"];
+
 describe("the rules are SPEC's rules", () => {
-  it("implements each of the eight, once", () => {
-    expect(ALERTS.map((a) => a.spec)).toEqual(SPEC_EIGHT);
+  it("implements each of the eight, once, and says which rules go beyond them", () => {
+    const spec = ALERTS.map((a) => a.spec).filter((phrase) => !BEYOND_SPEC.includes(phrase));
+    expect(spec).toEqual(SPEC_EIGHT);
+    expect(ALERTS.map((a) => a.spec).filter((phrase) => BEYOND_SPEC.includes(phrase))).toEqual(BEYOND_SPEC);
     expect(new Set(ALERTS.map((a) => a.name)).size, "names are unique").toBe(ALERTS.length);
   });
 
@@ -91,7 +100,15 @@ describe("the rules are SPEC's rules", () => {
      * one needs the judge to be slow on purpose. The alternative to saying
      * so is a table of eight PASSes, two of which would be untrue.
      */
-    expect(live).toEqual(["JudgeQueueBacklog", "JudgeOldestJobStale", "JudgeWorkerHeartbeatStale", "FailedLoginBurst"]);
+    expect(live).toEqual([
+      "JudgeQueueBacklog",
+      // Phase 12k: 120 jobs onto the SQL practice queue, which this machine
+      // can do for real because nothing here consumes that queue either.
+      "JudgeEngineBacklog",
+      "JudgeOldestJobStale",
+      "JudgeWorkerHeartbeatStale",
+      "FailedLoginBurst",
+    ]);
     expect(synthetic).toEqual([
       "JudgeInternalErrorRate",
       "HostDiskNearlyFull",
@@ -261,6 +278,18 @@ const FIXTURES: Readonly<Record<string, Fixture>> = {
   JudgeQueueBacklog: {
     below: scrape("", 'judge_queue_depth{queue="CONTEST"} 200\njudge_queue_depth{queue="RUN"} 7'),
     above: scrape("", 'judge_queue_depth{queue="CONTEST"} 201\njudge_queue_depth{queue="RUN"} 7'),
+  },
+  JudgeEngineBacklog: {
+    // The lane total is comfortably under JudgeQueueBacklog's 200 in both
+    // readings: this rule exists for exactly that case.
+    below: scrape(
+      "",
+      'judge_engine_queue_depth{queue="PRACTICE",engine="isolate"} 20\njudge_engine_queue_depth{queue="PRACTICE",engine="postgres"} 100',
+    ),
+    above: scrape(
+      "",
+      'judge_engine_queue_depth{queue="PRACTICE",engine="isolate"} 20\njudge_engine_queue_depth{queue="PRACTICE",engine="postgres"} 101',
+    ),
   },
   JudgeOldestJobStale: {
     below: scrape("", 'judge_oldest_job_age_seconds{queue="PRACTICE"} 60'),

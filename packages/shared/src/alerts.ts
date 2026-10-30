@@ -205,6 +205,36 @@ export const ALERTS: readonly AlertSpec[] = Object.freeze([
     reduce: ({ after }) => maxOf(after, "judge_queue_depth"),
   },
   {
+    /**
+     * The ninth rule, and the only one SPEC §10 does not name — for the
+     * same reason `auth_login_failures_total` exists: the thing it watches
+     * did not exist when the list of eight was written.
+     *
+     * A lane has two queues now (Phase 12k), and the two engines fail
+     * SEPARATELY: an isolate host and a SQL host are different machines
+     * with different failure modes. A lane whose total is comfortable can
+     * have one engine draining normally and the other stopped dead, and
+     * `JudgeQueueBacklog` — which reads the sum — would say nothing until
+     * the stopped half alone passed 200.
+     *
+     * Lower threshold and a longer `for:` than the lane rule, deliberately:
+     * this is "one half of the fleet is not keeping up", which is a warning
+     * somebody acts on today, not a page.
+     */
+    name: "JudgeEngineBacklog",
+    severity: "warning",
+    pending: "5m",
+    expr: "max by (queue, engine) (judge_engine_queue_depth) > 100",
+    threshold: 100,
+    summary: "One judging engine has more than 100 jobs waiting on a lane",
+    description:
+      "The two engines fail separately: the lane total can look fine while one engine's queue is not being drained at all. Read the Engines table on /admin/judge first — \"nodes online\" for that engine is the usual answer, and for the SQL engine it is usually the sandbox cluster rather than the judge process.",
+    spec: "queue depth >200 for 2 min (the per-engine half of it, Phase 12k)",
+    produced: "live",
+    how: "120 jobs enqueued onto the SQL practice queue with no SQL judge consuming it, then published by the scheduler's own observer.",
+    reduce: ({ after }) => maxOf(after, "judge_engine_queue_depth"),
+  },
+  {
     name: "JudgeOldestJobStale",
     severity: "critical",
     /**

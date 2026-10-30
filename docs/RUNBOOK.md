@@ -839,7 +839,8 @@ changed until "End impersonation" (or 15 minutes, or sign-out).
 
 ### 2.12 Alerts: what each one means, and what to do (Phase 10b)
 
-Eight rules, the eight SPEC §10 names. They live as data in
+Nine rules: the eight SPEC §10 names, plus `JudgeEngineBacklog` (Phase 12k,
+for the second judging engine). They live as data in
 `packages/shared/src/alerts.ts` and `infra/monitoring/alerts.yml` is
 **generated** from that list — edit the TypeScript, then:
 
@@ -862,7 +863,7 @@ pnpm --filter @recx/scheduler exec tsx ../../scripts/ops/fire-alerts.ts
 pnpm --filter @recx/scheduler exec tsx ../../scripts/ops/fire-alerts.ts --only JudgeQueueBacklog
 ```
 
-Four of the eight are produced for real; four are asserted against samples,
+Five of the nine are produced for real; four are asserted against samples,
 and the harness prints which and why — the exporters the other two read
 (node_exporter, postgres_exporter) cannot be installed on the development
 machine without root, a real INTERNAL_ERROR needs a problem whose checker
@@ -889,6 +890,30 @@ Do not flush the queue. Every job in it belongs to a submission row that the
 reconciler will re-enqueue within a tick, so a flush buys a minute and then
 the same backlog returns, minus any job whose submission has since been
 cleaned up.
+
+#### JudgeEngineBacklog
+
+More than **100** jobs waiting on one lane for ONE ENGINE, for five minutes.
+
+A lane has two queues (Phase 12k): `judge-<lane>` for programs and
+`judge-sql-<lane>` for SQL. The lane figures — and `JudgeQueueBacklog` —
+are the SUM, so one engine can be completely stopped while the lane total looks
+survivable. This rule is the half that says which.
+
+1. `/admin/judge` → the **Engines** table. "Nodes online" for the engine
+   that is backed up is the answer four times out of five; the row turns
+   red by itself when work is waiting and no node of that engine is online.
+2. For the SQL engine, the usual cause is not the judge process but the
+   cluster behind it: the judge quarantines itself when its boot checks or
+   its adversarial self-check fail, and the node card says which check and
+   what it reported.
+3. For the isolate engine, treat it exactly as **JudgeQueueBacklog** below:
+   the per-engine rule simply fired first.
+
+Do not move SQL work onto an isolate node — there is no such thing. The two
+engines judge different problems and a job sits on its engine's queue until
+a node of that engine takes it, which is why a stranded engine is a
+different incident from a busy lane.
 
 #### JudgeOldestJobStale
 
@@ -1567,6 +1592,38 @@ them), then restart the judge. Nothing else in the platform holds them.
 cluster. The process refuses to start with any of them, and that refusal is
 a feature rather than an inconvenience.
 
+**Bringing one up in production** (`deploy/compose.sql-judge.yml`, never
+run here — there is no such host):
+
+```bash
+# 1. the cluster, then the role whose whole definition is what it may NOT do
+docker compose -f deploy/compose.sql-judge.yml --env-file deploy/sql-judge.env up -d sandbox-db
+sudo scripts/ops/sql-sandbox-provision.sh
+
+# 2. register the node on the app host and drop its token in place
+#    (/run/recx/secrets/sql_judge_node_token), then
+docker compose -f deploy/compose.sql-judge.yml --env-file deploy/sql-judge.env up -d
+```
+
+The cluster is on the judge host, not the database host, and is in no
+backup: it holds per-submission schemas and nothing else, so losing it
+costs a rerun. `synchronous_commit=off` and `full_page_writes=off` are set
+for the same reason — a crash loses work that is seconds old and
+reproducible by definition.
+
+**Reading the fleet page with two engines** (`/admin/judge`):
+
+| What you see | What it means |
+|---|---|
+| **Engines** table, a red row | work is waiting on that engine and no node of it is online. This is the state the `JudgeEngineBacklog` alert fires on |
+| a node whose Engine says `postgres` | its **Judge / engine** row is the judge's version and PostgreSQL's, not isolate's |
+| Calibration: "Not measured for the SQL engine" | not a gap in that node's reporting. The SQL engine has no hello-world benchmark, because a query's limit is the database's own `statement_timeout` |
+| a SQL node that never serves ASSESSMENT or CONTEST | deliberate, and the restriction says so in words. Until there is a benchmark for the query engine, an exam is not judged on one |
+
+The lane figures above the table are the SUM of both engines' queues. A
+lane that looks busy with the Engines table showing one engine idle is one
+engine's problem, not a capacity problem.
+
 ---
 
 ## 3. Gate log
@@ -1883,3 +1940,12 @@ coordinator from actual runs — never in advance.
 | 12k.4 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean across seven projects; **8,404 tests passed, 0 failed** - shared 1,935, judge-worker 414, sql-judge 41, db 333, design 87, scheduler 247, web 4,164, repo 1,183; build exit 0; every size budget met, with Monaco's `sql.js` now the largest grammar at 4.2 KB and `@codemirror/lang-sql` a lazy chunk of its own) | Claude |
 | 12k.4 | 2026-10-31 | The narrow-screen grammar | **BUILT, NOT DRIVEN.** `@codemirror/lang-sql` (PostgreSQL dialect, keywords left as typed) is in the production build as its own lazy chunk, and Monaco's `sql` tokenizer is served from `/monaco/vs/basic-languages/sql`. The end-to-end run drove the wide layout; the under-768 px editor was not opened in a browser | NOT RUN | - |
 | 12k.4 | - | A SQL question in a contest or an exam | **NOT BUILT.** The arena and the attempt surface build their own language list and do not know about `sql17`, so a SQL problem placed in a contest or an assessment offers a programming language, and the submit action then refuses it with "That problem is answered with a SQL query" - safe, and unusable. Practice is the surface slice 4 covers | NOT RUN | - |
+| 12k.5 | 2026-10-31 | Slice 5, the ops: the fleet, the topology and the alerts know there are two engines | **DONE.** `/admin/judge` gained an **Engines** table (nodes online, slots busy, waiting and active per engine) and the node card now reads per engine — the engine and its version, the judge's own version beside PostgreSQL's rather than isolate's, and "Not measured for the SQL engine" where a calibration score would be. The lane figures are the SUM of both queues, which they silently were not before: `loadQueueDepths` read only the isolate queue name, so every SQL job waiting was invisible on the page that exists to show waiting work | Claude |
+| 12k.5 | 2026-10-31 | A judge node's ENGINE version, and why it is not `isolateVersion` | Migration `20261101130000_phase12k_node_engine_version`: one column, one default, additive. The heartbeat has carried `engineVersion` since slice 2 and nothing stored it. A column named after one engine holding another engine's version is the kind of small lie that costs an hour during an incident, so the SQL node's PostgreSQL version gets its own. `migrate diff` reports no drift; applied to `recx` and `recx_test` | Claude |
+| 12k.5 | 2026-10-31 | Lane eligibility that says something true about a SQL node | **CHANGED, consequence unchanged.** A postgres node was told its calibration was "missing", as though somebody forgot to send it; it now reads "the SQL engine has no calibration benchmark yet: a query's limit is the database's own statement_timeout, so this node does not serve ASSESSMENT or CONTEST". It is still refused the sensitive lanes, and that is the honest state rather than an oversight — a slow cluster really can turn a passing query into a timeout, so the engine needs a benchmark before an exam may be judged on one (`docs/OPEN-QUESTIONS.md`). The fleet calibration median is now taken over nodes of the SAME engine, in the heartbeat and on the fleet page: a CPU score from a database host measures nothing a C++ time limit is derived from | Claude |
+| 12k.5 | 2026-10-31 | `judge_engine_queue_depth{queue,engine}`, and the ninth alert rule | **ADDED, contract unchanged.** `judge_queue_depth` keeps its one label: the rules are written against it, and adding `engine` would turn `max by (queue)` into a per-engine maximum — 150 waiting on each of two engines would stop firing a rule that fires at 200. The split is its own gauge, published from the same read, zeroed per engine for every lane that reported nothing. `JudgeEngineBacklog` (warning, >100 for 5m) is the rule that catches one engine stopped while the lane total still looks survivable; `fire-alerts.ts` produces it for real, 120 jobs onto the SQL practice queue, chosen to be over its own threshold and under the lane rule's | Claude |
+| 12k.5 | 2026-10-31 | The fourth host role: `deploy/compose.sql-judge.yml` and `scripts/ops/sql-sandbox-provision.sh` | **WRITTEN, NOT RUN.** The sandbox cluster and the judge on one host, on an `internal:` network nothing else can reach; no published port but the node exporter's, every image pinned by a required digest variable, and all three credentials (the node token and both connection URLs) passed as `*_FILE` Docker secrets the config actually reads. The provisioner makes the student role — the one object the image cannot create for itself, because its whole definition is what it may NOT do: NOINHERIT, member of nothing, no CREATE, no TEMPORARY, nothing on schema public, and the default PUBLIC grants revoked | NOT RUN | - |
+| 12k.5 | 2026-10-31 | `docs/CAPACITY.md` §4b: the engine that counts in connections | **DONE.** A SQL slot's real cost is two connections (owner and student) held for the length of a job, so `RECX_SLOTS` is a connection budget and `max_connections >= 2 x slots + 16`. What runs out is not CPU: connections first, then schemas left behind by a job that died between CREATE and DROP, then `temp_file_limit` on somebody's accidental cross join. One host is enough because SQL problems are not allowed in a contest or an assessment at all, which is stated rather than assumed | Claude |
+| 12k.5 | 2026-10-31 | The fleet page and the alert, against the production build and a real SQL judge | PASS. `/admin/judge` as an admin, before and after a real `apps/sql-judge` heartbeat: the **Engines** table lists both engines and says a lane is the sum of its two queues; once the judge was up the node card read Engine `postgres` with **PostgreSQL 17.11** beside it (the packaging build trimmed - `server_version` reports "17.11 (Ubuntu 17.11-1.pgdg24.04+2)" and the fleet wants the number), **Judge / engine** rather than Worker / isolate, "Not measured for the SQL engine" where calibration goes, `sql17` in its languages, and the Engines row counting it 1 / 1 online. The stored restriction is the engine's own sentence, and the sensitive lanes are withheld. `fire-alerts.ts --only JudgeEngineBacklog`: **FIRES, 120 vs 100**, produced for real on `judge-sql-practice`. No error in the judge's log | PASS | Claude |
+| 12k.5 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean across seven projects; **8,425 tests passed, 0 failed** - shared 1,936, judge-worker 414, sql-judge 43, db 336, design 87, scheduler 250, web 4,174, repo 1,185; build exit 0; every size budget met) | Claude |
+| 12k.5 | - | The SQL judge publishes no `/metrics` of its own | **NOT BUILT, deliberately.** Everything about it is already published by a process there is exactly one of: the per-engine queue depth and its heartbeat age by the scheduler, its verdicts by web. A second listener republishing the same numbers from a second place is how two figures that should agree stop agreeing. What is genuinely missing is the engine's own internals - time in the author's setup script versus the student's statement, sweeper counts - and that is an open question rather than an omission | NOT RUN | - |

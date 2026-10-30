@@ -74,6 +74,29 @@ export const METRICS: readonly MetricSpec[] = Object.freeze([
     help: "Jobs waiting in each judge lane.",
   },
   {
+    /**
+     * The twelfth, and the one Phase 12k needed (slice 5).
+     *
+     * `judge_queue_depth` is labelled by lane and nothing else, and it
+     * stays that way: the alert rules are written against those labels,
+     * and a lane's backlog is what a student feels regardless of which
+     * engine will take the job. Adding an `engine` label to it would turn
+     * `max by (queue)` into a per-engine maximum — 150 waiting on each of
+     * two engines would stop firing a rule that fires at 200 — so the
+     * split is a SEPARATE series instead.
+     *
+     * It exists because "why is PRACTICE backed up" is almost always one
+     * engine rather than both, and because every SQL node being offline
+     * looks exactly like a load problem until somebody can see the split.
+     * `engine` is a closed set of two.
+     */
+    name: "judge_engine_queue_depth",
+    type: "gauge",
+    owner: "scheduler",
+    labels: ["queue", "engine"],
+    help: "Jobs waiting in each lane, by judging engine. judge_queue_depth is the sum of these.",
+  },
+  {
     name: "judge_oldest_job_age_seconds",
     type: "gauge",
     owner: "scheduler",

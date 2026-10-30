@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { InfraError } from "./errors";
+import { engineVersionOf } from "./version";
 
 /**
  * What must be true of the sandbox cluster before this node takes a job
@@ -43,7 +44,7 @@ export async function checkCluster(options: {
       const version = await owner.query<{ v: string; n: string }>(
         "SELECT current_setting('server_version') AS v, current_database() AS n",
       );
-      engineVersion = `PostgreSQL ${version.rows[0]?.v ?? "unknown"}`;
+      engineVersion = engineVersionOf(version.rows[0]?.v);
 
       /**
        * 1. This is not the application's database. The strongest check

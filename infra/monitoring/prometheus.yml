@@ -77,6 +77,14 @@ scrape_configs:
   # RECX_METRICS_PORT in the systemd unit. These hosts have no public
   # listener at all (Phase 2), so the scrape crosses the monitoring network
   # and nothing else can reach the port.
+  #
+  # The SQL judge host (Phase 12k) is NOT here, and that is deliberate: the
+  # SQL judge publishes no metrics of its own. Everything about it is
+  # already published by a process that has exactly one instance — the
+  # per-engine queue depth by the scheduler, its heartbeat age by the
+  # scheduler, its verdicts by web — and inventing a listener to republish
+  # them from a second place is how two numbers that should agree stop
+  # agreeing. Its node_exporter IS scraped, below, like every other host's.
   - job_name: recx-judge
     static_configs:
       - targets:
@@ -101,6 +109,7 @@ scrape_configs:
           - "db.recx.internal:9100"
           - "judge-1.recx.internal:9100"
           - "judge-2.recx.internal:9100"
+          - "sql-judge-1.recx.internal:9100"
 
   - job_name: postgres
     static_configs:

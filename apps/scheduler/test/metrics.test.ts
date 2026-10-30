@@ -1,10 +1,16 @@
 import { JUDGE_LANES, METRICS, forbiddenLabels, metricsFor, parseExposition } from "@recx/shared";
 import { beforeAll, describe, expect, it } from "vitest";
-import { observeEmptyLanes, observeHeartbeats, observeQueue, renderMetrics } from "../src/metrics";
+import {
+  observeEmptyLanes,
+  observeEngineQueue,
+  observeHeartbeats,
+  observeQueue,
+  renderMetrics,
+} from "../src/metrics";
 
 /**
- * The scheduler's three metrics, asserted against the served text
- * (Phase 10a).
+ * The scheduler's metrics, asserted against the served text (Phase 10a;
+ * a fourth gauge in Phase 12k, the per-engine split of the first).
  *
  * These are the three gauges, and a gauge is the one metric type that can be
  * silently wrong for hours: a counter that stops moving is visible, whereas a
@@ -28,15 +34,17 @@ const heartbeatOf = (worker: string) =>
 
 beforeAll(async () => {
   observeQueue("PRACTICE", 3, 12);
+  observeEngineQueue("PRACTICE", "isolate", 3);
   observeHeartbeats([{ hostname: "judge-1", ageSeconds: 7 }]);
   served = parseExposition(await renderMetrics());
 });
 
-describe("the scheduler registry exposes exactly its three", () => {
+describe("the scheduler registry exposes exactly its own", () => {
   it("serves them, with the type and help text from the contract", async () => {
     const owned = metricsFor("scheduler");
     expect(owned.map((m) => m.name)).toEqual([
       "judge_queue_depth",
+      "judge_engine_queue_depth",
       "judge_oldest_job_age_seconds",
       "judge_worker_heartbeat_age_seconds",
     ]);
@@ -64,6 +72,9 @@ describe("the scheduler registry exposes exactly its three", () => {
     const byName = new Map(served.map((m) => [m.name, m.labels]));
     expect(byName.get("judge_queue_depth")).toEqual(["queue"]);
     expect(byName.get("judge_oldest_job_age_seconds")).toEqual(["queue"]);
+    // The engine split is its own series, so the lane total keeps the one
+    // label the alert rules are written against (Phase 12k).
+    expect(byName.get("judge_engine_queue_depth")?.slice().sort()).toEqual(["engine", "queue"]);
     /**
      * `worker` is a HOSTNAME. It is bounded (one series per judge host, and
      * there will be single digits of them), it is not a person, and it is
@@ -112,6 +123,24 @@ describe("the queue gauges", () => {
       expect(text, lane).toContain(`judge_queue_depth{queue="${lane}"}`);
       expect(text, lane).toContain(`judge_oldest_job_age_seconds{queue="${lane}"}`);
     }
+  });
+
+  it("splits a lane by engine, and the total stays the sum", async () => {
+    observeQueue("PRACTICE", 7, 4);
+    observeEngineQueue("PRACTICE", "isolate", 5);
+    observeEngineQueue("PRACTICE", "postgres", 2);
+    const text = await renderMetrics();
+    expect(text).toContain('judge_engine_queue_depth{queue="PRACTICE",engine="isolate"} 5');
+    expect(text).toContain('judge_engine_queue_depth{queue="PRACTICE",engine="postgres"} 2');
+    expect(await depthOf("PRACTICE")).toBe(7);
+  });
+
+  it("zeroes every engine of a lane that reported nothing", async () => {
+    observeEngineQueue("REJUDGE", "postgres", 9);
+    observeEmptyLanes(new Set(["CONTEST"]));
+    const text = await renderMetrics();
+    expect(text).toContain('judge_engine_queue_depth{queue="REJUDGE",engine="postgres"} 0');
+    expect(text).toContain('judge_engine_queue_depth{queue="REJUDGE",engine="isolate"} 0');
   });
 
   it("clamps a negative reading to zero instead of publishing it", async () => {

@@ -6,6 +6,7 @@ import { formatDurationMs, formatRate, laneTotals } from "@/lib/judge/metrics";
 import { loadJudgeHealth } from "@/server/queries/admin-judge";
 import { AutoRefresh } from "@/components/admin/auto-refresh";
 import { CapsPanel } from "@/components/admin/caps-panel";
+import { EngineTable } from "@/components/admin/engine-table";
 import { LanguageMix, VerdictDistribution } from "@/components/admin/judge-mix";
 import { LanguageTable } from "@/components/admin/language-table";
 import { LaneTable } from "@/components/admin/lane-table";
@@ -119,6 +120,16 @@ export default async function JudgeHealthPage() {
         <CardHeader title="Lanes" subtitle="Queue depth now; latency, throughput and internal errors over the last hour." />
         <div className="pb-5 pt-3">
           <LaneTable lanes={health.lanes} queueDepthAvailable={health.queueDepthAvailable} validation={health.validation} />
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <CardHeader
+          title="Engines"
+          subtitle="A lane has one queue per engine, and the lane figures above are the sum of both."
+        />
+        <div className="pb-5 pt-3">
+          <EngineTable nodes={health.nodes} depths={health.engineDepths} />
         </div>
       </Card>
 

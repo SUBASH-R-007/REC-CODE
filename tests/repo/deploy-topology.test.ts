@@ -28,6 +28,11 @@ describe("the deployment files exist and say they have not been run", () => {
       "deploy/compose.app.yml",
       "deploy/compose.db.yml",
       "deploy/compose.judge.yml",
+      // Phase 12k: the fourth host role, the one whose sandbox is a
+      // database. Its cluster is in this file too, because a sandbox on
+      // the database host would be a sandbox one network hop from every
+      // submission the platform has ever stored.
+      "deploy/compose.sql-judge.yml",
     ]);
     expect(readRepoFile("deploy/Caddyfile").length).toBeGreaterThan(500);
     expect(readRepoFile("deploy/pgbackrest.conf").length).toBeGreaterThan(500);
@@ -167,12 +172,16 @@ describe("no secret is in the repository", () => {
 describe("the ops scripts", () => {
   const scripts = findFiles({ under: ["scripts/ops"], extensions: [".sh"] });
 
-  it("are the five the phase names", () => {
+  it("are the five Phase 10e names, plus the sandbox provisioner", () => {
     expect(scripts.sort()).toEqual([
       "scripts/ops/backup.sh",
       "scripts/ops/deploy.sh",
       "scripts/ops/restore-drill.sh",
       "scripts/ops/restore.sh",
+      // Phase 12k: the SQL judge's cluster needs one role the image cannot
+      // create for itself, because the student role's whole definition is
+      // what it may NOT do.
+      "scripts/ops/sql-sandbox-provision.sh",
       "scripts/ops/verify-backup.sh",
     ]);
   });
@@ -318,6 +327,12 @@ describe("the compose files and the processes agree on variable names", () => {
       service: "judge-worker",
       schema: () => schemaKeys("apps/judge-worker/src/config.ts", "export const workerEnvShape = {"),
     },
+    {
+      what: "the SQL judge",
+      file: "deploy/compose.sql-judge.yml",
+      service: "sql-judge",
+      schema: () => schemaKeys("apps/sql-judge/src/config.ts", "export const sqlJudgeEnvShape = {"),
+    },
   ] as const;
 
   it.each(PROCESSES)("$what is given nothing it does not read", ({ file, service, schema }) => {
@@ -365,7 +380,14 @@ describe("the compose files and the processes agree on variable names", () => {
      */
     const helper = readRepoFile("packages/shared/src/env-file.ts");
     expect(helper).toContain("export function hydrateFileBackedSecrets");
-    for (const rel of ["apps/web/src/lib/env.ts", "apps/scheduler/src/config.ts", "apps/judge-worker/src/config.ts"]) {
+    for (const rel of [
+      "apps/web/src/lib/env.ts",
+      "apps/scheduler/src/config.ts",
+      "apps/judge-worker/src/config.ts",
+      // The SQL judge reads three this way: its node token and both of the
+      // sandbox cluster's connection URLs, each of which has a password in it.
+      "apps/sql-judge/src/config.ts",
+    ]) {
       expect(readRepoFile(rel), `${rel} ignores *_FILE secrets`).toContain("hydrateFileBackedSecrets");
     }
     /**

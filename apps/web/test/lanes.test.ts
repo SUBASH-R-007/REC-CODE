@@ -26,8 +26,8 @@ function health(overrides: Partial<NodeHealth> = {}): NodeHealth {
   };
 }
 
-function decide(h: NodeHealth, others: (number | null)[] = [], allowUnhardened = false) {
-  return sensitiveLaneEligibility({ health: h, otherOnlineScores: others, now: NOW, allowUnhardened });
+function decide(h: NodeHealth, others: (number | null)[] = [], allowUnhardened = false, driver?: string) {
+  return sensitiveLaneEligibility({ health: h, otherOnlineScores: others, now: NOW, allowUnhardened, driver });
 }
 
 describe("median", () => {
@@ -118,6 +118,43 @@ describe("sensitive-lane eligibility", () => {
   it("reports every reason at once", () => {
     const result = decide(health({ calibrationScore: null, selfCheckOk: false, hostHardened: false }));
     expect(result.restrictions).toHaveLength(3);
+  });
+});
+
+describe("a SQL node's eligibility (Phase 12k)", () => {
+  /** A SQL node: self-checked and cluster-hardened, and never calibrated. */
+  const sqlHealth = () => health({ calibrationScore: null, calibratedAt: null });
+
+  it("is refused the sensitive lanes, and told why in words about the ENGINE", () => {
+    const decision = decide(sqlHealth(), [], false, "postgres");
+    expect(decision.sensitiveLanesOk).toBe(false);
+    const [reason] = decision.restrictions;
+    expect(reason).toContain("no calibration benchmark yet");
+    expect(reason).toContain("statement_timeout");
+    // Not the isolate wording: nobody forgot to send anything.
+    expect(decision.restrictions.join(" ")).not.toContain("calibration missing");
+  });
+
+  it("is refused even when it reports a score, because nothing interprets one yet", () => {
+    const decision = decide(health(), [1000], false, "postgres");
+    expect(decision.sensitiveLanesOk).toBe(false);
+    expect(decision.restrictions).toHaveLength(1);
+  });
+
+  it("still reports its self-check and its cluster hardening", () => {
+    const failed = decide(
+      health({ calibrationScore: null, calibratedAt: null, selfCheckOk: false, hostHardened: false }),
+      [],
+      false,
+      "postgres",
+    );
+    expect(failed.restrictions.join(" ")).toContain("self-check failed");
+    expect(failed.restrictions.join(" ")).toContain("host hardening check failed");
+  });
+
+  it("changes nothing for an isolate node", () => {
+    expect(decide(health(), [1000], false, "isolate").sensitiveLanesOk).toBe(true);
+    expect(decide(health(), [1000]).sensitiveLanesOk).toBe(true);
   });
 });
 

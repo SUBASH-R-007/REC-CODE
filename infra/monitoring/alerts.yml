@@ -22,6 +22,16 @@ groups:
           summary: 'A judge lane has more than 200 jobs waiting'
           description: 'Students are queued behind a backlog this platform cannot clear at its current capacity. Either a worker has stopped taking jobs or a contest is larger than the hosts provisioned for it.'
           runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgequeuebacklog'
+      - alert: JudgeEngineBacklog
+        expr: 'max by (queue, engine) (judge_engine_queue_depth) > 100'
+        for: 5m
+        labels:
+          severity: warning
+          spec: 'queue depth >200 for 2 min (the per-engine half of it, Phase 12k)'
+        annotations:
+          summary: 'One judging engine has more than 100 jobs waiting on a lane'
+          description: 'The two engines fail separately: the lane total can look fine while one engine''s queue is not being drained at all. Read the Engines table on /admin/judge first — "nodes online" for that engine is the usual answer, and for the SQL engine it is usually the sandbox cluster rather than the judge process.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgeenginebacklog'
       - alert: JudgeOldestJobStale
         expr: 'max by (queue) (judge_oldest_job_age_seconds) > 60'
         for: 1m

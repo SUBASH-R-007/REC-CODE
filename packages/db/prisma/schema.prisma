@@ -2029,6 +2029,9 @@ model JudgeNode {
   tokenHash         String
   workerVersion     String          @default("")
   isolateVersion    String          @default("")
+  /// The judging engine's own version, for a driver whose engine is not
+  /// isolate: PostgreSQL's server_version on a SQL node (Phase 12k).
+  engineVersion     String          @default("")
   driver            String          @default("isolate")
   languages         Json            @default("[]")
   slots             Int             @default(0)

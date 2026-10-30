@@ -1,5 +1,5 @@
 import { Counter, Gauge, Histogram, Registry } from "@prometheus-io/client";
-import { JUDGE_LANES, buildMetrics, type JudgeLane } from "@recx/shared";
+import { JUDGE_ENGINES, JUDGE_LANES, buildMetrics, type JudgeEngine, type JudgeLane } from "@recx/shared";
 
 /**
  * The scheduler's metrics (Phase 10a).
@@ -38,6 +38,7 @@ const metrics = buildMetrics<Counter<string>, Gauge<string>, Histogram<string>>(
 });
 
 const queueDepth = metrics.judge_queue_depth as Gauge<string>;
+const engineQueueDepth = metrics.judge_engine_queue_depth as Gauge<string>;
 const oldestJobAge = metrics.judge_oldest_job_age_seconds as Gauge<string>;
 const heartbeatAge = metrics.judge_worker_heartbeat_age_seconds as Gauge<string>;
 
@@ -65,6 +66,18 @@ export function observeQueue(lane: JudgeLane, depth: number, oldestAgeSeconds: n
 }
 
 /**
+ * One lane's depth for ONE engine (Phase 12k).
+ *
+ * Published beside the lane total rather than instead of it: the total is
+ * what the alert rules read, and this is what answers "which engine".
+ */
+export function observeEngineQueue(lane: JudgeLane, engine: JudgeEngine, depth: number): void {
+  quiet("observeEngineQueue", () => {
+    engineQueueDepth.set({ queue: lane, engine }, Math.max(0, depth));
+  });
+}
+
+/**
  * A lane with nothing in it is ZERO, not absent.
  *
  * This is the whole reason it is a separate function. A gauge that simply
@@ -79,6 +92,9 @@ export function observeEmptyLanes(seen: ReadonlySet<JudgeLane>): void {
       if (seen.has(lane)) continue;
       queueDepth.set({ queue: lane }, 0);
       oldestJobAge.set({ queue: lane }, 0);
+      // Every engine of every unseen lane, for the same reason: a series
+      // that stops being set is a series that keeps yesterday's number.
+      for (const engine of JUDGE_ENGINES) engineQueueDepth.set({ queue: lane, engine }, 0);
     }
   });
 }

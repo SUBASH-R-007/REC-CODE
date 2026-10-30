@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { LANGUAGE_KEYS, TOOLCHAIN_ID_PATTERN } from "./languages";
 import { SQL_LIMITS, sqlResultSetSchema } from "./sql-problem";
+// Type-only in the other direction (sql-language imports `type IoMode`), so
+// this is not a runtime cycle.
+import { SUBMIT_LANGUAGE_KEYS } from "./sql-language";
 import { LIMITS } from "./limits";
 import { VERDICTS } from "./verdict";
 import { functionSignatureSchema } from "./harness/signature";
@@ -473,7 +476,13 @@ export const heartbeatRequestSchema = z.object({
   driver: z.enum(["isolate", "docker", "mock", "postgres"]),
   /** e.g. "PostgreSQL 17.6". Optional: a v3 worker never sent one. */
   engineVersion: z.string().max(64).default(""),
-  languages: z.array(languageKeySchema),
+  /**
+   * The languages this node judges. A toolchain key for an isolate node;
+   * `sql17` for a SQL one, which judges a language that is not a toolchain
+   * (Phase 12k). Widening rather than a protocol bump: a v3 worker sends a
+   * subset of this set, and the field is stored for display only.
+   */
+  languages: z.array(z.enum(SUBMIT_LANGUAGE_KEYS as [string, ...string[]])),
   slots: z.number().int().min(0).max(256),
   /** Score of the 1-second calibration benchmark (higher = faster), refreshed every 6 h. */
   calibrationScore: z.number().nullable(),

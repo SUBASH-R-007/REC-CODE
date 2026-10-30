@@ -40,7 +40,7 @@ describe("infra/monitoring/alerts.yml", () => {
     expect(actual, "infra/monitoring/alerts.yml is stale: run with RECX_UPDATE_DOCS=1").toBe(expected);
   });
 
-  it("carries all eight rules, each with a for and a severity", () => {
+  it("carries every rule in the list, each with a for and a severity", () => {
     const yaml = read(ALERTS_FILE);
     expect(yaml.match(/^ {6}- alert: /gm) ?? []).toHaveLength(ALERTS.length);
     for (const alert of ALERTS) {

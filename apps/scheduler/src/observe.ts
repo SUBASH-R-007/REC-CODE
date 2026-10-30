@@ -1,7 +1,7 @@
 import type { Db } from "@recx/db";
 import { JUDGE_ENGINES, JUDGE_LANES, type JudgeEngine, type JudgeLane } from "@recx/shared";
 import type { Logger } from "pino";
-import { observeEmptyLanes, observeHeartbeats, observeQueue } from "./metrics";
+import { observeEmptyLanes, observeEngineQueue, observeHeartbeats, observeQueue } from "./metrics";
 
 /**
  * Publishing the scheduler's gauges, once a tick (Phase 10a).
@@ -59,14 +59,18 @@ async function observeLanes(deps: ObserveDeps): Promise<void> {
      * alert rules are written against those labels — so the two are SUMMED
      * for the depth and the OLDER of the two reported for the age. That
      * keeps the alert's question answerable: "is anybody waiting too long
-     * on this lane" is true if either engine's queue says so. A per-engine
-     * label would be a change to the contract and to the rules, and
-     * belongs with the rest of the SQL ops work rather than here.
+     * on this lane" is true if either engine's queue says so.
+     *
+     * Slice 5 added the split as its OWN series rather than as a label on
+     * this one: `judge_engine_queue_depth{queue,engine}`, published here
+     * from the same read. The alert rules keep reading the sum; a person
+     * looking at a backed-up lane can see which engine it is.
      */
     const parts = await Promise.all(JUDGE_ENGINES.map((engine) => deps.queues.depth(engine, lane)));
     const waiting = parts.reduce((sum, part) => sum + part.waiting, 0);
     const oldest = Math.max(...parts.map((part) => part.oldestAgeSeconds));
     observeQueue(lane, waiting, oldest);
+    JUDGE_ENGINES.forEach((engine, k) => observeEngineQueue(lane, engine, parts[k]?.waiting ?? 0));
     seen.add(lane);
   }
   observeEmptyLanes(seen);

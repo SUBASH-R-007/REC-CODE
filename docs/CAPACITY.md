@@ -77,6 +77,45 @@ for planning:
   so a node that drifts out of the band does not shrink the graded fleet
   below what the sitting needs.
 
+## 4b. The SQL engine, which counts in connections (Phase 12k)
+
+A SQL problem is judged by a different engine with a different unit, and
+the arithmetic above does not transfer: nothing compiles, nothing is
+pinned to a core, and the host doing the work is a PostgreSQL cluster
+rather than a sandbox on the judge box.
+
+| Quantity | Planning figure | Basis |
+|---|---|---|
+| Cost of one SQL case | **0.1–0.3 s** | create a schema, run the author's setup script (a few small tables), run one statement, drop the schema. The setup dominates; the student's SELECT over tens of rows does not register |
+| Cost of a submission | **~1 slot-second** | the cases of one problem, in sequence, stopping at the first failure |
+| Throughput of one slot | **~3,600 submissions per hour** | five times a program's, because there is no compile and no process to start |
+| A SQL slot's real cost | **two connections** | the owner's and the student's, held for the length of one job. `RECX_SLOTS` is therefore a connection budget as much as a concurrency one |
+| Cluster `max_connections` | **≥ 2 × slots + 16** | the pairs, plus the boot checks, the stale-schema sweeper and a person with `psql`. `deploy/compose.sql-judge.yml` defaults to 64, which carries 4 slots with room to grow |
+| Slots per host | **4** | a default chosen by the cluster rather than by cores: four concurrent queries against a small dataset is nothing for PostgreSQL, and raising it is a `max_connections` change first |
+
+**What actually runs out.** Not CPU. The three things to watch, in the
+order they bite: connections (the hard cap above), schemas left behind by
+a job that died between CREATE and DROP (the judge sweeps them at boot and
+the sweeper is the reason the cluster does not fill up), and `temp_file_limit`
+for a student's accidental cross join — which is bounded per statement, so
+one bad query is one bad query rather than a full disk.
+
+**The dataset is the thing to size, not the query.** An author's setup
+script is capped at 64 KB (`SQL_LIMITS.setupBytes`) and runs once per case
+per submission, so a problem with eight cases pays it eight times. A
+heavy dataset is the one authoring decision that changes this engine's
+capacity, which is why the cap is in the authoring surface rather than in
+an ops document.
+
+**One host is enough, and the reason is honest rather than confident.**
+SQL problems are a small share of a practice day and are not yet allowed
+in a contest or an assessment at all (the engine has no calibration
+benchmark — `docs/OPEN-QUESTIONS.md`), so the burst a judging fleet is
+sized for cannot reach this engine. If that changes, this section needs a
+measured burst run before the number of hosts does.
+
+---
+
 ## 5. Beyond the judge
 
 Also estimates, still to be measured:

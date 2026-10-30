@@ -33,9 +33,18 @@ function Failures({ items, label }: { items: string[]; label: string }) {
 
 const ago = (ms: number | null) => (ms === null ? "never" : `${formatAge(ms)} ago`);
 
-/** One judge node: identity, health, eligibility and the admin actions. */
+/**
+ * One judge node: identity, health, eligibility and the admin actions.
+ *
+ * Phase 12k: the fleet has two engines, and three of these rows read
+ * differently for each. A SQL node has no isolate and no CPU benchmark —
+ * what it has is a database, whose version is the thing a verdict depends
+ * on — so the page says that rather than printing a dash and leaving an
+ * ops person to wonder which half is broken.
+ */
 export function NodeCard({ node }: { node: AdminNodeRow }) {
   const maxDeviation = formatRate(LIMITS.calibration.maxDeviation, 0);
+  const sql = node.engine === "postgres";
   return (
     <Card className="p-5">
       <div className="flex flex-wrap items-start gap-3">
@@ -64,12 +73,16 @@ export function NodeCard({ node }: { node: AdminNodeRow }) {
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
-        <Item term="Driver">
+        <Item term="Engine">
           <span className="font-mono">{node.driver}</span>
+          {/* The node reports a complete string — the engine's name and its
+              version — so it is shown as it came rather than prefixed here.
+              The name itself belongs to SQL_DIALECT_LABEL and to the node. */}
+          {sql && node.engineVersion && <span className="text-text-secondary"> · {node.engineVersion}</span>}
         </Item>
-        <Item term="Worker / isolate">
+        <Item term={sql ? "Judge / engine" : "Worker / isolate"}>
           <span className="font-mono">
-            {node.workerVersion || "—"} / {node.isolateVersion || "—"}
+            {node.workerVersion || "—"} / {(sql ? node.engineVersion : node.isolateVersion) || "—"}
           </span>
         </Item>
         <Item term="Slots busy">
@@ -79,7 +92,12 @@ export function NodeCard({ node }: { node: AdminNodeRow }) {
           <span className={node.heartbeatStale ? "font-medium text-danger" : undefined}>{ago(node.heartbeatAgeMs)}</span>
         </Item>
         <Item term="Calibration">
-          {node.calibrationScore === null ? (
+          {sql ? (
+            // Not a gap in this node's reporting: the SQL engine has no
+            // hello-world benchmark, because a query's limit is the
+            // database's statement_timeout rather than a scaled C++ time.
+            <span className="text-muted">Not measured for the SQL engine</span>
+          ) : node.calibrationScore === null ? (
             <span className="text-muted">Not measured</span>
           ) : (
             <>

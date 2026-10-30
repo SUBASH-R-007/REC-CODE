@@ -5,6 +5,7 @@ import {
   JUDGE_HEARTBEAT_MS,
   JUDGE_PROTOCOL_VERSION,
   LIMITS,
+  SQL_LANGUAGE_KEY,
   type JudgeJobData,
   type JudgeNodeStatus,
 } from "@recx/shared";
@@ -108,9 +109,14 @@ async function main(): Promise<void> {
         isolateVersion: "",
         driver: "postgres",
         engineVersion: cluster.engineVersion,
-        // A SQL node runs no language from the catalogue; the driver is what
-        // says what it can do.
-        languages: [],
+        /**
+         * The one language this node judges. `sql17` is not a toolchain —
+         * there is no argv and no /opt/toolchains directory behind it —
+         * but it IS the language a submission carries, and the fleet page
+         * reads this list to say what a node can do. Reporting nothing
+         * made a working node look like a node with nothing to offer.
+         */
+        languages: [SQL_LANGUAGE_KEY],
         slots: config.RECX_SLOTS,
         busySlots: busy,
         calibrationScore: null,

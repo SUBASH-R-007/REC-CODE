@@ -25,6 +25,17 @@ import {
  *       which is refused (ignored, and logged) when NODE_ENV=production.
  *
  * A node that is not ONLINE serves no lane at all.
+ *
+ * Phase 12k: rule (a) is a hello-world CPU benchmark, which the SQL engine
+ * does not run and could not interpret — a query's limit is the database's
+ * own `statement_timeout`, not a scaled C++ time. A `postgres` node
+ * therefore reports no calibration and is told so in words, rather than
+ * being told its calibration is "missing" as though somebody forgot to
+ * send it. The CONSEQUENCE is deliberately unchanged: it still withholds
+ * the sensitive lanes. A slow cluster really can turn a passing query into
+ * a timeout, so the fleet needs a benchmark for the query engine before an
+ * exam may be judged on one — and until that exists, saying so plainly and
+ * refusing the lane is the honest state. (docs/OPEN-QUESTIONS.md.)
  */
 
 /** Calibration is refreshed every 6 h (LIMITS.calibration.intervalMs) and goes stale after 6.5 h. */
@@ -80,13 +91,20 @@ export function sensitiveLaneEligibility(input: {
   otherOnlineScores: readonly (number | null)[];
   now: Date;
   allowUnhardened: boolean;
+  /** The node's engine. "postgres" has no CPU benchmark (Phase 12k). */
+  driver?: string;
 }): LaneEligibility {
   const { health, now } = input;
   const restrictions: string[] = [];
 
   // (a) calibration
   const score = health.calibrationScore;
-  if (!isUsableScore(score) || health.calibratedAt === null) {
+  if (input.driver === "postgres") {
+    restrictions.push(
+      "the SQL engine has no calibration benchmark yet: a query's limit is the database's own statement_timeout, " +
+        "so this node does not serve ASSESSMENT or CONTEST",
+    );
+  } else if (!isUsableScore(score) || health.calibratedAt === null) {
     restrictions.push("calibration missing: no calibration benchmark has been reported");
   } else {
     const age = now.getTime() - health.calibratedAt.getTime();

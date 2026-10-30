@@ -53,6 +53,14 @@ function heartbeatWrite(
     hostname: hb.hostname,
     workerVersion: hb.workerVersion,
     isolateVersion: hb.isolateVersion,
+    /**
+     * Phase 12k, slice 5. The engine's own version, for a driver whose
+     * engine is not isolate: PostgreSQL's `server_version` on a SQL node.
+     * Kept apart from `isolateVersion` rather than folded into it, because
+     * a column named after one engine holding another engine's version is
+     * the kind of small lie that costs an hour during an incident.
+     */
+    engineVersion: hb.engineVersion,
     driver: hb.driver,
     languages: hb.languages,
     slots: hb.slots,
@@ -102,8 +110,15 @@ export async function POST(request: Request) {
     const allowUnhardened = allowUnhardenedNodes();
 
     const { data, health } = heartbeatWrite(hb, node, now);
+    /**
+     * The fleet median is over nodes of the SAME ENGINE (Phase 12k).
+     * Calibration is a hello-world CPU benchmark: a number from an isolate
+     * host and a number from a database host measure different things, and
+     * mixing them into one median would move the threshold every node is
+     * judged against for no reason anybody could explain.
+     */
     const others = await db.judgeNode.findMany({
-      where: { status: "ONLINE", id: { not: node.id }, calibrationScore: { not: null } },
+      where: { status: "ONLINE", id: { not: node.id }, driver: hb.driver, calibrationScore: { not: null } },
       select: { calibrationScore: true },
     });
     const eligibility = sensitiveLaneEligibility({
@@ -111,6 +126,7 @@ export async function POST(request: Request) {
       otherOnlineScores: others.map((o) => o.calibrationScore),
       now,
       allowUnhardened,
+      driver: hb.driver,
     });
     // Stored as "may serve ASSESSMENT / CONTEST right now": eligible AND ONLINE.
     const withLanes = (s: JudgeNodeStatus): Prisma.JudgeNodeUpdateManyMutationInput => ({

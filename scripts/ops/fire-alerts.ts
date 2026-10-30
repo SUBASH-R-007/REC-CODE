@@ -6,6 +6,7 @@ import {
   ALERTS,
   LANE_PRIORITY,
   QUEUE_NAME,
+  SQL_QUEUE_NAME,
   buildMetrics,
   parseSamples,
   type AlertReading,
@@ -86,6 +87,8 @@ const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 /** Everything this script creates carries this prefix, and is removed. */
 const TAG = "fire-alerts";
 const BACKLOG_JOBS = 250;
+/** Over JudgeEngineBacklog's 100, and under JudgeQueueBacklog's 200 on the lane. */
+const ENGINE_BACKLOG_JOBS = 120;
 const LOGIN_ATTEMPTS = 120;
 /** The oldest-job rule needs 60 s of real waiting; allow 80. */
 const AGE_WAIT_MS = 80_000;
@@ -211,6 +214,40 @@ function buildProducers(db: ReturnType<typeof createPrismaClient>, redis: Redis,
       } finally {
         // Always: 250 orphan jobs left in a dev Redis are 250 jobs a worker
         // started later would try to judge.
+        await Promise.allSettled(ids.map((id) => queue.remove(id)));
+        await queue.close();
+      }
+    },
+
+    /**
+     * 120 jobs onto the SQL practice queue (Phase 12k).
+     *
+     * The number is chosen from both sides: over this rule's 100, and
+     * under JudgeQueueBacklog's 200 for the LANE — so a pass here is the
+     * per-engine rule firing on a lane whose total is still quiet, which
+     * is the only situation it exists for.
+     *
+     * Nothing on this machine consumes the SQL queues either, so it is
+     * produced for real exactly as the lane backlog is.
+     */
+    JudgeEngineBacklog: async () => {
+      const queue = new Queue(SQL_QUEUE_NAME.PRACTICE, { connection: redis });
+      const ids = Array.from({ length: ENGINE_BACKLOG_JOBS }, (_, i) => `${TAG}-sql-backlog-${i}`);
+      try {
+        const before = await schedulerScrape(db, queues);
+        await queue.addBulk(
+          ids.map((id) => ({
+            name: "judge",
+            data: { kind: "submission" as const, id },
+            opts: { jobId: id, priority: LANE_PRIORITY.PRACTICE, removeOnComplete: true, removeOnFail: true },
+          })),
+        );
+        const after = await schedulerScrape(db, queues);
+        return {
+          reading: reading(before, after, 1),
+          note: `${ENGINE_BACKLOG_JOBS} jobs enqueued on ${SQL_QUEUE_NAME.PRACTICE}`,
+        };
+      } finally {
         await Promise.allSettled(ids.map((id) => queue.remove(id)));
         await queue.close();
       }

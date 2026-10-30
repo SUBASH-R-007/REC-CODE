@@ -3334,3 +3334,51 @@ programming language and the submit action then refuses it — safe, and
 unusable. Nobody should place a SQL problem in a contest until that is
 built. The narrow-screen grammar is in the build as a lazy chunk but was
 not opened in a browser.
+
+## Operating a second engine (Phase 12k, slice 5)
+
+**An instrument written for one engine is wrong for two, and it is wrong
+quietly.** `loadQueueDepths` read `QUEUE_NAME[lane]` — the isolate queue —
+so every SQL job waiting was absent from the page whose entire job is to
+show waiting work, and nothing failed. That is the shape of every bug in
+this slice: not an error, an omission that reads as "there is nothing
+there". The fix is the boring one (read both, sum them, show the split),
+and the lesson is that adding an engine means re-asking every number what
+it now means.
+
+**A label on an existing metric is a change to every rule that reads it.**
+Adding `engine` to `judge_queue_depth` would have turned
+`max by (queue) (judge_queue_depth) > 200` into a per-engine maximum: 150
+waiting on each of two engines would stop firing a rule that fires at 200.
+The split is a separate series for that reason alone, and the per-engine
+rule that reads it has a lower threshold and a longer `for:`, because
+"half the fleet is not keeping up" is a warning rather than a page.
+
+**A SQL node does not judge an exam, and the honest reason is a missing
+benchmark rather than a missing surface.** Calibration guards time limits:
+an isolate node whose CPU deviates from the fleet does not get the
+sensitive lanes. The analogue for the SQL engine is real — a slow cluster
+turns a passing query into a `statement_timeout` — and it does not exist
+yet, so the node is refused those lanes and TOLD SO in those words. The
+alternative, relaxing the rule because "a query's limit is enforced by the
+database", would have been true and would still have let an exam be judged
+on an unmeasured host. Slice 4 recorded that the contest and exam SURFACES
+do not offer SQL either; both have to be built before a SQL question can
+appear in either, and this is the half that would otherwise be forgotten,
+because it is the half nothing on a screen complains about.
+
+**The SQL judge publishes no `/metrics`, and that is a decision.** Its
+queue depth, its heartbeat age and its verdicts are already published by
+processes there is exactly one of; a second listener republishing them is
+how two numbers that should agree stop agreeing. What is genuinely absent
+is the engine's own internals — how much of a case is the author's setup
+script versus the student's statement, how many stale schemas the boot
+sweeper found — and those are worth a counter each the first time somebody
+needs to tune this engine rather than operate it.
+
+**Still not run.** `deploy/compose.sql-judge.yml` and
+`scripts/ops/sql-sandbox-provision.sh` have never been started: there is no
+SQL judge host, as there is no judge host and no database host. What IS
+exercised on every change is the thing they would deploy — the judge
+process against a real PostgreSQL 17, including the eleven-case adversarial
+suite — which is the half that would hurt if it were wrong.

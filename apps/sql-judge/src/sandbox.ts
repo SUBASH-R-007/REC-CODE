@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { Client, type ClientConfig } from "pg";
 import { SQL_LIMITS, type SqlResultSet } from "@recx/shared";
 import { InfraError } from "./errors";
+import { engineVersionOf } from "./version";
 
 /**
  * The sandbox: one ephemeral schema per case, and one connection as a role
@@ -126,7 +127,7 @@ export class SqlSandbox {
     await owner.connect();
     try {
       const { rows } = await owner.query<{ v: string }>("SELECT current_setting('server_version') AS v");
-      return `PostgreSQL ${rows[0]?.v ?? "unknown"}`;
+      return engineVersionOf(rows[0]?.v);
     } finally {
       await endQuietly(owner);
     }

@@ -41,6 +41,8 @@ function logger(): { log: Logger; warnings: unknown[] } {
 function queues(options: {
   ready?: boolean;
   depths?: Partial<Record<JudgeLane, { waiting: number; oldestAgeSeconds: number }>>;
+  /** The postgres queue's side of the same lane (Phase 12k). */
+  sqlDepths?: Partial<Record<JudgeLane, { waiting: number; oldestAgeSeconds: number }>>;
   throwOn?: JudgeLane;
 }): QueueCounts & { asked: JudgeLane[] } {
   const asked: JudgeLane[] = [];
@@ -56,7 +58,7 @@ function queues(options: {
     depth: async (engine, lane) => {
       asked.push(lane);
       if (options.throwOn === lane) throw new Error("Stream isn't writeable and enableOfflineQueue options is false");
-      if (engine !== "isolate") return { waiting: 0, oldestAgeSeconds: 0 };
+      if (engine !== "isolate") return options.sqlDepths?.[lane] ?? { waiting: 0, oldestAgeSeconds: 0 };
       return options.depths?.[lane] ?? { waiting: 0, oldestAgeSeconds: 0 };
     },
   };
@@ -114,6 +116,31 @@ describe("the lanes", () => {
     expect(port.asked.length).toBe(JUDGE_LANES.length * JUDGE_ENGINES.length);
     expect(await depthOf("CONTEST")).toBe(7);
     expect(await ageOf("CONTEST")).toBe(33);
+  });
+
+  it("sums the two engines into the lane, and publishes the split beside it", async () => {
+    /**
+     * The lane gauge is what the alert rules read, so it must be the SUM:
+     * 120 waiting on each engine is 240 on the lane, not 120. The split
+     * is its own series, because "which engine" is the first question
+     * asked about a backed-up lane with a second engine in the fleet.
+     */
+    await observeJudgeMetrics({
+      db: db([]),
+      queues: queues({
+        depths: { PRACTICE: { waiting: 120, oldestAgeSeconds: 10 } },
+        sqlDepths: { PRACTICE: { waiting: 120, oldestAgeSeconds: 90 } },
+      }),
+      log: logger().log,
+      now: () => NOW,
+    });
+    expect(await depthOf("PRACTICE")).toBe(240);
+    // The OLDER of the two: a student waiting 90 s on the SQL queue is
+    // waiting 90 s, whatever the other queue is doing.
+    expect(await ageOf("PRACTICE")).toBe(90);
+    const text = await renderMetrics();
+    expect(text).toContain('judge_engine_queue_depth{queue="PRACTICE",engine="isolate"} 120');
+    expect(text).toContain('judge_engine_queue_depth{queue="PRACTICE",engine="postgres"} 120');
   });
 
   it("publishes a lane with nothing in it as zero", async () => {

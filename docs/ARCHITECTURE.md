@@ -210,6 +210,40 @@ A SQL question also has no custom input — its input is the author's
 dataset — so the console's Custom input tab is absent rather than present
 and ignored, and `runCode` refuses one with a sentence.
 
+**Operating two engines (slice 5).** The fleet's instruments were written
+when there was one engine, and each had to be asked what it means when
+there are two.
+
+*A lane's backlog* is the SUM of its two queues, everywhere: the fleet
+page's totals read both (they silently read only the isolate queue before,
+so SQL work waiting was invisible on the page whose job is to show waiting
+work), and the scheduler's `judge_queue_depth` has summed them since slice
+3a. The SPLIT is a second gauge, `judge_engine_queue_depth{queue,engine}`,
+rather than a label on the first — the alert rules read `max by (queue)`,
+and an extra label would turn a sum into a maximum and stop a rule firing
+at exactly the moment it should. `JudgeEngineBacklog` is the rule for the
+state the sum hides: one engine stopped while the lane total still looks
+survivable.
+
+*Calibration* is a hello-world CPU benchmark, which the SQL engine does
+not run. A `postgres` node is told so in words rather than being told its
+calibration is "missing", and the fleet median is taken over nodes of the
+same engine, because a CPU score from a database host measures nothing a
+C++ time limit is derived from. The consequence is unchanged: a SQL node
+does not serve ASSESSMENT or CONTEST, and that is the honest state until
+the query engine has a benchmark of its own.
+
+*A node's identity* gained one column, `JudgeNode.engineVersion`. The
+heartbeat had carried it since slice 2 and nothing stored it; folding it
+into `isolateVersion` would have been a column named after one engine
+holding another's version.
+
+*The topology* is a fourth host role: `deploy/compose.sql-judge.yml` runs
+the sandbox cluster and the judge together, on an internal network with no
+published port, because the thing running untrusted input does not share a
+machine with the thing holding the data — the same rule the isolate judges
+follow, applied to a sandbox that happens to be a database.
+
 The three health concepts the fleet already has are re-meant rather than
 dropped: `hardening.ts` checks the CLUSTER at boot (not the application's
 database, the student role unprivileged, a member of nothing, unable to

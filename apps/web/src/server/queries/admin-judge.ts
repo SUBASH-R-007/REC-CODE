@@ -3,10 +3,12 @@ import { Queue } from "bullmq";
 import { z } from "zod";
 import type { JudgeLane as DbJudgeLane, JudgeNodeStatus, SubmissionOrigin, SubmissionStatus } from "@recx/db";
 import {
+  JUDGE_ENGINES,
   JUDGE_LANES,
   LIMITS,
-  QUEUE_NAME,
   isVerdict,
+  queueNameFor,
+  type JudgeEngine,
   type JudgeLane,
   type Verdict,
 } from "@recx/shared";
@@ -58,8 +60,12 @@ export interface AdminNodeRow {
   hostname: string;
   status: JudgeNodeStatus;
   driver: string;
+  /** Which engine judges here, from the driver (Phase 12k). */
+  engine: JudgeEngine;
   workerVersion: string;
   isolateVersion: string;
+  /** The engine's own version: PostgreSQL's on a SQL node, "" on an isolate one. */
+  engineVersion: string;
   slots: number;
   busySlots: number;
   heartbeatAgeMs: number | null;
@@ -93,6 +99,7 @@ export async function loadJudgeNodes(now: Date): Promise<{ nodes: AdminNodeRow[]
       driver: true,
       workerVersion: true,
       isolateVersion: true,
+      engineVersion: true,
       slots: true,
       busySlots: true,
       lastHeartbeatAt: true,
@@ -109,7 +116,9 @@ export async function loadJudgeNodes(now: Date): Promise<{ nodes: AdminNodeRow[]
       consecutiveIe: true,
     },
   });
-  const fleetMedian = fleetCalibrationMedian(rows);
+  // Per ENGINE, like the heartbeat's own median: a hello-world CPU score
+  // from a database host measures nothing a C++ time limit is derived from.
+  const fleetMedian = fleetCalibrationMedian(rows.filter((n) => n.driver !== "postgres"));
   const nodes = rows.map((n): AdminNodeRow => {
     const deviation = calibrationDeviation(n.calibrationScore, fleetMedian);
     return {
@@ -117,8 +126,10 @@ export async function loadJudgeNodes(now: Date): Promise<{ nodes: AdminNodeRow[]
       hostname: n.hostname,
       status: n.status,
       driver: n.driver,
+      engine: n.driver === "postgres" ? "postgres" : "isolate",
       workerVersion: n.workerVersion,
       isolateVersion: n.isolateVersion,
+      engineVersion: n.engineVersion,
       slots: n.slots,
       busySlots: n.busySlots,
       heartbeatAgeMs: ageMs(n.lastHeartbeatAt, now),
@@ -145,15 +156,16 @@ export async function loadJudgeNodes(now: Date): Promise<{ nodes: AdminNodeRow[]
 
 // ── Queue depth (BullMQ, read-only) ────────────────────────────────────
 
-const globalForAdminQueues = globalThis as unknown as { recxAdminQueues?: Map<JudgeLane, Queue> };
+const globalForAdminQueues = globalThis as unknown as { recxAdminQueues?: Map<string, Queue> };
 
-function laneQueue(lane: JudgeLane): Queue {
+function laneQueue(engine: JudgeEngine, lane: JudgeLane): Queue {
   globalForAdminQueues.recxAdminQueues ??= new Map();
-  let q = globalForAdminQueues.recxAdminQueues.get(lane);
+  const name = queueNameFor(engine, lane);
+  let q = globalForAdminQueues.recxAdminQueues.get(name);
   if (!q) {
-    q = new Queue(QUEUE_NAME[lane], { connection: redis() });
-    q.on("error", (err) => console.error(`[admin-judge] queue ${QUEUE_NAME[lane]} error:`, err.message));
-    globalForAdminQueues.recxAdminQueues.set(lane, q);
+    q = new Queue(name, { connection: redis() });
+    q.on("error", (err) => console.error(`[admin-judge] queue ${name} error:`, err.message));
+    globalForAdminQueues.recxAdminQueues.set(name, q);
   }
   return q;
 }
@@ -174,20 +186,51 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Waiting / active / delayed per lane, or null when Redis cannot be read. */
-export async function loadQueueDepths(): Promise<Partial<Record<JudgeLane, QueueDepth>> | null> {
+/** One lane's depth summed over the engines, and the per-engine split. */
+export interface LaneDepths {
+  byLane: Partial<Record<JudgeLane, QueueDepth>>;
+  byEngine: Record<JudgeEngine, QueueDepth>;
+}
+
+const emptyDepth = (): QueueDepth => ({ waiting: 0, active: 0, delayed: 0 });
+
+function addDepth(into: QueueDepth, part: QueueDepth): QueueDepth {
+  return {
+    waiting: into.waiting + part.waiting,
+    active: into.active + part.active,
+    delayed: into.delayed + part.delayed,
+  };
+}
+
+/**
+ * Waiting / active / delayed per lane, or null when Redis cannot be read.
+ *
+ * Phase 12k: a lane has one queue PER ENGINE, and a lane's figure is the
+ * sum — the question "is anybody waiting on PRACTICE" is about the lane,
+ * not about which engine will take the job. The per-engine split is
+ * returned beside it, because the answer to "why is PRACTICE backed up"
+ * is usually one engine rather than both, and a page that only has the
+ * sum cannot say which.
+ */
+export async function loadQueueDepths(): Promise<LaneDepths | null> {
+  const pairs = JUDGE_ENGINES.flatMap((engine) => JUDGE_LANES.map((lane) => ({ engine, lane })));
   try {
     const counts = await withTimeout(
       Promise.all(
-        JUDGE_LANES.map((lane) => laneQueue(lane).getJobCounts("waiting", "prioritized", "active", "delayed")),
+        pairs.map(({ engine, lane }) =>
+          laneQueue(engine, lane).getJobCounts("waiting", "prioritized", "active", "delayed"),
+        ),
       ),
       REDIS_TIMEOUT_MS,
     );
-    const depths: Partial<Record<JudgeLane, QueueDepth>> = {};
-    JUDGE_LANES.forEach((lane, k) => {
-      depths[lane] = depthFromCounts(counts[k] ?? {});
+    const byLane: Partial<Record<JudgeLane, QueueDepth>> = {};
+    const byEngine = Object.fromEntries(JUDGE_ENGINES.map((e) => [e, emptyDepth()])) as Record<JudgeEngine, QueueDepth>;
+    pairs.forEach(({ engine, lane }, k) => {
+      const depth = depthFromCounts(counts[k] ?? {});
+      byLane[lane] = addDepth(byLane[lane] ?? emptyDepth(), depth);
+      byEngine[engine] = addDepth(byEngine[engine], depth);
     });
-    return depths;
+    return { byLane, byEngine };
   } catch (error) {
     console.warn("[admin-judge] queue depth unavailable:", (error as Error).message);
     return null;
@@ -571,6 +614,8 @@ export interface JudgeHealth {
   fleetMedian: number | null;
   lanes: LaneSummary[];
   queueDepthAvailable: boolean;
+  /** The same backlog, split by judging engine (Phase 12k). */
+  engineDepths: Record<JudgeEngine, QueueDepth> | null;
   validation: ValidationWindow;
   stuck: StuckSubmissions;
   languageMix: LanguageMixRow[];
@@ -604,8 +649,9 @@ export async function loadJudgeHealth(scope: StudentScope, now = new Date()): Pr
     generatedAt: now,
     nodes: nodeData.nodes,
     fleetMedian: nodeData.fleetMedian,
-    lanes: summariseLanes(depths, windows),
+    lanes: summariseLanes(depths?.byLane ?? null, windows),
     queueDepthAvailable: depths !== null,
+    engineDepths: depths?.byEngine ?? null,
     validation,
     stuck,
     languageMix: mix,

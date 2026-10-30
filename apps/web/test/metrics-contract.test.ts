@@ -56,7 +56,7 @@ beforeAll(async () => {
 });
 
 describe("the contract itself", () => {
-  it("names the ten metrics SPEC §10 asks for, and one more it needs", () => {
+  it("names the ten metrics SPEC §10 asks for, and the two more it needs", () => {
     /**
      * Ten are required by name. The eleventh,
      * `auth_login_failures_total`, exists because the same paragraph asks
@@ -68,6 +68,10 @@ describe("the contract itself", () => {
     expect([...ALL_METRIC_NAMES].sort()).toEqual([
       "auth_login_failures_total",
       "judge_compile_cache_hits_total",
+      // The twelfth (Phase 12k): the per-engine split of judge_queue_depth,
+      // a separate series precisely so the lane gauge keeps its one label
+      // and the alert rules written against it keep meaning what they say.
+      "judge_engine_queue_depth",
       "judge_oldest_job_age_seconds",
       "judge_queue_depth",
       "judge_run_duration_seconds",
@@ -78,7 +82,7 @@ describe("the contract itself", () => {
       "sse_connections_active",
       "submission_e2e_latency_seconds",
     ]);
-    expect(METRICS).toHaveLength(11);
+    expect(METRICS).toHaveLength(12);
     expect(
       METRICS.filter((m) => SPEC_TEN.includes(m.name)),
       "every one of SPEC's ten is still here",
@@ -172,6 +176,9 @@ describe("no metric label can identify a person", () => {
      * here as well as at the metric.
      */
     expect([...new Set(METRICS.flatMap((m) => m.labels))].sort()).toEqual([
+      // `engine` is a closed set of two, and is no more a person than a
+      // lane is (Phase 12k).
+      "engine",
       "language",
       "queue",
       "reason",
