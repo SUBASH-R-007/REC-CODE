@@ -699,6 +699,20 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
   },
   {
     /**
+     * Phase 12h. The candidate's half of a mock interview: taking a slot,
+     * giving it back, and calling one off. Signed-in is the role check;
+     * who may touch THIS slot is the per-slot ownership check inside each
+     * body, because a mentor is also a signed-in user and a role cannot
+     * tell whose slot it is.
+     */
+    key: "mock.book",
+    label: "Book a mock interview, give it back, or call it off",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["mock-interviews#bookMockSlot", "mock-interviews#giveUpMockSlot", "mock-interviews#cancelMockInterview"],
+    routes: ["app/api/mock/[interviewId]/snapshot/route.ts#POST"],
+  },
+  {
+    /**
      * Phase 12e. A student's own account of their own interview, and
      * withdrawing it while nobody has read it. Nothing here publishes
      * anything: a submission waits for `mentor.interviews.review`.
@@ -989,6 +1003,30 @@ export const MENTOR_CAPABILITIES = deepFreeze([
    * about a named company AND moves the "asked at" counts a student
    * revises against. Audited at SECURITY for that reason.
    */
+  /**
+   * Phase 12h. SPEC §11's "mock-interview scheduler with read-only
+   * spectate mode". The mentor's half: offering a time, starting the
+   * interview, watching the candidate's editor and writing it up. The
+   * candidate's half is self-service.
+   *
+   * `/api/mock/[interviewId]/live` is here because it is the mirror —
+   * the one route that shows one student's draft code to somebody else,
+   * and it answers only for that interview's own mentor, only while it is
+   * running.
+   */
+  {
+    key: "mentor.mock.run",
+    label: "Offer and run mock interviews",
+    roles: MENTOR,
+    actions: [
+      "mock-interviews#offerMockSlot",
+      "mock-interviews#startMockInterview",
+      "mock-interviews#finishMockInterview",
+      "mock-interviews#markMockNoShow",
+    ],
+    routes: ["app/api/mock/[interviewId]/live/route.ts#GET"],
+    pages: ["app/mentor/mock-interviews/page.tsx"],
+  },
   {
     key: "mentor.interviews.review",
     label: "Read and decide students' interview submissions",

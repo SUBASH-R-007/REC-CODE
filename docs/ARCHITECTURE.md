@@ -90,6 +90,50 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## Mock interviews (Phase 12h)
+
+A mentor offers a slot; a student takes it; at the hour both open the same
+room, and the interviewer watches the candidate's editor without being able
+to touch it. SPEC §11 calls this "read-only spectate mode", and that is a
+design decision rather than a missing feature — the interviewer's half of
+the room renders the mirror as a `<pre>`, not a disabled editor, because a
+disabled editor is a control somebody eventually enables.
+
+`packages/shared/src/mock-interview.ts` holds the policy with no database
+in it: the five statuses, `MOCK_INTERVIEW_NEXT` (the only legal
+transitions), `canTransitionInterview()`, and the clock —
+`joinOpensAt` / `endsAt` / `isJoinable` (the room opens ten minutes early
+and closes at the end), `mayCancel` (a student may hand a slot back until
+an hour before), `mayMarkNoShow` (not for the first ten minutes: a slow
+lift is not a no-show on somebody's record). Three of the five statuses are
+terminal, including `NO_SHOW`, and `IN_PROGRESS → NO_SHOW` is refused —
+somebody who turned up and worked for twenty minutes did not fail to turn
+up, whatever happened afterwards.
+
+The writes are `apps/web/src/lib/mock/interviews.ts`, one `…As(actor, …)`
+function per transition, each going through `canTransitionInterview()`
+rather than growing its own `if`. Booking is a conditional `updateMany`
+on `status: "OPEN"` and `candidateId: null` — two students pressing Book
+on the same slot is a race Postgres settles, and the loser is told the slot
+is gone rather than overwriting the winner. A student holds at most
+`MOCK_INTERVIEW_LIMITS.concurrentBookings` slots at once, because a slot
+somebody is sitting on is a slot nobody else can take.
+
+The mirror is two routes under `app/api/mock/[interviewId]/`: the candidate
+`POST`s a snapshot every four seconds from their own editor (capped at
+`snapshotChars`, and only while the interview is running), and the
+interviewer holds a `GET` Server-Sent Events stream that re-reads the row
+every two seconds and sends a frame only when something changed. The
+transport copies the invigilation dashboard for the same reason: an indexed
+periodic read costs nothing for one viewer and keeps the candidate's hot
+path — typing — free of it. Permission is re-asked on every tick in
+`mirrorFor()`, so an interview that ends or is called off closes the mirror
+on the next poll rather than at some later disconnect.
+
+Feedback is three ratings and a markdown note, written once when the
+interviewer finishes. It is for the candidate to read and it counts for
+nothing: no XP, no leaderboard, no readiness input, no band.
+
 ## The recommender (Phase 12f)
 
 SPEC §11: "rule-based, explainable (no ML — it has neither the data nor an

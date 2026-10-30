@@ -577,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261030200000_phase12e_interview_archive";
+export const CHECK_CATALOG_THROUGH = "20261031000000_phase12h_mock_interviews";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1044,6 +1044,23 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProblemCompanyTag_frequency_check", "ProblemCompanyTag"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261030200000_phase12e_interview_archive" })),
+  ...(
+    [
+      // The lifecycle written down: a slot's status and its columns are
+      // what both people on the page are told, so a row where the two
+      // disagree is the product lying to one of them.
+      ["MockInterview_candidate_pair_check", "MockInterview"],
+      ["MockInterview_timing_check", "MockInterview"],
+      ["MockInterview_cancel_pair_check", "MockInterview"],
+      ["MockInterview_cancel_reason_size_check", "MockInterview"],
+      ["MockInterview_duration_check", "MockInterview"],
+      ["MockInterview_feedback_pair_check", "MockInterview"],
+      ["MockInterview_rating_range_check", "MockInterview"],
+      ["MockInterview_feedback_size_check", "MockInterview"],
+      ["MockInterview_not_self_check", "MockInterview"],
+      ["MockInterviewSnapshot_source_size_check", "MockInterviewSnapshot"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261031000000_phase12h_mock_interviews" })),
 ];
 
 /**

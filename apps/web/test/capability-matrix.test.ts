@@ -304,6 +304,25 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
       body: JSON.stringify({ step: "options", userId: "nope" }),
     }),
   ],
+  /**
+   * Phase 12h. The mock-interview room's two routes, both against an
+   * interview that does not exist — the guard runs before anything is
+   * read, which is the thing this matrix checks.
+   */
+  "app/api/mock/[interviewId]/snapshot/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/mock/nope/snapshot", {
+      method: "POST",
+      headers: { host: "localhost:3100", origin: "http://localhost:3100", "content-type": "application/json" },
+      body: JSON.stringify({ language: "cpp20", source: "" }),
+    }),
+    { params: Promise.resolve({ interviewId: "nope" }) },
+  ],
+  "app/api/mock/[interviewId]/live/route.ts#GET": () => [
+    new Request("http://localhost:3100/api/mock/nope/live", {
+      headers: { host: "localhost:3100", origin: "http://localhost:3100" },
+    }),
+    { params: Promise.resolve({ interviewId: "nope" }) },
+  ],
   // Phase 12a. Starting a sitting: a form POST from the readiness page.
   "app/api/exam/start/[slug]/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/start/nothing-here", {

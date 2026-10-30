@@ -347,7 +347,18 @@ describe("route handlers are bound and guarded", () => {
    * because it would require binding a dozen student reads in a slice about
    * metrics.
    */
-  const REQUIRED_GETS = ["app/api/health/route.ts#GET", "app/api/metrics/route.ts#GET"];
+  const REQUIRED_GETS = [
+    "app/api/health/route.ts#GET",
+    "app/api/metrics/route.ts#GET",
+    /**
+     * Phase 12h. A GET, and under `app/api` rather than `app/api/admin`,
+     * so the rule above would not have asked for it — but it is the
+     * mock-interview mirror: the one route in the product that shows one
+     * student's draft code to somebody else. If any GET is worth
+     * declaring, it is this one.
+     */
+    "app/api/mock/[interviewId]/live/route.ts#GET",
+  ];
 
   /** Route methods that must be bound: admin and super trees, plus every mutating API route except judge-node ones. */
   const required = routeFiles.flatMap((rel) => {

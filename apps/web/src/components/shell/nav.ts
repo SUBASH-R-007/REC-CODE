@@ -20,6 +20,7 @@ export type NavIconKey =
   | "aptitude"
   | "placement"
   | "interviews"
+  | "mock"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -97,6 +98,14 @@ export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
       // of preparation and belongs beside the things that measure it — and
       // because a student looking for "am I ready" does not look under
       // their own profile for it.
+      // Phase 12h. First in ASSESS: a mock is the one thing on this page a
+      // student does WITH somebody, and a booking has a time on it.
+      item(
+        "/mock-interviews",
+        "Mock interviews",
+        "mock",
+        "Book half an hour with a TA, and read what they wrote afterwards",
+      ),
       // Phase 12e. Beside Readiness, because both answer "what should I do
       // before the drive" — and this one answers it with what companies
       // actually asked rather than with a score.

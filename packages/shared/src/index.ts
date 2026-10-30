@@ -14,6 +14,7 @@ export * from "./revision";
 export * from "./discussion";
 export * from "./interview-archive";
 export * from "./recommend";
+export * from "./mock-interview";
 export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";

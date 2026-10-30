@@ -264,6 +264,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | 3 actions, 1 page |
 | `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | 1 action |
 | `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | 1 page |
+| `mentor.mock.run` | mentor | - | yes | yes | - | yes | 4 actions, 1 route, 1 page |
 | `mentor.interviews.review` | mentor | - | yes | yes | - | yes | 1 action, 1 page |
 | `judge.submit` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
@@ -276,6 +277,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
+| `mock.book` | self-service | yes | yes | yes | yes | yes | 3 actions, 1 route |
 | `interviews.share` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `discussion.participate` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
@@ -363,6 +365,21 @@ suite.
 * Proctoring (Phase 6) collects no webcam, microphone or screen recording by
   default and no content keystrokes or clipboard contents; see
   `docs/PROCTORING.md`.
+* **A mock interview (Phase 12h) is the one place one student's unfinished
+  code is shown live to another person, and both ends are fenced.** The
+  candidate's editor is pushed by the candidate (there is no read of a
+  student's draft from anywhere else) and is readable only through
+  `mirrorFor()`, which answers for that interview's own MENTOR and only
+  while it is IN_PROGRESS. The SSE route re-asks it every tick rather than
+  deciding once at connect, so the stream dies with the interview. The
+  route carries the mentor ROLE guard as well — `requireMentorAction()`,
+  the action guard rather than the page one, because an `EventSource` can
+  do nothing with a redirect — so the capability registry sees a role on
+  it rather than a promise that the body checks. The mirror is one-way:
+  nothing in the product writes a candidate's editor from the
+  interviewer's side. The interviewer's write-up is feedback for the
+  candidate and an input to nothing — no XP, no leaderboard, no readiness,
+  no band.
 * **The interview archive (Phase 12e) stores who wrote a row and never
   shows them.** The student-facing query does not select a name at all —
   not selected and dropped, not selected — and the anonymous line is built

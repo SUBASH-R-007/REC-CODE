@@ -2925,3 +2925,93 @@ horizon, the archive flag, the batch and the department filters all
 refused — but the development database has one published problem and every
 seeded student has solved it, so there is no unsolved tagged problem for
 the rung to pick. The first cohort with two published problems closes that.
+
+## The aptitude taxonomy cannot grow, and that is load-bearing (Phase 12g)
+
+**ATTEMPTED AND REVERTED.** SPEC §11 lists core-CS MCQ (OS, DBMS, CN, OOP)
+as a problem kind. The natural home for it is a fourth `AptitudeArea`
+beside QUANT, LOGICAL and VERBAL — the question format, the sitting, the
+scoring and the readiness input already exist, and the whole feature is a
+taxonomy entry plus content.
+
+It cannot be built that way. `AptitudePassage_area_topic_check` and
+`AptitudeQuestion_area_topic_check` enumerate every (area, topic) pair in
+the CHECK body itself, so a fourth area means dropping and recreating two
+catalogued CHECKs — and `packages/db/test/frozen-coverage.test.ts` fails
+the build for any migration that drops, alters, disables or bypasses a
+catalogued guard. There is no allowlist, on purpose: the whole value of
+that fence is that it has no "except this once" in it. The work was
+reverted whole — the taxonomy, the readiness change, the schema, the
+migration, the two CHECKs restored in both databases and the
+`_prisma_migrations` row removed — rather than weakening the fence to fit
+a feature.
+
+**The fix is a human's decision, not ours.** The shape that would let the
+taxonomy grow afterwards is to move the area→topic rule out of the CHECK
+body and into an `IMMUTABLE` function the CHECK calls, so a new area is a
+function body change rather than a constraint drop. That migration itself
+needs one guarded drop. Someone with the authority to say "this specific
+drop, once, to stop needing drops" has to approve it; nothing in the
+product should route around the fence to get there. Until then core-CS
+MCQ stays unbuilt, and that is the right trade: a missing question bank
+costs a cohort some practice, and a fence with one exception in it stops
+being a fence.
+
+
+## Mock interviews, and the three decisions inside them (Phase 12h)
+
+**Read-only is the feature.** SPEC §11 contrasts "read-only spectate mode"
+with collaborative editing. The interviewer's half of the room renders the
+candidate's code as a `<pre>`, not as a disabled editor. A disabled editor
+is a control somebody eventually enables, and the moment an interviewer
+can type into a candidate's buffer the thing being practised stops being
+an interview. There is no server path that writes a candidate's editor
+from anybody else's side, and the mirror read re-checks permission on
+every two-second tick rather than once at connect, so the stream closes
+with the interview instead of outliving it.
+
+**Polling rather than a socket, again.** The mirror is a snapshot `POST`
+every four seconds from the candidate and an SSE stream on the
+interviewer's side that re-reads an indexed row every two seconds. The
+same argument as the invigilation dashboard: one viewer, one row, and the
+candidate's typing never waits on a network round trip. If a cohort ever
+runs dozens of concurrent mock interviews this becomes a real cost and a
+pub/sub fan-out becomes worth its operational weight; at a handful it
+would be weight for nothing.
+
+**Three clock rules that each cost somebody something.** A student may
+hand a slot back until an hour before, and after that the only way out is
+to call it off with a reason the mentor reads — the cutoff exists because
+a slot abandoned at five minutes' notice is an hour of a mentor's evening
+nobody can refill. A no-show cannot be marked for the first ten minutes
+after the start, because a slow lift is not a no-show on somebody's
+record. Between the cutoff and the room opening there is a window where a
+booked slot can be neither given back nor joined; that is deliberate, and
+the refusal says so rather than looking like a bug.
+
+**The feedback counts for nothing, and nothing reads it.** Three ratings
+and a markdown note, written once, addressed to the candidate. It is not
+an XP source, not a leaderboard input, not a readiness signal and not a
+band. A mentor's judgement of one hour is exactly as good as a mentor's
+judgement of one hour, and the moment it feeds a number it starts being
+gamed from both ends.
+
+**Not built, deliberately.** No video, audio or screen share — the
+platform collects none of those anywhere (`docs/PROCTORING.md`), and
+bolting a room onto the one feature that would want it is how that rule
+erodes. Both sides are expected to be on a call of their own choosing.
+No recording of the session, no replay, no transcript. No rescheduling:
+cancel and offer again, because a reschedule is two notifications and a
+new consent pretending to be an edit. No automatic matching of candidate
+to mentor; a mentor offers hours and students take them.
+
+**NOT RUN: the mirror has never been watched by two real browsers at
+once.** It is proved against recx_test — the snapshot write is refused
+before the interview starts and after it ends, `mirrorFor` refuses the
+other mentor, another student and the candidate themselves, and the
+stream's own re-check is the same function — and proved by hand against
+the production build with a candidate pushing and a mentor's SSE stream
+reading. What has not happened is two people in two places at the same
+time on the campus network, which is the only way to find out whether
+four seconds feels live or laggy to the person watching.
+

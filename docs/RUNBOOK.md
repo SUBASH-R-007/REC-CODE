@@ -1421,6 +1421,52 @@ thing and needs a restart.
 
 ---
 
+### 2.17 Running a mock interview (Phase 12h)
+
+A mentor offers an hour; a student takes it; at the time both open the same
+room and the mentor watches the student code. There is no switch — the
+feature is on, and the only thing an operator does is understand the clock.
+
+**The mentor's side** is `/mentor/mock-interviews`. "Offer a slot" takes a
+start time (IST, as every admin form does) and a length between 15 and 120
+minutes. The slot appears to every student until somebody takes it; until
+then the mentor can call it off with a reason.
+
+**The student's side** is `/mock-interviews`, under ASSESS. Open slots are
+listed with the mentor's name and the time. A student holds at most **two**
+booked slots at once — the refusal says so, and the fix is to sit one or
+hand one back.
+
+**The clock, which is where every support question comes from:**
+
+| When | What is possible |
+|---|---|
+| until 60 minutes before | the student may hand the slot back; it becomes open again |
+| from 60 to 10 minutes before | neither: the student is committed. The way out is to call it off with a reason, which the mentor reads |
+| from 10 minutes before to the end | both sides can open the room; the mentor presses Start |
+| from 10 minutes after the start | the mentor may mark a no-show (not before — a slow lift is not a no-show on somebody's record) |
+| after the end | the room is closed. An interview left running is finished by the mentor writing it up |
+
+**What the mentor sees while it runs** is the student's editor, updating a
+few seconds behind, and nothing else — no camera, no microphone, no screen.
+Both sides are expected to be on a call of their own choosing; the platform
+does not place one and records nothing. The mirror is **read-only**: there
+is no way for an interviewer to type into a candidate's editor, and that is
+deliberate (`docs/OPEN-QUESTIONS.md`, Phase 12h).
+
+**Finishing** asks for three ratings and a written note. It goes to the
+student and counts for nothing else: no XP, no leaderboard, no readiness
+input, no band. If a mentor asks what the ratings "do", the answer is that
+the student reads them.
+
+**If the mirror says "Reconnecting…"** and stays there: the stream is an
+`EventSource` on `/api/mock/[interviewId]/live`, which closes itself when
+the interview is no longer running and after ten minutes in any case (the
+page reopens it). A mentor who is not that interview's mentor gets nothing
+from it, by design — check who offered the slot before looking further.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -1689,3 +1735,11 @@ coordinator from actual runs — never in advance.
 | 12f | 2026-10-30 | `RECX_DB_TESTS=1` against recx_test: the half that reads | PASS (`recommend.db.test.ts` 9/9 — the rule engine is pure and unit-tested, so what this covers is every `where` clause a unit test cannot: a due card found and an undue one ignored, a learned card ignored however overdue, the most-asked UNSOLVED problem chosen while a solved one with a higher count and a DRAFT one with a higher count still are both skipped, a drive outside the 21-day horizon and an archived one and one for another batch and one for another department all refused, the weakest topic counting unassisted solves only, and the rotation window counting one topic per problem rather than per submission) | Claude |
 | 12f | 2026-10-30 | Manual, against the production build | PASS. Three seeded students' dashboards each render one next action with its reason inline — "Due for revision today, on the 1-day step." — and the card links the problem. A placement officer created a drive for the company the archive had tagged; the drive row carries the catalogue company id after the fix above | PASS | Claude |
 | 12f | — | The DRIVE rung has never been seen in a browser | **NOT RUN.** It is proved end to end against recx_test, but the development database has one published problem and every seeded student has solved it, so there is no unsolved tagged problem for the rung to pick. The first cohort with two published problems closes it | NOT RUN | — |
+| 12g | 2026-10-30 | Core-CS MCQ as a fourth `AptitudeArea` | **ATTEMPTED AND REVERTED WHOLE.** SPEC §11 lists OS/DBMS/CN/OOP MCQs, and the aptitude sitting, scoring and readiness input already exist, so the feature is a taxonomy entry plus content. It cannot be built that way: `AptitudePassage_area_topic_check` and `AptitudeQuestion_area_topic_check` enumerate every (area, topic) pair in the CHECK body, so a fourth area means dropping two catalogued CHECKs — and `packages/db/test/frozen-coverage.test.ts` fails the build for any migration that drops, alters, disables or bypasses one, with no allowlist, which is the whole value of it. Reverted: the taxonomy, the readiness change, the schema, the migration directory, both CHECKs restored in `recx` and `recx_test` and the `_prisma_migrations` row removed; 784 db tests green afterwards. The shape that would unblock it — the area→topic rule in an `IMMUTABLE` function the CHECK calls — itself needs one guarded drop, so it is a human's decision and is written up in `docs/OPEN-QUESTIONS.md` rather than taken here | REVERTED | Claude |
+| 12h | 2026-10-30 | Mock interviews: a mentor's hour, and a read-only mirror | **DONE.** SPEC §11: a mentor offers a slot, a student books it, both open the same room and the interviewer watches the candidate's editor in "read-only spectate mode". The policy is pure (`packages/shared/src/mock-interview.ts`): five statuses with three terminal, `canTransitionInterview()` as the single gate every write goes through, and a clock with three rules that each cost somebody something — give a slot back until 60 minutes before, join from 10 minutes before, no-show only after 10 minutes have passed. `IN_PROGRESS → NO_SHOW` is refused outright. The mirror is a candidate-pushed snapshot every 4 s and an SSE read every 2 s whose permission is re-asked on every tick, so the stream dies with the interview; the interviewer's half renders it as a `<pre>` rather than a disabled editor, because a disabled editor is a control somebody eventually enables. Booking is a conditional `updateMany`, so two students pressing Book is a race Postgres settles. 10 CHECKs, all catalogued | Claude |
+| 12h | 2026-10-30 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` — Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted | PASS (lint 0 warnings; typecheck clean; **8,114 tests passed, 0 failed** — shared 1,845, judge-worker 414, db 324, design 87, scheduler 247, web 4,064, repo 1,133; build exit 0; every size budget met, `/dashboard` 121.9 KB of 160 KB) | Claude |
+| 12h | 2026-10-30 | `RECX_DB_TESTS=1` against recx_test: the lifecycle, the race and the mirror | PASS (`mock-interviews.db.test.ts` 13/13 — a slot offered, taken, started, mirrored and written up; two students pressing Book together and exactly one getting it; the booking cap refusing a third and a mentor refusing their own slot; the give-back cutoff; `mirrorFor` refusing another mentor, another student and the candidate themselves, and refusing everybody once the interview is not running; the snapshot write refused before the start and after the end; a cancel carrying its reason to the other side). The fixtures now mint a fresh student per booking test — the race's winner is deliberately non-deterministic, which made a shared fixture order-dependent and failed the cap test on one run in three | Claude |
+| 12h | 2026-10-30 | The ten new CHECKs against the frozen-guard fence | PASS (`frozen-coverage.test.ts` 268/268 against `recx_test`: every catalogued CHECK created exactly once, valid, on its table, and no uncatalogued CHECK up to this migration — including `MockInterview_candidate_pair_check`, `_timing_check`, `_cancel_pair_check`, `_cancel_reason_size_check`, `_duration_check`, `_feedback_pair_check`, `_rating_range_check`, `_feedback_size_check`, `_not_self_check` and `MockInterviewSnapshot_source_size_check`) | Claude |
+| 12h | 2026-10-30 | The student-exposure sweep, with both new routes and both new pages registered | PASS (`student-exposure.db.test.ts` 14/14 against recx_test, its own completeness assertion included — the sweep refuses to pass if a route, page, query or action is missing from its registry) | Claude |
+| 12h | 2026-10-30 | Manual, against the production build (four signed-in sessions: the slot's mentor, another mentor, the candidate and another student) | PASS. The mentor offered a 45-minute slot; it appeared on every student's list; the candidate booked it, the second student was told **"Somebody has already taken that slot."** and the mentor was told **"You cannot book your own slot."**. Before the start, the snapshot POST answered 422 and the SSE route 409, both "That interview is not running.". The mentor started it, the candidate's editor POSTed 204, and the mentor's `EventSource` delivered the frame — `int main() { /* half an answer */ return 0; }`, named with the candidate. The same stream answered **403 to the other mentor**, **403 to the candidate themselves** and 403 to another student's push; a student who is neither gets 404 on the room, not 403. The mentor finished with three ratings and a note; the candidate's list renders the write-up, and the page carries no band, no score and no integrity language. After the end the snapshot POST is 422 and the stream 409 again | PASS | Claude |
+| 12h | — | Two people in two places watching the same mirror | **NOT RUN.** Both halves are proved — the candidate pushing and the mentor's SSE stream reading, against the production build, plus every refusal — but the run was two sessions from one machine. Whether four seconds reads as live or laggy to somebody watching over the campus network is a question only two real browsers in two places answer | NOT RUN | — |

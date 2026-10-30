@@ -1032,6 +1032,30 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ),
       status: [303],
     },
+    /**
+     * Phase 12h. The mock-interview room. The snapshot route is the
+     * candidate's; the mirror is the interviewer's and a student must get
+     * exactly Forbidden from it, since it is the one route that shows one
+     * student's draft code to somebody else.
+     */
+    "api/mock/[interviewId]/snapshot/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/mock/${tag}-no-such-interview/snapshot`, {
+            method: "POST",
+            json: { language: "cpp20", source: "int main(){}" },
+          }),
+        () => params({ interviewId: `${tag}-no-such-interview` }),
+      ),
+      status: [404],
+    },
+    "api/mock/[interviewId]/live/route.ts#GET": {
+      call: call(
+        () => studentRequest(`/api/mock/${tag}-no-such-interview/live`),
+        () => params({ interviewId: `${tag}-no-such-interview` }),
+      ),
+      status: [403],
+    },
     "api/exam/device/assert/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/exam/device/assert", { method: "POST", json: { step: "options", slug: ids.assessmentSlug } }),
@@ -1270,6 +1294,13 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // widest read on the dashboard, and the one most able to surface a
     // draft problem or another student's row by widening a `where`.
     "recommend#loadRecommendExtras": async () => (await load(path.join(QUERIES_DIR, "recommend.ts"))).loadRecommendExtras!,
+    // Phase 12h. `mirrorFor` is the one query in the product whose whole
+    // job is to hand one student's draft code to another person, so the
+    // sweep calls it as a student and the canary check is the point.
+    "mock-interviews#loadStudentMocks": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).loadStudentMocks!,
+    "mock-interviews#loadMentorMocks": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).loadMentorMocks!,
+    "mock-interviews#loadMockSession": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).loadMockSession!,
+    "mock-interviews#mirrorFor": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).mirrorFor!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -1290,6 +1321,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "interviews#loadPendingExperiences": () => [[]],
     "interviews#companyTagLabel": () => [["no-such-company"]],
     "recommend#loadRecommendExtras": () => [[ids.user]],
+    "mock-interviews#loadStudentMocks": () => [[ids.user]],
+    "mock-interviews#loadMentorMocks": () => [[ids.user]],
+    "mock-interviews#loadMockSession": () => [[ids.user, `${tag}-no-such-interview`]],
+    "mock-interviews#mirrorFor": () => [[ids.user, `${tag}-no-such-interview`]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
@@ -1530,6 +1565,10 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "(student)/profile/settings/loading.tsx": () => ({}),
     "(student)/profile/settings/page.tsx": () => ({}),
     "(student)/interviews/page.tsx": () => ({ searchParams: {} }),
+    "(student)/mock-interviews/page.tsx": () => ({}),
+    "(student)/mock-interviews/[interviewId]/page.tsx": () => ({
+      params: { interviewId: `${tag}-no-such-interview` },
+    }),
     "(student)/revision/page.tsx": () => ({}),
     "(student)/sheets/[slug]/page.tsx": () => ({ params: { slug: ids.sheetSlug } }),
     "(student)/sheets/page.tsx": () => ({}),
@@ -1709,6 +1748,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * Phase 12e. A real submission (nothing about it is gated), and a
      * withdrawal of an id that is not theirs.
      */
+    /**
+     * Phase 12h. Every one against a slot that does not exist: what the
+     * sweep is for here is that the refusal carries no canary and says
+     * nothing about whose slot it is.
+     */
+    "mock-interviews#bookMockSlot": [() => [{ interviewId: `${tag}-no-such-slot` }]],
+    "mock-interviews#giveUpMockSlot": [() => [{ interviewId: `${tag}-no-such-slot` }]],
+    "mock-interviews#cancelMockInterview": [
+      () => [{ interviewId: `${tag}-no-such-slot`, reason: "Something came up and I cannot make it." }],
+    ],
     "interviews#submitInterviewExperience": [
       () => [
         {
