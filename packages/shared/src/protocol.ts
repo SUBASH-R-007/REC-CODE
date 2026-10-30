@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LANGUAGE_KEYS, TOOLCHAIN_ID_PATTERN } from "./languages";
+import { SQL_LIMITS } from "./sql-problem";
 import { LIMITS } from "./limits";
 import { VERDICTS } from "./verdict";
 import { functionSignatureSchema } from "./harness/signature";
@@ -16,8 +17,17 @@ import { functionSignatureSchema } from "./harness/signature";
  * FUNCTION harness, SET_EQUAL / ROWS_ANY_ORDER judged, CUSTOM_CHECKER output
  * canonicalised before the checker runs, JVM run flags. A v2 worker would
  * turn such jobs into permanent internal errors, so it gets 426 and drains.
+ *
+ * 4 (Phase 12k): a second ENGINE. Every spec now says which engine judges
+ * it — `isolate` for a program, `postgres` for a SQL query — and a SQL job
+ * carries a different spec shape (no compile, no memory limit, a setup
+ * script and a result set per case) behind the same routes, the same lease
+ * and the same result payload. An isolate node never sees a SQL job
+ * (separate queues), but the version still moves: a v3 worker predates the
+ * union, and the honest thing for a worker that cannot parse what the
+ * server might send is to drain rather than guess.
  */
-export const JUDGE_PROTOCOL_VERSION = 3;
+export const JUDGE_PROTOCOL_VERSION = 4;
 
 export const JUDGE_HEADERS = {
   protocol: "x-recx-judge-protocol",
@@ -41,6 +51,36 @@ export const QUEUE_NAME: Readonly<Record<JudgeLane, string>> = {
   PRACTICE: "judge-practice",
   REJUDGE: "judge-rejudge",
 };
+
+/**
+ * The engines that judge a job. `isolate` runs a program in a sandbox;
+ * `postgres` runs one SQL statement against a per-submission ephemeral
+ * schema in a cluster that holds no application data (Phase 12k).
+ */
+export const JUDGE_ENGINES = ["isolate", "postgres"] as const;
+export type JudgeEngine = (typeof JUDGE_ENGINES)[number];
+
+/**
+ * SQL jobs have their own queues, one per lane (Phase 12k).
+ *
+ * Not a flag on the job in the shared queues: `claimJob()` leases by id
+ * with no engine condition, so an isolate node WOULD claim a SQL
+ * submission and have to refuse it — and a refusal counts an attempt, so
+ * three of them would fail the job. Separate queues mean a node only ever
+ * hears about work it can do.
+ */
+export const SQL_QUEUE_NAME: Readonly<Record<JudgeLane, string>> = {
+  ASSESSMENT: "judge-sql-assessment",
+  CONTEST: "judge-sql-contest",
+  RUN: "judge-sql-run",
+  PRACTICE: "judge-sql-practice",
+  REJUDGE: "judge-sql-rejudge",
+};
+
+/** The queue a job belongs in, by engine and lane. */
+export function queueNameFor(engine: JudgeEngine, lane: JudgeLane): string {
+  return engine === "postgres" ? SQL_QUEUE_NAME[lane] : QUEUE_NAME[lane];
+}
 
 /**
  * Worker-side weighted slot allocation (BullMQ priority alone provably starves
@@ -202,6 +242,8 @@ export type CheckerSpec = z.infer<typeof checkerSpecSchema>;
 
 export const judgeJobSpecSchema = z.object({
   protocolVersion: z.literal(JUDGE_PROTOCOL_VERSION),
+  /** Protocol 4: which engine this spec is for. */
+  engine: z.literal("isolate").default("isolate"),
   kind: jobKindSchema,
   id: z.string(),
   lane: z.enum(JUDGE_LANES),
@@ -230,6 +272,60 @@ export const judgeJobSpecSchema = z.object({
   inlineBlobs: z.record(sha256, z.string().max(LIMITS.customRun.stdinBytes)).default({}),
 });
 export type JudgeJobSpec = z.infer<typeof judgeJobSpecSchema>;
+
+// ── The SQL engine's spec (protocol 4) ──────────────────────────────────
+
+/**
+ * One SQL case: the dataset is the version's setup script (shared by every
+ * case unless the case names its own), and the expected result set is a
+ * blob the author's own reference query produced during validation — never
+ * rows typed by hand, for the same reason expected stdout is not typed by
+ * hand.
+ */
+export const sqlCaseSpecSchema = z.object({
+  index: z.number().int().nonnegative(),
+  visible: z.boolean(),
+  /** Overrides the version's setup for this case; null = use the version's. */
+  setup: blobRefSchema.nullable().default(null),
+  expected: blobRefSchema,
+  /** Compared in order, or as a multiset. The author's choice per case. */
+  ordered: z.boolean(),
+});
+export type SqlCaseSpec = z.infer<typeof sqlCaseSpecSchema>;
+
+export const sqlJobSpecSchema = z.object({
+  protocolVersion: z.literal(JUDGE_PROTOCOL_VERSION),
+  engine: z.literal("postgres"),
+  kind: jobKindSchema,
+  id: z.string(),
+  lane: z.enum(JUDGE_LANES),
+  claimToken: z.string().min(16),
+  attempt: z.number().int().min(1),
+  /** The only dialect; stated rather than inferred. */
+  dialect: z.literal("postgres17"),
+  /** The student's statement. */
+  source: z.string().max(SQL_LIMITS.submissionBytes),
+  /** The schema and seed rows every case starts from. */
+  setup: blobRefSchema,
+  cases: z.array(sqlCaseSpecSchema).min(1).max(100),
+  stopOnFirstFailure: z.boolean(),
+  /** Enforced by the database, not by a timer in the service. */
+  statementTimeoutMs: z.literal(SQL_LIMITS.statementTimeoutMs),
+  /** A result set larger than this is refused rather than compared. */
+  maxRows: z.literal(SQL_LIMITS.rows),
+});
+export type SqlJobSpec = z.infer<typeof sqlJobSpecSchema>;
+
+/**
+ * What a claim may answer with. The route validates against this; each
+ * engine's service parses only its own half, because a worker that could
+ * parse the other engine's spec would eventually try to run it.
+ */
+export const anyJobSpecSchema = z.discriminatedUnion("engine", [
+  judgeJobSpecSchema.extend({ engine: z.literal("isolate") }),
+  sqlJobSpecSchema,
+]);
+export type AnyJobSpec = z.infer<typeof anyJobSpecSchema>;
 
 /** Why a claim was refused. The worker treats all of these as "job done". */
 export const claimRefusalSchema = z.object({
