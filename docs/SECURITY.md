@@ -648,6 +648,51 @@ environment check that already refuses a key matching `/DATABASE|NET/i`.
 
 ---
 
+## 10c. The SQL judge holds a database credential, and what that buys (Phase 12k)
+
+SPEC's anti-requirements say a judge host holds no database credentials.
+`apps/sql-judge` is the one exception, because its sandbox IS a database,
+so the rule is narrower rather than waived:
+
+* **Two credentials, both the sandbox's.** `RECX_SQL_OWNER_URL` creates
+  the per-submission schemas and runs the author's setup; `RECX_SQL_STUDENT_URL`
+  runs the student's statement as a role that owns nothing, inherits
+  nothing (so `set_config('role', …)` buys nothing) and can create
+  nothing. A separate connection rather than `SET ROLE`, because a session
+  whose `session_user` is privileged has something to go back to.
+* **It refuses to start with an application secret in its environment.**
+  `DATABASE_URL`, `DATABASE_URL_DIRECT`, `AUTH_SECRET`, `IP_HASH_PEPPER`,
+  `AI_API_KEY`, `EXPORT_SIGNING_KEY` and the storage keys are each refused
+  by name, and `tests/repo/sql-judge-posture.test.ts` refuses the KEY ever
+  being added to its own environment schema.
+* **It refuses to start against the application's database.** A boot check
+  looks for `User`, `Submission`, `Problem`, `AssessmentAttempt` and
+  `AuditLog`; if any exists, the process exits with the reason rather than
+  carrying on with a "sandbox" that is the real thing. That one is not
+  overridable, development or not.
+* **No `@recx/db`, no Prisma, and `pg` nowhere else.** The judge cannot
+  reach application data by construction, not by intention.
+* **The limits are the database's.** `statement_timeout = 5s`,
+  `lock_timeout`, `idle_in_transaction_session_timeout`,
+  `default_transaction_read_only`, a `READ ONLY` transaction and a row cap.
+  Nothing reads the student's SQL to decide what it may do: a blocklist of
+  `DROP|DELETE|UPDATE` would miss a write in a CTE and refuse the word in a
+  comment.
+* **Every case is a fresh schema and a fresh connection**, dropped and
+  closed in a `finally`, with a sweep at boot for anything a crash left.
+  Session state — a `SET`, a temp table, an advisory lock — is the "pooled
+  warm container" mistake in another shape.
+* **An error message is not a channel.** A database error is sanitised (the
+  job's schema name and any sandbox role name replaced) and capped before a
+  student sees it, and a hidden case's failure says which row differed and
+  nothing in it.
+* **An adversarial self-check runs on the node**, not only in CI: eleven
+  statements (writing, creating, two commands, `pg_read_file`, `pg_authid`,
+  `COPY … PROGRAM`, `set_config('role', …)`, a spin, another job's schema)
+  every six hours, reported in the heartbeat.
+
+---
+
 ## 11. Still planned, after Phase 10
 
 Phase 10 closed the observability and operations half of the list this

@@ -142,16 +142,33 @@ describe("the API key stays in the environment", () => {
    * that fails at the student.
    */
   const PRESENCE_ONLY = new Set(["apps/web/src/lib/ai/settings.ts"]);
+  /**
+   * Phase 12k. The SQL judge names the key in order to REFUSE to start if
+   * it is in its environment — the opposite of reading it. It is listed
+   * here rather than exempted silently, and the test below holds it to
+   * naming and never reading.
+   */
+  const REFUSES = new Set(["apps/sql-judge/src/config.ts"]);
   const files = findFiles({ under: ["apps", "packages", "scripts"], extensions: [...CODE_EXTENSIONS], exclude: isTestPath });
 
   it("AI_API_KEY is read only where it is declared and where it is sent", () => {
     const offenders = files
-      .filter((f) => !ALLOWED.has(f) && !PRESENCE_ONLY.has(f))
+      .filter((f) => !ALLOWED.has(f) && !PRESENCE_ONLY.has(f) && !REFUSES.has(f))
       .flatMap((f) => {
         const { code } = lexSource(readRepoFile(f));
         return [...code.matchAll(/\bAI_API_KEY\b/g)].map((m) => `${f}:${lineAt(code, m.index)}`);
       });
     expect(offenders).toEqual([]);
+  });
+
+  it("a file that refuses the key never reads it", () => {
+    for (const f of REFUSES) {
+      const { code } = lexSource(readRepoFile(f));
+      expect(code, f).toContain("AI_API_KEY");
+      // Named as a string in a list of keys to refuse, never dereferenced.
+      expect(code, f).not.toMatch(/process\.env\.AI_API_KEY|env\.AI_API_KEY|env\[["']AI_API_KEY/);
+      expect(code, f).toMatch(/FORBIDDEN_ENV_KEYS/);
+    }
   });
 
   it("a presence-only file never touches the value", () => {

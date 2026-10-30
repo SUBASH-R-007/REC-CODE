@@ -60,6 +60,10 @@ export function heartbeatBody(
     hostname: os.hostname().slice(0, 255),
     workerVersion: WORKER_VERSION,
     isolateVersion: info.version.slice(0, 64),
+    // Protocol 4 (Phase 12k) carries the engine's own version for drivers
+    // that are not isolate. This one's engine IS isolate, and its version
+    // is the line above.
+    engineVersion: "",
     driver: info.driver,
     languages: advertisedLanguages(info.languages, health.startupMs),
     slots: slots.size,

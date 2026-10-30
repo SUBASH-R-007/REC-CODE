@@ -1513,6 +1513,62 @@ because every student reads it.
 
 ---
 
+### 2.19 The SQL sandbox and its judge (Phase 12k)
+
+SQL problems are judged by `apps/sql-judge`, a judge node with a
+PostgreSQL sandbox instead of an isolate box. It is the only process in the
+platform that holds a database credential other than the app and the
+scheduler, and the credential is the sandbox's — never the application's.
+
+**Starting it in development:**
+
+```powershell
+node scripts/dev/sql-sandbox-up.mjs   # creates recx_sql_sandbox + two roles
+npx pnpm@9.15.9 --filter @recx/sql-judge dev
+```
+
+The script writes `apps/sql-judge/.env.local` (gitignored) with both
+connection strings and generates the passwords; it is idempotent and keeps
+the passwords it already wrote. In development the node id defaults to
+`sql-dev-1`; the seed registers only ONE development judge node, so either
+register a second one or run the SQL judge with the dev node's credentials
+while the isolate worker is stopped (the `JudgeNode` row's `driver` column
+shows whichever process beat last).
+
+**What it does at boot, in order:**
+
+| Step | What it means when it fails |
+|---|---|
+| refuses application secrets in its environment | somebody gave a judge host the app's `.env`; fix the unit file, not the check |
+| checks the cluster | `REFUSING TO RUN` means the "sandbox" is the application's database. Not overridable |
+| sweeps stale `job_…` schemas | a judge died mid-case. One schema is a leaked dataset; a growing count every boot means the host is being killed |
+| runs the adversarial self-check | a grant somebody loosened by hand. The node keeps working and the fleet withholds the sensitive lanes |
+| heartbeats as `driver: postgres` | the app host is down, or the node token is wrong |
+
+**The two things that go wrong in the sandbox, and what they look like:**
+
+* **A schema left behind.** `SELECT nspname FROM pg_namespace WHERE nspname
+  LIKE 'job\_%'` as the owner. The next boot drops them; dropping them by
+  hand is safe at any time, because no live job's schema outlives its case
+  by more than a few milliseconds.
+* **A student's query that will not die.** It cannot outlive
+  `statement_timeout` (five seconds) — if one appears to, the connection is
+  stuck rather than the query, and the judge closes it after three seconds
+  and destroys the socket. A connection count that climbs without jobs
+  running is the thing to look at (`SELECT count(*) FROM pg_stat_activity
+  WHERE application_name = 'recx-sql-judge'`).
+
+**Rotating the sandbox credentials:** re-run the script with the two URL
+lines removed from `.env.local` (it generates new passwords and re-applies
+them), then restart the judge. Nothing else in the platform holds them.
+
+**What it must never have:** the application's `DATABASE_URL`, `AUTH_SECRET`,
+`IP_HASH_PEPPER`, an object-store key, or a connection to the application's
+cluster. The process refuses to start with any of them, and that refusal is
+a feature rather than an inconvenience.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -1804,3 +1860,9 @@ coordinator from actual runs — never in advance.
 | 12k.1 | 2026-10-30 | Slice 1: the protocol goes to 4, and the SQL comparison is a pure module | **DONE.** `packages/shared/src/sql-problem.ts`: the dialect (PostgreSQL 17, stated rather than inferred), the limits the spec names (statement_timeout 5 s, one statement, 2,000 rows), the canonicalisation and the comparison. Two rules are arguments rather than conventions, and both are in the module header: a cell that LOOKS like a number is compared as a number (so `numeric`'s "1.50" and `float8`'s "1.5" are one answer, and a student is not failed for `sum(x)::int`), and column NAMES do not decide the verdict while the column COUNT does (so `count(*)` and `count(*) AS n` are one answer). NULL stays distinct from the empty string, because SQL's three-valued logic is the thing students get wrong. An ordered comparison that fails on rows that are nonetheless right reports ROW_ORDER — "the rows are right and the order is not" is one ORDER BY away, and is the most useful sentence available. Protocol 4 adds the engine discriminator, the SQL spec, and SQL's own five queues: `claimJob()` leases by id with no engine condition, so an isolate node would otherwise claim a SQL submission and refuse it, and three refusals fail a job | Claude |
 | 12k.1 | 2026-10-30 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean; **8,284 tests passed, 0 failed** - shared 1,910, judge-worker 414, db 327, design 87, scheduler 247, web 4,138, repo 1,161; build exit 0; all size budgets met). The protocol bump broke nothing because nothing hard-codes the number: every reference is the constant, which is what `tests/repo/single-source.test.ts` exists to keep true | Claude |
 | 12k.1 | 2026-10-30 | The comparison, as unit tests | PASS (`sql-problem.test.ts` 31/31: numeric and boolean canonicalisation, NULL against the empty string, a row key no cell's text can forge, column names ignored and the count enforced, row counts, the ROW_ORDER case, duplicates counted in both modes, a truncated result refused rather than compared on its prefix, a hidden case's message carrying the row and nothing in it, the multiple-statement HINT not fooled by a semicolon in a string, a comment or a dollar-quoted body, and the two engines' specs refusing to parse as each other) | Claude |
+| 12k.2 | 2026-10-30 | Slice 2: `apps/sql-judge`, the sandbox service | **DONE.** A judge node with a PostgreSQL sandbox instead of an isolate box: it consumes the SQL queues, claims through the same five endpoints, and posts the same result shape, so XP, the leaderboard, contests, assessments and the lease rules all keep meaning what they meant. Per case: the owner creates a schema, runs the author's setup and grants SELECT on what it made; the student's statement runs on its OWN connection as a role that owns nothing, inherits nothing and can create nothing, in a READ ONLY transaction with search_path pinned to that schema, statement_timeout at 5 s and a row cap; the schema is dropped in a `finally`, and a boot sweep drops anything a crash left behind. Two connections rather than `SET ROLE`, because one statement can call `set_config('role', …)` and a privileged session_user has something to go back to. One statement, because the EXTENDED protocol refuses a second command — the server's rule, not a semicolon count | Claude |
+| 12k.2 | 2026-10-30 | A hang the first database run found, which no unit test could | **FIXED.** Every case whose statement ERRORED hung forever: the suite timed out on six of them at once. The cause is in node-postgres rather than in the SQL — a query executed with a row limit is a portal, and when such a query errors the client's queue can be left waiting, so the `ROLLBACK` in the cleanup never settles. An `await` on a promise that never settles is invisible to `catch`, which is why it read as a hang rather than a failure. The fix is that nothing is sent on that connection afterwards: a READ ONLY transaction has nothing to roll back, and closing the socket is what ends it. Closing now has a three-second deadline and destroys the socket if even that does not return, the schema drop has its own `lock_timeout`, and the boot sweep exists because this run had left six schemas behind — each one a dataset the student role still had SELECT on | Claude |
+| 12k.2 | 2026-10-30 | `RECX_SQL_TESTS=1` against the real cluster: is the sandbox a sandbox? | PASS (`sandbox.db.test.ts` 17/17 against PostgreSQL 17 on 127.0.0.1:5433 — a query reading its own case's data as text with NULL distinct from the empty string; two cases not seeing each other's rows; every way of writing refused (DELETE, UPDATE, INSERT, DROP, TRUNCATE, ALTER); CREATE TABLE, CREATE TEMP TABLE, CREATE SCHEMA and CREATE VIEW refused; a second statement refused by the protocol; `pg_read_file`, `pg_ls_dir`, `COPY … FROM PROGRAM` and `COPY … TO PROGRAM` refused; `pg_authid` refused; `set_config('role', …)` refused; no other job's schema visible; a spin stopped by the database at 5.7 s; a flood truncated at the cap; the schema dropped after an ok, an error AND a refusal; a broken setup script released permanently; the eleven-case adversarial self-check green; and the five cluster checks green including "this is not the application's database") | Claude |
+| 12k.2 | 2026-10-30 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean across seven projects; **8,330 tests passed, 0 failed** - shared 1,910, judge-worker 414, **sql-judge 32** (17 database cases skipped without the opt-in), db 327, design 87, scheduler 247, web 4,138, repo 1,175; build exit 0 including the new app's 171 KB bundle; every size budget met). Two fences needed a line each: the AI-key fence now lists the SQL judge's config as a file that NAMES the key in order to refuse it (with its own test that it never reads it), and the new `sql-judge-posture.test.ts` fences the whole posture | Claude |
+| 12k.2 | 2026-10-30 | The service against the real app and the real cluster | PASS. Started with the development judge node's credentials against the production build: it refused nothing at boot, reported "holds no application tables", "superuser=false", "member of no other role" and "CREATE=false", swept stale schemas, passed its self-check, was accepted by `/api/judge/heartbeat` as `driver: postgres` with an empty language list, claimed a job queued by hand on `judge-sql-practice` with an id the app has never seen, treated the refusal as "job done" (which is the contract), reported ready and logged no error. The web side does not enqueue SQL jobs yet (slice 4), so the claim round trip is what this proves | PASS | Claude |
+| 12k.2 | - | The clean-stop path, and two fleets at once | **NOT RUN.** `SIGTERM` is not delivered to a Node process on Windows, so the drain-and-close path (`close()` on each queue worker, then the Redis connection) is unproved here; the Linux gate is where it will be. And the development seed registers one judge node, so an isolate worker and a SQL judge have not yet heartbeaten side by side — the `JudgeNode` row's `driver` column currently shows whichever beat last | NOT RUN | - |

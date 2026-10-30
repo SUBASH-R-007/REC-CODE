@@ -3141,3 +3141,60 @@ command line, emacs's `C-k`, the escape hatch, and nothing fetched on the
 standard keys. What has not happened is two hours of a real contest,
 which is where a keymap either disappears into the work or gets in the
 way.
+
+## The sandbox is a database, and three decisions that came from that (Phase 12k, slice 2)
+
+**One fixed student role, not a role per job.** The design document said a
+fresh read-only role per submission. Building it changed the answer: a role
+is a cluster-wide object, creating one needs `CREATEROLE` in the judge
+(a privilege whose whole point is escalation), and a crashed process would
+leak roles the way it would otherwise leak schemas. A role holds no state,
+so "fresh" bought nothing that mattered. What does the work is that the
+student's statement runs on its OWN CONNECTION as that role — not `SET
+ROLE` on the owner's session — so there is no privileged `session_user` to
+go back to, and `set_config('role', …)` in a single statement buys nothing
+because the role is a member of nothing. The boot check asserts all three.
+
+**The hang that only a real database could find.** The first run against
+PostgreSQL timed out six tests at once, and every one of them was a case
+whose statement ERRORED. The cause was not the SQL: a query executed with
+a row limit is a portal, and when such a query errors node-postgres can
+leave its queue waiting, so the `ROLLBACK` in the cleanup never settles.
+An `await` on a promise that never settles is invisible to `catch` — it is
+a hang, not a failure, which is why it looked like the database was stuck.
+Nothing is sent on that connection now: a `READ ONLY` transaction has
+nothing to roll back, and closing the socket is what ends it. The close has
+a deadline and destroys the socket if it is not honoured, because a judge
+that waits forever on a socket stops judging. Two things follow from that
+run: the schema drop has its own `lock_timeout`, and there is a sweep at
+boot — those six hangs left six schemas behind, each a dataset the student
+role still had `SELECT` on.
+
+**A parse error is a compile error.** PostgreSQL refusing to prepare a
+statement is the same event as a compiler refusing to compile one: it is
+deterministic, it is about the query rather than the data, and running the
+other four cases would say it four more times. So class 42 and `3F000` are
+CE and end the submission, with the database's own sanitised message in
+`compileOutput` where a compiler's would be; a refused write or a privilege
+is RE for that case, because it happened while running; `statement_timeout`
+is TLE; and more rows than the cap is OLE, because too much output is too
+much output whatever produced it. MLE has no meaning here — `work_mem`
+spills to disk rather than failing — and that is written down in the module
+rather than left for somebody to go looking for in a log.
+
+**Not built in this slice, deliberately.** The service judges jobs, and
+nothing enqueues one yet: the model, the authoring and the student surface
+are slices 3 and 4, and the web side's lane eligibility for a `postgres`
+node is slice 5 (the current rule is written in terms of a CPU
+calibration, an isolate self-check and kernel hardening, so a SQL node is
+correctly barred from ASSESSMENT and CONTEST until that rule learns the
+second engine). No metrics endpoint yet. No per-case setup caching: the
+author's script runs once per case, which is a few milliseconds and keeps
+the cases independent.
+
+**NOT RUN: two fleets at once, and the clean stop.** `SIGTERM` is not
+delivered to a Node process on Windows, so the drain path is unproved
+here. And the development seed registers one judge node, so an isolate
+worker and a SQL judge have not yet heartbeaten side by side; the
+`JudgeNode` row's `driver` column shows whichever beat last, which is fine
+in development and would not be on a real fleet.

@@ -28,6 +28,8 @@
  * wrong order needs to see it — but a name mismatch alone is not a WA.
  */
 
+import { z } from "zod";
+
 export const SQL_DIALECT = "postgres17" as const;
 export type SqlDialect = typeof SQL_DIALECT;
 
@@ -56,6 +58,40 @@ export interface SqlResultSet {
   rows: ReadonlyArray<ReadonlyArray<string | null>>;
   /** The query returned more than `SQL_LIMITS.rows`, so this is a prefix. */
   truncated?: boolean;
+}
+
+/**
+ * The on-disk form of an expected result set: the blob the author's own
+ * reference query produced during validation, and the only thing the SQL
+ * judge compares against.
+ *
+ * JSON rather than CSV because a cell may be NULL, may contain a newline,
+ * and must survive a round trip without a dialect of quoting of its own.
+ * Bounded by the same limits the sandbox enforces, so a blob that could
+ * not have come from a judged query is refused rather than compared.
+ */
+export const sqlResultSetSchema = z
+  .object({
+    columns: z.array(z.string().max(128)).max(SQL_LIMITS.columns),
+    rows: z
+      .array(z.array(z.string().max(SQL_LIMITS.cellChars).nullable()).max(SQL_LIMITS.columns))
+      .max(SQL_LIMITS.rows),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const wrong = value.rows.findIndex((row) => row.length !== value.columns.length);
+    if (wrong !== -1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["rows", wrong],
+        message: `Row ${wrong + 1} has ${value.rows[wrong]!.length} cells for ${value.columns.length} columns.`,
+      });
+    }
+  });
+
+/** Parse an expected-result blob. Throws with a readable message. */
+export function parseExpectedResultSet(json: unknown): SqlResultSet {
+  return sqlResultSetSchema.parse(json);
 }
 
 export const SQL_MISMATCH_REASONS = [

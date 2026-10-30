@@ -195,6 +195,7 @@ describe("HttpJudgeApi", () => {
       hostname: "h",
       workerVersion: "0.1.0",
       isolateVersion: "2.7",
+      engineVersion: "",
       driver: "isolate" as const,
       languages: ["py312" as const],
       slots: 1,

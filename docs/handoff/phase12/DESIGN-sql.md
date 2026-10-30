@@ -171,7 +171,14 @@ application data and reachable only by the SQL judge:
   submission** (`job_<claimToken>`), created at claim and dropped in a
   `finally`;
 - the setup script runs as a role that owns only that schema;
-- the student's statement runs as a **fresh read-only role** with
+- **(slice 2 changed this, and the reason is in `docs/OPEN-QUESTIONS.md`)**
+  the student's statement runs as ONE fixed read-only role on its OWN
+  connection rather than a fresh role per job: a role is a cluster-wide
+  object, creating one needs `CREATEROLE` in the judge, a crash would leak
+  roles, and a role holds no state, so "fresh" bought nothing. What does
+  the work is the separate connection — there is no privileged
+  `session_user` to go back to — plus a role that is a member of nothing;
+- the student's statement runs as that read-only role with
   `search_path` pinned to the job schema, `statement_timeout = 5s`,
   `idle_in_transaction_session_timeout`, no `pg_read_file`, no large
   objects, no `COPY ... PROGRAM`, no FDW, and no network access from the

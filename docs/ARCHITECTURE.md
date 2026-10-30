@@ -90,6 +90,43 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## A second judging engine: the SQL sandbox (Phase 12k)
+
+`apps/sql-judge` is a judge node like the isolate workers, with a different
+engine behind it. It consumes the `judge-sql-*` queues, claims a job
+through the same five endpoints, runs the student's single statement and
+posts the same result shape — so XP, the leaderboard, contests,
+assessments, rejudges, the lease, the attempt cap and "never retry a
+deterministic verdict" all keep meaning what they meant. The design and
+the reasoning are in `docs/handoff/phase12/DESIGN-sql.md`.
+
+What is different is the sandbox, and the credential. The isolate hosts
+hold no database URL at all; this one holds two, both to a cluster that
+holds no application data, and it refuses to start if either turns out to
+point at a database with application tables in it. `pg` is a dependency of
+this workspace and of no other (`tests/repo/sql-judge-posture.test.ts`).
+
+The sandbox per case: the owner connection creates a schema, runs the
+author's setup script inside it and grants the student role `SELECT` on
+what it made; the student's statement then runs on its OWN connection, as
+a role that owns nothing, inherits nothing and can create nothing, in a
+`READ ONLY` transaction with `search_path` pinned to that schema,
+`statement_timeout` at five seconds and a row cap; the schema is dropped in
+a `finally`, and a sweep at boot drops any a crashed process left behind.
+Two connections rather than `SET ROLE`, because a single statement can call
+`set_config('role', …)` and a session whose `session_user` is privileged
+has something to go back to. One statement, because the extended protocol
+refuses a second command — the server's rule, not a semicolon count.
+
+The three health concepts the fleet already has are re-meant rather than
+dropped: `hardening.ts` checks the CLUSTER at boot (not the application's
+database, the student role unprivileged, a member of nothing, unable to
+create, no untrusted extension), and `selfcheck.ts` is the adversarial
+suite — eleven statements a student will eventually try, every one of which
+the cluster must refuse — run at boot and every six hours, reported in
+every heartbeat. Calibration is the one that has no meaning here yet and is
+sent as null.
+
 ## Editor settings, and the keymaps (Phase 12j)
 
 SPEC §11: "vim/emacs keymaps". A student who has spent two years in vim

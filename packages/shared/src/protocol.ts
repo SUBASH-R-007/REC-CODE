@@ -423,7 +423,15 @@ export const heartbeatRequestSchema = z.object({
   hostname: z.string().max(255),
   workerVersion: z.string().max(64),
   isolateVersion: z.string().max(64),
-  driver: z.enum(["isolate", "docker", "mock"]),
+  /**
+   * Protocol 4: `postgres` is the SQL sandbox (Phase 12k). Its
+   * `isolateVersion` is empty — there is no isolate on that host — and the
+   * engine's own version goes in `engineVersion` rather than into a column
+   * named after another engine.
+   */
+  driver: z.enum(["isolate", "docker", "mock", "postgres"]),
+  /** e.g. "PostgreSQL 17.6". Optional: a v3 worker never sent one. */
+  engineVersion: z.string().max(64).default(""),
   languages: z.array(languageKeySchema),
   slots: z.number().int().min(0).max(256),
   /** Score of the 1-second calibration benchmark (higher = faster), refreshed every 6 h. */
