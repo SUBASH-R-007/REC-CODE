@@ -564,6 +564,7 @@ model User {
   hintReveals          HintReveal[]
   editorialViews       EditorialView[]
   aiAssists            AiAssist[]
+  revisionCards        RevisionCard[]
   problemActivity      ProblemActivity[]
   enrollments          StudyPlanEnrollment[]
   bookmarks            Bookmark[]
@@ -730,6 +731,7 @@ model Problem {
   hintReveals     HintReveal[]
   editorialViews  EditorialView[]
   aiAssists       AiAssist[]
+  revisionCards   RevisionCard[]
   activity        ProblemActivity[]
   studyPlanItems  StudyPlanItem[]
   bookmarks       Bookmark[]
@@ -1340,6 +1342,40 @@ model EditorialView {
   firstViewedAt DateTime @default(now())
 
   @@id([userId, problemId])
+}
+
+/// A problem coming back to a student on a spaced schedule (Phase 12c).
+///
+/// One card per student per problem, written the first time they solve it.
+/// `stage` indexes REVISION_INTERVALS in @recx/shared (1, 3, 7, 21, 60 days);
+/// a due re-solve moves it up a rung, a due attempt that fails moves it down
+/// one and leaves it due. Past the last rung `learnedAt` is set and the card
+/// is never surfaced again.
+///
+/// `dueOn` is a DATE, not a timestamp: a revision is due on a campus DAY,
+/// and a student in a hostel at 00:30 IST should get yesterday's queue, not
+/// a clock race. Indexed with `learnedAt` because the only hot query is
+/// "what is due for this student today".
+model RevisionCard {
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  problemId    String
+  problem      Problem   @relation(fields: [problemId], references: [id])
+  /// 0..REVISION_LAST_STAGE. The rung, not the number of reviews.
+  stage        Int       @default(0)
+  /// The campus day it becomes due (UTC-midnight DATE, like ActivityDay).
+  dueOn        DateTime  @db.Date
+  /// Successful due re-solves, and times a due attempt failed.
+  reviews      Int       @default(0)
+  lapses       Int       @default(0)
+  /// The first solve that created the card, and the last review that moved it.
+  createdAt    DateTime  @default(now())
+  lastReviewAt DateTime?
+  /// Set once, when the card clears the last rung. Never surfaced again.
+  learnedAt    DateTime?
+
+  @@id([userId, problemId])
+  @@index([userId, learnedAt, dueOn])
 }
 
 /// One question put to the AI helper and the answer it gave.

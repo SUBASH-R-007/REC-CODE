@@ -46,6 +46,22 @@ export const XP_KEYS = Object.freeze({
   aptitude: (userId: string, questionId: string) => `aptitude:${userId}:${questionId}`,
   /** One payment per finalise, idempotent under a retried finalise. */
   mock: (mockAttemptId: string) => `mock:${mockAttemptId}`,
+  /**
+   * A due revision re-solve: one payment per problem per campus DAY.
+   *
+   * The day, and not the rung the card was on. Keying on the rung looks
+   * tighter and is wrong: a card that lapses from rung 2 back to rung 1 has
+   * to climb rung 1 again, and the rung's key was spent the first time — so
+   * the second climb would pay nothing AND, because the ladder only moves
+   * when the ledger did, never advance. A student who forgot one problem
+   * once would have been stuck on it forever.
+   *
+   * The day is safe because the schedule already forbids two reviews of one
+   * problem in a day: a review pushes the card at least one day out, and a
+   * lapse pays nothing. A retried finalise computes the same key and is a
+   * no-op, which is the whole job.
+   */
+  revision: (userId: string, problemId: string, day: string) => `revision:${userId}:${problemId}:${day}`,
 });
 
 /**

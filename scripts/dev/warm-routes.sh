@@ -33,7 +33,7 @@ PASSES="${WARM_PASSES:-2}"
 # set; a route added to the suite belongs here too.
 ROUTES="
 /login /forgot-password /reset-password /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
-/leaderboard /sheets /learn /profile /notes /bookmarks /help /judge /offline
+/leaderboard /revision /sheets /learn /profile /notes /bookmarks /help /judge /offline
 /contests /aptitude /placement /notifications /accessibility /api/health
 /account/leave /account/reactivate /account/new-password
 /admin /admin/students /admin/students/import /admin/cohorts /admin/sheets

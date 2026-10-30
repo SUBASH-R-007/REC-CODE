@@ -134,6 +134,9 @@ const TARGETS: readonly Target[] = [
    */
   { path: "/placement", as: "student", gating: true },
   // Reported, not gating.
+  // Phase 12c. The revision queue: a list of links and a stats block, and
+  // the one page whose whole job is to be opened every morning.
+  { path: "/revision", as: "student", gating: false },
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },
   { path: "/profile", as: "student", gating: false },

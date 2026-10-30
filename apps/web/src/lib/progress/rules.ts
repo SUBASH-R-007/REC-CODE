@@ -209,6 +209,31 @@ export function streakMilestoneAward(milestone: number, earnedToday: DayXp, rule
   return { uncapped, amount, capped: amount < uncapped };
 }
 
+/**
+ * A due revision re-solve: 25 % of the problem's first-solve XP, then the
+ * daily caps.
+ *
+ * Deliberately NOT multiplied by anything else. The daily-challenge doubling
+ * and the assisted reduction both describe how the problem was solved the
+ * FIRST time; a revision is a different act — remembering it — and a rate
+ * that depended on what happened months ago would be impossible to explain
+ * on the page that pays it. An Easy revision still counts against the Easy
+ * cap, because Easy-grinding is exactly what that cap is for.
+ */
+export function revisionAward(difficulty: DifficultyKey, earnedToday: DayXp, rules: XpRules = XP_RULES): XpAward {
+  const uncapped = solveXp({ difficulty, firstSolve: false, assisted: false, dailyChallenge: false, revision: true }, rules);
+  const amount = applyDailyCaps(
+    {
+      amount: uncapped,
+      isEasy: difficulty === "EASY",
+      earnedTodayTotal: earnedToday.total,
+      earnedTodayEasy: earnedToday.easy,
+    },
+    rules,
+  );
+  return { uncapped, amount, capped: amount < uncapped };
+}
+
 /** The three XpBucket keys a moment belongs to: ALL_TIME "all", MONTH "2026-10", WEEK "2026-W41". */
 export function bucketKeys(at: Date): Array<{ period: XpPeriod; periodKey: string }> {
   return XP_PERIODS.map((period) => ({ period, periodKey: periodKey(period, at) }));

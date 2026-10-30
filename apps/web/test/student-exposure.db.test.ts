@@ -1245,11 +1245,18 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "contests#getContest": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getContest!,
     "contests#getStandings": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getStandings!,
     "contests#getRatingSummary": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getRatingSummary!,
+    // Phase 12c. Both read the viewer's own cards and join the problem for
+    // its title and slug — the one place a revision query could reach a
+    // frozen version's hidden tests by widening a select.
+    "revision#loadRevisionQueue": async () => (await load(path.join(QUERIES_DIR, "revision.ts"))).loadRevisionQueue!,
+    "revision#countDueRevisions": async () => (await load(path.join(QUERIES_DIR, "revision.ts"))).countDueRevisions!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
     "announcements#getActiveAnnouncements": () => [[ids.user]],
     "dashboard#getDashboard": () => [[ids.user]],
+    "revision#loadRevisionQueue": () => [[ids.user]],
+    "revision#countDueRevisions": () => [[ids.user]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
@@ -1489,6 +1496,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "(student)/profile/page.tsx": () => ({}),
     "(student)/profile/settings/loading.tsx": () => ({}),
     "(student)/profile/settings/page.tsx": () => ({}),
+    "(student)/revision/page.tsx": () => ({}),
     "(student)/sheets/[slug]/page.tsx": () => ({ params: { slug: ids.sheetSlug } }),
     "(student)/sheets/page.tsx": () => ({}),
     "layout.tsx": () => ({}),

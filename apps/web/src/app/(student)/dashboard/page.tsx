@@ -10,6 +10,8 @@ import { AnnouncementBanner } from "@/components/dashboard/announcement-banner";
 import { ContinueCard } from "@/components/dashboard/continue-card";
 import { LevelCard, StreakCard, WeeklyGoalCard } from "@/components/dashboard/progress-cards";
 import { DailyChallengeCard, RecentSubmissionsCard, StudyPlansCard } from "@/components/dashboard/activity-cards";
+import { RevisionCard } from "@/components/dashboard/revision-card";
+import { loadRevisionQueue } from "@/server/queries/revision";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -23,7 +25,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function DashboardPage() {
   const user = await requireUser();
   const now = new Date();
-  const [data, announcements, standing] = await Promise.all([
+  const [data, announcements, standing, revision] = await Promise.all([
     getDashboard(user.id, now),
     getActiveAnnouncements(user.id, now),
     // Phase 8e. Its own read rather than a field on the dashboard model: the
@@ -31,6 +33,9 @@ export default async function DashboardPage() {
     // must see it even on a day when nothing else on this page has anything
     // to say.
     myStanding(user.id, now),
+    // Phase 12c. A schedule nobody is reminded of is a schedule nobody
+    // keeps, and this is the page a student actually opens.
+    loadRevisionQueue(user.id, now),
   ]);
 
   const summary =
@@ -69,6 +74,10 @@ export default async function DashboardPage() {
       <div className="grid gap-5 lg:grid-cols-3">
         <RecentSubmissionsCard rows={data.recent} now={now} className="lg:col-span-2" />
         <StudyPlansCard plans={data.plans} />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <RevisionCard queue={revision} className="lg:col-span-2" />
       </div>
     </div>
   );

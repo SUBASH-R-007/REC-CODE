@@ -35,8 +35,8 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
   let db: Db;
   let apply: ApplyModule;
   let languageConfigId = "";
-  const users = { main: "", other: "" };
-  type ProblemName = "easy" | "medium" | "hard" | "hard2" | "easy2" | "rejudged" | "streak" | "internal";
+  const users = { main: "", other: "", reviser: "" };
+  type ProblemName = "easy" | "medium" | "hard" | "hard2" | "easy2" | "rejudged" | "streak" | "internal" | "revise" | "revise2";
   const problems = {} as Record<ProblemName, { id: string; versionId: string }>;
   const createdBadgeIds: string[] = [];
   let planId = "";
@@ -163,14 +163,14 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
       })
     ).id;
 
-    for (const name of ["main", "other"] as const) {
+    for (const name of ["main", "other", "reviser"] as const) {
       users[name] = (
         await db.user.create({
           data: {
             collegeId: `${tag}-${name}`,
             email: `${tag}-${name}@rec-code.example`,
             firstName: "Progress",
-            lastName: name === "main" ? "Tester" : "Other",
+            lastName: name === "main" ? "Tester" : name === "other" ? "Other" : "Reviser",
             handle: `${tag}-${name}`,
             batchYear: 2027,
             departmentCode: "CSE",
@@ -189,6 +189,11 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
     problems.rejudged = await createProblem("rejudged", "EASY");
     problems.streak = await createProblem("streak", "MEDIUM");
     problems.internal = await createProblem("internal", "EASY");
+    // Phase 12c. Their own problems and their own student, because the
+    // revision ladder walks days forward and the streak assertions above
+    // are written against main's calendar.
+    problems.revise = await createProblem("revise", "EASY");
+    problems.revise2 = await createProblem("revise2", "MEDIUM");
 
     // The badge catalogue is seeded by content; create only the rows missing here.
     for (const badge of PROGRESS_BADGES) {
@@ -241,6 +246,7 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
           "Notification",
           "HintReveal",
           "EditorialView",
+          "RevisionCard",
           "ProblemActivity",
           "StudyPlanEnrollment",
           "Submission",
@@ -263,7 +269,14 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
 
   it("a wrong answer is an attempt: status, ProblemStat, ActivityDay, UserStats and streak — no XP", async () => {
     const { outcome } = await judge(users.main, problems.easy, "WA", at(0, "10:00"));
-    expect(outcome).toEqual({ firstSolve: false, assisted: false, xp: { solve: 0, streak: 0 }, streak: 1, badges: [] });
+    expect(outcome).toEqual({
+      firstSolve: false,
+      assisted: false,
+      xp: { solve: 0, streak: 0, revision: 0 },
+      revision: { created: false, reviewed: false, lapsed: false, learned: false },
+      streak: 1,
+      badges: [],
+    });
 
     expect(await status(problems.easy.id)).toMatchObject({
       status: "ATTEMPTED",
@@ -555,14 +568,21 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
 
     // Rejudged again (any verdict): nothing changes.
     const noop = await progress(wrong.id, users.main, problems.rejudged, "WA", at(5, "08:00"), { rejudge: true });
-    expect(noop).toMatchObject({ firstSolve: false, xp: { solve: 0, streak: 0 }, streak: null });
+    expect(noop).toMatchObject({ firstSolve: false, xp: { solve: 0, streak: 0, revision: 0 }, streak: null });
     expect(await stats()).toMatchObject({ solvedTotal: after.solvedTotal, xpTotal: after.xpTotal });
   });
 
   it("an internal error changes nothing", async () => {
     const before = await stats();
     const { outcome } = await judge(users.main, problems.internal, "IE", at(5, "09:00"));
-    expect(outcome).toEqual({ firstSolve: false, assisted: false, xp: { solve: 0, streak: 0 }, streak: null, badges: [] });
+    expect(outcome).toEqual({
+      firstSolve: false,
+      assisted: false,
+      xp: { solve: 0, streak: 0, revision: 0 },
+      revision: { created: false, reviewed: false, lapsed: false, learned: false },
+      streak: null,
+      badges: [],
+    });
     expect(await status(problems.internal.id)).toBeNull();
     expect(await db.problemStat.findUnique({ where: { problemId: problems.internal.id } })).toBeNull();
     expect(await stats()).toMatchObject({ submissions: before.submissions, updatedAt: before.updatedAt });
@@ -618,5 +638,126 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
     } finally {
       quiet.mockRestore();
     }
+  });
+
+  // ── Spaced revision (Phase 12c) ────────────────────────────────────────
+
+  const cardOf = (problemId: string, userId = users.reviser) =>
+    db.revisionCard.findUnique({ where: { userId_problemId: { userId, problemId } } });
+  const dayOf = (value: Date) => value.toISOString().slice(0, 10);
+  const revisionEvents = () =>
+    db.xpEvent.findMany({ where: { userId: users.reviser, kind: "REVISION" }, orderBy: { id: "asc" } });
+
+  it("a first solve writes a card due tomorrow, and a same-day re-solve does not move it", async () => {
+    await judge(users.reviser, problems.revise, "AC", at(0, "10:00"));
+    expect(await cardOf(problems.revise.id)).toMatchObject({ stage: 0, reviews: 0, lapses: 0, learnedAt: null });
+    expect(dayOf((await cardOf(problems.revise.id))!.dueOn)).toBe(day(1));
+
+    // Polishing an old solution on the same day is not revising: the card is
+    // not due, so nothing about it changes and nothing is paid.
+    const again = await judge(users.reviser, problems.revise, "AC", at(0, "18:00"));
+    expect(again.outcome.revision).toEqual({ created: false, reviewed: false, lapsed: false, learned: false });
+    expect(dayOf((await cardOf(problems.revise.id))!.dueOn)).toBe(day(1));
+    expect(await revisionEvents()).toEqual([]);
+  });
+
+  it("a due re-solve climbs a rung, pays a quarter, and comes back three days later", async () => {
+    const { outcome } = await judge(users.reviser, problems.revise, "AC", at(1, "09:00"));
+    // An EASY first solve is 50; a revision pays 25 % of it.
+    expect(outcome.xp.revision).toBe(Math.round(XP_RULES.firstSolve.EASY * XP_RULES.revisionMultiplier));
+    expect(outcome.revision).toEqual({ created: false, reviewed: true, lapsed: false, learned: false });
+
+    const card = await cardOf(problems.revise.id);
+    expect(card).toMatchObject({ stage: 1, reviews: 1, lapses: 0, learnedAt: null });
+    expect(dayOf(card!.dueOn)).toBe(day(4));
+    expect(card!.lastReviewAt).not.toBeNull();
+
+    const [event] = await revisionEvents();
+    expect(event).toMatchObject({ kind: "REVISION", amount: outcome.xp.revision, problemId: problems.revise.id });
+    expect(event!.meta).toMatchObject({ fromStage: 0, toStage: 1, intervalDays: 3, learned: false });
+  });
+
+  it("the same finalise applied twice pays once and climbs once", async () => {
+    const before = await cardOf(problems.revise.id);
+    const id = await createSubmission(users.reviser, problems.revise, "AC", at(4, "09:00"));
+    const first = await progress(id, users.reviser, problems.revise, "AC", at(4, "09:00"));
+    const second = await progress(id, users.reviser, problems.revise, "AC", at(4, "09:00"));
+    expect(first.revision.reviewed).toBe(true);
+    expect(second.revision.reviewed).toBe(false);
+    expect(second.xp.revision).toBe(0);
+    const after = await cardOf(problems.revise.id);
+    expect(after!.stage).toBe(before!.stage + 1);
+    expect(after!.reviews).toBe(before!.reviews + 1);
+  });
+
+  it("a due attempt that fails drops a rung, stays due today, and pays nothing", async () => {
+    const before = await cardOf(problems.revise.id);
+    expect(before!.stage).toBe(2);
+    // Day 11 is the 7-day step from day 4.
+    const { outcome } = await judge(users.reviser, problems.revise, "WA", at(11, "09:00"));
+    expect(outcome.revision).toEqual({ created: false, reviewed: false, lapsed: true, learned: false });
+    expect(outcome.xp.revision).toBe(0);
+
+    const after = await cardOf(problems.revise.id);
+    // Down one, not back to the start, and still in front of them today.
+    expect(after).toMatchObject({ stage: 1, lapses: 1, reviews: 2 });
+    expect(dayOf(after!.dueOn)).toBe(day(11));
+  });
+
+  it("clearing the last rung learns the card, and it never comes back", async () => {
+    // Walk it to the top from where the lapse left it (stage 1, due today).
+    await judge(users.reviser, problems.revise, "AC", at(11, "10:00")); // → 2, due day 18
+    await judge(users.reviser, problems.revise, "AC", at(18, "10:00")); // → 3, due day 39
+    await judge(users.reviser, problems.revise, "AC", at(39, "10:00")); // → 4, due day 99
+    const top = await cardOf(problems.revise.id);
+    expect(top).toMatchObject({ stage: 4, learnedAt: null });
+    expect(dayOf(top!.dueOn)).toBe(day(99));
+
+    const { outcome } = await judge(users.reviser, problems.revise, "AC", at(99, "10:00"));
+    expect(outcome.revision).toEqual({ created: false, reviewed: true, lapsed: false, learned: true });
+    const learned = await cardOf(problems.revise.id);
+    expect(learned!.learnedAt).not.toBeNull();
+    expect(learned!.stage).toBe(4);
+
+    // And a later solve of a learned problem is just a solve.
+    const after = await judge(users.reviser, problems.revise, "AC", at(120, "10:00"));
+    expect(after.outcome.revision).toEqual({ created: false, reviewed: false, lapsed: false, learned: false });
+    expect(after.outcome.xp.revision).toBe(0);
+  });
+
+  it("a rejudge is not a review: it never moves a card", async () => {
+    await judge(users.reviser, problems.revise2, "AC", at(0, "11:00"));
+    const before = await cardOf(problems.revise2.id);
+    expect(dayOf(before!.dueOn)).toBe(day(1));
+
+    const id = await createSubmission(users.reviser, problems.revise2, "AC", at(1, "11:00"));
+    const outcome = await progress(id, users.reviser, problems.revise2, "AC", at(1, "11:00"), { rejudge: true });
+    expect(outcome.revision.reviewed).toBe(false);
+    expect(outcome.xp.revision).toBe(0);
+    const after = await cardOf(problems.revise2.id);
+    expect(after).toMatchObject({ stage: before!.stage, reviews: 0 });
+    expect(dayOf(after!.dueOn)).toBe(day(1));
+  });
+
+  it("revision XP is capped like everything else, and the ladder still moves exactly once", async () => {
+    // Fill the day's total cap, then revise: the award is reduced to zero,
+    // the event is still written, and the card advances once.
+    await db.activityDay.upsert({
+      where: { userId_date: { userId: users.reviser, date: dayAsDate(day(1)) } },
+      create: { userId: users.reviser, date: dayAsDate(day(1)), xp: XP_RULES.caps.totalPerDay },
+      update: { xp: XP_RULES.caps.totalPerDay },
+    });
+    const { outcome } = await judge(users.reviser, problems.revise2, "AC", at(1, "12:00"));
+    expect(outcome.xp.revision).toBe(0);
+    expect(outcome.revision.reviewed).toBe(true);
+    const event = await db.xpEvent.findFirst({
+      where: { userId: users.reviser, kind: "REVISION", problemId: problems.revise2.id },
+    });
+    expect(event).toMatchObject({ amount: 0 });
+    expect(event!.meta).toMatchObject({
+      capped: true,
+      uncapped: Math.round(XP_RULES.firstSolve.MEDIUM * XP_RULES.revisionMultiplier),
+    });
+    expect((await cardOf(problems.revise2.id))!.stage).toBe(1);
   });
 });

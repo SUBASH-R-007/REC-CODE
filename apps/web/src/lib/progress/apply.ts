@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma, type DbTx, type XpEventKind } from "@recx/db";
 import { clearRestrictionOnSolve } from "@recx/db/inactivity";
 import { XP_KEYS, isRestrictedStatus, makesSolveAssisted, type StreakState, type Verdict } from "@recx/shared";
+import { applyRevision } from "./revision";
 import { loadXpRules } from "./xp-config";
 import {
   PROGRESS_NOTIFICATION_KIND,
@@ -70,7 +71,9 @@ export interface ProgressOutcome {
   firstSolve: boolean;
   assisted: boolean;
   /** XP inserted by this call (0 when nothing new was awarded). */
-  xp: { solve: number; streak: number };
+  xp: { solve: number; streak: number; revision: number };
+  /** What this submission did to the problem's revision card (Phase 12c). */
+  revision: { created: boolean; reviewed: boolean; lapsed: boolean; learned: boolean };
   /** The streak after this submission, or null when it was not touched. */
   streak: number | null;
   /** Badge keys newly awarded by this call. */
@@ -80,7 +83,8 @@ export interface ProgressOutcome {
 const nothing = (): ProgressOutcome => ({
   firstSolve: false,
   assisted: false,
-  xp: { solve: 0, streak: 0 },
+  xp: { solve: 0, streak: 0, revision: 0 },
+  revision: { created: false, reviewed: false, lapsed: false, learned: false },
   streak: null,
   badges: [],
 });
@@ -159,7 +163,11 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
 
   // ── XP ledger first: what was actually inserted drives every XP counter.
   let earned: DayXp = { total: 0, easy: 0 };
-  if (solve || milestone !== null) {
+  // `plan.accepted` is in the condition because an accepted repeat solve may
+  // be a due revision, and a revision is capped like everything else. Not
+  // knowing whether a card is due yet costs one read of a row this student
+  // already has; getting it wrong would hand out uncapped XP.
+  if (solve || milestone !== null || plan.accepted) {
     const today = await tx.activityDay.findUnique({
       where: { userId_date: { userId, date: dayDate } },
       select: { xp: true, xpEasy: true },
@@ -220,9 +228,35 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
       },
     });
     if (inserted) solveXp = award.amount;
+    earned = { total: earned.total + solveXp, easy: earned.easy + (solve.difficulty === "EASY" ? solveXp : 0) };
   }
-  const xpTotal = solveXp + streakXp;
-  const xpEasy = solve?.difficulty === "EASY" ? solveXp : 0;
+
+  /**
+   * Spaced revision (Phase 12c). Last of the three XP sources on purpose: a
+   * first solve and a streak milestone are things the student did today,
+   * and if the daily cap has to take something off, it should take it off
+   * the 25 % for remembering an old problem rather than off the new work.
+   */
+  const revision = await applyRevision(tx, {
+    userId,
+    problemId,
+    submissionId: input.submissionId,
+    problemVersionId: input.problemVersionId,
+    day: plan.day,
+    now: input.now,
+    accepted: plan.accepted,
+    firstSolve: plan.firstSolve,
+    countAttempt: plan.countAttempt,
+    earnedToday: earned,
+    rules: xp.rules,
+    rulesVersion: xp.version,
+    restricted,
+    insertXpEvent: (event) => insertXpEvent(tx, { ...event, meta: event.meta as Prisma.InputJsonObject }),
+  });
+
+  const xpTotal = solveXp + streakXp + revision.xp;
+  const xpEasy =
+    (solve?.difficulty === "EASY" ? solveXp : 0) + (revision.difficulty === "EASY" ? revision.xp : 0);
 
   // ── Per-user rows (this user's lock is held).
   const cohort = await touchUser(tx, userId, plan, input.now);
@@ -302,7 +336,13 @@ export async function applySubmissionProgress(tx: DbTx, input: SubmissionProgres
   return {
     firstSolve: plan.firstSolve,
     assisted: solve?.assisted ?? false,
-    xp: { solve: solveXp, streak: streakXp },
+    xp: { solve: solveXp, streak: streakXp, revision: revision.xp },
+    revision: {
+      created: revision.created,
+      reviewed: revision.reviewed,
+      lapsed: revision.lapsed,
+      learned: revision.learned,
+    },
     streak: plan.streak?.after.current ?? null,
     badges,
   };

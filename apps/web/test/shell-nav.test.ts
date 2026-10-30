@@ -58,7 +58,10 @@ describe("shell navigation model", () => {
   it("groups PRACTICE, COMPETE, ASSESS and ME as specified, in order", () => {
     const shown = visibleGroups().map((g) => [g.label, g.items.map((i) => i.href)]);
     expect(shown).toEqual([
-      ["Practice", ["/problems", "/sheets", "/learn"]],
+      // Phase 12c put Revision second in PRACTICE, directly after Problems:
+      // revising IS practice, and a student who has to find it under their
+      // own profile will not.
+      ["Practice", ["/problems", "/revision", "/sheets", "/learn"]],
       // Contests arrived in Phase 5.
       ["Compete", ["/contests", "/leaderboard"]],
       // ASSESS was reserved empty for Phases 6-7; aptitude was its first

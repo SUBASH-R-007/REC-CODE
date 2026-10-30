@@ -2683,3 +2683,59 @@ everyone or nobody, which is the only setting a super-admin can reason
 about on the morning somebody complains. And the assistant is not offered
 to staff: an admin who wants to know whether a problem is confusing should
 read the hint tiers and the submission log, which are the evidence.
+
+## Spaced revision, and the bug the arithmetic hid (Phase 12c)
+
+SPEC §11's post-launch list calls this "the highest-value thing here that
+LeetCode does not have, because the documented failure mode of sheet prep is
+solving 300 problems once and retaining none." It is now built: a problem
+you solve comes back after a day, then three, seven, twenty-one and sixty,
+and clearing the last step retires it.
+
+**The bug worth recording.** The XP ledger row was first keyed on the rung
+the card came due on — `revision:{user}:{problem}:{stage}` — which reads as
+the tightest possible key and is wrong. A card that lapses from rung 2 back
+to rung 1 has to climb rung 1 a second time, and that rung's key was spent
+on the first climb. Because the ladder deliberately only advances when the
+ledger row was actually inserted, the second climb would have paid nothing
+AND never moved: a student who forgot one problem once would have been stuck
+on it forever, seeing the same card every day with no way to clear it.
+
+Nothing about the design on paper showed this. It appeared the moment a test
+walked a real card up the ladder, down one rung and up again. The key is now
+the campus day, which the schedule already makes unique — a review pushes
+the card at least a day out, and a lapse pays nothing — and the comment on
+`XP_KEYS.revision` says why, because the rung version will look like an
+improvement to the next person who reads it.
+
+**Why three a day, and why the backlog is stated.** A queue with no ceiling
+is a debt, and a debt is a tab you stop opening. `REVISION_DAILY_CAP` is
+applied to what is shown; `/revision` and the dashboard card both print how
+many more are past their date. A page that quietly dropped work would be a
+page nobody trusts twice.
+
+**Why the migration backfills.** Without it the feature does nothing for
+anybody until tomorrow and nothing at all for the students who need it most
+— the ones who solved two hundred problems last term and remember forty.
+With a naive backfill those same students open it on launch day and find two
+hundred cards due. So the dates are spread, three a day per student, oldest
+solve first, at rung 0: the product has never asked them to recall any of
+it, so it does not get to claim they are on the 60-day step.
+
+**NOT RUN: a card has never been moved by the real judge.** The ladder is
+walked end to end against recx_test — create, not-yet-due, climb, retried
+finalise, lapse, re-climb, learn, rejudge, daily cap — but every one of
+those submissions is a row written by the test rather than a program a
+student wrote and a worker judged. What that leaves unproven is only the
+seam into `finalize.ts`, which this phase did not change; the surfaces were
+read from the running production build against the backfilled cards.
+
+**Not built, and deliberate.** No self-graded difficulty (SM-2's quality
+score needs an honest self-report; the judge already knows whether they got
+it right, which is a smaller and more explainable input). No way to snooze
+or dismiss a card — if the ladder is wrong the fix is the ladder, not a
+per-card escape hatch that turns the queue into a to-do list. No notification
+when cards fall due: the dashboard says it, and an email every morning about
+homework is how a feature gets muted. No revision for aptitude questions,
+which have their own once-per-question XP rule and would need their own
+answer.

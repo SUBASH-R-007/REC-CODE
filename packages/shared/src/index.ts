@@ -10,6 +10,7 @@ export * from "./time";
 export * from "./help";
 export * from "./ai-helper";
 export * from "./progress";
+export * from "./revision";
 export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";

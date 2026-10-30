@@ -90,6 +90,31 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## Spaced revision (Phase 12c)
+
+A `RevisionCard` per student per problem, written by the progress engine the
+first time they solve it and moved by the same engine afterwards. The ladder
+is five rungs — 1, 3, 7, 21 and 60 days (`REVISION_INTERVALS` in
+`@recx/shared`); a due re-solve climbs one and pays 25 % of the first solve,
+a due attempt that fails drops one and stays due today, and clearing the top
+rung sets `learnedAt` and retires the card.
+
+Three decisions are worth knowing before changing anything here:
+
+* **The ladder moves only when the ledger did.** `applyRevision` advances the
+  card after `insertXpEvent` reports an insert, so a retried finalise can
+  neither pay twice nor climb twice. The idempotency key is the campus DAY,
+  not the rung: a card that lapses has to climb the same rung again, and a
+  rung-keyed row would have been spent the first time — which would have
+  stuck that card forever. A real walk up the ladder found this; the
+  arithmetic looked right on paper.
+* **Three a day is a property of the QUEUE, not of the data.**
+  `REVISION_DAILY_CAP` is applied in `dueQueue()`; the backlog keeps its
+  order and the surfaces state its length.
+* **The migration backfills.** Every problem already solved gets a card,
+  three per student per day, oldest solve first — otherwise the feature is
+  empty for exactly the students it exists for.
+
 ## Problem authoring (Phase 4)
 
 **Revisions and review.** A problem's content is a chain of

@@ -15,6 +15,7 @@ export type NavIconKey =
   | "problems"
   | "sheets"
   | "learn"
+  | "revision"
   | "contests"
   | "aptitude"
   | "placement"
@@ -57,6 +58,9 @@ export const DASHBOARD_ITEM = item("/dashboard", "Dashboard", "dashboard", "Your
 const PROBLEMS = item("/problems", "Problems", "problems", "Browse and solve practice problems");
 const SHEETS = item("/sheets", "Sheets", "sheets", "Curated problem sheets for placements");
 const LEARN = item("/learn", "Learn", "learn", "Guided topic tracks");
+// Phase 12c. In PRACTICE rather than ME, because revising is practice — and
+// a student who has to go looking for it under their own profile will not.
+const REVISION = item("/revision", "Revision", "revision", "Problems you solved, coming back on a spaced schedule");
 const CONTESTS = item("/contests", "Contests", "contests", "Timed rounds, standings and your rating");
 const LEADERBOARD = item("/leaderboard", "Leaderboard", "leaderboard", "Weekly, monthly and all-time XP rankings");
 const PROFILE = item("/profile", "Profile", "profile", "Your progress, badges and settings");
@@ -71,7 +75,7 @@ const LEAVE = item(
 );
 
 export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
-  { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, SHEETS, LEARN]) },
+  { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, REVISION, SHEETS, LEARN]) },
   { id: "compete", label: "Compete", items: Object.freeze([CONTESTS, LEADERBOARD]) },
   // ASSESS: Phase 7's aptitude surface. The group was reserved empty for
   // Phases 6-7 and this is its first entry — Phase 6's assessments are
