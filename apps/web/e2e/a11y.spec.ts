@@ -144,6 +144,7 @@ const TARGETS: readonly Target[] = [
   // Phase 12h. Three cards of slots with buttons whose presence depends on
   // the clock — the shape most likely to lose a label.
   { path: "/mock-interviews", as: "student", gating: false },
+  { path: "/written", as: "student", gating: false },
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },
   { path: "/profile", as: "student", gating: false },
@@ -187,6 +188,7 @@ const TARGETS: readonly Target[] = [
   { path: "/mentor/moderation", as: "admin", gating: false },
   { path: "/mentor/experiences", as: "admin", gating: false },
   { path: "/mentor/mock-interviews", as: "admin", gating: false },
+  { path: "/mentor/written", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
   { path: "/judge", as: null, gating: false },

@@ -713,6 +713,18 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
   },
   {
     /**
+     * Phase 12i. Drafting and handing in a written answer. One answer per
+     * student per question, and a student may only ever reach their own:
+     * both are enforced by the (prompt, author) key the library writes
+     * through rather than by anything the page sends.
+     */
+    key: "written.answer",
+    label: "Draft and hand in a written answer",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["written#saveWrittenDraft", "written#submitWrittenAnswer"],
+  },
+  {
+    /**
      * Phase 12e. A student's own account of their own interview, and
      * withdrawing it while nobody has read it. Nothing here publishes
      * anything: a submission waits for `mentor.interviews.review`.
@@ -1026,6 +1038,26 @@ export const MENTOR_CAPABILITIES = deepFreeze([
     ],
     routes: ["app/api/mock/[interviewId]/live/route.ts#GET"],
     pages: ["app/mentor/mock-interviews/page.tsx"],
+  },
+  {
+    /**
+     * Phase 12i. Writing a question, publishing or retiring it, and
+     * marking what students hand in. The marking queue is shared between
+     * everybody with this capability rather than owned by the question's
+     * author; "not your own answer" is a per-row check in the library,
+     * since a TA is a student's colleague and sometimes a student.
+     */
+    key: "mentor.written.grade",
+    label: "Write questions, and mark written answers",
+    roles: MENTOR,
+    actions: [
+      "written#createWrittenPrompt",
+      "written#publishWrittenPrompt",
+      "written#retireWrittenPrompt",
+      "written#gradeWrittenAnswer",
+      "written#handBackWrittenAnswer",
+    ],
+    pages: ["app/mentor/written/page.tsx", "app/mentor/written/[answerId]/page.tsx"],
   },
   {
     key: "mentor.interviews.review",

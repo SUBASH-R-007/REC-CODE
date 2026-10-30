@@ -577,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261031000000_phase12h_mock_interviews";
+export const CHECK_CATALOG_THROUGH = "20261101000000_phase12i_written_answers";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1061,6 +1061,29 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["MockInterviewSnapshot_source_size_check", "MockInterviewSnapshot"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261031000000_phase12h_mock_interviews" })),
+  ...(
+    [
+      // Nothing here runs code, so these CHECKs carry the weight a judge
+      // carries elsewhere: a mark is whole or it does not exist, and a
+      // student is never shown half of one.
+      ["WrittenPrompt_status_pair_check", "WrittenPrompt"],
+      ["WrittenPrompt_title_size_check", "WrittenPrompt"],
+      ["WrittenPrompt_body_size_check", "WrittenPrompt"],
+      ["WrittenPrompt_time_box_check", "WrittenPrompt"],
+      ["WrittenCriterion_weight_check", "WrittenCriterion"],
+      ["WrittenCriterion_label_size_check", "WrittenCriterion"],
+      ["WrittenCriterion_order_check", "WrittenCriterion"],
+      ["WrittenAnswer_body_size_check", "WrittenAnswer"],
+      ["WrittenAnswer_submitted_pair_check", "WrittenAnswer"],
+      ["WrittenAnswer_graded_pair_check", "WrittenAnswer"],
+      ["WrittenAnswer_score_range_check", "WrittenAnswer"],
+      ["WrittenAnswer_overall_size_check", "WrittenAnswer"],
+      ["WrittenAnswer_hand_back_pair_check", "WrittenAnswer"],
+      ["WrittenAnswer_not_self_check", "WrittenAnswer"],
+      ["WrittenMark_points_check", "WrittenMark"],
+      ["WrittenMark_note_size_check", "WrittenMark"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101000000_phase12i_written_answers" })),
 ];
 
 /**

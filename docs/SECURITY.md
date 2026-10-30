@@ -265,6 +265,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | 1 action |
 | `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | 1 page |
 | `mentor.mock.run` | mentor | - | yes | yes | - | yes | 4 actions, 1 route, 1 page |
+| `mentor.written.grade` | mentor | - | yes | yes | - | yes | 5 actions, 2 pages |
 | `mentor.interviews.review` | mentor | - | yes | yes | - | yes | 1 action, 1 page |
 | `judge.submit` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
@@ -278,6 +279,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `mock.book` | self-service | yes | yes | yes | yes | yes | 3 actions, 1 route |
+| `written.answer` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `interviews.share` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `discussion.participate` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
@@ -365,6 +367,22 @@ suite.
 * Proctoring (Phase 6) collects no webcam, microphone or screen recording by
   default and no content keystrokes or clipboard contents; see
   `docs/PROCTORING.md`.
+* **A written answer (Phase 12i) is coursework, and the student is told
+  so before they write.** The grader sees their name — there is no
+  anonymising here, unlike the interview archive, because a TA writing
+  "you have described the API and not the storage" is writing to
+  somebody — and `WRITTEN_NOTICES.graderSeesName` says that on the page
+  above the box. A student reaches their own answer and nobody else's:
+  the read is keyed on `(promptId, authorId)`, there is no surface
+  anywhere that shows one student another's answer, and a retired
+  question stays readable only by whoever answered it. The answer is a
+  student's markdown rendered with `renderUntrustedMarkdown` on the one
+  page where a member of staff reads it, and nothing in a request path
+  deletes an answer or a question — retiring hides a question and keeps
+  every answer written against it. Both are fenced by
+  `tests/repo/written-posture.test.ts`. The mark is an input to nothing:
+  no XP, no leaderboard, no readiness, no band, no recruiter-visible
+  field.
 * **A mock interview (Phase 12h) is the one place one student's unfinished
   code is shown live to another person, and both ends are fenced.** The
   candidate's editor is pushed by the candidate (there is no read of a

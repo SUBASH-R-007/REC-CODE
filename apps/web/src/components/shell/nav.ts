@@ -21,6 +21,7 @@ export type NavIconKey =
   | "placement"
   | "interviews"
   | "mock"
+  | "written"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -114,6 +115,15 @@ export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
         "Interviews",
         "interviews",
         "What companies actually asked, reported by students here",
+      ),
+      // Phase 12i. After Interviews and before Readiness: the archive says
+      // which rounds companies run, and this is where a student practises
+      // the one that has no program in it.
+      item(
+        "/written",
+        "Written",
+        "written",
+        "Design and written questions, marked by a TA against a published rubric",
       ),
       item(
         "/placement",

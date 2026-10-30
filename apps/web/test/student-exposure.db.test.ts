@@ -1301,6 +1301,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "mock-interviews#loadMentorMocks": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).loadMentorMocks!,
     "mock-interviews#loadMockSession": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).loadMockSession!,
     "mock-interviews#mirrorFor": async () => (await load(path.join(QUERIES_DIR, "mock-interviews.ts"))).mirrorFor!,
+    // Phase 12i. `loadForGrading` renders one student's prose to a member
+    // of staff and `loadGradingQueue` names students; both are swept as a
+    // STUDENT, where each must refuse rather than answer.
+    "written#loadOpenPrompts": async () => (await load(path.join(QUERIES_DIR, "written.ts"))).loadOpenPrompts!,
+    "written#loadPromptForStudent": async () => (await load(path.join(QUERIES_DIR, "written.ts"))).loadPromptForStudent!,
+    "written#loadGradingQueue": async () => (await load(path.join(QUERIES_DIR, "written.ts"))).loadGradingQueue!,
+    "written#loadForGrading": async () => (await load(path.join(QUERIES_DIR, "written.ts"))).loadForGrading!,
+    "written#loadAuthoredPrompts": async () => (await load(path.join(QUERIES_DIR, "written.ts"))).loadAuthoredPrompts!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -1325,6 +1333,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "mock-interviews#loadMentorMocks": () => [[ids.user]],
     "mock-interviews#loadMockSession": () => [[ids.user, `${tag}-no-such-interview`]],
     "mock-interviews#mirrorFor": () => [[ids.user, `${tag}-no-such-interview`]],
+    "written#loadOpenPrompts": () => [[ids.user]],
+    "written#loadPromptForStudent": () => [[ids.user, `${tag}-no-such-question`]],
+    "written#loadGradingQueue": () => [[ids.user]],
+    "written#loadForGrading": () => [[ids.user, `${tag}-no-such-answer`]],
+    "written#loadAuthoredPrompts": () => [[ids.user]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
@@ -1570,6 +1583,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       params: { interviewId: `${tag}-no-such-interview` },
     }),
     "(student)/revision/page.tsx": () => ({}),
+    "(student)/written/page.tsx": () => ({}),
+    "(student)/written/[slug]/page.tsx": () => ({ params: { slug: `${tag}-no-such-question` } }),
     "(student)/sheets/[slug]/page.tsx": () => ({ params: { slug: ids.sheetSlug } }),
     "(student)/sheets/page.tsx": () => ({}),
     "layout.tsx": () => ({}),
@@ -1757,6 +1772,21 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "mock-interviews#giveUpMockSlot": [() => [{ interviewId: `${tag}-no-such-slot` }]],
     "mock-interviews#cancelMockInterview": [
       () => [{ interviewId: `${tag}-no-such-slot`, reason: "Something came up and I cannot make it." }],
+    ],
+    /**
+     * Phase 12i. A question nobody published, so the refusal is the thing
+     * being swept: it must not say whether the question exists, and must
+     * carry no canary from the fixture.
+     */
+    "written#saveWrittenDraft": [() => [{ promptId: `${tag}-no-such-question`, bodyMd: "A draft." }]],
+    "written#submitWrittenAnswer": [
+      () => [
+        {
+          promptId: `${tag}-no-such-question`,
+          bodyMd:
+            "An answer long enough to pass the floor, which is a hundred and twenty characters, so this sentence keeps going for a while.",
+        },
+      ],
     ],
     "interviews#submitInterviewExperience": [
       () => [

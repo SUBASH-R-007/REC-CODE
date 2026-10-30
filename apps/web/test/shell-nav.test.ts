@@ -71,7 +71,10 @@ describe("shell navigation model", () => {
       // Phase 12e put Interviews between them: both answer "what should I
       // do before the drive", and this one answers it with what companies
       // actually asked rather than with a score.
-      ["Assess", ["/aptitude", "/mock-interviews", "/interviews", "/placement"]],
+      // Phase 12i put Written between Interviews and Readiness: the
+      // archive says which rounds companies run, and this is where a
+      // student practises the one that has no program in it.
+      ["Assess", ["/aptitude", "/mock-interviews", "/interviews", "/written", "/placement"]],
       // Phase 8a put "Excused days" in ME rather than in ASSESS: it is about
       // the student's own account, not about practising. Last in the group,
       // because it is the entry nobody should need often.

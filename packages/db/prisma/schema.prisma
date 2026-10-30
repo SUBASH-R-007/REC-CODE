@@ -547,32 +547,32 @@ enum ProblemImportRowStatus {
 // ── Identity ───────────────────────────────────────────────────────────
 
 model User {
-  id             String        @id @default(cuid())
-  lmsUserId      String?       @unique
+  id                 String        @id @default(cuid())
+  lmsUserId          String?       @unique
   /// Roll number. The join key with the LMS roster.
-  collegeId      String        @unique
-  email          String        @unique
-  firstName      String
-  lastName       String
+  collegeId          String        @unique
+  email              String        @unique
+  firstName          String
+  lastName           String
   /// Public handle for /u/[handle]. Never the roll number.
-  handle         String        @unique
-  role           Role          @default(STUDENT)
-  status         AccountStatus @default(ACTIVE)
+  handle             String        @unique
+  role               Role          @default(STUDENT)
+  status             AccountStatus @default(ACTIVE)
   /// Argon2id (m=19456, t=2, p=1). Null for LMS-SSO-only accounts.
-  passwordHash   String?
+  passwordHash       String?
   /// Set when an account is created with an initial password an admin chose.
   /// Every authenticated surface refuses until the holder replaces it
   /// (lib/auth/guards), so a shared initial password is good for exactly one
   /// sign-in per account. A CHECK keeps it false while passwordHash is NULL:
   /// a password you do not have cannot be the one you must change.
-  mustChangePassword Boolean   @default(false)
-  batchYear      Int?
-  departmentCode String?
-  section        String?
-  lastActiveAt   DateTime?
-  lastLoginAt    DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  mustChangePassword Boolean       @default(false)
+  batchYear          Int?
+  departmentCode     String?
+  section            String?
+  lastActiveAt       DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   /// Public profile at /u/[handle]: never email, roll number, department or scores.
   visibility        ProfileVisibility @default(REC_ONLY)
@@ -597,17 +597,20 @@ model User {
   editorialViews       EditorialView[]
   aiAssists            AiAssist[]
   revisionCards        RevisionCard[]
-  discussionPosts      DiscussionPost[]      @relation("PostAuthor")
-  moderatedPosts       DiscussionPost[]      @relation("PostModerator")
+  discussionPosts      DiscussionPost[]        @relation("PostAuthor")
+  moderatedPosts       DiscussionPost[]        @relation("PostModerator")
   doubtThreads         DoubtThread[]
   doubtReplies         DoubtReply[]
-  contentReports       ContentReport[]       @relation("ReportAuthor")
-  resolvedReports      ContentReport[]       @relation("ReportResolver")
-  interviewExperiences InterviewExperience[] @relation("ExperienceAuthor")
-  decidedExperiences   InterviewExperience[] @relation("ExperienceModerator")
-  mockInterviewsGiven  MockInterview[]       @relation("MockMentor")
-  mockInterviewsSat    MockInterview[]       @relation("MockCandidate")
-  mockInterviewsEnded  MockInterview[]       @relation("MockCanceller")
+  contentReports       ContentReport[]         @relation("ReportAuthor")
+  resolvedReports      ContentReport[]         @relation("ReportResolver")
+  interviewExperiences InterviewExperience[]   @relation("ExperienceAuthor")
+  decidedExperiences   InterviewExperience[]   @relation("ExperienceModerator")
+  mockInterviewsGiven  MockInterview[]         @relation("MockMentor")
+  mockInterviewsSat    MockInterview[]         @relation("MockCandidate")
+  mockInterviewsEnded  MockInterview[]         @relation("MockCanceller")
+  writtenPromptsSet    WrittenPrompt[]         @relation("WrittenAuthor")
+  writtenAnswers       WrittenAnswer[]         @relation("WrittenAnswerAuthor")
+  writtenAnswersMarked WrittenAnswer[]         @relation("WrittenGrader")
   problemActivity      ProblemActivity[]
   enrollments          StudyPlanEnrollment[]
   bookmarks            Bookmark[]
@@ -643,18 +646,18 @@ model User {
   /// Excused absences, read by the inactivity counter (Phase 8).
   leaveExceptions LeaveException[]
   /// Where they stand with the inactivity policy, and why (Phase 8c).
-  restriction  AccountRestriction?
-  statusEvents AccountStatusEvent[]
+  restriction     AccountRestriction?
+  statusEvents    AccountStatusEvent[]
 
   /// Readiness (Phase 9). Snapshots are never hard-deleted with the student.
   readinessSnapshots ReadinessSnapshot[]
-  menteeAssignments  MentorAssignment[] @relation("MenteeAssignments")
-  mentorAssignments  MentorAssignment[] @relation("MentorAssignments")
-  placementExports   PlacementExport[]  @relation("PlacementExports")
-  placementDrives    PlacementDrive[]   @relation("DrivesCreated")
+  menteeAssignments  MentorAssignment[]         @relation("MenteeAssignments")
+  mentorAssignments  MentorAssignment[]         @relation("MentorAssignments")
+  placementExports   PlacementExport[]          @relation("PlacementExports")
+  placementDrives    PlacementDrive[]           @relation("DrivesCreated")
   driveDecisions     DriveEligibilityDecision[] @relation("DriveDecisionsAbout")
   driveDecisionsMade DriveEligibilityDecision[] @relation("DriveDecisionsMade")
-  profileExports     ProfileExport[]    @relation("ProfileExports")
+  profileExports     ProfileExport[]            @relation("ProfileExports")
 
   @@index([status, lastActiveAt])
   @@index([batchYear, departmentCode, section])
@@ -706,16 +709,16 @@ model Session {
 /// ONE conditional UPDATE (`consumedAt IS NULL`), and a trigger refuses any
 /// attempt to un-spend it or to move it to another account.
 model PasswordReset {
-  id        String @id @default(cuid())
-  userId    String
+  id            String    @id @default(cuid())
+  userId        String
   /// sha256(token). Unique, so a presented token is one indexed lookup.
-  tokenHash String @unique
-  expiresAt DateTime
+  tokenHash     String    @unique
+  expiresAt     DateTime
   /// Set once, by the UPDATE that spends it. Never cleared (trigger).
-  consumedAt DateTime?
+  consumedAt    DateTime?
   /// sha256(ip + pepper) of whoever asked. Never a raw address.
   requestIpHash String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -765,7 +768,7 @@ model Problem {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  versions        ProblemVersion[]    @relation("ProblemVersions")
+  versions        ProblemVersion[]             @relation("ProblemVersions")
   submissions     Submission[]
   tags            ProblemTag[]
   companyTags     ProblemCompanyTag[]
@@ -804,12 +807,12 @@ model ProblemTag {
 /// Placement-cell-curated companies until the InterviewExperience archive
 /// (Phase 11) exists; the UI labels these "curated".
 model Company {
-  id        String              @id @default(cuid())
-  slug      String              @unique
-  name      String
-  curated   Boolean             @default(true)
-  createdAt DateTime            @default(now())
-  problems  ProblemCompanyTag[]
+  id              String                @id @default(cuid())
+  slug            String                @unique
+  name            String
+  curated         Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  problems        ProblemCompanyTag[]
   placementDrives PlacementDrive[]
   interviews      InterviewExperience[]
 }
@@ -1201,28 +1204,28 @@ model UserProblemStatus {
 /// One row per user per campus (Asia/Kolkata) day with any activity: the
 /// streak source, the heatmap, and the inactivity evidence.
 model ActivityDay {
-  userId        String
-  user          User     @relation(fields: [userId], references: [id])
-  date          DateTime @db.Date
-  submissions   Int      @default(0)
-  accepted      Int      @default(0)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  date            DateTime @db.Date
+  submissions     Int      @default(0)
+  accepted        Int      @default(0)
   /// First solves that day.
-  solved        Int      @default(0)
-  xp            Int      @default(0)
+  solved          Int      @default(0)
+  xp              Int      @default(0)
   /// XP from Easy first solves that day (the 600/day Easy cap).
-  xpEasy        Int      @default(0)
-  activeSeconds Int      @default(0)
+  xpEasy          Int      @default(0)
+  activeSeconds   Int      @default(0)
   /// Aptitude questions answered in topic practice that day (Phase 7). A row
   /// has to exist for a student who only does aptitude, or Phase 8's nightly
   /// job cannot see them and the heatmap shows an empty year.
-  aptitudeAnswers Int    @default(0)
+  aptitudeAnswers Int      @default(0)
   /// Full mocks finalised that day (Phase 7).
-  mocksFinalised  Int    @default(0)
+  mocksFinalised  Int      @default(0)
   /// XP from aptitude topic practice that day (the 200/day aptitude cap).
   /// Maintained here for the same reason xpEasy is: SPEC §4(d) forbids
   /// aggregating XpEvent on a request, and a cap that needs today's total
   /// needs it from a maintained row.
-  xpAptitude      Int    @default(0)
+  xpAptitude      Int      @default(0)
 
   @@id([userId, date])
   @@index([date])
@@ -1442,10 +1445,10 @@ model MockInterview {
   cancelReason    String?
 
   /// Written once, when the interviewer finishes. 1..5 each.
-  ratingCommunication Int?
+  ratingCommunication  Int?
   ratingProblemSolving Int?
   ratingCode           Int?
-  feedbackMd           String?        @db.Text
+  feedbackMd           String?   @db.Text
   feedbackAt           DateTime?
 
   createdAt DateTime @default(now())
@@ -1540,36 +1543,36 @@ enum InterviewSource {
 /// page renders instead, and it deliberately drops the section: batch plus
 /// department plus section is three or four people.
 model InterviewExperience {
-  id          String                @id @default(cuid())
+  id                  String                 @id @default(cuid())
   /// Null only for a BOOTSTRAP row entered by an admin before launch.
-  authorId    String?
-  author      User?                 @relation("ExperienceAuthor", fields: [authorId], references: [id])
-  source      InterviewSource       @default(STUDENT)
+  authorId            String?
+  author              User?                  @relation("ExperienceAuthor", fields: [authorId], references: [id])
+  source              InterviewSource        @default(STUDENT)
   /// The catalogue company, once one exists; `companyName` is what the
   /// student typed and is kept either way so a rename never rewrites an
   /// account of what happened.
-  companyId   String?
-  company     Company?              @relation(fields: [companyId], references: [id])
-  companyName String
-  role        String
-  mode        InterviewMode
+  companyId           String?
+  company             Company?               @relation(fields: [companyId], references: [id])
+  companyName         String
+  role                String
+  mode                InterviewMode
   /// Month precision: a drive is a month, and a day is identifying.
-  heldYear    Int
-  heldMonth   Int
-  rounds      Int
+  heldYear            Int
+  heldMonth           Int
+  rounds              Int
   /// Minutes of the LONGEST round, which is what a student wants to know.
   longestRoundMinutes Int?
-  outcome     InterviewOutcome
-  roundKinds  InterviewRoundKind[]
-  topics      String[]
-  preparation InterviewPreparation[]
-  status      InterviewStatus       @default(PENDING)
+  outcome             InterviewOutcome
+  roundKinds          InterviewRoundKind[]
+  topics              String[]
+  preparation         InterviewPreparation[]
+  status              InterviewStatus        @default(PENDING)
   /// Set together: who decided, when, and the sentence the student is shown.
-  decidedById String?
-  decidedBy   User?                 @relation("ExperienceModerator", fields: [decidedById], references: [id])
-  decidedAt   DateTime?
-  decisionReason String?
-  createdAt   DateTime              @default(now())
+  decidedById         String?
+  decidedBy           User?                  @relation("ExperienceModerator", fields: [decidedById], references: [id])
+  decidedAt           DateTime?
+  decisionReason      String?
+  createdAt           DateTime               @default(now())
 
   problems InterviewExperienceProblem[]
 
@@ -1645,17 +1648,17 @@ model DiscussionPost {
 /// reply (`mayReplyToDoubt()`), which is what stops the doubt list becoming
 /// the solution list by the back door.
 model DoubtThread {
-  id         String       @id @default(cuid())
+  id         String          @id @default(cuid())
   problemId  String
-  problem    Problem      @relation(fields: [problemId], references: [id])
+  problem    Problem         @relation(fields: [problemId], references: [id])
   authorId   String
-  author     User         @relation(fields: [authorId], references: [id])
+  author     User            @relation(fields: [authorId], references: [id])
   title      String
-  bodyMd     String       @db.Text
-  status     DoubtStatus  @default(OPEN)
+  bodyMd     String          @db.Text
+  status     DoubtStatus     @default(OPEN)
   /// Set when the ASKER marks a reply as the answer; only they may.
   answeredAt DateTime?
-  createdAt  DateTime     @default(now())
+  createdAt  DateTime        @default(now())
   editedAt   DateTime?
   replies    DoubtReply[]
   reports    ContentReport[]
@@ -1689,21 +1692,21 @@ model DoubtReply {
 /// neither is a report a moderator cannot act on. Resolving one is a
 /// decision with a name on it, like every other decision in this product.
 model ContentReport {
-  id          String          @id @default(cuid())
-  postId      String?
-  post        DiscussionPost? @relation(fields: [postId], references: [id])
-  doubtId     String?
-  doubt       DoubtThread?    @relation(fields: [doubtId], references: [id])
-  reporterId  String
-  reporter    User            @relation("ReportAuthor", fields: [reporterId], references: [id])
-  reason      ReportReason
-  detail      String
-  status      ReportStatus    @default(OPEN)
+  id           String          @id @default(cuid())
+  postId       String?
+  post         DiscussionPost? @relation(fields: [postId], references: [id])
+  doubtId      String?
+  doubt        DoubtThread?    @relation(fields: [doubtId], references: [id])
+  reporterId   String
+  reporter     User            @relation("ReportAuthor", fields: [reporterId], references: [id])
+  reason       ReportReason
+  detail       String
+  status       ReportStatus    @default(OPEN)
   resolvedById String?
-  resolvedBy  User?           @relation("ReportResolver", fields: [resolvedById], references: [id])
-  resolvedAt  DateTime?
-  resolution  String?
-  createdAt   DateTime        @default(now())
+  resolvedBy   User?           @relation("ReportResolver", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  resolution   String?
+  createdAt    DateTime        @default(now())
 
   @@index([status, createdAt])
   @@index([postId])
@@ -3345,19 +3348,19 @@ enum AptitudeQuestionKind {
 /// is a stem, not a passage (CHECK); a passage with fewer than two questions
 /// is a stem with extra steps, refused at publish.
 model AptitudePassage {
-  id         String            @id @default(cuid())
+  id         String             @id @default(cuid())
   area       AptitudeArea
   topic      AptitudeTopic
   title      String
   /// Markdown, sanitised server-side through the existing sanitize.ts.
-  body       String            @db.Text
-  wordCount  Int               @default(0)
+  body       String             @db.Text
+  wordCount  Int                @default(0)
   sourceNote String
   origin     ContentOrigin
   authorId   String?
-  status     ProblemStatus     @default(DRAFT)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  status     ProblemStatus      @default(DRAFT)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
   questions  AptitudeQuestion[]
 
   @@index([status, area, topic])
@@ -3387,7 +3390,7 @@ model AptitudeQuestion {
   numericTolerance     Decimal?             @db.Decimal(20, 6)
   numericUnit          String?
   /// Mandatory at publish, enforced by CHECK as well as by zod (SPEC §5).
-  explanation          String               @db.Text @default("")
+  explanation          String               @default("") @db.Text
   /// The authoring aid that tells a section author whether 25 questions fit
   /// in 25 minutes.
   expectedSeconds      Int
@@ -3792,15 +3795,15 @@ model CalendarDay {
 /// A REQUESTED row excuses nothing. That is the whole reason the status
 /// exists: otherwise a student could stop the counter by asking.
 model LeaveException {
-  id        String      @id @default(cuid())
-  userId    String
-  user      User        @relation(fields: [userId], references: [id])
-  kind      LeaveKind
-  startDate DateTime    @db.Date
-  endDate   DateTime    @db.Date
-  status    LeaveStatus @default(REQUESTED)
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  kind           LeaveKind
+  startDate      DateTime    @db.Date
+  endDate        DateTime    @db.Date
+  status         LeaveStatus @default(REQUESTED)
   /// The student's own words, 10–1000 characters by CHECK.
-  reason    String      @db.Text
+  reason         String      @db.Text
   /// An uploaded medical certificate or exam hall ticket, when there is one.
   /// A plain id, not a relation: the file store is not this table's child.
   evidenceFileId String?
@@ -3809,8 +3812,8 @@ model LeaveException {
   decidedAt      DateTime?
   /// Mandatory and minimum-length on a REJECTED row, by CHECK. A refusal a
   /// student cannot read is a refusal they cannot answer.
-  decisionNote   String?   @db.Text
-  createdAt      DateTime  @default(now())
+  decisionNote   String?     @db.Text
+  createdAt      DateTime    @default(now())
 
   @@index([userId, status, startDate])
   @@index([status, startDate])
@@ -3848,10 +3851,10 @@ enum RestrictionStage {
 /// @recx/shared, with a partial unique index making at most one row active
 /// per scope so the resolution is always single-valued.
 model InactivityPolicy {
-  version       Int     @id @default(autoincrement())
-  isActive      Boolean @default(true)
+  version        Int     @id @default(autoincrement())
+  isActive       Boolean @default(true)
   /// null = every batch.
-  batchYear     Int?
+  batchYear      Int?
   /// null = every department.
   departmentCode String?
 
@@ -3872,7 +3875,7 @@ model InactivityPolicy {
   /// in this database: they are accepted, ignored, and the evidence row
   /// records that they were unavailable, so a missing signal is never read
   /// as inactivity (docs/OPEN-QUESTIONS.md).
-  countsAsActivity Json @default("{\"submission\":true,\"solve\":true,\"login\":false,\"lesson\":true}")
+  countsAsActivity  Json @default("{\"submission\":true,\"solve\":true,\"login\":false,\"lesson\":true}")
   /// The sum of the enabled signals' counts a day needs to be excluded.
   minActivityPerDay Int  @default(1)
 
@@ -3883,7 +3886,7 @@ model InactivityPolicy {
 
   /// A named human who can intervene. The spec's point is that non-progress
   /// must be visible to somebody, so this never silently goes nowhere.
-  notifyMentor     Boolean @default(true)
+  notifyMentor      Boolean @default(true)
   /// Refused by CHECK until the phase that builds a consent record drops it:
   /// a parent address is third-party personal data.
   notifyParentEmail Boolean @default(false)
@@ -3950,7 +3953,7 @@ model AccountRestriction {
   /// Until when the student has grace before the next rung.
   graceEndsAt    DateTime?
 
-  countedInactiveDays Int       @default(0)
+  countedInactiveDays Int               @default(0)
   lastEvaluatedAt     DateTime?
   /// The policy version the last evaluation was made under.
   policyVersion       Int?
@@ -3982,9 +3985,9 @@ model AccountRestriction {
 /// and TRUNCATE are refused outright. The same shape as XpEvent, for the
 /// same reason: this is the thing an appeal reads.
 model AccountStatusEvent {
-  id        BigInt @id @default(autoincrement())
-  userId    String
-  user      User   @relation(fields: [userId], references: [id])
+  id     BigInt @id @default(autoincrement())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   fromStage  RestrictionStage
   toStage    RestrictionStage
@@ -4010,7 +4013,7 @@ model AccountStatusEvent {
   actorId           String?
   /// Mandatory and minimum-length on a manual row: hard disabling is "only
   /// ever a manual, REASONED, audit-logged admin action".
-  reason            String?  @db.Text
+  reason            String?   @db.Text
   notifiedAt        DateTime?
   /// The campus day a sweep evaluated. Exactly the sweep's rows have one,
   /// and the partial unique index on it is what makes a second run a no-op.
@@ -4065,10 +4068,10 @@ model ReadinessRun {
 /// One student per run. Cohort columns are COPIED, like XpBucket's: every
 /// officer aggregate is then one index scan with no join to User.
 model ReadinessSnapshot {
-  userId     String
-  user       User         @relation(fields: [userId], references: [id])
-  computedOn DateTime     @db.Date
-  run        ReadinessRun @relation(fields: [computedOn], references: [computedOn])
+  userId       String
+  user         User         @relation(fields: [userId], references: [id])
+  computedOn   DateTime     @db.Date
+  run          ReadinessRun @relation(fields: [computedOn], references: [computedOn])
   rulesVersion Int
 
   /// The cohort the percentiles were taken in, and how many were in it. A
@@ -4095,8 +4098,8 @@ model ReadinessSnapshot {
 
   /// 0–100, per tier, because the two tiers that use breadth divide by
   /// different per-topic targets. A single column could not hold both.
-  topicBreadthProduct Int?
-  topicBreadthTop     Int?
+  topicBreadthProduct  Int?
+  topicBreadthTop      Int?
   /// The argmin that set each breadth. "Your breadth is 0.17" is useless;
   /// "graphs is holding you back" is actionable.
   limitingTopicProduct Topic?
@@ -4160,13 +4163,13 @@ model MentorAssignment {
 /// nothing, and one that could be deleted would let the person who exported a
 /// cohort remove the evidence.
 model PlacementExport {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   requestedById String
-  requestedBy   User     @relation("PlacementExports", fields: [requestedById], references: [id])
-  requestedAt   DateTime @default(now())
+  requestedBy   User      @relation("PlacementExports", fields: [requestedById], references: [id])
+  requestedAt   DateTime  @default(now())
   /// The cohort filter as given, so "who was in that file" is answerable
   /// without re-running a query against a cohort that has since changed.
-  filters       Json     @default("{}")
+  filters       Json      @default("{}")
   columns       String[]
   rowCount      Int
   /// The readiness run the figures came from; null when none had finished.
@@ -4206,19 +4209,19 @@ enum ProfileExportKind {
 /// mockInterviewScore unsourced no TOP score can exceed 85, so a raw bar of
 /// 70 would fail a cohort for a component nobody has built.
 model PlacementDrive {
-  id                      String            @id @default(cuid())
+  id                      String        @id @default(cuid())
   companyId               String?
-  company                 Company?          @relation(fields: [companyId], references: [id])
+  company                 Company?      @relation(fields: [companyId], references: [id])
   companyName             String
   tier                    ReadinessTier
-  driveOn                 DateTime          @db.Date
+  driveOn                 DateTime      @db.Date
   thresholdScore          Int?
   eligibleBatchYear       Int?
   eligibleDepartmentCodes String[]
   notes                   String?
   createdById             String
-  createdBy               User              @relation("DrivesCreated", fields: [createdById], references: [id])
-  createdAt               DateTime          @default(now())
+  createdBy               User          @relation("DrivesCreated", fields: [createdById], references: [id])
+  createdAt               DateTime      @default(now())
   archivedAt              DateTime?
 
   decisions DriveEligibilityDecision[]
@@ -4285,4 +4288,118 @@ model ProfileExport {
   revokedById  String?
 
   @@index([userId, issuedAt(sort: Desc)])
+}
+
+/// Phase 12i. A written or system-design question, and the rubric it is
+/// marked against.
+///
+/// SPEC §11: "written/system-design with rubric grading". Nothing here runs:
+/// a design answer has no test cases, and the thing being practised is the
+/// explanation. The rubric is published WITH the question, because a student
+/// who can see what is being looked for can practise against it.
+enum WrittenKind {
+  SYSTEM_DESIGN
+  WRITTEN
+}
+
+enum WrittenPromptStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum WrittenAnswerStatus {
+  DRAFT
+  SUBMITTED
+  GRADED
+}
+
+model WrittenPrompt {
+  id             String              @id @default(cuid())
+  slug           String              @unique
+  kind           WrittenKind
+  title          String
+  promptMd       String              @db.Text
+  /// How long the question is MEANT to take. Advice on the page, enforced
+  /// nowhere: a timer on an unproctored text box only teaches students to
+  /// draft somewhere else and paste.
+  timeBoxMinutes Int
+  status         WrittenPromptStatus @default(DRAFT)
+  authorId       String
+  author         User                @relation("WrittenAuthor", fields: [authorId], references: [id])
+  publishedAt    DateTime?
+  /// Retiring hides the question and keeps every answer written against it.
+  retiredAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  criteria WrittenCriterion[]
+  answers  WrittenAnswer[]
+
+  @@index([status, kind])
+}
+
+/// One line of a rubric. Fixed once the question is published: a student
+/// marked 12/16 against four criteria did not get that score against five.
+model WrittenCriterion {
+  id       String        @id @default(cuid())
+  promptId String
+  prompt   WrittenPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  order    Int
+  label    String
+  guidance String?
+  /// 1 (nice to have) to 5 (the point of the question).
+  weight   Int
+
+  marks WrittenMark[]
+
+  @@unique([promptId, order])
+}
+
+/// One student's answer to one question. One per student per question: a
+/// second attempt at a design question is a new question, not a retry.
+model WrittenAnswer {
+  id          String              @id @default(cuid())
+  promptId    String
+  prompt      WrittenPrompt       @relation(fields: [promptId], references: [id])
+  authorId    String
+  author      User                @relation("WrittenAnswerAuthor", fields: [authorId], references: [id])
+  bodyMd      String              @db.Text
+  status      WrittenAnswerStatus @default(DRAFT)
+  submittedAt DateTime?
+
+  graderId  String?
+  grader    User?     @relation("WrittenGrader", fields: [graderId], references: [id])
+  gradedAt  DateTime?
+  overallMd String?   @db.Text
+  /// The weighted total, stored with the mark rather than recomputed: the
+  /// rubric can be retired afterwards, and a score that moves is not a score.
+  points    Int?
+  outOf     Int?
+
+  /// Handed back unmarked, with a sentence saying what is missing.
+  handedBackAt DateTime?
+  handBackNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  marks WrittenMark[]
+
+  @@unique([promptId, authorId])
+  @@index([status, submittedAt])
+  @@index([authorId, updatedAt(sort: Desc)])
+}
+
+/// One criterion's mark on one answer. A rubric with a hole in it is not a
+/// rubric, so the grade action refuses until every criterion has one.
+model WrittenMark {
+  answerId    String
+  answer      WrittenAnswer    @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  criterionId String
+  criterion   WrittenCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  points      Int
+  note        String?
+
+  @@id([answerId, criterionId])
 }

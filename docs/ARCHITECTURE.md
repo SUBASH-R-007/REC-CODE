@@ -90,6 +90,54 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## Written and system-design answers (Phase 12i)
+
+A TA writes a question and the rubric it will be marked against; both are
+published together. A student reads the rubric, writes prose, hands it in;
+a TA marks each criterion out of four and writes a note. SPEC §11's last
+Phase 11+ item is "written/system-design with rubric grading", and the
+word doing the work is *rubric*: a mark says how it went, a rubric says
+what is being looked for, and a student who can see what is being looked
+for can practise against it.
+
+`packages/shared/src/written.ts` is the policy, with no database in it:
+two kinds (`SYSTEM_DESIGN`, `WRITTEN`), the question's three statuses, the
+answer's three, both transition tables, the 0–4 mark ladder with a label
+per rung so two TAs mean the same by a 3, `rubricScore()` (weights
+multiply, and the denominator is on the page so a student can check the
+arithmetic), and `unmarkedCriteria()`, which is what makes a rubric with a
+gap in it refusable.
+
+Four tables. `WrittenPrompt` and `WrittenCriterion` are the question;
+`WrittenAnswer` is one student's answer, keyed unique on
+`(promptId, authorId)` — one answer per student per question, because a
+second attempt at a design question is a different question rather than a
+retry; `WrittenMark` is one criterion's mark on one answer. Sixteen
+CHECKs, and two of them carry rules the application also enforces: a mark
+is **whole or it does not exist** (grader, moment, note and weighted total
+together, and never the author), and a published rubric is **fixed** —
+a student marked 12 of 16 against four criteria did not get that score
+against five.
+
+The writes are `apps/web/src/lib/written/answers.ts`. Grading is one
+transaction: the marks are replaced, the answer moves to GRADED, and the
+weighted total is **stored** rather than recomputed later, so retiring the
+question afterwards cannot move somebody's score. A grader may instead
+hand an answer back — SUBMITTED → DRAFT with a sentence the student is
+shown — which is a better outcome than 4 of 16 and is a grader's doing
+rather than a student's: a student who could withdraw a submission at will
+would make the queue meaningless.
+
+Reads split along the line the discussion board draws. A question's
+markdown is a TA's and renders with `renderMarkdown`; an answer's is a
+student's, read by a member of staff signed in with a mentor's session,
+and renders with `renderUntrustedMarkdown`. The marking queue is shared
+rather than per-author (a question answered by ninety students is not one
+person's evening) and ordered oldest-first. The score feeds nothing: no
+XP, no leaderboard, no readiness, no band, fenced by
+`tests/repo/written-posture.test.ts` over the import graph of every
+scoring module.
+
 ## Mock interviews (Phase 12h)
 
 A mentor offers a slot; a student takes it; at the hour both open the same

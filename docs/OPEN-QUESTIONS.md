@@ -3015,3 +3015,70 @@ reading. What has not happened is two people in two places at the same
 time on the campus network, which is the only way to find out whether
 four seconds feels live or laggy to the person watching.
 
+## A rubric before the answer, and the number it deliberately is not (Phase 12i)
+
+**The rubric is published with the question.** It would have been less
+work to let a TA invent criteria at marking time. The reason not to is
+that a student who can read "names the read path and why it is cheap,
+weight 5" before they start has been told what the exercise is; one who
+reads it afterwards has been told how they did. The second is a mark,
+the first is teaching. It also puts a floor under the grading -- a TA
+working through four named criteria writes something more useful than a
+TA working through a feeling -- and it is why the rubric is frozen the
+moment the question opens: a student marked 12 of 16 against four
+criteria did not get that score against five.
+
+**The score feeds nothing, and that is the same decision as the mock
+interview's.** Three ratings there, a weighted percentage here, and
+neither reaches XP, the leaderboard, readiness or a band. A weighted
+percentage from one person reading one answer is exactly that; wired to
+a dashboard it would be optimised from one end and inflated from the
+other. `tests/repo/written-posture.test.ts` fences it on the import
+graph of every scoring module rather than on a comment.
+
+**Handing back, rather than marking low.** A grader can push an answer
+back to the student's drafts with a sentence instead of giving it 4 of
+16. The sentence is the point: a low mark tells a student they did
+badly, "you have described the API and not the storage" tells them what
+to do next, and the answer is still there to do it in. The transition is
+the grader's and not the student's, because a student who could withdraw
+a submission at will would make a shared queue meaningless.
+
+**The time box is advice.** A question says "about 45 minutes" because
+knowing the intended size is part of the exercise. Nothing enforces it.
+A timer on an unproctored text box would only teach students to draft
+somewhere else and paste, and would make an answer written over three
+evenings -- which is still worth marking -- feel like cheating.
+
+**The grader sees the name, unlike the interview archive.** Those two
+surfaces answer the question differently on purpose. An archive entry is
+one student's account of a company's process, read by every student, and
+anonymity is what makes it safe to write. An answer is coursework, read
+by one TA who is writing back to a person. The page says so above the
+box before anything is handed in.
+
+**One answer per student per question.** A second attempt at a design
+question is a different question, not a retry: re-answering the same
+prompt after reading the marks measures nothing except how recently the
+marks were read. The unique key is `(promptId, authorId)`, so the
+product cannot drift into attempts without a migration saying so.
+
+**Not built, deliberately.** No model answer: publishing one would turn
+the next cohort's exercise into a recall test, and the rubric already
+says what a good answer does. No peer marking -- a student marking a
+student is a different product with different consent, and the honest
+version needs calibration nobody here has. No per-criterion re-mark
+after a grade: the grade is final and a second opinion is a
+conversation, not a column. No LaTeX or diagram upload; "say it in
+words" is what a design round actually asks for. No timer, as above.
+
+**NOT RUN: nobody has marked a real cohort's answers.** The whole
+lifecycle is proved -- against recx_test (15 cases: the rubric that must
+be whole and must belong to this question, the grader who may not be the
+author, the hand-back that keeps the student's words, the retired
+question that stays readable by whoever answered it, and the CHECKs
+refusing a half-written mark however it is attempted) and by hand against
+the production build with four signed-in people. What has not happened is
+a TA marking thirty answers in an evening, which is the only way to find
+out whether three criteria or six is the right number, and whether the
+0-4 ladder's rungs mean the same thing to two different TAs.

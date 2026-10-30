@@ -1467,6 +1467,52 @@ from it, by design — check who offered the slot before looking further.
 
 ---
 
+### 2.18 Written and system-design questions (Phase 12i)
+
+A TA writes a question and the rubric it is marked against; students
+answer in prose; a TA marks it. There is no switch -- the feature is on,
+and nothing about it runs code.
+
+**Writing one** is `/mentor/written`. The form takes a kind (system
+design, or a written answer), a title, the question in markdown, roughly
+how long it should take, and **two to eight criteria** with a weight of
+1-5 each. It saves as a **draft**: nobody can see it or answer it until
+"Publish it".
+
+**The rubric is published with the question and frozen when it opens.**
+If a criterion is wrong, retire the question and write another one -- a
+student marked 12 of 16 against four criteria did not get that score
+against five, and the database refuses the alternative.
+
+**Retiring is not deleting.** A retired question leaves every student's
+list except that of somebody who answered it, and their answer and its
+mark stay readable. A question's author may retire it, and so may an
+ADMIN or SUPER_ADMIN -- a TA who leaves must not take a published
+question with them.
+
+**Marking** is the queue on `/mentor/written`, shared between everybody
+who can mark and ordered oldest-first. Open a row and the page shows the
+question, the answer and the rubric together. Every criterion starts
+*unmarked*: a default would be a mark nobody made, and the save is
+refused until all of them carry one. Two ways to finish:
+
+| What | When to use it | What the student sees |
+|---|---|---|
+| Save the mark | there is something to say per criterion | the weighted total with its denominator, each criterion's mark and note, and the overall note |
+| Hand it back unmarked | a mark would say less than a sentence | the sentence, and their own draft back to work on |
+
+**What the mark does: nothing.** No XP, no leaderboard, no readiness, no
+band, nothing a recruiter sees. If a TA asks what the percentage is for,
+the answer is that the student reads it.
+
+**The one thing to tell a student** who asks whether this is anonymous:
+it is not. The person marking sees their name, the page says so above
+the box, and that is deliberate -- an answer is coursework, unlike an
+interview archive entry (Phase 12e), which is anonymous precisely
+because every student reads it.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -1743,3 +1789,10 @@ coordinator from actual runs — never in advance.
 | 12h | 2026-10-30 | The student-exposure sweep, with both new routes and both new pages registered | PASS (`student-exposure.db.test.ts` 14/14 against recx_test, its own completeness assertion included — the sweep refuses to pass if a route, page, query or action is missing from its registry) | Claude |
 | 12h | 2026-10-30 | Manual, against the production build (four signed-in sessions: the slot's mentor, another mentor, the candidate and another student) | PASS. The mentor offered a 45-minute slot; it appeared on every student's list; the candidate booked it, the second student was told **"Somebody has already taken that slot."** and the mentor was told **"You cannot book your own slot."**. Before the start, the snapshot POST answered 422 and the SSE route 409, both "That interview is not running.". The mentor started it, the candidate's editor POSTed 204, and the mentor's `EventSource` delivered the frame — `int main() { /* half an answer */ return 0; }`, named with the candidate. The same stream answered **403 to the other mentor**, **403 to the candidate themselves** and 403 to another student's push; a student who is neither gets 404 on the room, not 403. The mentor finished with three ratings and a note; the candidate's list renders the write-up, and the page carries no band, no score and no integrity language. After the end the snapshot POST is 422 and the stream 409 again | PASS | Claude |
 | 12h | — | Two people in two places watching the same mirror | **NOT RUN.** Both halves are proved — the candidate pushing and the mentor's SSE stream reading, against the production build, plus every refusal — but the run was two sessions from one machine. Whether four seconds reads as live or laggy to somebody watching over the campus network is a question only two real browsers in two places answer | NOT RUN | — |
+| 12i | 2026-10-30 | Written and system-design questions, marked against a rubric | **DONE.** SPEC 11's last Phase 11+ item: "written/system-design with rubric grading". Nothing here runs code. A TA writes a question AND the rubric it is marked against, published together - the word doing the work is *rubric*: a mark says how it went, a rubric says what is being looked for, and a student who can see what is being looked for can practise against it. Four tables, sixteen CHECKs, two of which carry rules the application also enforces: a mark is whole or it does not exist (grader, moment, note and weighted total together, and never the author), and a published rubric is fixed. Marking is one transaction and the weighted total is STORED, so retiring the question afterwards cannot move somebody's score. A grader may hand an answer back into the student's drafts with a sentence instead of marking it 4 of 16 - the better outcome, and a grader's doing rather than a student's. The score feeds nothing: no XP, no leaderboard, no readiness, no band, fenced on the import graph of every scoring module | Claude |
+| 12i | 2026-10-30 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted | PASS (lint 0 warnings; typecheck clean; **8,231 tests passed, 0 failed** - shared 1,867, judge-worker 414, db 327, design 87, scheduler 247, web 4,138, repo 1,151; build exit 0; every size budget met, `/dashboard` 121.9 KB of 160 KB - the two new pages ship no editor and no new dependency) | Claude |
+| 12i | 2026-10-30 | `RECX_DB_TESTS=1` against recx_test: the marking | PASS (`written.db.test.ts` 15/15, green on the first run - the draft nobody published that nobody can answer or read; two criteria with the same name and a rubric of one, both refused; publish then retire, and no reopening; one answer per student per question with the draft saving over itself; the floor on handing in; the mark as one transaction, 5x4 + 3x2 out of 32, with the per-criterion notes; a rubric with a gap, a criterion marked twice and a criterion from ANOTHER question, all three refused with nothing written; a TA refused their own answer; the hand-back that keeps the student's words and lets them hand in again; a student's own answer visible and another's not; a retired question readable by whoever answered it and nobody else; the shared queue minus the grader's own; grading refused on a draft; publish and retire refused to a stranger and allowed to staff; and the CHECKs refusing a half-written mark three ways through raw Prisma) | Claude |
+| 12i | 2026-10-30 | The sixteen new CHECKs against the frozen-guard fence | PASS (`frozen-coverage.test.ts` 271/271 against recx_test: every catalogued CHECK created exactly once, valid, on its table, and no uncatalogued CHECK up to this migration) | Claude |
+| 12i | 2026-10-30 | The student-exposure sweep, with five queries, two pages and two actions registered | PASS (`student-exposure.db.test.ts` 14/14 against recx_test, including its own completeness assertion. `loadForGrading` and `loadGradingQueue` are the two that matter: both render or name somebody else's work, and both are swept as a STUDENT) | Claude |
+| 12i | 2026-10-30 | Manual, against the production build (four signed-in sessions: the question's TA, a second TA, the student and another student) | PASS. The TA wrote a three-criterion rubric (weights 5/3/2) and published it; before publishing, the draft was absent from the student's list and answering it was refused with "That question is not open for answers.". The student's page showed each criterion with its weight, "40 weighted marks in all", the rubric notice, the time-box sentence and the warning that the grader sees their name - all **before** the answer box. A short answer was refused; the real one was handed in; editing after handing in was refused. The answer reached the shared queue with the student's name, and both `/mentor/written` and the grading page answered a student with a 307. Marking two of three criteria was refused ("a rubric with a gap in it is not a rubric"); marking all three stored 33 of 40, and marking again was refused as final. The student's page then showed "33 of 40 weighted marks (83%)", each criterion's mark against the same rubric, the TA's note, who marked it and when, and the sentence saying it counts for nothing - with no band, no grade letter and no integrity language anywhere. Another student opened the question and saw no part of the answer | PASS | Claude |
+| 12i | - | Nobody has marked a real cohort's answers | **NOT RUN.** The lifecycle is proved against recx_test and by hand against the production build, but a TA marking thirty answers in an evening is the only way to find out whether three criteria or six is the right number, and whether the 0-4 ladder means the same to two different TAs | NOT RUN | - |
