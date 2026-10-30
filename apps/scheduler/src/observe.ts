@@ -1,5 +1,5 @@
 import type { Db } from "@recx/db";
-import { JUDGE_LANES, type JudgeLane } from "@recx/shared";
+import { JUDGE_ENGINES, JUDGE_LANES, type JudgeEngine, type JudgeLane } from "@recx/shared";
 import type { Logger } from "pino";
 import { observeEmptyLanes, observeHeartbeats, observeQueue } from "./metrics";
 
@@ -22,7 +22,7 @@ import { observeEmptyLanes, observeHeartbeats, observeQueue } from "./metrics";
 export interface QueueCounts {
   ready(): boolean;
   /** Jobs waiting in a lane, and the age of the oldest, in seconds. */
-  depth(lane: JudgeLane): Promise<{ waiting: number; oldestAgeSeconds: number }>;
+  depth(engine: JudgeEngine, lane: JudgeLane): Promise<{ waiting: number; oldestAgeSeconds: number }>;
 }
 
 export interface ObserveDeps {
@@ -53,8 +53,20 @@ async function observeLanes(deps: ObserveDeps): Promise<void> {
 
   const seen = new Set<JudgeLane>();
   for (const lane of JUDGE_LANES) {
-    const counts = await deps.queues.depth(lane);
-    observeQueue(lane, counts.waiting, counts.oldestAgeSeconds);
+    /**
+     * Phase 12k: a lane has two queues now, one per engine. The gauge is
+     * labelled by lane and nothing else — the metric contract and the
+     * alert rules are written against those labels — so the two are SUMMED
+     * for the depth and the OLDER of the two reported for the age. That
+     * keeps the alert's question answerable: "is anybody waiting too long
+     * on this lane" is true if either engine's queue says so. A per-engine
+     * label would be a change to the contract and to the rules, and
+     * belongs with the rest of the SQL ops work rather than here.
+     */
+    const parts = await Promise.all(JUDGE_ENGINES.map((engine) => deps.queues.depth(engine, lane)));
+    const waiting = parts.reduce((sum, part) => sum + part.waiting, 0);
+    const oldest = Math.max(...parts.map((part) => part.oldestAgeSeconds));
+    observeQueue(lane, waiting, oldest);
     seen.add(lane);
   }
   observeEmptyLanes(seen);

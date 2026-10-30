@@ -65,7 +65,17 @@ import { fileURLToPath } from "node:url";
 import type { Db, DbTx, Prisma } from "@recx/db";
 // Type-only (erased): the module itself loads dynamically after the env file.
 import type { BundleFile } from "../src/lib/testdata/bundle";
-import { campusDay, campusDayDate, LANGUAGE_CATALOG, LANGUAGE_KEYS, TESTLIB_ID } from "@recx/shared";
+import {
+  campusDay,
+  campusDayDate,
+  LANGUAGE_CATALOG,
+  LANGUAGE_KEYS,
+  SQL_LANGUAGE_KEY,
+  SQL_LANGUAGE_LABEL,
+  SQL_RUNTIME,
+  SQL_TOOLCHAIN_ID,
+  TESTLIB_ID,
+} from "@recx/shared";
 import {
   generateTwoSumTests,
   TWO_SUM,
@@ -348,8 +358,29 @@ async function seedLanguages(db: Db) {
       }),
     ]);
   }
+  /**
+   * SQL (Phase 12k) is a language a student writes in but not a toolchain:
+   * its runtime is `SQL_RUNTIME`, not a `LanguageRuntime`, and the engine
+   * that judges it is the sandbox service rather than an isolate box. The
+   * row exists for the same reason every other one does — a submission
+   * points at a LanguageConfig — which is what let SQL problems join the
+   * pipeline without a single change to `Submission`.
+   */
+  const sqlFields = {
+    label: SQL_LANGUAGE_LABEL,
+    version: "17",
+    runtime: toJson(SQL_RUNTIME),
+    enabled: true,
+    isCurrent: true,
+  };
+  await db.languageConfig.upsert({
+    where: { key_toolchainId: { key: SQL_LANGUAGE_KEY, toolchainId: SQL_TOOLCHAIN_ID } },
+    create: { key: SQL_LANGUAGE_KEY, toolchainId: SQL_TOOLCHAIN_ID, ...sqlFields },
+    update: sqlFields,
+  });
+
   const enabled = LANGUAGE_KEYS.filter((k) => LANGUAGE_CATALOG[k].enabledByDefault);
-  log(`language configs: ${LANGUAGE_KEYS.length} (enabled: ${enabled.join(", ")})`);
+  log(`language configs: ${LANGUAGE_KEYS.length} + sql (enabled: ${enabled.join(", ")}, ${SQL_LANGUAGE_KEY})`);
 }
 
 // ── Theme ────────────────────────────────────────────────────────────────

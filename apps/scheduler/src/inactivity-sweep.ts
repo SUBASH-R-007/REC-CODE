@@ -7,7 +7,7 @@ import {
   type AppliedDecision,
   type SweepDecision,
 } from "@recx/db/inactivity";
-import { CAMPUS_TIME_ZONE, SWEEP_HOLDBACKS, type SweepHoldback } from "@recx/shared";
+import { CAMPUS_TIME_ZONE, JUDGE_ENGINES, SWEEP_HOLDBACKS, type SweepHoldback } from "@recx/shared";
 import type { Logger } from "pino";
 import type { JudgeQueuePort } from "./queues";
 
@@ -292,9 +292,16 @@ export class InactivitySweepJob {
      */
     if (this.queues && applied.cancelledSubmissionIds.length > 0) {
       for (const id of applied.cancelledSubmissionIds) {
-        await this.queues.remove("CONTEST", id).catch((cause: unknown) => {
-          this.log.warn({ err: cause, submissionId: id }, "could not drop a cancelled contest job from Redis");
-        });
+        // Phase 12k: a job id lives on exactly one of the two engines'
+        // queues, and removing it from the other is a no-op. Asking both is
+        // cheaper and safer than reading each submission's io mode to find
+        // out which one — and a cancelled job left in Redis is picked up,
+        // found cancelled and dropped anyway.
+        for (const engine of JUDGE_ENGINES) {
+          await this.queues.remove(engine, "CONTEST", id).catch((cause: unknown) => {
+            this.log.warn({ err: cause, submissionId: id }, "could not drop a cancelled contest job from Redis");
+          });
+        }
       }
     }
   }

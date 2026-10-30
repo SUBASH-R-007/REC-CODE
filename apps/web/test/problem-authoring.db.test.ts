@@ -112,6 +112,9 @@ describe.skipIf(!ENABLED)("authoring end to end (recx_test)", () => {
     const outcome = await m.claim.claimJob(await nodeRow(), { protocolVersion: JUDGE_PROTOCOL_VERSION, kind: "validation", id: runId });
     if (!outcome.claimed) throw new Error(`claim refused: ${outcome.refusal.reason}`);
     const spec = outcome.spec;
+    // Phase 12k: a claim answers with either engine's spec. Every version
+    // in this suite is a program.
+    if (spec.engine !== "isolate") throw new Error(`expected an isolate spec, got ${spec.engine}`);
     // AC: every test passes. Otherwise the first test fails and the rest are skipped (stop on first failure).
     const tests: TestResult[] = spec.tests.map((t, i) => ({
       i: t.index,

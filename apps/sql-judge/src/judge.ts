@@ -114,7 +114,6 @@ export async function judgeSqlJob(
     throw new PermanentJudgeError(`this judge speaks postgres17, not ${spec.dialect}`);
   }
 
-  const versionSetup = verify(spec.setup, await deps.readBlob(spec.setup), "setup").toString("utf8");
   const cases = [...spec.cases].sort((a, b) => a.index - b.index);
 
   const tests: TestResult[] = [];
@@ -124,9 +123,11 @@ export async function judgeSqlJob(
   let firstFailedIndex: number | null = null;
 
   for (const testCase of cases) {
-    const setup = testCase.setup
-      ? verify(testCase.setup, await deps.readBlob(testCase.setup), `case ${testCase.index} setup`).toString("utf8")
-      : versionSetup;
+    const setup = verify(
+      testCase.setup,
+      await deps.readBlob(testCase.setup),
+      `case ${testCase.index} dataset`,
+    ).toString("utf8");
 
     const outcome = await deps.sandbox.runCase({ setup, source: spec.source, maxRows: spec.maxRows });
     const judged = judgeCase(testCase, outcome);

@@ -52,6 +52,15 @@ enum ProblemStatus {
 enum IoMode {
   STDIN
   FUNCTION
+  /// Phase 12k. One SQL statement against a dataset, judged by the postgres
+  /// engine (apps/sql-judge) rather than by an isolate box.
+  SQL
+}
+
+/// Phase 12k. The only dialect SQL problems are judged in, stated rather
+/// than inferred — the problem page says so too.
+enum SqlDialect {
+  postgres17
 }
 
 enum Verdict {
@@ -111,6 +120,9 @@ enum CompareMode {
   FLOAT
   CHECKER
   INTERACTIVE
+  /// Phase 12k. Result-set comparison, for SQL versions only: a version is
+  /// SQL exactly when it compares ROWS (ProblemVersion_sql_mode_mirror).
+  ROWS
 }
 
 enum SubtaskAggregation {
@@ -866,6 +878,15 @@ model ProblemVersion {
   /// Base (C++) limits; per-language limits arrive with ProblemLanguageLimit.
   timeLimitMs        Int
   memoryLimitKb      Int           @default(262144)
+  /// SQL versions only (Phase 12k). Null for every other io mode, and
+  /// non-null for this one: ProblemVersion_sql_fields_pair.
+  sqlDialect         SqlDialect?
+  /// Whether the row ORDER is part of the answer. One value per version
+  /// rather than per case: ordering is a property of the QUESTION, and a
+  /// problem whose second case silently changed the rule would be a problem
+  /// nobody could answer twice. (The wire carries it per case, because the
+  /// judge has no opinion about where it came from.)
+  sqlOrdered         Boolean?
   /// CHECKER compare mode: testlib-compatible checker source (C++20).
   checkerSha256      String?
   /// Pinned testlib toolchain id the checker compiles against.

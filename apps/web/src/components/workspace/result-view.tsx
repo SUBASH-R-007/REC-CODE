@@ -34,6 +34,9 @@ export const WA_NOTES: Readonly<Record<CompareMode, string>> = {
   FLOAT: "Numbers are compared with a small tolerance (absolute or relative); everything else token by token.",
   CHECKER: "A checker program verifies your answer, so any correct answer is accepted — this one was not.",
   INTERACTIVE: "Your program's dialogue with the interactor did not reach a correct result.",
+  // Phase 12k. A SQL answer is a result set: the columns, the rows and
+  // (when the question asks for an order) the order.
+  ROWS: "Your query's result set is compared with the answer's: the number of columns, the rows, and the order when the question asks for one.",
 };
 
 /**

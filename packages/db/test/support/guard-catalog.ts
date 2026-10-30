@@ -577,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261101000000_phase12i_written_answers";
+export const CHECK_CATALOG_THROUGH = "20261101120500_phase12k_sql_checks";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1084,6 +1084,18 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["WrittenMark_note_size_check", "WrittenMark"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261101000000_phase12i_written_answers" })),
+  ...(
+    [
+      // Phase 12k. One column answers "which engine judges this?" either
+      // way round, and a SQL version carries neither a function signature
+      // nor a checker — both would be read by rules that do not apply to a
+      // result-set comparison.
+      ["ProblemVersion_sql_mode_mirror", "ProblemVersion"],
+      ["ProblemVersion_sql_fields_pair", "ProblemVersion"],
+      ["ProblemVersion_sql_no_signature", "ProblemVersion"],
+      ["ProblemVersion_sql_no_checker", "ProblemVersion"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101120500_phase12k_sql_checks" })),
 ];
 
 /**

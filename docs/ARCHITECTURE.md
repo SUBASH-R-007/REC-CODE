@@ -118,6 +118,33 @@ Two connections rather than `SET ROLE`, because a single statement can call
 has something to go back to. One statement, because the extended protocol
 refuses a second command — the server's rule, not a semicolon count.
 
+**A SQL problem in the model (slice 3).** `ProblemVersion.ioMode = SQL`,
+`compareMode = ROWS`, plus two SQL-only columns: `sqlDialect` (one value,
+stated rather than inferred) and `sqlOrdered` (whether the row order is part
+of the answer — per VERSION, because ordering is a property of the question,
+even though the wire carries it per case). No new table: a `TestCase`
+already has an input blob and an output blob, and for SQL those are the
+case's dataset and its expected result set, with the same immutability and
+the same sha256 discipline. That is what let SQL join the pipeline with no
+change to `Submission` at all — and so with no change to XP, the
+leaderboard, contests, assessments or rejudges.
+
+Four CHECKs hold the shape: a version is SQL exactly when it compares ROWS,
+each SQL column is present exactly for a SQL version, and a SQL version
+carries neither a function signature nor a checker (both would be read by
+rules that do not apply to a result set). SQL is also a `LanguageConfig`
+row — key `sql17`, with a `SqlRuntime` rather than a `LanguageRuntime`,
+because `LANGUAGE_KEYS` describes toolchains and a statement handed to a
+database has no argv, no environment and no `/opt/toolchains` directory.
+
+**Routing.** `engineForIoMode()` is the one place that maps a problem to an
+engine, and `queueNameFor()` the one place that maps an engine and a lane to
+a queue. The web enqueuer reads the engine from the row itself rather than
+taking it as a parameter: there are five enqueue call sites, none of them
+has the version in hand, and a SQL job on an isolate queue is a job an
+isolate node claims and cannot run. The scheduler's reconciler reads it the
+same way, as a `CASE WHEN` on the row it is reconciling.
+
 The three health concepts the fleet already has are re-meant rather than
 dropped: `hardening.ts` checks the CLUSTER at boot (not the application's
 database, the student role unprivileged, a member of nothing, unable to

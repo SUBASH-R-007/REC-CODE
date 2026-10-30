@@ -246,13 +246,13 @@ describe("the protocol", () => {
       attempt: 1,
       dialect: "postgres17",
       source: "SELECT 1",
-      setup: blob,
-      cases: [{ index: 0, visible: true, expected: blob, ordered: true }],
+      cases: [{ index: 0, visible: true, setup: blob, expected: blob, ordered: true }],
       stopOnFirstFailure: true,
       statementTimeoutMs: SQL_LIMITS.statementTimeoutMs,
       maxRows: SQL_LIMITS.rows,
     };
-    expect(sqlJobSpecSchema.parse(spec).cases[0]!.setup).toBeNull();
+    // Every case names its own dataset; cases that share one share the blob.
+    expect(sqlJobSpecSchema.parse(spec).cases[0]!.setup.sha256).toBe(blob.sha256);
     expect(sqlJobSpecSchema.safeParse({ ...spec, dialect: "mysql8" }).success).toBe(false);
     // And the timeout is not the service's to choose.
     expect(sqlJobSpecSchema.safeParse({ ...spec, statementTimeoutMs: 30_000 }).success).toBe(false);
@@ -270,8 +270,7 @@ describe("the protocol", () => {
       attempt: 1,
       dialect: "postgres17",
       source: "SELECT 1",
-      setup: blob,
-      cases: [{ index: 0, visible: false, expected: blob, ordered: false }],
+      cases: [{ index: 0, visible: false, setup: blob, expected: blob, ordered: false }],
       stopOnFirstFailure: false,
       statementTimeoutMs: SQL_LIMITS.statementTimeoutMs,
       maxRows: SQL_LIMITS.rows,

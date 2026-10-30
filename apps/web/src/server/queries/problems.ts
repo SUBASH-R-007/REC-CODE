@@ -8,6 +8,7 @@ import {
   isLanguageKey,
   isTopic,
   type FunctionSignature,
+  type IoMode,
   type LanguageKey,
   type Topic,
 } from "@recx/shared";
@@ -279,7 +280,7 @@ export interface ProblemWorkspace {
    */
   statementHtml: string;
   constraints: string[];
-  ioMode: "STDIN" | "FUNCTION";
+  ioMode: IoMode;
   signature: FunctionSignature | null;
   timeLimitMs: number;
   memoryLimitKb: number;
@@ -330,7 +331,7 @@ interface WorkspaceContent {
   statementMd: string;
   statementHtml: string;
   constraints: string[];
-  ioMode: "STDIN" | "FUNCTION";
+  ioMode: IoMode;
   signature: FunctionSignature | null;
   timeLimitMs: number;
   memoryLimitKb: number;

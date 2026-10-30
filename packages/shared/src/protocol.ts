@@ -18,7 +18,10 @@ import { functionSignatureSchema } from "./harness/signature";
  * canonicalised before the checker runs, JVM run flags. A v2 worker would
  * turn such jobs into permanent internal errors, so it gets 426 and drains.
  *
- * 4 (Phase 12k): a second ENGINE. Every spec now says which engine judges
+ * 4 (Phase 12k): a second ENGINE. The shape was settled across the
+ * phase's slices and released once — slice 1 introduced it, slice 3 moved
+ * a SQL case's dataset from the version to the case — so there is no
+ * intermediate version for a fleet to be half-upgraded to. Every spec now says which engine judges
  * it — `isolate` for a program, `postgres` for a SQL query — and a SQL job
  * carries a different spec shape (no compile, no memory limit, a setup
  * script and a result set per case) behind the same routes, the same lease
@@ -116,13 +119,24 @@ export const LANE_PRIORITY: Readonly<Record<JudgeLane, number>> = {
   REJUDGE: 20,
 };
 
-export const COMPARE_MODES = ["EXACT", "TOKEN", "FLOAT", "CHECKER", "INTERACTIVE"] as const;
+/**
+ * How a job's output is compared. `ROWS` is a SQL version's result-set
+ * comparison (Phase 12k) and is judged by the `postgres` engine only — an
+ * isolate worker that is ever handed one refuses the job permanently
+ * rather than guessing at it.
+ */
+export const COMPARE_MODES = ["EXACT", "TOKEN", "FLOAT", "CHECKER", "INTERACTIVE", "ROWS"] as const;
 export type CompareMode = (typeof COMPARE_MODES)[number];
 
 export const SCORING_MODES = ["ICPC", "SUBTASK", "PER_TEST"] as const;
 export type ScoringMode = (typeof SCORING_MODES)[number];
 
-export const IO_MODES = ["STDIN", "FUNCTION"] as const;
+/**
+ * `SQL` is a problem answered with one statement against a dataset rather
+ * than with a program (Phase 12k). `engineForIoMode()` in `sql-language.ts`
+ * is the one place that turns this into which engine judges it.
+ */
+export const IO_MODES = ["STDIN", "FUNCTION", "SQL"] as const;
 export type IoMode = (typeof IO_MODES)[number];
 
 /** Infrastructure retries only: attempts 3, exponential from 2s. */
@@ -276,19 +290,25 @@ export type JudgeJobSpec = z.infer<typeof judgeJobSpecSchema>;
 // ── The SQL engine's spec (protocol 4) ──────────────────────────────────
 
 /**
- * One SQL case: the dataset is the version's setup script (shared by every
- * case unless the case names its own), and the expected result set is a
- * blob the author's own reference query produced during validation — never
- * rows typed by hand, for the same reason expected stdout is not typed by
- * hand.
+ * One SQL case: its dataset and its expected result set, each a blob.
+ *
+ * Both are per case, with no version-level default — slice 3 settled that,
+ * because a `TestCase` already carries an input blob and an output blob,
+ * and two ways to say where the dataset comes from is one way too many.
+ * Cases that share a dataset share the blob: `TestBlob` is keyed by
+ * sha256, so the bytes are stored once however many cases name them.
+ *
+ * The expected result set is a blob the author's own reference query
+ * produced during validation — never rows typed by hand, for the same
+ * reason expected stdout is not typed by hand.
  */
 export const sqlCaseSpecSchema = z.object({
   index: z.number().int().nonnegative(),
   visible: z.boolean(),
-  /** Overrides the version's setup for this case; null = use the version's. */
-  setup: blobRefSchema.nullable().default(null),
+  /** The schema and seed rows this case starts from. */
+  setup: blobRefSchema,
   expected: blobRefSchema,
-  /** Compared in order, or as a multiset. The author's choice per case. */
+  /** Compared in order, or as a multiset. The problem's choice, per case on the wire. */
   ordered: z.boolean(),
 });
 export type SqlCaseSpec = z.infer<typeof sqlCaseSpecSchema>;
@@ -305,8 +325,6 @@ export const sqlJobSpecSchema = z.object({
   dialect: z.literal("postgres17"),
   /** The student's statement. */
   source: z.string().max(SQL_LIMITS.submissionBytes),
-  /** The schema and seed rows every case starts from. */
-  setup: blobRefSchema,
   cases: z.array(sqlCaseSpecSchema).min(1).max(100),
   stopOnFirstFailure: z.boolean(),
   /** Enforced by the database, not by a timer in the service. */

@@ -232,9 +232,16 @@ describe.skipIf(!ENABLED)("judge protocol v2 against recx_test", () => {
     return row.id;
   }
 
+  /**
+   * Phase 12k: a claim answers with either engine's spec. Every job in this
+   * suite is a program, so the helper narrows to the isolate spec and
+   * fails loudly if a SQL one ever turns up here — which would mean the
+   * engine mapping had changed under the pipeline.
+   */
   async function claim(node: TestNode, kind: JobKind, id: string) {
     const outcome = await m.claim.claimJob(await nodeRow(node), { protocolVersion: JUDGE_PROTOCOL_VERSION, kind, id });
     if (!outcome.claimed) throw new Error(`claim refused: ${outcome.refusal.reason}`);
+    if (outcome.spec.engine !== "isolate") throw new Error(`expected an isolate spec, got ${outcome.spec.engine}`);
     return outcome.spec;
   }
 

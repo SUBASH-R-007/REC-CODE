@@ -1,6 +1,6 @@
 import "server-only";
 import type { Prisma, ProblemImportRowStatus, Role } from "@recx/db";
-import { isVerdict, type Verdict } from "@recx/shared";
+import { isVerdict, type CompareMode, type IoMode, type Verdict } from "@recx/shared";
 import {
   REVIEW_STAGES,
   reviewStageOf,
@@ -224,9 +224,9 @@ export interface AdminProblemDetail {
     statementMd: string;
     constraints: string[];
     origin: "FACULTY" | "SENIOR_STUDENT" | "AI_ASSISTED";
-    ioMode: "STDIN" | "FUNCTION";
+    ioMode: IoMode;
     functionSignatureJson: string;
-    compareMode: "EXACT" | "TOKEN" | "FLOAT" | "CHECKER" | "INTERACTIVE";
+    compareMode: CompareMode;
     floatEpsilon: number | null;
     scoringMode: "ICPC" | "SUBTASK" | "PER_TEST";
     stopOnFirstFailure: boolean;

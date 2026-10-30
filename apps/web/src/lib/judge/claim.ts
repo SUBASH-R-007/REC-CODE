@@ -13,11 +13,14 @@ import {
   type JudgeJobSpec,
   type JudgeLane,
   type ProgressEvent,
+  engineForIoMode,
+  type SqlJobSpec,
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { verdictReached } from "@/lib/metrics";
 import { redis } from "@/lib/redis";
+import { buildSqlJobSpec } from "@/lib/judge/sql-job-spec";
 import { buildJudgeJobSpec, JobSpecError, type JobSpecChecker, type JobSpecInput } from "./job-spec";
 import { isSensitiveLane } from "./lanes";
 
@@ -42,7 +45,15 @@ import { isSensitiveLane } from "./lanes";
  * test/judge-claim-constants.test.ts).
  */
 
-export type ClaimOutcome = { claimed: true; spec: JudgeJobSpec } | { claimed: false; refusal: ClaimRefusal };
+/**
+ * Phase 12k: a claim answers with the spec of whichever ENGINE judges the
+ * job — an isolate spec for a program, a SQL spec for a statement. The
+ * route serialises either; each service parses only its own, so neither
+ * can be handed work it cannot run.
+ */
+export type ClaimOutcome =
+  | { claimed: true; spec: JudgeJobSpec | SqlJobSpec }
+  | { claimed: false; refusal: ClaimRefusal };
 
 export const JOB_TABLE: Readonly<Record<JobKind, Prisma.Sql>> = {
   submission: Prisma.raw('"Submission"'),
@@ -238,6 +249,8 @@ async function diagnose(kind: JobKind, id: string, node: JudgeNode): Promise<Cla
 
 const versionSelect = {
   ioMode: true,
+  sqlDialect: true,
+  sqlOrdered: true,
   functionSignature: true,
   compareMode: true,
   floatEpsilon: true,
@@ -394,7 +407,25 @@ export async function claimJob(node: JudgeNode, request: ClaimRequest): Promise<
   if (attempt === null) return refuse(await diagnose(kind, id, node));
 
   try {
-    return { claimed: true, spec: buildJudgeJobSpec(await loadSpecInput(kind, id, token, attempt, node)) };
+    const input = await loadSpecInput(kind, id, token, attempt, node);
+    const spec =
+      engineForIoMode(input.version.ioMode) === "postgres"
+        ? buildSqlJobSpec({
+            kind: input.kind,
+            id: input.id,
+            lane: input.lane,
+            claimToken: input.claimToken,
+            attempt: input.attempt,
+            source: input.source,
+            version: {
+              sqlDialect: input.version.sqlDialect ?? null,
+              sqlOrdered: input.version.sqlOrdered ?? null,
+              stopOnFirstFailure: input.version.stopOnFirstFailure,
+            },
+            tests: [...input.tests],
+          })
+        : buildJudgeJobSpec(input);
+    return { claimed: true, spec };
   } catch (error) {
     if (error instanceof JobSpecError) {
       // Bad data (corrupt runtime json, a version without tests …): no retry

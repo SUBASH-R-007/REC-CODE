@@ -713,13 +713,13 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
         priority: LANE_PRIORITY.CONTEST,
         attempts: JUDGE_RETRY.attempts,
       });
-      expect(await queues.state("REJUDGE", id("bull-validation"))).toBe("prioritized");
+      expect(await queues.state("isolate", "REJUDGE", id("bull-validation"))).toBe("prioritized");
       expect((await vrun("bull-validation")).judgeState).toBe("DISPATCHED");
 
       // The next tick finds the live job and keeps it.
       const again = await runReconcilerTick({ db, queues, log });
       expect(again.jobs.errors).toBe(0);
-      expect(await queues.state("REJUDGE", id("bull-validation"))).toBe("prioritized");
+      expect(await queues.state("isolate", "REJUDGE", id("bull-validation"))).toBe("prioritized");
     });
   });
 });

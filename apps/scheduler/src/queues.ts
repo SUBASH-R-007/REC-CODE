@@ -3,10 +3,11 @@ import type { Redis } from "ioredis";
 import type { Logger } from "pino";
 import {
   judgeJobOptions as sharedJudgeJobOptions,
-  QUEUE_NAME,
+  queueNameFor,
   progressChannel,
   progressEventSchema,
   type JobKind,
+  type JudgeEngine,
   type JudgeJobData,
   type JudgeLane,
   type ProgressEvent,
@@ -19,15 +20,23 @@ export function judgeJobOptions(lane: JudgeLane, id: string): JobsOptions {
   return sharedJudgeJobOptions(lane, id);
 }
 
-/** The slice of BullMQ the reconciler needs, so the decision path is testable without Redis. */
+/**
+ * The slice of BullMQ the reconciler needs, so the decision path is
+ * testable without Redis.
+ *
+ * Every method takes the ENGINE as well as the lane (Phase 12k): there are
+ * two families of queues, and a job put on the wrong one is claimed by a
+ * node that cannot run it. The reconciler reads the engine from the row it
+ * is reconciling rather than assuming.
+ */
 export interface JudgeQueuePort {
   /** Whether Redis is connected right now. False defers every enqueue to a later tick. */
   ready(): boolean;
   /** `Queue.getJobState()` — "unknown" when there is no such job. */
-  state(lane: JudgeLane, id: string): Promise<string>;
+  state(engine: JudgeEngine, lane: JudgeLane, id: string): Promise<string>;
   /** True when the job is gone afterwards (false: BullMQ refused, e.g. it is locked). */
-  remove(lane: JudgeLane, id: string): Promise<boolean>;
-  add(lane: JudgeLane, data: JudgeJobData): Promise<void>;
+  remove(engine: JudgeEngine, lane: JudgeLane, id: string): Promise<boolean>;
+  add(engine: JudgeEngine, lane: JudgeLane, data: JudgeJobData): Promise<void>;
   /** Live progress for an open submission/run page (best effort). */
   publish(kind: JobKind, id: string, event: ProgressEvent): Promise<void>;
   close(): Promise<void>;
@@ -42,15 +51,16 @@ export type EnsureOutcome = "kept" | "added" | "replaced" | "remove-refused";
  */
 export async function ensureJob(
   queues: JudgeQueuePort,
+  engine: JudgeEngine,
   lane: JudgeLane,
   data: JudgeJobData,
   dryRun: boolean,
 ): Promise<EnsureOutcome> {
-  const action = classifyJobState(await queues.state(lane, data.id));
+  const action = classifyJobState(await queues.state(engine, lane, data.id));
   if (action === "keep") return "kept";
   if (dryRun) return action === "add" ? "added" : "replaced";
-  if (action === "replace" && !(await queues.remove(lane, data.id))) return "remove-refused";
-  await queues.add(lane, data);
+  if (action === "replace" && !(await queues.remove(engine, lane, data.id))) return "remove-refused";
+  await queues.add(engine, lane, data);
   return action === "add" ? "added" : "replaced";
 }
 
@@ -61,7 +71,8 @@ export async function ensureJob(
  * same tick carries on regardless (Redis is transport, Postgres is truth).
  */
 export class BullJudgeQueues implements JudgeQueuePort {
-  private readonly queues = new Map<JudgeLane, Queue<JudgeJobData>>();
+  /** Keyed by queue NAME, because there are two families of them now. */
+  private readonly queues = new Map<string, Queue<JudgeJobData>>();
 
   /**
    * `prefix` is BullMQ's key prefix. Production uses BullMQ's default, as the
@@ -78,34 +89,35 @@ export class BullJudgeQueues implements JudgeQueuePort {
     return this.connection.status === "ready";
   }
 
-  private queue(lane: JudgeLane): Queue<JudgeJobData> {
-    let q = this.queues.get(lane);
+  private queue(engine: JudgeEngine, lane: JudgeLane): Queue<JudgeJobData> {
+    const name = queueNameFor(engine, lane);
+    let q = this.queues.get(name);
     if (!q) {
       // skipMetasUpdate: the web app owns queue metadata; the scheduler only
       // reads job state and re-adds jobs.
-      q = new Queue<JudgeJobData>(QUEUE_NAME[lane], {
+      q = new Queue<JudgeJobData>(name, {
         connection: this.connection,
         skipMetasUpdate: true,
         ...(this.prefix ? { prefix: this.prefix } : {}),
       });
       // An EventEmitter 'error' without a listener would crash the process.
-      q.on("error", (err) => this.log.warn({ err, queue: QUEUE_NAME[lane] }, "BullMQ queue error"));
-      this.queues.set(lane, q);
+      q.on("error", (err) => this.log.warn({ err, queue: name }, "BullMQ queue error"));
+      this.queues.set(name, q);
     }
     return q;
   }
 
-  state(lane: JudgeLane, id: string): Promise<string> {
-    return this.queue(lane).getJobState(id);
+  state(engine: JudgeEngine, lane: JudgeLane, id: string): Promise<string> {
+    return this.queue(engine, lane).getJobState(id);
   }
 
-  async remove(lane: JudgeLane, id: string): Promise<boolean> {
+  async remove(engine: JudgeEngine, lane: JudgeLane, id: string): Promise<boolean> {
     // 1 = removed, 0 = locked by a worker (left for the next tick).
-    return (await this.queue(lane).remove(id)) === 1;
+    return (await this.queue(engine, lane).remove(id)) === 1;
   }
 
-  async add(lane: JudgeLane, data: JudgeJobData): Promise<void> {
-    await this.queue(lane).add("judge", data, judgeJobOptions(lane, data.id));
+  async add(engine: JudgeEngine, lane: JudgeLane, data: JudgeJobData): Promise<void> {
+    await this.queue(engine, lane).add("judge", data, judgeJobOptions(lane, data.id));
   }
 
   /**
@@ -143,8 +155,8 @@ export class BullJudgeQueues implements JudgeQueuePort {
    * job is the number SPEC §10's "oldest job > 60s" rule means: how long
    * somebody has been waiting, not how long the job has existed.
    */
-  async depth(lane: JudgeLane): Promise<{ waiting: number; oldestAgeSeconds: number }> {
-    const queue = this.queue(lane);
+  async depth(engine: JudgeEngine, lane: JudgeLane): Promise<{ waiting: number; oldestAgeSeconds: number }> {
+    const queue = this.queue(engine, lane);
     const counts = await queue.getJobCounts("waiting", "delayed", "prioritized");
     const waiting = (counts.waiting ?? 0) + (counts.delayed ?? 0) + (counts.prioritized ?? 0);
     if (waiting === 0) return { waiting: 0, oldestAgeSeconds: 0 };

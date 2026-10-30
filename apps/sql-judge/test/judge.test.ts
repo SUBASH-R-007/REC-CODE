@@ -32,10 +32,21 @@ function spec(over: Partial<SqlJobSpec> = {}): SqlJobSpec {
     attempt: 1,
     dialect: "postgres17",
     source: "SELECT id FROM t ORDER BY id",
-    setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
     cases: [
-      { index: 0, visible: true, setup: null, expected: { sha256: EXPECTED.sha256, sizeBytes: EXPECTED.sizeBytes }, ordered: true },
-      { index: 1, visible: false, setup: null, expected: { sha256: EXPECTED.sha256, sizeBytes: EXPECTED.sizeBytes }, ordered: true },
+      {
+        index: 0,
+        visible: true,
+        setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
+        expected: { sha256: EXPECTED.sha256, sizeBytes: EXPECTED.sizeBytes },
+        ordered: true,
+      },
+      {
+        index: 1,
+        visible: false,
+        setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
+        expected: { sha256: EXPECTED.sha256, sizeBytes: EXPECTED.sizeBytes },
+        ordered: true,
+      },
     ],
     stopOnFirstFailure: true,
     statementTimeoutMs: SQL_LIMITS.statementTimeoutMs,
@@ -205,7 +216,13 @@ describe("what it refuses to judge at all", () => {
       judgeSqlJob(
         spec({
           cases: [
-            { index: 0, visible: true, setup: null, expected: { sha256: bad.sha256, sizeBytes: bad.sizeBytes }, ordered: true },
+            {
+              index: 0,
+              visible: true,
+              setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
+              expected: { sha256: bad.sha256, sizeBytes: bad.sizeBytes },
+              ordered: true,
+            },
           ],
         }),
         {

@@ -56,6 +56,9 @@ export interface JobSpecVersionRow {
   stopOnFirstFailure: boolean;
   timeLimitMs: number;
   memoryLimitKb: number;
+  /** SQL versions only (Phase 12k); null for every other io mode. */
+  sqlDialect?: "postgres17" | null;
+  sqlOrdered?: boolean | null;
 }
 
 export interface JobSpecSubtaskRow {

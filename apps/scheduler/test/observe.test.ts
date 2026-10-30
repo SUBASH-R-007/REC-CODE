@@ -1,5 +1,5 @@
 import type { Db } from "@recx/db";
-import { JUDGE_LANES, type JudgeLane } from "@recx/shared";
+import { JUDGE_ENGINES, JUDGE_LANES, type JudgeLane } from "@recx/shared";
 import type { Logger } from "pino";
 import { beforeEach, describe, expect, it } from "vitest";
 import { observeHeartbeats, observeQueue, renderMetrics } from "../src/metrics";
@@ -47,9 +47,16 @@ function queues(options: {
   return {
     asked,
     ready: () => options.ready ?? true,
-    depth: async (lane) => {
+    /**
+     * Phase 12k: a lane has one queue per engine. The fake answers the
+     * configured depth for the ISOLATE queue and an empty SQL one, so the
+     * sum the observer reports is the lane's number — and `asked` records
+     * the lane once per engine, which is what the observer does.
+     */
+    depth: async (engine, lane) => {
       asked.push(lane);
       if (options.throwOn === lane) throw new Error("Stream isn't writeable and enableOfflineQueue options is false");
+      if (engine !== "isolate") return { waiting: 0, oldestAgeSeconds: 0 };
       return options.depths?.[lane] ?? { waiting: 0, oldestAgeSeconds: 0 };
     },
   };
@@ -101,7 +108,10 @@ describe("the lanes", () => {
   it("asks every lane and publishes what it finds", async () => {
     const port = queues({ depths: { CONTEST: { waiting: 7, oldestAgeSeconds: 33 } } });
     await observeJudgeMetrics({ db: db([]), queues: port, log: logger().log, now: () => NOW });
-    expect(port.asked.sort()).toEqual([...JUDGE_LANES].sort());
+    // Phase 12k: every lane, once per engine — both families are read and
+    // summed into the lane's gauge.
+    expect([...new Set(port.asked)].sort()).toEqual([...JUDGE_LANES].sort());
+    expect(port.asked.length).toBe(JUDGE_LANES.length * JUDGE_ENGINES.length);
     expect(await depthOf("CONTEST")).toBe(7);
     expect(await ageOf("CONTEST")).toBe(33);
   });

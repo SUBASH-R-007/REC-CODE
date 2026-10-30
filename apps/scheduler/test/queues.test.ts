@@ -27,15 +27,15 @@ describe("ensureJob", () => {
 
   it("adds a missing job", async () => {
     const q = new FakeQueues();
-    expect(await ensureJob(q, "PRACTICE", data, false)).toBe("added");
-    expect(q.added).toEqual([{ lane: "PRACTICE", data }]);
+    expect(await ensureJob(q, "isolate", "PRACTICE", data, false)).toBe("added");
+    expect(q.added).toEqual([{ engine: "isolate", lane: "PRACTICE", data }]);
     expect(q.removed).toEqual([]);
   });
 
   it.each(["waiting", "prioritized", "delayed", "active"])("keeps a %s job", async (state) => {
     const q = new FakeQueues();
     q.setState("CONTEST", "sub_1", state);
-    expect(await ensureJob(q, "CONTEST", data, false)).toBe("kept");
+    expect(await ensureJob(q, "isolate", "CONTEST", data, false)).toBe("kept");
     expect(q.added).toEqual([]);
     expect(q.removed).toEqual([]);
   });
@@ -43,9 +43,9 @@ describe("ensureJob", () => {
   it.each(["completed", "failed"])("removes a %s job and adds it again", async (state) => {
     const q = new FakeQueues();
     q.setState("PRACTICE", "sub_1", state);
-    expect(await ensureJob(q, "PRACTICE", data, false)).toBe("replaced");
-    expect(q.removed).toEqual([{ lane: "PRACTICE", id: "sub_1" }]);
-    expect(q.added).toEqual([{ lane: "PRACTICE", data }]);
+    expect(await ensureJob(q, "isolate", "PRACTICE", data, false)).toBe("replaced");
+    expect(q.removed).toEqual([{ engine: "isolate", lane: "PRACTICE", id: "sub_1" }]);
+    expect(q.added).toEqual([{ engine: "isolate", lane: "PRACTICE", data }]);
     expect(q.stateOf("PRACTICE", "sub_1")).toBe("waiting");
   });
 
@@ -53,15 +53,15 @@ describe("ensureJob", () => {
     const q = new FakeQueues();
     q.setState("PRACTICE", "sub_1", "completed");
     q.locked.add("sub_1");
-    expect(await ensureJob(q, "PRACTICE", data, false)).toBe("remove-refused");
+    expect(await ensureJob(q, "isolate", "PRACTICE", data, false)).toBe("remove-refused");
     expect(q.added).toEqual([]);
   });
 
   it("only reads in a dry run", async () => {
     const q = new FakeQueues();
     q.setState("PRACTICE", "sub_1", "failed");
-    expect(await ensureJob(q, "PRACTICE", data, true)).toBe("replaced");
-    expect(await ensureJob(q, "PRACTICE", { kind: "submission", id: "sub_2" }, true)).toBe("added");
+    expect(await ensureJob(q, "isolate", "PRACTICE", data, true)).toBe("replaced");
+    expect(await ensureJob(q, "isolate", "PRACTICE", { kind: "submission", id: "sub_2" }, true)).toBe("added");
     expect(q.added).toEqual([]);
     expect(q.removed).toEqual([]);
   });

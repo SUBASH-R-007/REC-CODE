@@ -1,11 +1,13 @@
 import { Prisma, type Db, type DbTx } from "@recx/db";
 import {
+  JUDGE_ENGINES,
   JUDGE_LANES,
   JUDGE_NODE_STATUSES,
   LIMITS,
   SENSITIVE_LANES,
   jobKindSchema,
   type JobKind,
+  type JudgeEngine,
   type JudgeLane,
   type ProgressEvent,
 } from "@recx/shared";
@@ -140,6 +142,18 @@ const ENSURE_CONCURRENCY = 16;
  * from input. Only Submission has a lane column; the other kinds select NULL
  * and take their fixed lane from jobLane() (classify.ts).
  */
+/**
+ * Which engine judges a row (Phase 12k), as a correlated subquery rather
+ * than a second round trip: `ioMode = 'SQL'` means the postgres sandbox,
+ * anything else means an isolate box. A job put on the wrong family's
+ * queue is claimed by a node that cannot run it, so this is read from the
+ * row every tick rather than assumed.
+ */
+const ENGINE = Prisma.raw(
+  `(SELECT CASE WHEN pv."ioMode" = 'SQL' THEN 'postgres' ELSE 'isolate' END
+      FROM "ProblemVersion" pv WHERE pv.id = "problemVersionId")`,
+);
+
 const SOURCE: Record<JobKind, { table: Prisma.Sql; lane: Prisma.Sql; since: Prisma.Sql }> = {
   submission: { table: Prisma.raw(`"Submission"`), lane: Prisma.raw(`"lane"::text`), since: Prisma.raw(`"queuedAt"`) },
   run: { table: Prisma.raw(`"RunRequest"`), lane: Prisma.raw(`NULL::text`), since: Prisma.raw(`"createdAt"`) },
@@ -170,9 +184,11 @@ const LOCK_ROWS = Prisma.raw(`FOR UPDATE SKIP LOCKED`);
 
 // Raw rows are a trust boundary like any other: validate their shape.
 const laneSchema = z.enum(JUDGE_LANES);
+const engineSchema = z.enum(JUDGE_ENGINES);
 const queuedRowSchema = z.object({
   id: z.string(),
   lane: laneSchema.nullable(),
+  engine: engineSchema,
   attemptCount: z.number().int(),
   judgeState: z.string(),
   since: z.date(),
@@ -181,6 +197,7 @@ const queuedRowSchema = z.object({
 const leasedRowSchema = z.object({
   id: z.string(),
   lane: laneSchema.nullable(),
+  engine: engineSchema,
   attemptCount: z.number().int(),
   leaseExpiresAt: z.date().nullable(),
   claimedByNodeId: z.string().nullable(),
@@ -378,7 +395,8 @@ async function dispatchQueued(deps: ReconcilerDeps, kind: JobKind, report: TickR
         kind,
         z.array(queuedRowSchema).parse(
           await tx.$queryRaw<unknown[]>`
-            SELECT id, ${src.lane} AS lane, "attemptCount", "judgeState"::text AS "judgeState",
+            SELECT id, ${src.lane} AS lane, ${ENGINE} AS engine, "attemptCount",
+                   "judgeState"::text AS "judgeState",
                    ${src.since} AS since, ${DB_NOW} AS "dbNow"
             FROM ${src.table}
             WHERE status = 'QUEUED'
@@ -426,7 +444,8 @@ async function reclaimLeases(deps: ReconcilerDeps, kind: JobKind, report: TickRe
         kind,
         z.array(leasedRowSchema).parse(
           await tx.$queryRaw<unknown[]>`
-            SELECT id, ${src.lane} AS lane, "attemptCount", "leaseExpiresAt", "claimedByNodeId",
+            SELECT id, ${src.lane} AS lane, ${ENGINE} AS engine, "attemptCount",
+                   "leaseExpiresAt", "claimedByNodeId",
                    ${DB_NOW} AS "dbNow"
             FROM ${src.table}
             WHERE status = 'JUDGING'
@@ -646,11 +665,14 @@ async function publishAll(
   if (failure) log.warn({ err: failure.reason, kind, event: event.type }, "could not publish judge progress");
 }
 
-/** After commit: make sure every row has a live BullMQ job on its lane's queue. */
+/**
+ * After commit: make sure every row has a live BullMQ job on its own
+ * queue — its lane's, on its ENGINE's family (Phase 12k).
+ */
 async function ensureJobs(
   deps: ReconcilerDeps,
   kind: JobKind,
-  rows: ReadonlyArray<{ id: string; lane: JudgeLane }>,
+  rows: ReadonlyArray<{ id: string; lane: JudgeLane; engine: JudgeEngine }>,
   report: TickReport,
 ): Promise<void> {
   if (rows.length === 0) return;
@@ -663,7 +685,7 @@ async function ensureJobs(
   let firstError: unknown = null;
   await forEachLimit(rows, ENSURE_CONCURRENCY, async (row) => {
     try {
-      const outcome = await ensureJob(queues, row.lane, { kind, id: row.id }, deps.dryRun ?? false);
+      const outcome = await ensureJob(queues, row.engine, row.lane, { kind, id: row.id }, deps.dryRun ?? false);
       if (outcome === "kept") report.jobs.kept++;
       else if (outcome === "added") report.jobs.added++;
       else if (outcome === "replaced") report.jobs.replaced++;

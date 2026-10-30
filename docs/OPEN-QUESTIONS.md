@@ -3198,3 +3198,51 @@ here. And the development seed registers one judge node, so an isolate
 worker and a SQL judge have not yet heartbeaten side by side; the
 `JudgeNode` row's `driver` column shows whichever beat last, which is fine
 in development and would not be on a real fleet.
+
+## A SQL problem is a `TestCase` with different bytes in it (Phase 12k, slice 3)
+
+**No new table, and that was the design's whole bet.** A `TestCase`
+already carries an input blob and an output blob. For a SQL problem those
+are the case's dataset and its expected result set — same immutability,
+same sha256 discipline, same bundle, same blob route. Reusing them is why
+`Submission` needed no column, and so why XP, the leaderboard, contests,
+assessments and rejudges needed no change at all. The alternative — a
+`SqlProblem` table beside `Problem` — would have been quicker to write and
+would have left every one of those features with a second case to handle.
+
+**`sqlOrdered` is per version, not per case.** The wire carries it per
+case because the judge has no opinion about where it came from, but the
+model has one value: ordering is a property of the QUESTION, and a problem
+whose second case silently changed the rule would be a problem nobody
+could answer twice.
+
+**SQL is a language the student writes in, and not a toolchain.**
+`LANGUAGE_KEYS` describes `/opt/toolchains` directories, compile argv, run
+argv, process limits. A statement handed to a database has none of those,
+and the judge worker validates that a runtime points inside
+`/opt/toolchains`. So `sql17` is a `LanguageConfig` row whose runtime is a
+`SqlRuntime` — five fields that say which engine judges it — and nothing
+was invented to fit a shape that describes something else.
+
+**The engine is read from the row, not passed in.** There are five enqueue
+call sites and not one of them has the problem version in hand. A
+parameter would have been five chances to pass the wrong engine, and a SQL
+job on an isolate queue is a job an isolate node claims and cannot run; the
+cost of being right is one indexed lookup on the submit path. The
+scheduler's reconciler reads it the same way, as a `CASE WHEN` on the row
+it is already locking.
+
+**A lane's queue depth is now the sum of two queues.** The gauge is
+labelled by lane, and the metric contract and the alert rules are written
+against those labels, so the two engines' depths are summed and the older
+age reported. "Is anybody waiting too long on this lane" is still
+answerable; which engine they are waiting on is not, and a per-engine
+label is a change to the contract rather than to a line of code.
+
+**NOT RUN: nothing enqueues a SQL job yet.** The model holds one, the
+claim builds the spec, the queues are separate and the sandbox judges what
+it is given — but no page creates a SQL submission, because the authoring
+surface and the expected-result capture are the rest of slice 3. The
+end-to-end path (a TA writes a question, a student answers it, a verdict
+comes back) has therefore not run, and the gate row says so rather than
+implying a feature that is three commits from working.

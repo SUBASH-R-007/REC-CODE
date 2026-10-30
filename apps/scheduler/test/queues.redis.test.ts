@@ -45,16 +45,16 @@ describe.skipIf(!ENABLED)("BullJudgeQueues against Redis", () => {
 
   it("adds a missing job once, then keeps it", async () => {
     const data = { kind: "submission" as const, id: `${prefix}-a` };
-    expect(await queues.state("PRACTICE", data.id)).toBe("unknown");
-    expect(await ensureJob(queues, "PRACTICE", data, false)).toBe("added");
+    expect(await queues.state("isolate", "PRACTICE", data.id)).toBe("unknown");
+    expect(await ensureJob(queues, "isolate", "PRACTICE", data, false)).toBe("added");
     // A job with a priority sits in BullMQ's prioritized set.
-    expect(await queues.state("PRACTICE", data.id)).toBe("prioritized");
-    expect(await ensureJob(queues, "PRACTICE", data, false)).toBe("kept");
+    expect(await queues.state("isolate", "PRACTICE", data.id)).toBe("prioritized");
+    expect(await ensureJob(queues, "isolate", "PRACTICE", data, false)).toBe("kept");
   });
 
   it("replaces a completed job, which BullMQ would otherwise dedupe", async () => {
     const data = { kind: "run" as const, id: `${prefix}-b` };
-    await queues.add("RUN", data);
+    await queues.add("isolate", "RUN", data);
 
     const workerConn = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
     const worker = new Worker(QUEUE_NAME.RUN, async () => "ok", { connection: workerConn, prefix });
@@ -67,20 +67,20 @@ describe.skipIf(!ENABLED)("BullJudgeQueues against Redis", () => {
       await worker.close();
       await workerConn.quit();
     }
-    expect(await queues.state("RUN", data.id)).toBe("completed");
+    expect(await queues.state("isolate", "RUN", data.id)).toBe("completed");
 
-    expect(await ensureJob(queues, "RUN", data, true)).toBe("replaced");
-    expect(await queues.state("RUN", data.id)).toBe("completed"); // the dry run wrote nothing
+    expect(await ensureJob(queues, "isolate", "RUN", data, true)).toBe("replaced");
+    expect(await queues.state("isolate", "RUN", data.id)).toBe("completed"); // the dry run wrote nothing
 
-    expect(await ensureJob(queues, "RUN", data, false)).toBe("replaced");
-    expect(await queues.state("RUN", data.id)).toBe("prioritized");
+    expect(await ensureJob(queues, "isolate", "RUN", data, false)).toBe("replaced");
+    expect(await queues.state("isolate", "RUN", data.id)).toBe("prioritized");
   });
 
   it("carries a validation job on the REJUDGE queue with the shared options", async () => {
     const data = { kind: "validation" as const, id: `${prefix}-v` };
-    expect(await ensureJob(queues, "REJUDGE", data, false)).toBe("added");
-    expect(await queues.state("REJUDGE", data.id)).toBe("prioritized");
-    expect(await ensureJob(queues, "REJUDGE", data, false)).toBe("kept");
+    expect(await ensureJob(queues, "isolate", "REJUDGE", data, false)).toBe("added");
+    expect(await queues.state("isolate", "REJUDGE", data.id)).toBe("prioritized");
+    expect(await ensureJob(queues, "isolate", "REJUDGE", data, false)).toBe("kept");
 
     const inspect = new Queue(QUEUE_NAME.REJUDGE, { connection: conn, prefix });
     try {
@@ -107,7 +107,7 @@ describe.skipIf(!ENABLED)("BullJudgeQueues against Redis", () => {
      * ASSESSMENT is used because no other test in this file touches it.
      */
     const lane = "ASSESSMENT" as const;
-    expect(await queues.depth(lane)).toEqual({ waiting: 0, oldestAgeSeconds: 0 });
+    expect(await queues.depth("isolate", lane)).toEqual({ waiting: 0, oldestAgeSeconds: 0 });
 
     // Added through a raw Queue so the arrival time can be backdated: the
     // age has to come from the job's own timestamp, not from "now".
@@ -119,9 +119,9 @@ describe.skipIf(!ENABLED)("BullJudgeQueues against Redis", () => {
         priority: LANE_PRIORITY.ASSESSMENT,
         timestamp: Date.now() - 300_000,
       });
-      expect(await queues.state(lane, old.id), "priorities do not queue in `waiting`").toBe("prioritized");
+      expect(await queues.state("isolate", lane, old.id), "priorities do not queue in `waiting`").toBe("prioritized");
 
-      const first = await queues.depth(lane);
+      const first = await queues.depth("isolate", lane);
       expect(first.waiting).toBe(1);
       expect(first.oldestAgeSeconds).toBeGreaterThan(290);
       expect(first.oldestAgeSeconds).toBeLessThan(360);
@@ -129,15 +129,15 @@ describe.skipIf(!ENABLED)("BullJudgeQueues against Redis", () => {
       // A retry waiting out its backoff is also a student waiting.
       const retry = { kind: "submission" as const, id: `${prefix}-depth-delayed` };
       await inspect.add("judge", retry, { jobId: retry.id, delay: 120_000 });
-      expect(await queues.state(lane, retry.id)).toBe("delayed");
+      expect(await queues.state("isolate", lane, retry.id)).toBe("delayed");
 
-      const second = await queues.depth(lane);
+      const second = await queues.depth("isolate", lane);
       expect(second.waiting, "delayed and prioritized both count").toBe(2);
       expect(second.oldestAgeSeconds, "the OLDEST of the three lists, not the last one read").toBeGreaterThan(290);
 
       await inspect.remove(old.id);
       await inspect.remove(retry.id);
-      expect(await queues.depth(lane)).toEqual({ waiting: 0, oldestAgeSeconds: 0 });
+      expect(await queues.depth("isolate", lane)).toEqual({ waiting: 0, oldestAgeSeconds: 0 });
     } finally {
       await inspect.close();
     }
