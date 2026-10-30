@@ -39,7 +39,8 @@ function leakyEntry(i: number, v = "AC") {
     input: `input-${i}`,
     expected: `expected-${i}`,
     diff: `diff-${i}`,
-    message: "secret",
+    message: `message-${i}`,
+    note: "secret",
   };
 }
 
@@ -79,7 +80,9 @@ describe("toStudentView — submissions", () => {
   it("never serialises hidden-test input, expected output, stdout, stderr or diff", () => {
     const json = JSON.stringify(toStudentView(submission()));
     for (const i of [2, 6]) {
-      for (const field of ["input", "expected", "stdout", "stderr", "diff"]) {
+      // `message` joined this list in Phase 12k: a visible case may carry
+      // the judge's sentence about it, and a hidden one may not.
+      for (const field of ["input", "expected", "stdout", "stderr", "diff", "message"]) {
         expect(json).not.toContain(`${field}-${i}`);
       }
     }
@@ -103,8 +106,9 @@ describe("toStudentView — submissions", () => {
       expected: "[0,1]\n",
       stdout: "stdout-0",
       stderr: "stderr-0",
+      message: "message-0",
     });
-    expect(second.sample).toEqual({ n: 2, input: "[3,2,4]\n6\n", expected: "[1,2]\n", stdout: "[1,2]\n", stderr: "" });
+    expect(second.sample).toEqual({ n: 2, input: "[3,2,4]\n6\n", expected: "[1,2]\n", stdout: "[1,2]\n", stderr: "", message: "message-1" });
   });
 
   it("truncates sample fields to 256 bytes with a visible marker", () => {

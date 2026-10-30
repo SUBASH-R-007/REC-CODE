@@ -3291,3 +3291,46 @@ notice, no read-only or one-statement sentence, and a WA that does not
 show which row differed (the judge sends that sentence for a visible case;
 the submission result compaction drops it). A student could answer one
 today through the real action, and the page would not help them do it.
+
+## A SQL answer is a result set (Phase 12k, slice 4)
+
+**The whole student surface follows from that one sentence.** A case's
+result is a dataset and two result sets, not three streams of text, so it
+is rendered as two tables; NULL is written as a word because `''` and NULL
+are different answers and a blank cell cannot say which; the Description
+tab states a query's own limit rather than a C++ time limit and a memory
+figure, neither of which describes a query; and there is no custom input,
+because a SQL question's input is the author's dataset.
+
+**The sentence a student reads is written once.** Every rule — the
+dialect, one statement, the read-only role, the timeout, the ordering, the
+refusals — is `SQL_NOTICES` / `SQL_REFUSALS` in `@recx/shared`, and a
+repository test refuses a second copy, including the dialect's own name
+anywhere in `apps/web/src`. Two copies of a sentence is one copy that goes
+stale, and the stale one is always the one on the screen.
+
+**Two channels were reused rather than invented.** The student's rows
+travel in the protocol's `stdout`, because a SQL submission's output IS a
+result set — so the rule that already drops a hidden case's stdout needed
+no new code at all. The judge's sentence travels in `TestResult.message`,
+which the protocol has carried since Phase 1 and the web boundary dropped
+on the floor; it is now kept for the indexes the VERSION marks as samples,
+read from the database rather than from the body a worker sent. A worker
+that marked a hidden case visible would otherwise be deciding what a
+student may read.
+
+**Clip by rows before cutting by bytes.** A visible case's stored field is
+capped at 4 KB and a result set may be 2,000 rows: JSON cut at a byte
+budget is not JSON, so a table would have arrived as unparseable text.
+Both sides are clipped to `SQL_DISPLAY_ROWS` first — by the judge for the
+student's rows, by `finalizeSubmission` for the expected ones — and the
+page says it is showing a prefix. Anything that still does not parse is
+shown as text rather than as an error where a result should be.
+
+**What this slice does NOT cover.** A SQL problem in a CONTEST or an
+ASSESSMENT: the arena and the attempt surface build their own language
+lists, which do not know about `sql17`, so such a problem offers a
+programming language and the submit action then refuses it — safe, and
+unusable. Nobody should place a SQL problem in a contest until that is
+built. The narrow-screen grammar is in the build as a lazy chunk but was
+not opened in a browser.

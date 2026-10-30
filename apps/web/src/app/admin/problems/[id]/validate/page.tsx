@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2, CircleAlert, Clock, Info, XCircle } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@recx/design";
-import { LANGUAGE_CATALOG, isLanguageKey } from "@recx/shared";
+import { submitLanguageLabel } from "@recx/shared";
 import { requirePageRole } from "@/lib/auth/guards";
 import { getValidationReport } from "@/server/queries/admin-problems";
 import { AutoRefresh } from "@/components/admin/auto-refresh";
@@ -31,7 +31,7 @@ const PHASE_TEXT: Record<string, string> = {
 };
 
 function languageLabel(key: string): string {
-  return isLanguageKey(key) ? LANGUAGE_CATALOG[key].label : key;
+  return submitLanguageLabel(key);
 }
 
 /**

@@ -165,6 +165,51 @@ has the version in hand, and a SQL job on an isolate queue is a job an
 isolate node claims and cannot run. The scheduler's reconciler reads it the
 same way, as a `CASE WHEN` on the row it is reconciling.
 
+**The student surface (slice 4).** A SQL answer is a result set, and the
+whole surface follows from that one sentence.
+
+*What a student may choose.* `getProblemWorkspace()` offers a SQL problem
+`sql17` and nothing else, and offers `sql17` for no other problem — one
+line, both halves. The submit action refuses the other pairing anyway, so
+offering a C++ option on a SQL question would be offering a door that is
+locked. The editor opens on the dialect's grammar (Monaco's own `sql`
+tokenizer, `@codemirror/lang-sql` with the PostgreSQL dialect under 768 px)
+and, when the author wrote no starter, on a comment.
+
+*What a student is told before they type.* Four chips over the editor —
+the dialect, one statement, read-only, the five-second limit — and the
+same rules in full sentences in the Description tab, which also states
+whether the row order is part of the answer and that column names are not
+compared. Every sentence is `SQL_NOTICES` in `@recx/shared`; a repository
+test refuses a second copy of any of them (and refuses the dialect's name
+appearing anywhere in `apps/web/src`). The Description tab shows a query's
+own limit rather than the C++ time limit and a memory figure, neither of
+which describes a query.
+
+*What a student is told afterwards.* A case has three blocks rather than
+three streams of text: the dataset, the expected rows and their own rows,
+the last two rendered as TABLES with NULL written as a word — `''` and
+NULL are different answers and a blank cell cannot say which. The judge's
+one sentence about the case sits above them ("the rows are right and the
+order is not — row 1 differs"), and for a failed query it is the
+database's own message.
+
+That sentence needed a channel, and it reuses the two that already exist
+rather than inventing one. The student's result set travels in the
+protocol's `stdout` — a SQL submission's output IS a result set — so the
+web boundary's existing rule drops it for every hidden case with no new
+code. The sentence travels in `TestResult.message`, which the protocol has
+carried since Phase 1 and the web boundary dropped; `compactTestResults`
+now keeps it, for the indexes the VERSION marks as samples, read from the
+database rather than from the body a worker sent. Both sides of a table
+are clipped to `SQL_DISPLAY_ROWS` before they are stored, because a
+visible-case field is capped in BYTES and JSON cut mid-string is not a
+result set any more.
+
+A SQL question also has no custom input — its input is the author's
+dataset — so the console's Custom input tab is absent rather than present
+and ignored, and `runCode` refuses one with a sentence.
+
 The three health concepts the fleet already has are re-meant rather than
 dropped: `hardening.ts` checks the CLUSTER at boot (not the application's
 database, the student role unprivileged, a member of nothing, unable to

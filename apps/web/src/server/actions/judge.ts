@@ -1,7 +1,17 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { LIMITS, isSqlLanguage, utf8Length, type JobKind, type LanguageKey } from "@recx/shared";
+import {
+  LIMITS,
+  SQL_LIMITS,
+  SQL_REFUSALS,
+  isSqlLanguage,
+  looksLikeMultipleStatements,
+  utf8Length,
+  type IoMode,
+  type JobKind,
+  type LanguageKey,
+} from "@recx/shared";
 import { functionSignatureSchema, supportsFunctionMode, validateFunctionInput, type FunctionSignature } from "@recx/shared/harness";
 import { requireActionUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -46,6 +56,7 @@ interface JudgeTarget {
   languageConfigId: string;
   sampleCount: number;
   totalCases: number;
+  ioMode: IoMode;
   /** FUNCTION problems: the live version signature (custom Run input is validated against it). */
   signature: FunctionSignature | null;
 }
@@ -96,7 +107,27 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
   const parsedSig =
     problem.liveVersion.ioMode === "FUNCTION" ? functionSignatureSchema.safeParse(problem.liveVersion.functionSignature) : null;
   const signature = parsedSig?.success ? parsedSig.data : null;
-  return { problemId: problem.id, versionId, languageConfigId: config.id, sampleCount, totalCases, signature };
+  return {
+    problemId: problem.id,
+    versionId,
+    languageConfigId: config.id,
+    sampleCount,
+    totalCases,
+    ioMode: problem.liveVersion.ioMode,
+    signature,
+  };
+}
+
+/**
+ * The two SQL rules a server can state before anything is queued
+ * (Phase 12k): one statement, and a length a query has no business
+ * exceeding. Neither is the fence — the sandbox refuses a second command
+ * outright and the role it runs as cannot write — but a student should
+ * read a sentence rather than wait for a verdict to learn it.
+ */
+function refuseBadSql(source: string): void {
+  if (utf8Length(source) > SQL_LIMITS.submissionBytes) throw new ValidationError(SQL_REFUSALS.tooLong);
+  if (looksLikeMultipleStatements(source)) throw new ValidationError(SQL_REFUSALS.multiple);
 }
 
 /**
@@ -127,6 +158,7 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
     const parsed = submitSolutionSchema.parse(input);
     const target = await loadTarget(parsed.slug, parsed.language);
     if (target.totalCases === 0) throw new ValidationError("This problem has no tests yet.");
+    if (target.ioMode === "SQL") refuseBadSql(parsed.source);
 
     const sourceSha256 = createHash("sha256").update(parsed.source, "utf8").digest("hex");
     const sourceBytes = utf8Length(parsed.source);
@@ -169,6 +201,13 @@ export async function runCode(input: RunCodeInput): Promise<ActionResult<{ id: s
     const user = await requireActionUser();
     const parsed = runCodeSchema.parse(input);
     const target = await loadTarget(parsed.slug, parsed.language);
+    if (target.ioMode === "SQL") {
+      refuseBadSql(parsed.source);
+      // A SQL question's input IS its dataset, and the author's datasets
+      // are what the question means, so there is nothing to type here.
+      if (parsed.customInput !== null) throw new ValidationError(SQL_REFUSALS.customInput);
+      if (target.sampleCount === 0) throw new ValidationError(SQL_REFUSALS.noSampleCase);
+    }
     if (parsed.customInput === null && target.sampleCount === 0) {
       throw new ValidationError("This problem has no sample tests. Run it with custom input instead.");
     }

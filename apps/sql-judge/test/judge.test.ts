@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { JUDGE_PROTOCOL_VERSION, SQL_LIMITS, type SqlJobSpec, type SqlResultSet } from "@recx/shared";
+import { JUDGE_PROTOCOL_VERSION, SQL_DISPLAY_ROWS, SQL_LIMITS, type SqlJobSpec, type SqlResultSet } from "@recx/shared";
 import { PermanentJudgeError } from "../src/errors";
 import { judgeSqlJob, type SandboxLike } from "../src/judge";
 import { silentLogger } from "../src/logger";
@@ -305,5 +305,68 @@ describe("what it refuses to judge at all", () => {
         logger: silentLogger(),
       }),
     ).rejects.toThrow(/digest/);
+  });
+});
+
+/**
+ * Phase 12k, slice 4. A SQL submission's OUTPUT is a result set, so the
+ * rows a visible case produced travel in `stdout` — the protocol's channel
+ * for a visible case's output, which the web boundary already drops for
+ * every hidden one.
+ */
+describe("what the student's query returned", () => {
+  const judge = (sandbox: SandboxLike, over?: Partial<SqlJobSpec>) =>
+    judgeSqlJob(spec(over), { sandbox, readBlob, logger: silentLogger() });
+
+  const mine: SqlResultSet = { columns: ["id"], rows: [["2"], ["1"]] };
+
+  it("reports the rows of a visible case, and none of a hidden one", async () => {
+    const outcome = await judge(sandboxThat(ok(expected)), { stopOnFirstFailure: false });
+    const [visible, hidden] = outcome.tests;
+    expect(JSON.parse(visible!.stdout!)).toEqual({ columns: ["id"], rows: [["1"], ["2"]] });
+    expect(hidden!.stdout).toBeUndefined();
+  });
+
+  it("reports them for a wrong answer too, which is when they are read", async () => {
+    const outcome = await judge(sandboxThat(ok(mine)));
+    expect(outcome.verdict).toBe("WA");
+    expect(JSON.parse(outcome.tests[0]!.stdout!)).toEqual({ columns: ["id"], rows: [["2"], ["1"]] });
+    expect(outcome.tests[0]!.message).toContain("row 1 differs");
+  });
+
+  it("sends none for a case whose query never produced a result set", async () => {
+    const outcome = await judge(sandboxThat({ kind: "timeout", ms: SQL_LIMITS.statementTimeoutMs }));
+    expect(outcome.tests[0]!.v).toBe("TLE");
+    expect(outcome.tests[0]!.stdout).toBeUndefined();
+  });
+
+  it("clips a long result set to the rows a page shows", async () => {
+    const long: SqlResultSet = { columns: ["id"], rows: Array.from({ length: 500 }, (_, i) => [String(i)]) };
+    const outcome = await judge(sandboxThat(ok(long)));
+    const sent = JSON.parse(outcome.tests[0]!.stdout!) as SqlResultSet & { truncated?: boolean };
+    expect(sent.rows).toHaveLength(SQL_DISPLAY_ROWS);
+    expect(sent.truncated).toBe(true);
+  });
+
+  it("sends none on a capture run: there is no student, and the rows ARE the answer", async () => {
+    const outcome = await judgeSqlJob(
+      spec({
+        kind: "validation",
+        id: "val-1",
+        capture: true,
+        cases: [
+          {
+            index: 0,
+            visible: true,
+            setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
+            expected: null,
+            ordered: true,
+          },
+        ],
+      }),
+      { sandbox: sandboxThat(ok(expected)), readBlob, logger: silentLogger() },
+    );
+    expect(outcome.sqlCaptured).toHaveLength(1);
+    expect(outcome.tests[0]!.stdout).toBeUndefined();
   });
 });

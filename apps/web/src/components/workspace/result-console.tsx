@@ -50,6 +50,12 @@ export const ResultConsole = forwardRef<
     custom: CustomInputState;
     onCustomChange: (next: CustomInputState) => void;
     customHint: string;
+    /**
+     * False for a question that has no custom input to run against — a SQL
+     * question, whose input is the author's dataset (Phase 12k). The tab is
+     * then absent rather than present and ignored.
+     */
+    allowCustom?: boolean;
   }
 >(function ResultConsole(
   {
@@ -67,12 +73,15 @@ export const ResultConsole = forwardRef<
     custom,
     onCustomChange,
     customHint,
+    allowCustom = true,
   },
   headingRef,
 ) {
   const baseId = useId();
   const inputBytes = utf8Length(custom.text);
   const overLimit = inputBytes > MAX_CUSTOM_INPUT_BYTES;
+  const tabs = allowCustom ? TABS : TABS.filter((t) => t.value === "result");
+  const shown: ConsoleTab = allowCustom ? tab : "result";
 
   return (
     <section
@@ -103,18 +112,18 @@ export const ResultConsole = forwardRef<
           Console
         </h2>
         <div role="tablist" aria-label="Console view" className="flex gap-1 rounded-lg bg-background p-0.5">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.value}
               type="button"
               role="tab"
               id={`${baseId}-tab-${t.value}`}
-              aria-selected={tab === t.value}
+              aria-selected={shown === t.value}
               aria-controls={`${baseId}-panel-${t.value}`}
-              tabIndex={tab === t.value ? 0 : -1}
+              tabIndex={shown === t.value ? 0 : -1}
               onClick={() => onTabChange(t.value)}
               onKeyDown={(e) => {
-                if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                if (allowCustom && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
                   e.preventDefault();
                   const next: ConsoleTab = t.value === "result" ? "input" : "result";
                   onTabChange(next);
@@ -123,7 +132,7 @@ export const ResultConsole = forwardRef<
               }}
               className={cn(
                 "inline-flex h-(--ws-ctl-sm) items-center rounded-md px-2.5 text-xs font-medium transition-colors",
-                tab === t.value
+                shown === t.value
                   ? "bg-surface text-text shadow-sm"
                   : "text-text-secondary hover:bg-primary-subtle hover:text-text",
               )}
@@ -153,12 +162,12 @@ export const ResultConsole = forwardRef<
 
       <div
         role="tabpanel"
-        id={`${baseId}-panel-${tab}`}
-        aria-labelledby={`${baseId}-tab-${tab}`}
+        id={`${baseId}-panel-${shown}`}
+        aria-labelledby={`${baseId}-tab-${shown}`}
         tabIndex={0}
         className="scroll-thin min-h-0 flex-1 overflow-y-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
       >
-        {tab === "result" ? (
+        {shown === "result" ? (
           <ResultPanel target={target} sending={sending} stream={stream} sampleIndexes={sampleIndexes} />
         ) : (
           <div className="space-y-3">

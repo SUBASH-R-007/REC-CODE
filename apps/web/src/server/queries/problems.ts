@@ -4,12 +4,18 @@ import { cache } from "react";
 import { Prisma, type Difficulty } from "@recx/db";
 import {
   LANGUAGE_CATALOG,
+  SQL_LANGUAGE_KEY,
+  SQL_STARTER_CODE,
   functionSignatureSchema,
   isLanguageKey,
+  isSqlLanguage,
   isTopic,
+  submitEditorLanguage,
   type FunctionSignature,
   type IoMode,
   type LanguageKey,
+  type SqlDialect,
+  type SubmitLanguageKey,
   type Topic,
 } from "@recx/shared";
 import { starterStub, supportsFunctionMode } from "@recx/shared/harness";
@@ -246,7 +252,8 @@ export const listCatalogCompanies: () => Promise<CatalogCompany[]> = unstable_ca
 );
 
 export interface WorkspaceLanguage {
-  key: LanguageKey;
+  /** A toolchain key, or `sql17` for a SQL problem (Phase 12k). */
+  key: SubmitLanguageKey;
   /** LanguageConfig.label, e.g. "C++20 (GCC 13.2.0)". */
   label: string;
   /** LanguageConfig.version, the pinned toolchain's exact version (workspace footer, /judge). */
@@ -282,6 +289,9 @@ export interface ProblemWorkspace {
   constraints: string[];
   ioMode: IoMode;
   signature: FunctionSignature | null;
+  /** SQL problems only (Phase 12k): the dialect, and whether the row order is part of the answer. */
+  sqlDialect: SqlDialect | null;
+  sqlOrdered: boolean | null;
   timeLimitMs: number;
   memoryLimitKb: number;
   samples: WorkspaceSample[];
@@ -333,6 +343,8 @@ interface WorkspaceContent {
   constraints: string[];
   ioMode: IoMode;
   signature: FunctionSignature | null;
+  sqlDialect: SqlDialect | null;
+  sqlOrdered: boolean | null;
   timeLimitMs: number;
   memoryLimitKb: number;
   samples: WorkspaceSample[];
@@ -376,6 +388,8 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
         constraints: true,
         ioMode: true,
         functionSignature: true,
+        sqlDialect: true,
+        sqlOrdered: true,
         timeLimitMs: true,
         memoryLimitKb: true,
         starterCodes: { select: { language: true, code: true } },
@@ -407,6 +421,8 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       constraints: asConstraints(version.constraints),
       ioMode: version.ioMode,
       signature,
+      sqlDialect: version.sqlDialect,
+      sqlOrdered: version.sqlOrdered,
       timeLimitMs: version.timeLimitMs,
       memoryLimitKb: version.memoryLimitKb,
       samples: version.testCases.map((t) => ({
@@ -417,7 +433,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       starters: version.starterCodes.map((s) => ({ language: s.language, code: s.code })),
     };
   },
-  ["problem-workspace", "v1"],
+  ["problem-workspace", "v2"],
 );
 
 /**
@@ -446,9 +462,29 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
   const starters = new Map(content.starters.map((s) => [s.language, s.code]));
   const sig = content.signature;
 
+  /**
+   * Phase 12k: a SQL problem offers SQL and nothing else, and no other
+   * problem offers SQL. Both halves of that are this one line, because a
+   * picker that offers C++ for a question answered with a SELECT is a
+   * picker that wastes a student's submission — and the submit action
+   * refuses the pairing anyway (`loadTarget`), so offering it would be
+   * offering a door that is locked.
+   */
+  const sql = content.ioMode === "SQL";
   const languages: WorkspaceLanguage[] = [];
   const functionUnavailable: ProblemWorkspace["functionUnavailable"] = [];
   for (const config of configs) {
+    if (sql !== isSqlLanguage(config.key)) continue;
+    if (sql) {
+      languages.push({
+        key: SQL_LANGUAGE_KEY,
+        label: config.label,
+        version: config.version,
+        editorLanguage: submitEditorLanguage(config.key),
+        starter: starters.get(SQL_LANGUAGE_KEY) ?? SQL_STARTER_CODE,
+      });
+      continue;
+    }
     if (!isLanguageKey(config.key)) continue;
     if (sig && !supportsFunctionMode(config.key)) {
       functionUnavailable.push({ key: config.key, label: config.label });
@@ -476,6 +512,8 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
     constraints: content.constraints,
     ioMode: content.ioMode,
     signature: sig,
+    sqlDialect: content.sqlDialect,
+    sqlOrdered: content.sqlOrdered,
     timeLimitMs: content.timeLimitMs,
     memoryLimitKb: content.memoryLimitKb,
     samples: content.samples,

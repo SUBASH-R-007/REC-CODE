@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { FUNCTION_COMPARATOR_DESCRIPTIONS, type FunctionSignature } from "@recx/shared";
+import {
+  FUNCTION_COMPARATOR_DESCRIPTIONS,
+  SQL_LIMITS,
+  SQL_NOTICES,
+  readResultSet,
+  type FunctionSignature,
+} from "@recx/shared";
+import { ResultSetTable } from "@/components/workspace/result-set";
 import type { ProblemWorkspace } from "@/server/queries/problems";
 
 /** How a FUNCTION problem's samples are read, by comparator. */
@@ -77,20 +84,72 @@ function SampleBlock({ title, text }: { title: string; text: string }) {
   );
 }
 
+/**
+ * How a SQL question is judged (Phase 12k), in full sentences.
+ *
+ * Everything here is a rule a student can be wrong about without their
+ * query being wrong: the dialect, one statement, the read-only role,
+ * whether the row order counts, and that column names are not compared.
+ * The editor carries the first three as chips; this is where they are
+ * explained, because this pane has room and the editor does not.
+ */
+function SqlJudgingNotes({ ordered }: { ordered: boolean }) {
+  const notes = [
+    SQL_NOTICES.dialect,
+    SQL_NOTICES.oneStatement,
+    SQL_NOTICES.readOnly,
+    ordered ? SQL_NOTICES.ordered : SQL_NOTICES.unordered,
+    SQL_NOTICES.columnNames,
+    SQL_NOTICES.timeout,
+  ];
+  return (
+    <section aria-labelledby="problem-sql-rules">
+      <h2 id="problem-sql-rules" className="font-display text-base font-semibold">
+        How your query is judged
+      </h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-secondary">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** A SQL sample's expected side: the rows as a table, or the text as it came. */
+function SqlSampleOutput({ text }: { text: string }) {
+  const resultSet = readResultSet(text);
+  if (!resultSet) return <SampleBlock title="Expected rows" text={text} />;
+  return <ResultSetTable title="Expected rows" resultSet={resultSet} />;
+}
+
 export function ProblemDescription({ problem, statementHtml }: { problem: ProblemWorkspace; statementHtml: string }) {
+  const sql = problem.ioMode === "SQL";
   return (
     <article aria-label="Problem description" className="space-y-6">
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
-        <span>
-          Time limit <span className="font-medium text-text">{formatSeconds(problem.timeLimitMs)}</span> (C++;{" "}
-          <Link href="/judge#time-limits" className="text-primary underline underline-offset-2">
-            scaled for other languages
-          </Link>
-          )
-        </span>
-        <span>
-          Memory <span className="font-medium text-text">{formatMb(problem.memoryLimitKb)}</span>
-        </span>
+        {sql ? (
+          // A query's limit is the database's statement timeout, and its
+          // memory is the server's business (work_mem spills to disk), so
+          // neither the C++ time limit nor a memory figure describes it.
+          <span>
+            Query limit{" "}
+            <span className="font-medium text-text">{formatSeconds(SQL_LIMITS.statementTimeoutMs)}</span>
+          </span>
+        ) : (
+          <>
+            <span>
+              Time limit <span className="font-medium text-text">{formatSeconds(problem.timeLimitMs)}</span> (C++;{" "}
+              <Link href="/judge#time-limits" className="text-primary underline underline-offset-2">
+                scaled for other languages
+              </Link>
+              )
+            </span>
+            <span>
+              Memory <span className="font-medium text-text">{formatMb(problem.memoryLimitKb)}</span>
+            </span>
+          </>
+        )}
       </p>
       {problem.functionUnavailable.length > 0 && (
         <p className="text-xs text-text-secondary">
@@ -101,6 +160,8 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
 
       {/* Sanitised on the server by renderMarkdown() — allow-listed tags only. */}
       <div className={STATEMENT_CLASSES} dangerouslySetInnerHTML={{ __html: statementHtml }} />
+
+      {sql && <SqlJudgingNotes ordered={problem.sqlOrdered === true} />}
 
       {problem.constraints.length > 0 && (
         <section aria-labelledby="problem-constraints">
@@ -125,8 +186,19 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
             <div key={sample.index} className="space-y-2">
               <h3 className="text-sm font-semibold">Sample {k + 1}</h3>
               <div className="grid gap-2 xl:grid-cols-2">
-                <SampleBlock title="Input" text={labelledLines(sample.input, problem.signature)} />
-                <SampleBlock title="Output" text={sample.output} />
+                {sql ? (
+                  <>
+                    {/* The dataset the query runs against: the tables, and
+                        the rows in them, exactly as the sandbox builds them. */}
+                    <SampleBlock title="Dataset" text={sample.input} />
+                    <SqlSampleOutput text={sample.output} />
+                  </>
+                ) : (
+                  <>
+                    <SampleBlock title="Input" text={labelledLines(sample.input, problem.signature)} />
+                    <SampleBlock title="Output" text={sample.output} />
+                  </>
+                )}
               </div>
             </div>
           ))}

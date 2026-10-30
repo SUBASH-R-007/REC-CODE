@@ -3,13 +3,12 @@ import { cache } from "react";
 import { z } from "zod";
 import { Prisma, type Difficulty, type ProfileVisibility, type User } from "@recx/db";
 import {
-  LANGUAGE_CATALOG,
   TOPICS,
   TOPIC_LABEL,
   campusDay,
   effectiveStreak,
-  isLanguageKey,
   levelProgress,
+  submitLanguageLabel,
   type LevelProgress,
   type Topic,
 } from "@recx/shared";
@@ -218,8 +217,9 @@ export interface OwnProfile extends ProfileCore {
 
 /** "C++20 (GCC 13.2.0)" → "C++20". */
 export function languageLabel(key: string): string {
-  if (!isLanguageKey(key)) return key;
-  return LANGUAGE_CATALOG[key].label.split(" (")[0] ?? key;
+  // `sql17` is a language a student submits in and not a toolchain, so
+  // the label comes from the one function that knows both (Phase 12k).
+  return submitLanguageLabel(key).split(" (")[0] ?? key;
 }
 
 export function languageShares(languageCounts: unknown): LanguageShare[] {

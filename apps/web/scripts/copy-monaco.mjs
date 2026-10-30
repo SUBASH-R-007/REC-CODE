@@ -21,7 +21,8 @@ try {
 
 const src = join(pkgDir, "min", "vs");
 const dest = join(here, "..", "public", "monaco", "vs");
-const KEEP_LANGUAGES = new Set(["cpp", "python", "java", "go", "kotlin", "javascript"]);
+// `sql` is Monaco's PostgreSQL-compatible SQL tokenizer (Phase 12k).
+const KEEP_LANGUAGES = new Set(["cpp", "python", "java", "go", "kotlin", "javascript", "sql"]);
 
 rmSync(dest, { recursive: true, force: true });
 mkdirSync(dest, { recursive: true });

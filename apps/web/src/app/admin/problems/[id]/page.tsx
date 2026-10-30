@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AlertTriangle, CircleAlert, Info } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@recx/design";
-import { LANGUAGE_CATALOG, isLanguageKey } from "@recx/shared";
+import { submitLanguageLabel } from "@recx/shared";
 import { CONTENT_ORIGIN_LABEL } from "@recx/shared/authoring";
 import { requirePageRole } from "@/lib/auth/guards";
 import { renderMarkdown } from "@/lib/markdown";
@@ -45,7 +45,7 @@ const STATEMENT_CLASSES = [
 ].join(" ");
 
 function languageLabel(key: string): string {
-  return isLanguageKey(key) ? LANGUAGE_CATALOG[key].label : key;
+  return submitLanguageLabel(key);
 }
 
 /**

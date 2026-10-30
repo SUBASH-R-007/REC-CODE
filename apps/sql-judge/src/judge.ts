@@ -3,6 +3,7 @@ import {
   compareResultSets,
   parseExpectedResultSet,
   sqlCaseMessage,
+  writeResultSet,
   type BlobRef,
   type SqlCaseSpec,
   type SqlJobSpec,
@@ -150,6 +151,19 @@ export async function judgeSqlJob(
     // that cannot parse never reads one.
     let verdict = judged.verdict;
     let message = judged.message;
+    /**
+     * What the student's query actually returned, for a case they can see
+     * (Phase 12k, slice 4). It travels in `stdout`, which is the protocol's
+     * channel for a visible case's output and is already dropped for every
+     * hidden one at the web boundary — a SQL submission's output IS a result
+     * set, so that is what goes in it. Clipped to the rows a page shows,
+     * because a stored visible-case field is capped in BYTES and JSON cut
+     * mid-string is no longer a result set.
+     */
+    let stdout: string | undefined;
+    if (outcome.kind === "ok" && testCase.visible && !spec.capture) {
+      stdout = writeResultSet(outcome.result);
+    }
     if (outcome.kind === "ok" && spec.capture) {
       // Nothing to compare against: this run is what creates it.
       if (outcome.result.truncated) {
@@ -205,6 +219,7 @@ export async function judgeSqlJob(
       v: verdict,
       ms,
       kb: 0,
+      ...(stdout ? { stdout } : {}),
       ...(message ? { message: message.slice(0, 512) } : {}),
     });
     if (verdict === "AC") passed += 1;

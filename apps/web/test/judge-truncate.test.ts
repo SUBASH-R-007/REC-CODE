@@ -62,6 +62,32 @@ describe("compactTestResults", () => {
       { i: 2, v: "AC", ms: 12, kb: 2048 },
     ]);
   });
+
+  /**
+   * Phase 12k. The judge's one sentence about a case — which row differs,
+   * or the database's own words for a query that failed — is kept for a
+   * case the student can already see, and dropped for every other one.
+   */
+  it("keeps the judge's message for a visible case only", () => {
+    const tests = [
+      result(0, { message: "Row 1 differs." }),
+      result(1, { message: "The query failed on a hidden dataset." }),
+    ];
+    expect(compactTestResults(tests, new Set([0]))).toEqual([
+      { i: 0, v: "AC", ms: 10, kb: 2048, message: "Row 1 differs." },
+      { i: 1, v: "AC", ms: 11, kb: 2048 },
+    ]);
+  });
+
+  it("drops every message when no case is visible", () => {
+    const [entry] = compactTestResults([result(0, { message: "Row 1 differs." })]);
+    expect(entry).toEqual({ i: 0, v: "AC", ms: 10, kb: 2048 });
+  });
+
+  it("cuts a long message to 512 bytes", () => {
+    const [entry] = compactTestResults([result(0, { message: "x".repeat(5_000) })], new Set([0]));
+    expect(utf8Bytes(entry!.message!)).toBeLessThanOrEqual(512);
+  });
 });
 
 describe("buildSubmissionDetails", () => {

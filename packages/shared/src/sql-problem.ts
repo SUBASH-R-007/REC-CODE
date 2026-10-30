@@ -70,24 +70,43 @@ export interface SqlResultSet {
  * Bounded by the same limits the sandbox enforces, so a blob that could
  * not have come from a judged query is refused rather than compared.
  */
-export const sqlResultSetSchema = z
-  .object({
-    columns: z.array(z.string().max(128)).max(SQL_LIMITS.columns),
-    rows: z
-      .array(z.array(z.string().max(SQL_LIMITS.cellChars).nullable()).max(SQL_LIMITS.columns))
-      .max(SQL_LIMITS.rows),
-  })
+const resultSetShape = {
+  columns: z.array(z.string().max(128)).max(SQL_LIMITS.columns),
+  rows: z
+    .array(z.array(z.string().max(SQL_LIMITS.cellChars).nullable()).max(SQL_LIMITS.columns))
+    .max(SQL_LIMITS.rows),
+};
+
+/** Every row has one cell per column, or it is not a result set. */
+function checkRowWidths(
+  value: { columns: readonly string[]; rows: ReadonlyArray<ReadonlyArray<string | null>> },
+  ctx: z.RefinementCtx,
+): void {
+  const wrong = value.rows.findIndex((row) => row.length !== value.columns.length);
+  if (wrong !== -1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rows", wrong],
+      message: `Row ${wrong + 1} has ${value.rows[wrong]!.length} cells for ${value.columns.length} columns.`,
+    });
+  }
+}
+
+export const sqlResultSetSchema = z.object(resultSetShape).strict().superRefine(checkRowWidths);
+
+/**
+ * The same result set, for DISPLAY, where `truncated` is allowed.
+ *
+ * An EXPECTED result is never a prefix — a capture whose reference query
+ * ran past the row cap is refused outright — so the stored-blob schema
+ * above has no such field and a blob claiming one is not an expected
+ * result. What a page shows is a different thing: the first rows of what
+ * a student's query returned, which says so.
+ */
+export const sqlDisplayResultSetSchema = z
+  .object({ ...resultSetShape, truncated: z.boolean().optional() })
   .strict()
-  .superRefine((value, ctx) => {
-    const wrong = value.rows.findIndex((row) => row.length !== value.columns.length);
-    if (wrong !== -1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["rows", wrong],
-        message: `Row ${wrong + 1} has ${value.rows[wrong]!.length} cells for ${value.columns.length} columns.`,
-      });
-    }
-  });
+  .superRefine(checkRowWidths);
 
 /** Parse an expected-result blob. Throws with a readable message. */
 export function parseExpectedResultSet(json: unknown): SqlResultSet {
@@ -296,6 +315,9 @@ export const SQL_REFUSALS = Object.freeze({
   tooLong: `Keep the query under ${SQL_LIMITS.submissionBytes} characters.`,
   notSql: "That question is not a SQL question.",
   wrongDialect: `Only ${SQL_DIALECT_LABEL[SQL_DIALECT]} is judged here.`,
+  customInput:
+    "A SQL question runs against its own datasets, so there is no input to type. Run it to see your query against the sample dataset.",
+  noSampleCase: "That question has no sample dataset to run against. Submit your query instead.",
 });
 
 /** What a student is shown for a case: the sentence, or nothing if hidden. */
@@ -305,4 +327,78 @@ export function sqlCaseMessage(comparison: SqlComparison, visible: boolean): str
   // Hidden cases say which row, and never what was in it — the same rule
   // as hidden stdout, which is dropped at the web boundary.
   return comparison.row ? `Row ${comparison.row} differs.` : "The result set differs.";
+}
+
+// ── Showing a result set to a human (Phase 12k, slice 4) ───────────────
+
+/**
+ * Rows of a result set a student is shown.
+ *
+ * The judged cap is 2,000 rows, which is a sensible ceiling for a query
+ * and a useless thing to put on a screen: nobody reads row 1,300, and a
+ * stored visible-case detail is capped at 4 KB anyway, so a longer table
+ * would arrive cut in the middle of a JSON string and render as nothing.
+ * Both sides of the table — the answer and the student's own rows — are
+ * clipped to this before they are stored, so what is stored is always a
+ * result set that still parses.
+ */
+export const SQL_DISPLAY_ROWS = 20;
+
+/**
+ * The first `maxRows` rows, marked as a prefix when anything was dropped.
+ *
+ * `truncated` already means "there was more than this" (the sandbox sets
+ * it when a query exceeds the row cap), so a clipped table carries the
+ * same flag and the page says the same sentence for both.
+ */
+export function clipResultSet(resultSet: SqlResultSet, maxRows: number = SQL_DISPLAY_ROWS): SqlResultSet {
+  if (resultSet.rows.length <= maxRows) return resultSet;
+  return {
+    columns: resultSet.columns,
+    rows: resultSet.rows.slice(0, maxRows),
+    truncated: true,
+  };
+}
+
+/**
+ * A stored result set for DISPLAY: null rather than a throw.
+ *
+ * The page renders what it is given, and what it is given may be a blob
+ * written before this code existed, a value cut by a byte budget, or a
+ * plain string from a problem that is not a SQL problem at all. Every one
+ * of those is "no table here, show the text" — never an error boundary
+ * over a student's result.
+ */
+export function readResultSet(text: string | null | undefined): SqlResultSet | null {
+  if (typeof text !== "string" || text.trim().length === 0) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const parsed = sqlDisplayResultSetSchema.safeParse(json);
+  return parsed.success ? parsed.data : null;
+}
+
+/** JSON for storage, clipped for display first. */
+export function writeResultSet(resultSet: SqlResultSet, maxRows: number = SQL_DISPLAY_ROWS): string {
+  const clipped = clipResultSet(resultSet, maxRows);
+  return JSON.stringify({
+    columns: [...clipped.columns],
+    rows: clipped.rows.map((row) => [...row]),
+    ...(clipped.truncated ? { truncated: true } : {}),
+  });
+}
+
+/** "2 columns, 3 rows" — the table's caption and its accessible name. */
+export function describeResultSet(resultSet: SqlResultSet): string {
+  const columns = `${resultSet.columns.length} column${resultSet.columns.length === 1 ? "" : "s"}`;
+  const rows = `${resultSet.rows.length} row${resultSet.rows.length === 1 ? "" : "s"}`;
+  return resultSet.truncated ? `${columns}, first ${rows}` : `${columns}, ${rows}`;
+}
+
+/** How a cell reads in a table: SQL NULL is a word, not an empty box. */
+export function displayCell(cell: string | null): string {
+  return cell === null ? "NULL" : cell;
 }

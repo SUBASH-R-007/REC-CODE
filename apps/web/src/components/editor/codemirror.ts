@@ -105,6 +105,13 @@ async function languageSupport(id: string): Promise<Extension> {
       return (await import("@codemirror/lang-javascript")).javascript();
     case "go":
       return (await import("@codemirror/lang-go")).go();
+    // Phase 12k. The PostgreSQL dialect, because that is the only dialect
+    // judged here, and lower-case keywords because that is what a student
+    // typed: this grammar highlights, it does not rewrite.
+    case "sql": {
+      const mod = await import("@codemirror/lang-sql");
+      return mod.sql({ dialect: mod.PostgreSQL, upperCaseKeywords: false });
+    }
     default:
       return [];
   }

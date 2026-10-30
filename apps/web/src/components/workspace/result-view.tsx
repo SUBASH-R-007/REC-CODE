@@ -1,5 +1,6 @@
 import { VerdictBadge } from "@recx/design";
-import { FUNCTION_COMPARATOR_DESCRIPTIONS, type CompareMode } from "@recx/shared";
+import { FUNCTION_COMPARATOR_DESCRIPTIONS, readResultSet, type CompareMode } from "@recx/shared";
+import { ResultSetTable } from "@/components/workspace/result-set";
 import {
   formatMemoryKb,
   formatPoints,
@@ -69,6 +70,22 @@ export function OutputBlock({ title, text, tone }: { title: string; text: string
   );
 }
 
+/**
+ * One side of a SQL case: a table when the text is a result set, the plain
+ * block when it is not.
+ *
+ * The fallback is not defensive decoration. The dataset is SQL rather than
+ * a result set, a detail row written before Phase 12k holds whatever it
+ * held, and a value cut by a byte budget is no longer JSON — every one of
+ * those is "show the text", never an error where a student's result should
+ * be.
+ */
+function SqlBlock({ title, text, tone }: { title: string; text: string; tone?: "danger" }) {
+  const resultSet = readResultSet(text);
+  if (!resultSet) return <OutputBlock title={title} text={text} tone={tone} />;
+  return <ResultSetTable title={title} resultSet={resultSet} tone={tone} />;
+}
+
 /** "10 / 10 pts" for a PER_TEST problem; "? / 10 pts" when partial credit is not itemised. */
 function PointsLabel({ points }: { points: TestPointsView }) {
   const earned = points.earned === null ? "?" : formatPoints(points.earned);
@@ -80,7 +97,7 @@ function PointsLabel({ points }: { points: TestPointsView }) {
   );
 }
 
-function TestRow({ test, points }: { test: TestView; points?: TestPointsView | undefined }) {
+function TestRow({ test, points, rows }: { test: TestView; points?: TestPointsView | undefined; rows?: boolean }) {
   const metrics = (
     <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-xs text-text-secondary tabular-nums">
       {points && <PointsLabel points={points} />}
@@ -109,10 +126,29 @@ function TestRow({ test, points }: { test: TestView; points?: TestPointsView | u
           <VerdictBadge verdict={test.v} size="sm" />
           {metrics}
         </summary>
+        {/* What the judge said about THIS case: the row that differs, or the
+            database's own message for a failed query (visible cases only —
+            a hidden case's message never leaves the web boundary). */}
+        {sample.message && <p className="mt-2 text-xs text-text-secondary">{sample.message}</p>}
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {sample.input !== null && <OutputBlock title="Input" text={sample.input} />}
-          {sample.expected !== null && <OutputBlock title="Expected output" text={sample.expected} />}
-          {sample.stdout !== null && <OutputBlock title="Your output" text={sample.stdout} />}
+          {sample.input !== null &&
+            (rows ? (
+              <OutputBlock title="Dataset" text={sample.input} />
+            ) : (
+              <OutputBlock title="Input" text={sample.input} />
+            ))}
+          {sample.expected !== null &&
+            (rows ? (
+              <SqlBlock title="Expected rows" text={sample.expected} />
+            ) : (
+              <OutputBlock title="Expected output" text={sample.expected} />
+            ))}
+          {sample.stdout !== null &&
+            (rows ? (
+              <SqlBlock title="Your rows" text={sample.stdout} />
+            ) : (
+              <OutputBlock title="Your output" text={sample.stdout} />
+            ))}
           {sample.stderr ? <OutputBlock title="Error output (stderr)" text={sample.stderr} tone="danger" /> : null}
         </div>
       </details>
@@ -193,11 +229,21 @@ export function CompileOutput({ view }: { view: StudentView }) {
 }
 
 /** A plain list of test rows, with per-test points for PER_TEST problems. */
-function TestList({ tests, points, label }: { tests: TestView[]; points?: ReadonlyMap<number, TestPointsView>; label: string }) {
+function TestList({
+  tests,
+  points,
+  label,
+  rows,
+}: {
+  tests: TestView[];
+  points?: ReadonlyMap<number, TestPointsView>;
+  label: string;
+  rows?: boolean;
+}) {
   return (
     <ul className="divide-y divide-border rounded-xl border border-border" aria-label={label}>
       {tests.map((t) => (
-        <TestRow key={t.i} test={t} points={points?.get(t.i)} />
+        <TestRow key={t.i} test={t} points={points?.get(t.i)} rows={rows} />
       ))}
     </ul>
   );
@@ -212,10 +258,12 @@ function SubtaskResults({
   view,
   scoring,
   headingLevel,
+  rows,
 }: {
   view: SubmissionStudentView;
   scoring: ScoreView;
   headingLevel: 3 | 4;
+  rows?: boolean;
 }) {
   const Heading = headingLevel === 3 ? "h3" : "h4";
   const byIndex = new Map(view.tests.map((t) => [t.i, t]));
@@ -246,7 +294,7 @@ function SubtaskResults({
             {tests.length > 0 ? (
               <ul className="divide-y divide-border" aria-label={`${subtaskLabel(st.index)} tests`}>
                 {tests.map((t) => (
-                  <TestRow key={t.i} test={t} />
+                  <TestRow key={t.i} test={t} rows={rows} />
                 ))}
               </ul>
             ) : (
@@ -259,7 +307,7 @@ function SubtaskResults({
           </section>
         );
       })}
-      {others.length > 0 && <TestList tests={others} label="Other test results" />}
+      {others.length > 0 && <TestList tests={others} label="Other test results" rows={rows} />}
     </div>
   );
 }
@@ -267,13 +315,17 @@ function SubtaskResults({
 /** Per-test rows (grouped by subtask for SUBTASK problems). */
 export function TestResults({ view, headingLevel = 3 }: { view: StudentView; headingLevel?: 3 | 4 }) {
   const scoring = view.kind === "submission" ? view.scoring : null;
+  // ROWS is a SQL problem's compare mode, and the only signal this needs:
+  // the blocks of a case are a dataset and two result sets rather than
+  // three streams of text (Phase 12k).
+  const rows = view.compareMode === "ROWS";
   if (view.kind === "submission" && scoring?.mode === "SUBTASK" && view.verdict !== "CE") {
-    return <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} />;
+    return <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} rows={rows} />;
   }
   if (view.tests.length === 0) return null;
   if (scoring?.mode === "PER_TEST") {
     const points = new Map(scoring.testPoints.map((p) => [p.i, p]));
-    return <TestList tests={view.tests} points={points} label="Test results" />;
+    return <TestList tests={view.tests} points={points} label="Test results" rows={rows} />;
   }
-  return <TestList tests={view.tests} label="Test results" />;
+  return <TestList tests={view.tests} label="Test results" rows={rows} />;
 }

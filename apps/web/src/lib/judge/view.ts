@@ -51,6 +51,12 @@ export interface SampleDetail {
   expected: string | null;
   stdout: string | null;
   stderr: string | null;
+  /**
+   * The judge's one sentence about this case: which row differs, or the
+   * database's own message for a query that failed (Phase 12k). Stored for
+   * visible cases only, so a hidden test can never have one.
+   */
+  message: string | null;
 }
 
 export interface SampleTestView extends HiddenTestView {
@@ -228,6 +234,7 @@ const storedTestSchema = z.object({
   stderr: z.string().nullish().catch(null),
   input: z.string().nullish().catch(null),
   expected: z.string().nullish().catch(null),
+  message: z.string().nullish().catch(null),
 });
 type StoredTest = z.infer<typeof storedTestSchema>;
 
@@ -284,6 +291,7 @@ function sampleTest(t: StoredTest, n: number, fields: Omit<SampleDetail, "n">): 
       expected: clip(fields.expected, max),
       stdout: clip(fields.stdout, max),
       stderr: clip(fields.stderr, max),
+      message: clip(fields.message, 512),
     },
   };
 }
@@ -411,6 +419,7 @@ function submissionView(source: SubmissionViewSource): SubmissionStudentView {
       expected: detail?.expected ?? known.sample.expected,
       stdout: detail?.stdout ?? t.stdout ?? null,
       stderr: detail?.stderr ?? t.stderr ?? null,
+      message: t.message ?? null,
     });
   });
   return {
@@ -456,6 +465,7 @@ function runView(source: RunViewSource): RunStudentView {
       expected: t.expected ?? known.sample.expected,
       stdout: t.stdout ?? null,
       stderr: t.stderr ?? null,
+      message: t.message ?? null,
     });
   });
   return {

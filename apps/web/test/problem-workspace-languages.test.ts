@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LANGUAGE_CATALOG } from "@recx/shared";
+import { LANGUAGE_CATALOG, SQL_EDITOR_LANGUAGE, SQL_STARTER_CODE } from "@recx/shared";
 
 /**
  * getProblemWorkspace() hands each enabled language's pinned toolchain
@@ -61,6 +61,8 @@ function content(overrides: Record<string, unknown> = {}) {
     constraints: [],
     ioMode: "STDIN",
     functionSignature: null,
+    sqlDialect: null,
+    sqlOrdered: null,
     timeLimitMs: 1000,
     memoryLimitKb: 262_144,
     starterCodes: [],
@@ -122,6 +124,59 @@ describe("getProblemWorkspace languages", () => {
     // one with no access control over it at all.
     const select = h.version.mock.calls[0]?.[0]?.select as { testCases?: { where?: unknown } };
     expect(select.testCases?.where).toEqual({ isSample: true });
+  });
+
+  /**
+   * Phase 12k. A SQL problem is answered with SQL and nothing else, and no
+   * other problem is answered with SQL — the submit action refuses the
+   * other pairing anyway, so offering it would be offering a locked door.
+   */
+  const SQL_ROW = { key: "sql17", label: "PostgreSQL 17", version: "17.2" };
+
+  it("offers a SQL problem SQL alone, with the SQL grammar and starter", async () => {
+    h.problem.mockResolvedValue(pointer());
+    h.version.mockResolvedValue(content({ ioMode: "SQL", sqlDialect: "postgres17", sqlOrdered: true }));
+    h.languages.mockResolvedValue([
+      { key: "cpp20", label: "C++20 (GCC 13.2.0)", version: "13.2.0-pinned" },
+      SQL_ROW,
+    ]);
+
+    const workspace = await getProblemWorkspace("two-sum");
+
+    expect(workspace?.languages.map((l) => l.key)).toEqual(["sql17"]);
+    expect(workspace?.languages[0]?.label).toBe("PostgreSQL 17");
+    expect(workspace?.languages[0]?.editorLanguage).toBe(SQL_EDITOR_LANGUAGE);
+    expect(workspace?.languages[0]?.starter).toBe(SQL_STARTER_CODE);
+    // The ordering rule travels with it: the Description tab states it, and
+    // it is the one thing about a SQL answer only a human could decide.
+    expect(workspace?.sqlOrdered).toBe(true);
+    expect(workspace?.sqlDialect).toBe("postgres17");
+  });
+
+  it("uses the author's starter query when there is one", async () => {
+    h.problem.mockResolvedValue(pointer());
+    h.version.mockResolvedValue(
+      content({
+        ioMode: "SQL",
+        sqlDialect: "postgres17",
+        sqlOrdered: false,
+        starterCodes: [{ language: "sql17", code: "SELECT -- your columns here" }],
+      }),
+    );
+    h.languages.mockResolvedValue([SQL_ROW]);
+
+    const workspace = await getProblemWorkspace("two-sum");
+    expect(workspace?.languages[0]?.starter).toBe("SELECT -- your columns here");
+  });
+
+  it("never offers SQL for a problem that is not a SQL problem", async () => {
+    h.problem.mockResolvedValue(pointer());
+    h.version.mockResolvedValue(content());
+    h.languages.mockResolvedValue([{ key: "cpp20", label: "C++20 (GCC 13.2.0)", version: "13.2.0" }, SQL_ROW]);
+
+    const workspace = await getProblemWorkspace("two-sum");
+    expect(workspace?.languages.map((l) => l.key)).toEqual(["cpp20"]);
+    expect(workspace?.sqlDialect).toBeNull();
   });
 
   it("returns null for an unpublished or retired problem without reading its content", async () => {

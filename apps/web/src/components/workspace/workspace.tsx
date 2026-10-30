@@ -17,7 +17,15 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { Button, Dialog, EmptyState, Select, cn, useToast } from "@recx/design";
-import { VERDICT_LABEL, utf8Length, type LanguageKey } from "@recx/shared";
+import {
+  SQL_LIMITS,
+  SQL_REFUSALS,
+  VERDICT_LABEL,
+  isSqlLanguage,
+  looksLikeMultipleStatements,
+  utf8Length,
+  type SubmitLanguageKey,
+} from "@recx/shared";
 import { CodeEditor } from "@/components/editor/code-editor";
 import type { EditorPrefs } from "@/components/editor/editor-types";
 import {
@@ -33,6 +41,7 @@ import {
   type MobileTab,
 } from "@/components/workspace/layout";
 import { LanguageVersion } from "@/components/workspace/language-version";
+import { SqlNote } from "@/components/workspace/sql-note";
 import { ResultConsole, type ConsoleTab, type CustomInputState } from "@/components/workspace/result-console";
 import { RestoreBar } from "@/components/workspace/restore-bar";
 import { TabStrip, type TabStripItem } from "@/components/workspace/tab-strip";
@@ -105,7 +114,7 @@ export function Workspace({
   slug: string;
   languages: WorkspaceLanguage[];
   /** The language to open in (cookie preference, else the newest draft's). */
-  initialLanguage: LanguageKey | null;
+  initialLanguage: SubmitLanguageKey | null;
   /** The viewer's server CodeDrafts for this problem. */
   serverDrafts: InitialServerDraft[];
   sampleIndexes: number[];
@@ -146,6 +155,14 @@ export function Workspace({
   const { language, source } = drafts;
   const byKey = useMemo(() => new Map(languages.map((l) => [l.key, l])), [languages]);
   const active = language ? byKey.get(language) : undefined;
+  /**
+   * A SQL problem (Phase 12k). It is read from the ACTIVE language rather
+   * than passed in, because that is the same fact: a SQL problem offers
+   * `sql17` and nothing else, and no other problem offers it at all
+   * (`getProblemWorkspace`). Every surface that renders this workspace
+   * gets the SQL behaviour without being told about it.
+   */
+  const sql = active ? isSqlLanguage(active.key) : false;
   const [resetOpen, setResetOpen] = useState(false);
   const status = saveStatus(drafts.sync);
 
@@ -197,6 +214,10 @@ export function Workspace({
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [consoleTab, setConsoleTab] = useState<ConsoleTab>("result");
   const [custom, setCustom] = useState<CustomInputState>({ enabled: false, text: defaultCustomInput });
+  // A SQL question's input is its dataset, and the author's datasets are
+  // what the question means: there is nothing a student could type here,
+  // so the tab is not offered rather than offered and ignored.
+  const customOn = custom.enabled && !sql;
   const [announcement, setAnnouncement] = useState("");
 
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -285,8 +306,21 @@ export function Workspace({
 
   function preflight(): boolean {
     if (source.trim().length === 0) {
-      toast("Write some code first.", "warning");
+      toast(sql ? SQL_REFUSALS.empty : "Write some code first.", "warning");
       return false;
+    }
+    if (sql) {
+      // The same three refusals the server applies, said before a
+      // submission is spent rather than after it comes back.
+      if (utf8Length(source) > SQL_LIMITS.submissionBytes) {
+        toast(SQL_REFUSALS.tooLong, "error");
+        return false;
+      }
+      if (looksLikeMultipleStatements(source)) {
+        toast(SQL_REFUSALS.multiple, "warning");
+        return false;
+      }
+      return true;
     }
     if (utf8Length(source) > MAX_SOURCE_BYTES) {
       toast("Your code is larger than 256 KB. Trim it down and try again.", "error");
@@ -314,7 +348,7 @@ export function Workspace({
 
   async function run() {
     if (!language || sending || !preflight()) return;
-    const customInput = custom.enabled ? custom.text : null;
+    const customInput = customOn ? custom.text : null;
     if (customInput !== null && utf8Length(customInput) > MAX_CUSTOM_INPUT_BYTES) {
       toast("Custom input is larger than 64 KB. Use a smaller input and try again.", "error");
       return;
@@ -414,7 +448,7 @@ export function Workspace({
             <Select
               id={`${baseId}-language`}
               value={language}
-              onChange={(e) => drafts.changeLanguage(e.target.value as LanguageKey)}
+              onChange={(e) => drafts.changeLanguage(e.target.value as SubmitLanguageKey)}
               className={cn(control, "rounded-lg! py-0! pl-2.5! text-sm")}
             >
               {languages.map((l) => (
@@ -468,7 +502,7 @@ export function Workspace({
               ) : (
                 <Play className="h-4 w-4" aria-hidden />
               )}
-              {custom.enabled ? "Run custom" : "Run"}
+              {customOn ? "Run custom" : "Run"}
             </Button>
             <Button size="sm" className={cn(control, busyClass)} onClick={submit} aria-disabled={sending !== null || undefined}>
               {sending === "submission" ? (
@@ -480,6 +514,8 @@ export function Workspace({
             </Button>
           </div>
         </div>
+
+        {sql && <SqlNote />}
 
         {drafts.offer && (
           <RestoreBar offer={drafts.offer} onRestore={drafts.applyOffer} onDismiss={drafts.dismissOffer} />
@@ -523,6 +559,7 @@ export function Workspace({
             custom={custom}
             onCustomChange={setCustom}
             customHint={customHint}
+            allowCustom={!sql}
           />
         </div>
 

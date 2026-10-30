@@ -1,6 +1,6 @@
 import "server-only";
 import type { Prisma, Role } from "@recx/db";
-import { LANGUAGE_CATALOG, isLanguageKey, type JobKind, type VerdictDisplay } from "@recx/shared";
+import { submitEditorLanguage, type JobKind, type VerdictDisplay } from "@recx/shared";
 import { isStaff } from "@/lib/auth/guards";
 import { findScopedStudent, loadStudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
@@ -169,7 +169,7 @@ export async function getSubmissionDetail(id: string, slug: string, viewer: View
     view,
     source,
     sourceWithheld,
-    editorLanguage: isLanguageKey(row.language) ? LANGUAGE_CATALOG[row.language].editorLanguage : "plaintext",
+    editorLanguage: submitEditorLanguage(row.language),
     sampleIndexes: row.problemVersion.testCases.filter((t) => t.isSample).map((t) => t.index),
     problem: { slug: row.problem.slug, title: row.problemVersion.title, displayCode: row.problem.displayCode },
     owner: own ? null : { firstName: row.user.firstName, lastName: row.user.lastName },

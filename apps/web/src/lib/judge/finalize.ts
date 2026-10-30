@@ -3,7 +3,9 @@ import type { DbTx, JudgeNode, Prisma } from "@recx/db";
 import {
   JUDGE_RETRY,
   LIMITS,
+  readResultSet,
   sanitizeToolOutput,
+  writeResultSet,
   type ReleaseRequest,
   type ResultRequest,
 } from "@recx/shared";
@@ -43,15 +45,37 @@ class StaleResultError extends Error {}
 const ACTIVE_JUDGE_STATES = ["DISPATCHED", "RUNNING"] as const;
 
 /** A visible blob as text, already cut to the per-field detail limit. */
-async function blobText(blob: { inline: string | null; storageKey: string | null }): Promise<string> {
-  if (blob.inline !== null) return truncateBytes(blob.inline, LIMITS.detail.perTestBytes);
+async function blobText(
+  blob: { inline: string | null; storageKey: string | null },
+  maxBytes: number = LIMITS.detail.perTestBytes,
+): Promise<string> {
+  if (blob.inline !== null) return truncateBytes(blob.inline, maxBytes);
   if (!blob.storageKey) return "";
   const bytes = await getTestDataStore().get(blob.storageKey);
-  return truncateBytes(bytes.toString("utf8"), LIMITS.detail.perTestBytes);
+  return truncateBytes(bytes.toString("utf8"), maxBytes);
+}
+
+/**
+ * How much of a SQL expected-result blob is read before it is clipped to
+ * the rows a page shows. A result set is JSON, and JSON cut at a byte
+ * budget is not JSON any more — so it is cut by ROWS first, and that
+ * cannot be done to text nobody has parsed yet.
+ */
+const SQL_EXPECTED_READ_BYTES = 1024 * 1024;
+
+/**
+ * The expected side of a SQL case, clipped to the rows a student is shown
+ * (Phase 12k). Text that is not a result set is returned as it came: a
+ * blob written before this existed, or one already cut, is shown as text
+ * rather than lost.
+ */
+function sqlExpectedForDisplay(text: string): string {
+  const resultSet = readResultSet(text);
+  return resultSet ? writeResultSet(resultSet) : truncateBytes(text, LIMITS.detail.perTestBytes);
 }
 
 /** Sample input / expected output of a (frozen) version — read outside any transaction. */
-async function loadSampleTexts(problemVersionId: string): Promise<SampleText[]> {
+async function loadSampleTexts(problemVersionId: string, sql = false): Promise<SampleText[]> {
   const samples = await db.testCase.findMany({
     where: { problemVersionId, isSample: true },
     orderBy: { index: "asc" },
@@ -62,7 +86,13 @@ async function loadSampleTexts(problemVersionId: string): Promise<SampleText[]> 
     },
   });
   return Promise.all(
-    samples.map(async (s) => ({ index: s.index, input: await blobText(s.input), expected: await blobText(s.output) })),
+    samples.map(async (s) => ({
+      index: s.index,
+      input: await blobText(s.input),
+      expected: sql
+        ? sqlExpectedForDisplay(await blobText(s.output, SQL_EXPECTED_READ_BYTES))
+        : await blobText(s.output),
+    })),
   );
 }
 
@@ -103,13 +133,21 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
     // `language` is read for `judge_verdict_total`'s label (Phase 10a). The
     // result body does not carry it, and versioning the judge protocol for a
     // metric label would be the wrong trade; this select already runs.
-    select: { problemVersionId: true, claimToken: true, language: true },
+    select: {
+      problemVersionId: true,
+      claimToken: true,
+      language: true,
+      problemVersion: { select: { ioMode: true } },
+    },
   });
   // Cheap early exit before any blob reads; the guarded update below is the real check.
   if (!head || head.claimToken !== body.claimToken) return "stale";
 
-  const details = buildSubmissionDetails(body.tests, await loadSampleTexts(head.problemVersionId));
-  const testResults = compactTestResults(body.tests);
+  const samples = await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode === "SQL");
+  const details = buildSubmissionDetails(body.tests, samples);
+  // The sample indexes of the VERSION decide which cases may carry the
+  // judge's message, so a worker cannot make a hidden case visible.
+  const testResults = compactTestResults(body.tests, new Set(samples.map((s) => s.index)));
   const judgedAt = new Date();
 
   try {
@@ -238,14 +276,24 @@ export async function finalizeRun(node: JudgeNode, body: ResultRequest): Promise
   const { id } = body;
   const head = await db.runRequest.findUnique({
     where: { id },
-    select: { problemVersionId: true, customInput: true, claimToken: true, userId: true, language: true },
+    select: {
+      problemVersionId: true,
+      customInput: true,
+      claimToken: true,
+      userId: true,
+      language: true,
+      problemVersion: { select: { ioMode: true } },
+    },
   });
   if (!head || head.claimToken !== body.claimToken) return "stale";
 
   const result =
     head.customInput !== null
       ? buildRunResult(body.tests, { kind: "custom" })
-      : buildRunResult(body.tests, { kind: "samples", samples: await loadSampleTexts(head.problemVersionId) });
+      : buildRunResult(body.tests, {
+          kind: "samples",
+          samples: await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode === "SQL"),
+        });
   const judgedAt = new Date();
 
   try {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LanguageKey } from "@recx/shared";
+import type { SubmitLanguageKey } from "@recx/shared";
 import { clearLegacyDraft, readLegacyDraft, rememberLanguage, sendDraftBeacon } from "@/lib/drafts/browser";
 import { idbGet, idbPut } from "@/lib/drafts/idb";
 import { LOCAL_DEBOUNCE_MS, SERVER_DEBOUNCE_MS, localDraftKey, serverRetryDelayMs } from "@/lib/drafts/keys";
@@ -27,12 +27,12 @@ import { saveDraft } from "@/server/actions/drafts";
  */
 
 export interface DraftLanguage {
-  key: LanguageKey;
+  key: SubmitLanguageKey;
   starter: string;
 }
 
 export interface InitialServerDraft {
-  language: LanguageKey;
+  language: SubmitLanguageKey;
   source: string;
   updatedAt: number;
 }
@@ -50,7 +50,7 @@ export interface RestoreOffer {
 }
 
 interface Snapshot {
-  language: LanguageKey;
+  language: SubmitLanguageKey;
   source: string;
   editedAt: number;
 }
@@ -74,17 +74,17 @@ export function useDrafts({
   slug: string;
   languages: readonly DraftLanguage[];
   serverDrafts: readonly InitialServerDraft[];
-  initialLanguage: LanguageKey | null;
+  initialLanguage: SubmitLanguageKey | null;
 }) {
   // Everything below reads its inputs once: router.refresh() re-renders the
   // page with fresh props, and none of that may disturb the open editor.
   const [starters] = useState(() => new Map(languages.map((l) => [l.key, l.starter])));
   const [serverCopies] = useState(
-    () => new Map<LanguageKey, DraftCopy>(serverDrafts.map((d) => [d.language, { source: d.source, updatedAt: d.updatedAt }])),
+    () => new Map<SubmitLanguageKey, DraftCopy>(serverDrafts.map((d) => [d.language, { source: d.source, updatedAt: d.updatedAt }])),
   );
-  const starterOf = useCallback((key: LanguageKey) => starters.get(key) ?? "", [starters]);
+  const starterOf = useCallback((key: SubmitLanguageKey) => starters.get(key) ?? "", [starters]);
 
-  const [language, setLanguage] = useState<LanguageKey | null>(initialLanguage);
+  const [language, setLanguage] = useState<SubmitLanguageKey | null>(initialLanguage);
   const [source, setSourceState] = useState(() =>
     initialLanguage ? (serverCopies.get(initialLanguage)?.source ?? starterOf(initialLanguage)) : "",
   );
@@ -107,12 +107,12 @@ export function useDrafts({
   });
   const timers = useRef<{ local?: ReturnType<typeof setTimeout>; server?: ReturnType<typeof setTimeout>; retry?: ReturnType<typeof setTimeout> }>({});
   const failures = useRef(0);
-  const inFlight = useRef(new Set<LanguageKey>());
-  const queued = useRef(new Map<LanguageKey, Snapshot>());
+  const inFlight = useRef(new Set<SubmitLanguageKey>());
+  const queued = useRef(new Map<SubmitLanguageKey, Snapshot>());
   const resolveToken = useRef(0);
   const lastBeacon = useRef<string | null>(null);
 
-  const setSyncFor = useCallback((key: LanguageKey, patch: Partial<DraftSync>) => {
+  const setSyncFor = useCallback((key: SubmitLanguageKey, patch: Partial<DraftSync>) => {
     if (live.current.language === key) setSync((s) => ({ ...s, ...patch }));
   }, []);
 
@@ -238,7 +238,7 @@ export function useDrafts({
 
   // ── Load: compare the device copy with the server copy ──────────────
   const resolveLocal = useCallback(
-    async (key: LanguageKey) => {
+    async (key: SubmitLanguageKey) => {
       const token = ++resolveToken.current;
       const raw = await idbGet(localDraftKey(problemId, key));
       if (token !== resolveToken.current || live.current.language !== key) return;
@@ -291,7 +291,7 @@ export function useDrafts({
   );
 
   const changeLanguage = useCallback(
-    (next: LanguageKey) => {
+    (next: SubmitLanguageKey) => {
       const l = live.current;
       if (!l.language || next === l.language || !starters.has(next)) return;
       // Save the outgoing language first (both reads happen synchronously).

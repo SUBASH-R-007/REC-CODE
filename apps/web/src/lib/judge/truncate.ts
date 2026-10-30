@@ -38,16 +38,39 @@ export interface CompactTestResult {
   v: Verdict;
   ms: number;
   kb: number;
+  /**
+   * The judge's one sentence about this case — the row that differs, or the
+   * database's own words for a query that failed (Phase 12k). Kept for a
+   * VISIBLE case only, and never present otherwise, which is the same rule
+   * as stdout one line down: a hidden case's message is dropped here even
+   * when a worker sent one.
+   */
+  message?: string;
 }
 
-/** One entry per test index (first wins), in index order, nothing but i/v/ms/kb. */
-export function compactTestResults(tests: readonly TestResult[]): CompactTestResult[] {
+/** 512 bytes, the protocol's own cap on a per-case message. */
+const MESSAGE_BYTES = 512;
+
+/**
+ * One entry per test index (first wins), in index order, nothing but
+ * i/v/ms/kb — plus, for a case in `visible`, the judge's message.
+ *
+ * `visible` is the set of sample indexes of the pinned version, from the
+ * database rather than from the worker's body: a worker that marked a
+ * hidden case visible would otherwise decide what a student may read.
+ */
+export function compactTestResults(
+  tests: readonly TestResult[],
+  visible: ReadonlySet<number> = new Set(),
+): CompactTestResult[] {
   const seen = new Set<number>();
   const out: CompactTestResult[] = [];
   for (const t of [...tests].sort((a, b) => a.i - b.i)) {
     if (seen.has(t.i)) continue;
     seen.add(t.i);
-    out.push({ i: t.i, v: t.v, ms: t.ms, kb: t.kb });
+    const entry: CompactTestResult = { i: t.i, v: t.v, ms: t.ms, kb: t.kb };
+    if (visible.has(t.i) && t.message) entry.message = truncateBytes(t.message, MESSAGE_BYTES);
+    out.push(entry);
   }
   return out;
 }
@@ -116,6 +139,8 @@ export interface RunResultEntry {
   stderr: string;
   input?: string;
   expected?: string;
+  /** The judge's sentence about this case (Phase 12k). Every case of a run is visible. */
+  message?: string;
 }
 
 /**
@@ -148,6 +173,7 @@ export function buildRunResult(
       entry.input = truncateBytes(sample.input, LIMITS.detail.perTestBytes);
       entry.expected = truncateBytes(sample.expected, LIMITS.detail.perTestBytes);
     }
+    if (t.message) entry.message = truncateBytes(t.message, MESSAGE_BYTES);
     out.push(entry);
   }
   return out;

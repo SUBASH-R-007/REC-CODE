@@ -1,5 +1,5 @@
 import "server-only";
-import { isLanguageKey, type LanguageKey } from "@recx/shared";
+import { isSubmitLanguage, type SubmitLanguageKey } from "@recx/shared";
 import { db } from "@/lib/db";
 import { clampClientTime, type DraftSave } from "@/lib/drafts/schema";
 import { NotFoundError, RateLimitError } from "@/lib/errors";
@@ -20,7 +20,7 @@ import { hitRateLimit } from "@/lib/rate-limit";
 export const DRAFT_SAVE_RATE_LIMIT = { limit: 60, windowMs: 60_000 } as const;
 
 export interface ServerDraft {
-  language: LanguageKey;
+  language: SubmitLanguageKey;
   source: string;
   /** Epoch ms of the edit that produced it (client clock, clamped on save). */
   updatedAt: number;
@@ -33,7 +33,7 @@ export async function loadServerDrafts(userId: string, problemId: string): Promi
     select: { language: true, source: true, clientUpdatedAt: true },
   });
   return rows.flatMap((row) =>
-    isLanguageKey(row.language)
+    isSubmitLanguage(row.language)
       ? [{ language: row.language, source: row.source, updatedAt: row.clientUpdatedAt.getTime() }]
       : [],
   );

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LANGUAGE_KEYS, SQL_LANGUAGE_KEY, LIMITS, utf8Length } from "@recx/shared";
+import { LIMITS, SUBMIT_LANGUAGE_KEYS, utf8Length, type SubmitLanguageKey } from "@recx/shared";
 
 /**
  * Input schemas for the workspace's Submit and Run actions. Pure (no I/O) so
@@ -39,7 +39,7 @@ export const slugSchema = z
  * here and refused by the submit action for any problem that is not a SQL
  * problem, which is where the version is in hand.
  */
-export const languageSchema = z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY] as [string, ...string[]], {
+export const languageSchema = z.enum(SUBMIT_LANGUAGE_KEYS as [SubmitLanguageKey, ...SubmitLanguageKey[]], {
   errorMap: () => ({ message: "Choose a supported language." }),
 });
 
