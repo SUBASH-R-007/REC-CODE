@@ -3,6 +3,9 @@ import type {
   CapturedOutput,
   ExecRequest,
   ExecResult,
+  InteractivePairRequest,
+  InteractivePairResult,
+  InteractiveStop,
   IsolateMeta,
   Sandbox,
   SandboxFileInfo,
@@ -38,6 +41,21 @@ export interface FakeRun {
  */
 export type FakeHandler = (request: ExecRequest, box: Map<string, FakeFile>) => FakeRun;
 
+/**
+ * What a fake interactive pair did (Phase 12l). A handler answers for BOTH
+ * sides at once, because the thing under test is the conversation: who
+ * exited how, how it was stopped, and what each side reported.
+ */
+export interface FakePair {
+  solution?: { meta?: Partial<IsolateMeta>; stderr?: string; bytes?: number };
+  interactor?: { meta?: Partial<IsolateMeta>; stderr?: string; bytes?: number };
+  stopped?: InteractiveStop;
+  /** The conversation, as the worker's relay would have recorded it. */
+  transcript?: string;
+}
+
+export type FakePairHandler = (request: InteractivePairRequest) => FakePair;
+
 export const OK_META: IsolateMeta = {
   status: null,
   timeSec: 0.012,
@@ -64,6 +82,9 @@ export class FakeSandbox implements Sandbox {
   readonly log: string[] = [];
   readonly writes: { role: BoxRole; name: string; data: Buffer; mode: number }[] = [];
   readonly execs: ExecRequest[] = [];
+  readonly pairs: InteractivePairRequest[] = [];
+  /** Set by a test that judges an interactive problem. */
+  pairHandler: FakePairHandler | null = null;
 
   constructor(private readonly handler: FakeHandler) {}
 
@@ -123,6 +144,31 @@ export class FakeSandbox implements Sandbox {
       stderr: captured(stderr, request.stderrCapBytes),
       outputLimitExceeded:
         run.outputLimitExceeded ?? (request.outputLimitBytes !== null && stdout.length > request.outputLimitBytes),
+    };
+  }
+
+  async execPair(request: InteractivePairRequest): Promise<InteractivePairResult> {
+    this.pairs.push(request);
+    this.log.push(`execPair ${request.solution.role}+${request.interactor.role}`);
+    if (!this.pairHandler) throw new Error("fake: execPair called with no pairHandler");
+    const answer = this.pairHandler(request);
+    const side = (
+      role: "solution" | "interactor",
+      given: FakePair["solution"],
+    ): InteractivePairResult["solution"] => {
+      const stderr = Buffer.from(given?.stderr ?? "", "utf8");
+      this.box(request[role].role).set(request[role].stderr, { data: stderr, mode: 0o644 });
+      return {
+        meta: { ...OK_META, ...given?.meta },
+        stderr: captured(stderr, request[role].stderrCapBytes),
+        bytes: given?.bytes ?? 0,
+      };
+    };
+    return {
+      solution: side("solution", answer.solution),
+      interactor: side("interactor", answer.interactor),
+      stopped: answer.stopped ?? "none",
+      transcript: Buffer.from(answer.transcript ?? "", "utf8").subarray(0, request.transcriptBytes),
     };
   }
 

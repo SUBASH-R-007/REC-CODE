@@ -75,6 +75,67 @@ export interface ExecResult {
   outputLimitExceeded: boolean;
 }
 
+/**
+ * One side of an interactive pair (Phase 12l).
+ *
+ * Like an `ExecRequest` without stdin and stdout: those two are PIPES held
+ * by the worker rather than files in the box, which is what lets the two
+ * programs talk while sharing no directory. stderr stays a file — it is
+ * the interactor's report and the solution's diagnostics, both read after
+ * the conversation ends.
+ */
+export interface InteractiveSide {
+  role: BoxRole;
+  argv: string[];
+  toolchainIds: string[];
+  env: Record<string, string>;
+  limits: SandboxLimits;
+  stderr: string;
+  stderrCapBytes: number;
+  /** Bytes this side may send before the worker stops the pair. */
+  outputLimitBytes: number;
+}
+
+export interface InteractivePairRequest {
+  /** The student's program. Its stdout goes to the interactor's stdin. */
+  solution: InteractiveSide;
+  /** The author's interactor. Its stdout goes to the solution's stdin. */
+  interactor: InteractiveSide;
+  /** No byte in EITHER direction for this long: both are blocked reading. */
+  idleMs: number;
+  /**
+   * Bytes of the CONVERSATION to keep, for a case the student may see.
+   * The worker is already in the middle, so this costs a buffer and is the
+   * only way a student can be shown what their program actually said —
+   * there is no output file in an interactive case. The caller decides
+   * whether to show it, exactly as it decides about stdout.
+   */
+  transcriptBytes: number;
+  signal?: AbortSignal;
+}
+
+/** Why the worker stopped the conversation, if it did. */
+export type InteractiveStop = "none" | "solution-output" | "interactor-output" | "idle" | "aborted";
+
+export interface InteractiveSideResult {
+  meta: IsolateMeta;
+  stderr: CapturedOutput;
+  /** Bytes this side wrote to the other one. */
+  bytes: number;
+}
+
+export interface InteractivePairResult {
+  solution: InteractiveSideResult;
+  interactor: InteractiveSideResult;
+  stopped: InteractiveStop;
+  /**
+   * The conversation, line by line, marked by direction: `> ` is what the
+   * solution sent and `< ` is what the interactor replied. Truncated to
+   * `transcriptBytes` on a line boundary.
+   */
+  transcript: Buffer;
+}
+
 export interface SandboxFileInfo {
   name: string;
   size: number;
@@ -92,6 +153,12 @@ export interface Sandbox {
   listFiles(role: BoxRole): Promise<SandboxFileInfo[]>;
   unlink(role: BoxRole, name: string): Promise<void>;
   exec(request: ExecRequest): Promise<ExecResult>;
+  /**
+   * Two boxes at once, their stdin and stdout wired to each other through
+   * the worker (Phase 12l). Both boxes must already be initialised and
+   * staged. Returns when both have exited, or when the worker stopped them.
+   */
+  execPair(request: InteractivePairRequest): Promise<InteractivePairResult>;
   /** Remove the box. Idempotent; never throws. */
   cleanup(role: BoxRole): Promise<void>;
 }

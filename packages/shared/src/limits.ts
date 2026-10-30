@@ -55,6 +55,21 @@ export const LIMITS = deepFreeze({
   inlineBlobBytes: 64 * 1024,
   /** Checker box (separate uid, answer.txt read-only). */
   checker: { cpuSec: 10, wallSec: 20, memoryKb: 524_288, outputBytes: 4 * 1024 },
+  /**
+   * Interactive problems (Phase 12l). The interactor runs under the
+   * checker's own caps — it is a testlib program in the checker box — and
+   * these are the two numbers that belong to the CONVERSATION rather than
+   * to either program.
+   *
+   * `idleMs`: no byte in either direction for this long means both
+   * programs are blocked reading, which is a deadlock and in practice a
+   * missing flush. SPEC §11 names the 2 seconds.
+   *
+   * `interactorOutputBytes`: what the interactor may send the solution
+   * across one case. An interactor that floods is the author's bug, so
+   * crossing this is a FAIL rather than the student's OLE.
+   */
+  interactive: { idleMs: 2_000, interactorOutputBytes: 64 * 1024 * 1024 },
   /** Per-user judge caps (super-admin may override per user, audited). */
   userCaps: {
     inFlightSubmissions: 2,

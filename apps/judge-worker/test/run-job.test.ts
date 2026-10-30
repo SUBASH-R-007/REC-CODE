@@ -352,7 +352,10 @@ describe("runJob — refuses, permanently, what no node can judge faithfully", (
 
   it.each<[string, Pick<JudgeJobSpec, "compareMode">, RegExp]>([
     ["CHECKER comparison without a checker", { compareMode: "CHECKER" }, /without a checker/],
-    ["INTERACTIVE comparison", { compareMode: "INTERACTIVE" }, /INTERACTIVE comparison is not available/],
+    // Phase 12l: INTERACTIVE is judgeable now, and refused without the
+    // author's interactor for the same reason CHECKER is refused without
+    // the checker — nothing on any node could decide the verdict.
+    ["INTERACTIVE comparison without an interactor", { compareMode: "INTERACTIVE" }, /without an interactor/],
   ])("%s → PermanentJudgeError before any box is created", async (_name, patch, message) => {
     const job = buildJob({ cases: ADDER_CASES, ...patch });
     const sandbox = new FakeSandbox(() => ({}));

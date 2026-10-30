@@ -139,8 +139,20 @@ export interface PreparedChecker {
   cached: boolean;
 }
 
-/** The checker binary: from the compile cache, else compiled in the compile box (and cached). */
-export async function prepareChecker(checker: CheckerSpec, ctx: CheckerContext): Promise<PreparedChecker> {
+/**
+ * The checker binary: from the compile cache, else compiled in the compile
+ * box (and cached).
+ *
+ * `what` is the word the author reads when it does not compile. An
+ * interactor is compiled by this same function (Phase 12l) and telling its
+ * author that "the checker does not compile" would send them looking for a
+ * checker the problem does not have.
+ */
+export async function prepareChecker(
+  checker: CheckerSpec,
+  ctx: CheckerContext,
+  what: "checker" | "interactor" = "checker",
+): Promise<PreparedChecker> {
   const key = checkerCacheKey(checker);
   const hit = await ctx.compileCache?.get(key);
   const cachedBinary = hit?.artifacts.find((a) => a.name === CHECKER_BINARY);
@@ -173,17 +185,17 @@ export async function prepareChecker(checker: CheckerSpec, ctx: CheckerContext):
     );
     switch (classifyCompile(result.meta)) {
       case "infra":
-        throw new InfraError(`isolate internal error while compiling the checker: ${result.meta.message ?? "unknown"}`);
+        throw new InfraError(`isolate internal error while compiling the ${what}: ${result.meta.message ?? "unknown"}`);
       case "resource":
-        throw new PermanentJudgeError("checker does not compile: compilation exceeded resource limits");
+        throw new PermanentJudgeError(`${what} does not compile: compilation exceeded resource limits`);
       case "error":
-        throw new PermanentJudgeError(`checker does not compile: ${errorLine(diagnostics) || "the compiler reported an error"}`);
+        throw new PermanentJudgeError(`${what} does not compile: ${errorLine(diagnostics) || "the compiler reported an error"}`);
       case "ok":
         break;
     }
     const built = (await sandbox.listFiles("compile")).find((f) => f.name === CHECKER_BINARY);
     if (!built || built.size === 0 || built.size > MAX_CHECKER_BYTES) {
-      throw new PermanentJudgeError("checker does not compile: no usable checker binary was produced");
+      throw new PermanentJudgeError(`${what} does not compile: no usable binary was produced`);
     }
     const binary = await sandbox.readFile("compile", CHECKER_BINARY, MAX_CHECKER_BYTES);
     await ctx.compileCache?.put(key, {

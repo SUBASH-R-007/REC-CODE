@@ -220,8 +220,11 @@ describe("the multiple-statement hint", () => {
 });
 
 describe("the protocol", () => {
-  it("is at 4, with two engines", () => {
-    expect(JUDGE_PROTOCOL_VERSION).toBe(4);
+  it("has two engines, and a version no older than the one that added them", () => {
+    // 4 added the engine discriminator (Phase 12k); 5 added the interactor
+    // (Phase 12l). The number only ever goes up, and what this asserts is
+    // the pair of engines rather than the number of the moment.
+    expect(JUDGE_PROTOCOL_VERSION).toBeGreaterThanOrEqual(4);
     expect(JUDGE_ENGINES).toEqual(["isolate", "postgres"]);
   });
 

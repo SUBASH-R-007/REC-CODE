@@ -5,6 +5,7 @@ import {
   TOOLCHAIN_ROOT,
   worstVerdict,
   type CheckerSpec,
+  type InteractorSpec,
   type CompareMode,
   type JudgeJobSpec,
   type LanguageRuntime,
@@ -71,6 +72,8 @@ export interface JudgePlan {
   compareMode: CompareMode;
   /** The checker, when compareMode is CHECKER. */
   checker: CheckerSpec | null;
+  /** compareMode INTERACTIVE: the author's interactor (Phase 12l). */
+  interactor: InteractorSpec | null;
   /** SUBTASK scoring of a submission or validation, in execution order; null otherwise. */
   subtasks: ResolvedSubtask[] | null;
   /**
@@ -124,14 +127,31 @@ export function planJob(spec: JudgeJobSpec): JudgePlan {
   if (compareMode === "CHECKER") {
     checker = spec.checker;
     if (!checker) throw new PermanentJudgeError("CHECKER comparison without a checker in the job spec");
-    if (!TESTLIB_ID.test(checker.testlibId) || !TOOLCHAIN_ID_PATTERN.test(checker.testlibId)) {
-      throw new PermanentJudgeError(`checker testlib id ${JSON.stringify(checker.testlibId)} is not a testlib-<version> directory`);
-    }
+    assertTestlibId(checker.testlibId, "checker");
+  }
+  /**
+   * Phase 12l. An interactive job needs the author's interactor the way a
+   * CHECKER job needs the checker, and for the same reason: without it
+   * there is nothing that could decide the verdict, on this node or any
+   * other, so it is refused permanently rather than retried.
+   */
+  let interactor: InteractorSpec | null = null;
+  if (compareMode === "INTERACTIVE") {
+    interactor = spec.interactor;
+    if (!interactor) throw new PermanentJudgeError("INTERACTIVE comparison without an interactor in the job spec");
+    assertTestlibId(interactor.testlibId, "interactor");
   }
   const subtasks = spec.kind !== "run" && spec.scoringMode === "SUBTASK" ? resolveSubtasks(spec) : null;
   const functionCompare =
     spec.ioMode === "FUNCTION" && spec.functionSignature ? functionCompareSpec(spec.functionSignature, spec.floatEpsilon) : null;
-  return { compareMode, checker, subtasks, functionCompare };
+  return { compareMode, checker, interactor, subtasks, functionCompare };
+}
+
+/** A testlib directory id, as a job spec may name it. */
+function assertTestlibId(id: string, what: string): void {
+  if (!TESTLIB_ID.test(id) || !TOOLCHAIN_ID_PATTERN.test(id)) {
+    throw new PermanentJudgeError(`${what} testlib id ${JSON.stringify(id)} is not a testlib-<version> directory`);
+  }
 }
 
 /**
@@ -164,16 +184,22 @@ export function assertRuntimeKnown(
 
 /**
  * The comparison actually applied; PermanentJudgeError when this judge cannot
- * apply the one asked for. STDIN: the spec's mode (INTERACTIVE refused).
- * FUNCTION: every comparator is judged (structurally, see planJob); the
- * spec's compareMode must mirror it — CHECKER exactly when the comparator is
- * CUSTOM_CHECKER — and is otherwise unused.
+ * apply the one asked for. STDIN: the spec's mode, INTERACTIVE included
+ * since Phase 12l. FUNCTION: every comparator is judged (structurally, see
+ * planJob); the spec's compareMode must mirror it — CHECKER exactly when the
+ * comparator is CUSTOM_CHECKER — and is otherwise unused.
  */
 export function effectiveCompareMode(
   spec: Pick<JudgeJobSpec, "compareMode" | "ioMode" | "functionSignature">,
 ): CompareMode {
-  if (spec.compareMode === "INTERACTIVE") {
-    throw new PermanentJudgeError("INTERACTIVE comparison is not available on this judge");
+  if (spec.compareMode === "INTERACTIVE" && spec.ioMode !== "STDIN") {
+    /**
+     * A FUNCTION problem's answer is a return value, and an interactive
+     * one's is a conversation on stdin and stdout. There is no harness
+     * that could be both, so the pairing is refused here rather than
+     * producing a verdict nobody could explain.
+     */
+    throw new PermanentJudgeError(`INTERACTIVE comparison needs a STDIN problem, not ${spec.ioMode}`);
   }
   if (spec.ioMode !== "FUNCTION") return spec.compareMode;
 

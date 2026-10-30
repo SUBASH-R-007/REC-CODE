@@ -15,6 +15,11 @@ import {
   type CapturedOutput,
   type ExecRequest,
   type ExecResult,
+  type InteractivePairRequest,
+  type InteractivePairResult,
+  type InteractiveSide,
+  type InteractiveSideResult,
+  type InteractiveStop,
   type Sandbox,
   type SandboxFileInfo,
   type SandboxLimits,
@@ -57,7 +62,16 @@ export type IsolateArgvOptions =
       env: Readonly<Record<string, string>>;
       limits: SandboxLimits;
       stdin: string | null;
-      stdout: string;
+      /**
+       * A file inside the box, or null to leave the program's stdout as the
+       * one isolate inherited — a pipe held by the worker, for an
+       * interactive pair (Phase 12l). The banned flag that keeps EVERY
+       * descriptor open is not involved and stays banned (the list at the
+       * top of this file, and test/argv.test.ts): this is isolate's own
+       * treatment of the three standard streams, which it hands to the
+       * sandboxed program while closing everything else.
+       */
+      stdout: string | null;
       stderr: string;
       argv: readonly string[];
     };
@@ -121,7 +135,7 @@ export function buildIsolateArgv(options: IsolateArgvOptions): string[] {
   }
   env.push(...Object.entries(FORCED_ENV));
 
-  for (const name of [options.stdout, options.stderr, ...(options.stdin ? [options.stdin] : [])]) {
+  for (const name of [...(options.stdout ? [options.stdout] : []), options.stderr, ...(options.stdin ? [options.stdin] : [])]) {
     try {
       assertBoxFileName(name);
     } catch {
@@ -159,7 +173,7 @@ export function buildIsolateArgv(options: IsolateArgvOptions): string[] {
     `--core=${LIMITS.coreDumpKb}`,
     ...env.map(([key, value]) => `--env=${key}=${value}`),
     ...(options.stdin ? [`--stdin=${options.stdin}`] : []),
-    `--stdout=${options.stdout}`,
+    ...(options.stdout ? [`--stdout=${options.stdout}`] : []),
     `--stderr=${options.stderr}`,
     "--run",
     "--",
@@ -349,6 +363,212 @@ export class IsolateSandbox implements Sandbox {
     }
   }
 
+  /**
+   * Two boxes talking to each other, with the worker in the middle
+   * (Phase 12l).
+   *
+   * Each side is an ordinary isolate run with no `--stdin` and no
+   * `--stdout`, so the sandboxed program inherits the pipes isolate was
+   * given; the worker copies bytes from one to the other. Being in the
+   * middle is what makes the three rules of a conversation enforceable at
+   * all: a byte cap each way, an idle deadline when both are blocked
+   * reading, and a teardown that leaves neither box running.
+   *
+   * A FIFO pair in a directory bound into both boxes would be faster and
+   * would also give the two programs a shared, writable directory — a
+   * channel for more than the protocol. They share nothing here.
+   */
+  async execPair(request: InteractivePairRequest): Promise<InteractivePairResult> {
+    const sides = [request.solution, request.interactor] as const;
+    interface PreparedSide {
+      side: InteractiveSide;
+      boxId: number;
+      metaFile: string;
+      stderrHandle: FileHandle;
+      argv: string[];
+    }
+    const prepared: PreparedSide[] = [];
+    for (const side of sides) {
+      const boxId = this.options.boxIds[side.role];
+      const metaFile = path.join(this.options.metaDir, `box-${boxId}.meta`);
+      await rm(metaFile, { force: true });
+      await this.unlink(side.role, side.stderr);
+      await this.writeFile(side.role, side.stderr, "", 0o644);
+      prepared.push({
+        side,
+        boxId,
+        metaFile,
+        stderrHandle: await open(path.join(this.boxDir(side.role), side.stderr), fsConstants.O_RDONLY | O_NOFOLLOW),
+        argv: buildIsolateArgv({
+          action: "run",
+          boxId,
+          metaFile,
+          syntheticEtc: this.options.syntheticEtc,
+          toolchainIds: side.toolchainIds,
+          env: side.env,
+          limits: side.limits,
+          stdin: null,
+          stdout: null,
+          stderr: side.stderr,
+          argv: side.argv,
+        }),
+      });
+    }
+    const [solution, interactor] = prepared as [PreparedSide, PreparedSide];
+
+    try {
+      const timeoutMs = Math.max(
+        watchdogMs(request.solution.limits),
+        watchdogMs(request.interactor.limits),
+      );
+      const outcome = await this.relay({
+        solution,
+        interactor,
+        idleMs: request.idleMs,
+        timeoutMs,
+        transcriptBytes: request.transcriptBytes,
+        signal: request.signal,
+      });
+      if (outcome.stopped === "aborted") throw new InfraError("interactive run aborted: the worker is shutting down");
+
+      const read = async (one: PreparedSide, bytes: number): Promise<InteractiveSideResult> => {
+        const meta = parseIsolateMeta(await readFile(one.metaFile, "utf8").catch(() => ""));
+        if (isMetaEmpty(meta)) {
+          throw new InfraError(
+            `isolate produced no meta for box ${one.boxId} (interactive): ${outcome.diagnostics.slice(0, 300)}`,
+          );
+        }
+        return { meta, stderr: await capture(one.stderrHandle, one.side.stderrCapBytes), bytes };
+      };
+      return {
+        solution: await read(solution, outcome.solutionBytes),
+        interactor: await read(interactor, outcome.interactorBytes),
+        stopped: outcome.stopped,
+        transcript: outcome.transcript,
+      };
+    } finally {
+      for (const one of prepared) await one.stderrHandle.close().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Run both isolate processes and copy bytes between them.
+   *
+   * Ending a side's stdin when the OTHER side exits is what lets a correct
+   * conversation finish: a solution that reads until EOF needs the EOF,
+   * and an interactor waiting for a line from a program that has exited
+   * would otherwise sit there until its own wall limit.
+   */
+  private relay(input: {
+    solution: { argv: string[]; side: InteractiveSide };
+    interactor: { argv: string[]; side: InteractiveSide };
+    idleMs: number;
+    timeoutMs: number;
+    transcriptBytes: number;
+    signal?: AbortSignal;
+  }): Promise<{
+    stopped: InteractiveStop;
+    solutionBytes: number;
+    interactorBytes: number;
+    transcript: Buffer;
+    diagnostics: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      const spawnSide = (argv: string[]): ChildProcess =>
+        spawn(this.options.isolateBin, argv, { stdio: ["pipe", "pipe", "pipe"], env: ISOLATE_ENV });
+
+      let solution: ChildProcess;
+      let interactor: ChildProcess;
+      try {
+        solution = spawnSide(input.solution.argv);
+        interactor = spawnSide(input.interactor.argv);
+      } catch (error) {
+        reject(new InfraError(`cannot run isolate (${this.options.isolateBin}): ${errorMessage(error)}`, { cause: error }));
+        return;
+      }
+
+      let stopped: InteractiveStop = "none";
+      let solutionBytes = 0;
+      let interactorBytes = 0;
+      let diagnostics = "";
+      const transcript = new Transcript(input.transcriptBytes);
+      let lastActivity = Date.now();
+      let alive = 2;
+      let settled = false;
+
+      const note = (chunk: string) => {
+        if (diagnostics.length < 16_384) diagnostics += chunk;
+      };
+      // isolate's OWN stderr (not the box's): its diagnostics if it fails.
+      solution.stderr?.setEncoding("utf8").on("data", note);
+      interactor.stderr?.setEncoding("utf8").on("data", note);
+
+      const stop = (why: InteractiveStop) => {
+        if (stopped === "none") stopped = why;
+        // SIGTERM: isolate tears the box down and writes its meta file.
+        for (const child of [solution, interactor]) if (child.exitCode === null) child.kill("SIGTERM");
+      };
+
+      /** One direction of the conversation. */
+      const pipe = (from: ChildProcess, to: ChildProcess, side: InteractiveSide, count: (n: number) => void) => {
+        from.stdout?.on("data", (chunk: Buffer) => {
+          lastActivity = Date.now();
+          count(chunk.length);
+          transcript.add(from === solution ? ">" : "<", chunk);
+          // EPIPE when the other side has already gone: not an error here,
+          // the exit handlers below decide what the conversation meant.
+          to.stdin?.write(chunk, () => undefined);
+          if (side.outputLimitBytes > 0) {
+            const written = from === solution ? solutionBytes : interactorBytes;
+            if (written > side.outputLimitBytes) stop(from === solution ? "solution-output" : "interactor-output");
+          }
+        });
+        from.stdout?.on("error", () => undefined);
+        to.stdin?.on("error", () => undefined);
+      };
+      pipe(solution, interactor, input.solution.side, (n) => (solutionBytes += n));
+      pipe(interactor, solution, input.interactor.side, (n) => (interactorBytes += n));
+
+      const idle = setInterval(() => {
+        if (Date.now() - lastActivity >= input.idleMs) stop("idle");
+      }, Math.max(50, Math.min(250, Math.floor(input.idleMs / 4))));
+
+      const watchdog = setTimeout(() => {
+        stop("idle");
+        for (const child of [solution, interactor]) if (child.exitCode === null) child.kill("SIGKILL");
+      }, input.timeoutMs);
+
+      const onAbort = () => stop("aborted");
+      input.signal?.addEventListener("abort", onAbort, { once: true });
+      if (input.signal?.aborted) onAbort();
+
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(idle);
+        clearTimeout(watchdog);
+        input.signal?.removeEventListener("abort", onAbort);
+        resolve({ stopped, solutionBytes, interactorBytes, transcript: transcript.buffer(), diagnostics });
+      };
+
+      for (const [child, other] of [
+        [solution, interactor],
+        [interactor, solution],
+      ] as const) {
+        child.once("error", (error) => {
+          note(`isolate spawn error: ${error.message}\n`);
+          stop("none");
+          if (--alive === 0) finish();
+        });
+        child.once("close", () => {
+          // The other side learns the conversation is over.
+          other.stdin?.end(() => undefined);
+          if (--alive === 0) finish();
+        });
+      }
+    });
+  }
+
   async cleanup(role: BoxRole): Promise<void> {
     const boxId = this.options.boxIds[role];
     this.roots.delete(role);
@@ -409,6 +629,53 @@ export class IsolateSandbox implements Sandbox {
         resolve({ code, signal, stdout, stderr });
       });
     });
+  }
+}
+
+/**
+ * The conversation of an interactive case, marked by direction (Phase 12l).
+ *
+ * A chunk is not a line: a program may write half a line, and a reply may
+ * arrive before the other half. Lines are therefore assembled per
+ * direction and emitted when they are complete, so what a student reads is
+ * the dialogue rather than the scheduler's timing. The last, unterminated
+ * line of each side is emitted at the end — it is usually the query that
+ * never got a reply, which is exactly the interesting one in a deadlock.
+ */
+class Transcript {
+  private readonly lines: string[] = [];
+  private readonly partial = new Map<string, string>();
+  private bytes = 0;
+  private full = false;
+
+  constructor(private readonly capBytes: number) {}
+
+  add(direction: ">" | "<", chunk: Buffer): void {
+    if (this.full || this.capBytes <= 0) return;
+    const text = (this.partial.get(direction) ?? "") + chunk.toString("utf8");
+    const parts = text.split("\n");
+    this.partial.set(direction, parts.pop() ?? "");
+    for (const line of parts) this.push(`${direction} ${line}`);
+  }
+
+  buffer(): Buffer {
+    for (const [direction, rest] of this.partial) {
+      if (rest.length > 0) this.push(`${direction} ${rest}`);
+    }
+    this.partial.clear();
+    return Buffer.from(this.lines.join("\n"), "utf8");
+  }
+
+  private push(line: string): void {
+    if (this.full) return;
+    const size = Buffer.byteLength(line, "utf8") + 1;
+    if (this.bytes + size > this.capBytes) {
+      this.lines.push("… (the rest of the conversation is not shown)");
+      this.full = true;
+      return;
+    }
+    this.bytes += size;
+    this.lines.push(line);
   }
 }
 

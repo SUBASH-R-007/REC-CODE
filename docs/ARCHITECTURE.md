@@ -253,6 +253,68 @@ the cluster must refuse — run at boot and every six hours, reported in
 every heartbeat. Calibration is the one that has no meaning here yet and is
 sent as null.
 
+## Interactive problems (Phase 12l, the engine)
+
+SPEC §11's last engine item, and its own description of it: *"the most
+fragile part of the engine"*. `CompareMode.INTERACTIVE` had been in the
+enum since the init migration and refused in four places; slice 1 makes
+the thing those refusals were protecting the platform from.
+
+**Two boxes, and they share nothing but the conversation.** The solution
+runs in the slot's RUN box and the author's INTERACTOR in its CHECKER box
+— a different uid, cgroup and mount namespace, which is the separation
+that box already exists to provide. Each is an ordinary isolate run with
+no `--stdin` and no `--stdout`, so the sandboxed program inherits the
+pipes isolate was handed, and the WORKER copies bytes between them
+(`Sandbox.execPair`). SPEC says FIFOs; a FIFO pair would need a directory
+bound into both boxes, which is a channel for more than the protocol —
+the solution could leave a file for the interactor to read. Being in the
+middle instead is also what makes the three rules of a conversation
+enforceable: a byte cap each way, an idle deadline, and a teardown that
+leaves neither box running.
+
+**The interactor is the judge.** It exits with the verdict, using the
+CHECKER's own exit codes (0 ok, 1 WA, 2 PE→WA, 3 FAIL→permanent release,
+16+n partial), and it is compiled, cached and interpreted by the checker's
+own code. There is no second comparison pass: a two-program protocol
+where either may fail is already the most fragile thing here, and a third
+would double the states nobody can reason about.
+
+**The interactor's CPU is excluded by construction** — two runs, two meta
+files, two cgroups, nothing to subtract.
+
+**Mutual idle is a deadlock, and it is the student's.** No byte in either
+direction for `LIMITS.interactive.idleMs` (2 s) means both programs are
+blocked reading. The verdict is TLE, with a sentence that names the cause:
+a missing flush. The integration suite proved how easily that sentence
+would have been wrong — a C++ program that forgets to flush still works,
+because `std::cin` is TIED to `std::cout` and a read flushes the pending
+write, so the deadlock a student actually hits comes from C stdio.
+
+**The precedence is the whole design**, because in a conversation both
+programs fail together and the second failure is usually caused by the
+first: infrastructure, then the student's own time / memory / output
+limits, then the deadlock, then the interactor's own failure, then the
+student's crash — *unless it was SIGPIPE*, which means the interactor had
+already decided and exited — then the interactor's verdict. Both
+directions of that one exception are a wrong verdict if missed: RE for an
+interactor's correct WA, or WA hiding a segfault.
+
+**What a student sees of a visible case is the conversation**, marked by
+direction (`> ` theirs, `< ` the interactor's), recorded by the relay
+because it was passing the bytes anyway. There is no output file in an
+interactive case; without the transcript a student would have nothing at
+all. A hidden case shows nothing, by the same rule as every other kind of
+problem — not the transcript, not even the interactor's report, which
+describes the hidden data.
+
+**Protocol 5.** The job spec carries the interactor, and a protocol-4
+worker would turn such a job into a permanent internal error — so the app
+refuses older workers with 426, the mechanism `docs/RUNBOOK.md` §2.9
+documents and the reason it exists. The mock driver refuses interactive
+jobs outright: a fabricated AC for a conversation that never happened
+would be indistinguishable from a real verdict.
+
 ## Editor settings, and the keymaps (Phase 12j)
 
 SPEC §11: "vim/emacs keymaps". A student who has spent two years in vim

@@ -42,16 +42,32 @@ export function buildJob(
     cases?: TestCaseInput[];
     /** A testlib checker's source: sets compareMode CHECKER and spec.checker. */
     checkerSource?: string;
+    /** A testlib interactor's source: sets compareMode INTERACTIVE and spec.interactor (Phase 12l). */
+    interactorSource?: string;
     testlibId?: string;
   } & Partial<Omit<JudgeJobSpec, "language" | "source" | "tests">>,
 ): BuiltJob {
-  const { language = "cpp20", source = "int main(){}", cases = [], checkerSource, testlibId = "testlib-0.9.41", ...rest } = options;
+  const {
+    language = "cpp20",
+    source = "int main(){}",
+    cases = [],
+    checkerSource,
+    interactorSource,
+    testlibId = "testlib-0.9.41",
+    ...rest
+  } = options;
   const blobs = new Map<string, Buffer>();
   let checker: JudgeJobSpec["checker"] = null;
   if (checkerSource !== undefined) {
     const c = blob(checkerSource);
     blobs.set(c.ref.sha256, c.data);
     checker = { source: c.ref, language: "cpp20", testlibId };
+  }
+  let interactor: JudgeJobSpec["interactor"] = null;
+  if (interactorSource !== undefined) {
+    const i = blob(interactorSource);
+    blobs.set(i.ref.sha256, i.data);
+    interactor = { source: i.ref, language: "cpp20", testlibId };
   }
   const tests: TestSpec[] = cases.map((c, index) => {
     const input = blob(c.input);
@@ -83,7 +99,7 @@ export function buildJob(
     source,
     ioMode: "STDIN",
     functionSignature: null,
-    compareMode: checker ? "CHECKER" : "TOKEN",
+    compareMode: interactor ? "INTERACTIVE" : checker ? "CHECKER" : "TOKEN",
     floatEpsilon: null,
     scoringMode: "ICPC",
     stopOnFirstFailure: true,
@@ -92,6 +108,7 @@ export function buildJob(
     tests,
     subtasks: [],
     checker,
+    interactor,
     inlineBlobs: {},
     ...rest,
   });

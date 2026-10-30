@@ -213,6 +213,33 @@ describe("buildIsolateArgv — rejects what it must not run", () => {
   }
 });
 
+/**
+ * Phase 12l: one run in the whole judge has no `--stdout` — the solution
+ * and the interactor of an interactive pair, whose stdout is a pipe the
+ * worker holds. The flags that are never emitted are still never emitted.
+ */
+describe("an interactive pair's command line", () => {
+  const base = optionsFor(LANGUAGE_CATALOG.cpp20, "run");
+
+  it("omits --stdout and --stdin, and keeps --stderr a file in the box", () => {
+    const argv = buildIsolateArgv({ ...base, stdin: null, stdout: null });
+    expect(argv.some((a) => a.startsWith("--stdout"))).toBe(false);
+    expect(argv.some((a) => a.startsWith("--stdin"))).toBe(false);
+    expect(argv).toContain(`--stderr=${base.stderr}`);
+  });
+
+  it("emits none of the forbidden flags, exactly as every other run does", () => {
+    const argv = buildIsolateArgv({ ...base, stdin: null, stdout: null });
+    for (const flag of FORBIDDEN_FLAGS) {
+      expect(argv.some((a) => flag.test(a)), String(flag)).toBe(false);
+    }
+  });
+
+  it("still refuses an illegal stderr name", () => {
+    expect(() => buildIsolateArgv({ ...base, stdout: null, stderr: "../escape" })).toThrow(InfraError);
+  });
+});
+
 describe("source guard", () => {
   // Belt and braces next to the argv tests: no source file spells a forbidden
   // isolate option as a string literal anywhere (comments may name them).

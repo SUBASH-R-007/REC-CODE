@@ -1,5 +1,5 @@
 import type { JudgeJobSpec, TestResult, Verdict } from "@recx/shared";
-import { InfraError } from "../errors";
+import { InfraError, PermanentJudgeError } from "../errors";
 import { aggregate, compileErrorOutcome } from "../judge/aggregate";
 import { executeTests, planJob } from "../judge/plan";
 import { defaultLanguages } from "../toolchains";
@@ -22,7 +22,11 @@ import type { DriverInfo, JudgeDriver, JudgeIO, JudgeOutcome } from "./types";
  * Without a marker every test is AC with fixed fake times. Scoring is the real
  * one (src/judge/plan.ts + aggregate.ts): subtasks, dependencies and
  * PER_TEST points behave exactly as on a real node, and a spec no node could
- * judge (e.g. INTERACTIVE) is refused permanently, as on a real node. A loud
+ * judge is refused permanently, as on a real node — INTERACTIVE among them
+ * (Phase 12l): a real node judges one, and this driver cannot, because the
+ * thing that decides the verdict is a conversation with the author's
+ * interactor. A fake AC on an interactive problem would teach a developer
+ * nothing and would look exactly like the real thing. A loud
  * banner is printed on every job, and src/boot.ts refuses to start this
  * driver when NODE_ENV=production.
  */
@@ -74,6 +78,12 @@ export class MockJudgeDriver implements JudgeDriver {
     io.logger.warn({ kind: spec.kind, id: spec.id }, "MOCK JUDGE — NO CODE IS EXECUTED — VERDICTS ARE FAKE");
 
     const plan = planJob(spec);
+    if (plan.compareMode === "INTERACTIVE") {
+      throw new PermanentJudgeError(
+        "the mock judge cannot judge an interactive problem: its verdict is a conversation with the author's interactor, " +
+          "and a fabricated one would be indistinguishable from a real verdict. Use a Linux node with real isolate.",
+      );
+    }
     const marker = parseMockMarker(spec.source);
     if (marker?.kind === "IE") throw new InfraError("RECX_MOCK:IE — simulated infrastructure failure (mock judge)");
 

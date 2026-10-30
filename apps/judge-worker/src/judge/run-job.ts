@@ -25,6 +25,7 @@ import type { Logger } from "../logger";
 import type { CapturedOutput, Sandbox } from "../sandbox/types";
 import { aggregate, compileErrorOutcome } from "./aggregate";
 import { CheckerRunner, checkerMessage, prepareChecker } from "./checker";
+import { InteractiveRunner, interpretInteractive, prepareInteractor } from "./interactive";
 import { compareOutputs } from "./compare";
 import { compileLimits, outputLimitBytes, runArgv, runLimits } from "./limits";
 import { executeTests, planJob, type JudgePlan, type TestOutcome } from "./plan";
@@ -212,21 +213,125 @@ export async function runJob(spec: JudgeJobSpec, ctx: RunJobContext): Promise<Ju
     ctx.logger.debug({ cached: prepared.cached }, "checker ready");
   }
 
+  // ── Interactor (Phase 12l) ────────────────────────────────────────────
+  // Compiled and cached exactly like a checker, because it is one that
+  // happens to run beside the solution instead of after it.
+  let interactive: InteractiveRunner | null = null;
+  if (plan.interactor) {
+    const prepared = await prepareInteractor(plan.interactor, ctx);
+    interactive = new InteractiveRunner(ctx.sandbox, prepared.binary, ctx.signal);
+    ctx.logger.debug({ cached: prepared.cached }, "interactor ready");
+  }
+
   // ── Tests ─────────────────────────────────────────────────────────────
   ctx.progress({ type: "state", state: "RUNNING" });
   try {
     const executed = await executeTests(
       spec,
       plan,
-      (test) => runTest(spec, plan, test, artifacts, checker, diagnostics, ctx),
+      (test) =>
+        interactive
+          ? runInteractiveTest(spec, test, artifacts, interactive, diagnostics, ctx)
+          : runTest(spec, plan, test, artifacts, checker, diagnostics, ctx),
       ctx.progress,
       ctx.signal,
     );
     return aggregate(spec, executed, compile);
   } finally {
-    if (checker) await ctx.sandbox.cleanup("checker");
+    if (checker || interactive) await ctx.sandbox.cleanup("checker");
     await ctx.sandbox.cleanup("run");
   }
+}
+
+/**
+ * One interactive case (Phase 12l).
+ *
+ * What is NOT here is as important as what is: no input file is staged in
+ * the run box (the case's input is the interactor's hidden data — the
+ * secret number, the array), nothing is compared afterwards, and there is
+ * no output file at all. The student's stdout went to the interactor.
+ *
+ * What a visible case shows instead is the CONVERSATION, which the worker
+ * recorded because it was relaying it anyway. A hidden case shows nothing,
+ * by the same rule as every other kind of problem.
+ */
+async function runInteractiveTest(
+  spec: JudgeJobSpec,
+  test: TestSpec,
+  artifacts: CompiledArtifact[],
+  interactive: InteractiveRunner,
+  diagnostics: Diagnostics,
+  ctx: RunJobContext,
+): Promise<TestOutcome> {
+  const { sandbox } = ctx;
+  const language = spec.language;
+  const visible = test.isSample || test.output === null;
+
+  await sandbox.init("run");
+  for (const artifact of artifacts) await sandbox.writeFile("run", artifact.name, artifact.data, artifact.mode);
+  const input = await ctx.blobs.get(test.input);
+
+  const tripBytes = outputLimitBytes(test);
+  const pair = await interactive.converse({
+    input,
+    solution: {
+      argv: runArgv(spec),
+      toolchainIds: [language.toolchainId, ...language.extraToolchainIds],
+      env: language.env,
+      limits: runLimits(spec),
+      outputLimitBytes: tripBytes,
+    },
+    stderrCapBytes: LIMITS.stderrCapture.defaultBytes,
+    transcriptBytes: visible ? LIMITS.detail.perTestBytes : 0,
+  });
+
+  const run = classifyRun(pair.solution.meta, {
+    timeLimitMs: spec.timeLimitMs,
+    memoryLimitKb: spec.memoryLimitKb,
+    language: language.key,
+    stderr: captureText(pair.solution.stderr),
+    outputLimitExceeded: pair.stopped === "solution-output",
+  });
+  if (run.verdict === "IE") throw new InfraError(`isolate internal error on test ${test.index}: ${run.message ?? ""}`);
+
+  const outcome = interpretInteractive({
+    solution: {
+      verdict: run.verdict,
+      timeMs: run.timeMs,
+      memoryKb: run.memoryKb,
+      exitCode: run.exitCode,
+      signal: run.signal,
+      outputLimitExceeded: pair.stopped === "solution-output",
+    },
+    solutionMeta: pair.solution.meta,
+    interactorMeta: pair.interactor.meta,
+    interactorReport: InteractiveRunner.report(pair),
+    stopped: pair.stopped,
+  });
+  if (outcome.kind === "infra") throw new InfraError(`${outcome.reason} (test ${test.index})`);
+  if (outcome.kind === "fail") throw new PermanentJudgeError(outcome.reason);
+
+  const { judgement } = outcome;
+  const result: TestResult = {
+    i: test.index,
+    v: judgement.verdict,
+    ms: run.timeMs,
+    kb: run.memoryKb,
+    exitCode: run.exitCode,
+    signal: run.signal,
+  };
+  if (run.idle) result.idle = true;
+  // What ended the conversation, then what the run itself said, then the
+  // interactor's own words — visible cases and validation runs only.
+  if (run.message) result.message = run.message.slice(0, MESSAGE_CHARS);
+  if (judgement.message) result.message = judgement.message.slice(0, MESSAGE_CHARS);
+  if (judgement.report && (visible || spec.kind === "validation")) result.message = judgement.report;
+
+  if (visible) {
+    result.stdout = truncateUtf8(pair.transcript.toString("utf8"), LIMITS.detail.perTestBytes);
+    result.stderr = diagnostics(captureText(pair.solution.stderr), LIMITS.stderrCapture.defaultBytes);
+  }
+  return { result, fraction: judgement.fraction };
 }
 
 type Compiled =

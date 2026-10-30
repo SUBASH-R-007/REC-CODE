@@ -664,7 +664,28 @@ ADMIN and SUPER_ADMIN only (checked server-side); refreshes every 10 s.
   overrides; a super admin can grant an override with a reason and an expiry
   (audited `judge.quota.override`).
 
-### 2.9 Judge protocol upgrades (protocol 3, Phase 4)
+### 2.9 Judge protocol upgrades (protocol 5, Phase 12l)
+
+`JUDGE_PROTOCOL_VERSION` has moved twice since the Phase 4 note below, and
+the ROLLOUT is the same each time — deploy the web app first, then rebuild
+every judge host — because the mechanism is the same: an older worker gets
+426 on claim, blob and result, treats it as fatal and exits, and Postgres
+keeps the jobs QUEUED until a new worker claims them.
+
+| Version | Phase | What it added | What an older worker would have done |
+|---|---|---|---|
+| 4 | 12k | the `engine` discriminator and the SQL job spec | a v3 worker cannot parse a SQL spec at all |
+| 5 | 12l | the `interactor` on the job spec, and INTERACTIVE as a judgeable mode | a v4 worker turns every interactive job into a permanent internal error |
+
+For protocol 5 there is one extra thing to check after the rollout, and it
+is the thing that makes an interactive problem work at all: a judge host
+needs testlib (`/opt/toolchains/testlib-*/testlib.h`) and the pinned C++
+compiler, exactly as a CHECKER problem does. A node without them releases
+an interactive job as an infrastructure failure — retryable, so the job
+moves to a node that has them — and `/admin/judge` shows the release
+reason on the node's card.
+
+### 2.9b Judge protocol 3 (Phase 4), kept for the record
 
 `JUDGE_PROTOCOL_VERSION` is 3 since Phase 4: the wire shapes are unchanged,
 but FUNCTION problems are judged by structured comparison on the worker (all
@@ -1949,3 +1970,9 @@ coordinator from actual runs — never in advance.
 | 12k.5 | 2026-10-31 | The fleet page and the alert, against the production build and a real SQL judge | PASS. `/admin/judge` as an admin, before and after a real `apps/sql-judge` heartbeat: the **Engines** table lists both engines and says a lane is the sum of its two queues; once the judge was up the node card read Engine `postgres` with **PostgreSQL 17.11** beside it (the packaging build trimmed - `server_version` reports "17.11 (Ubuntu 17.11-1.pgdg24.04+2)" and the fleet wants the number), **Judge / engine** rather than Worker / isolate, "Not measured for the SQL engine" where calibration goes, `sql17` in its languages, and the Engines row counting it 1 / 1 online. The stored restriction is the engine's own sentence, and the sensitive lanes are withheld. `fire-alerts.ts --only JudgeEngineBacklog`: **FIRES, 120 vs 100**, produced for real on `judge-sql-practice`. No error in the judge's log | PASS | Claude |
 | 12k.5 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean across seven projects; **8,425 tests passed, 0 failed** - shared 1,936, judge-worker 414, sql-judge 43, db 336, design 87, scheduler 250, web 4,174, repo 1,185; build exit 0; every size budget met) | Claude |
 | 12k.5 | - | The SQL judge publishes no `/metrics` of its own | **NOT BUILT, deliberately.** Everything about it is already published by a process there is exactly one of: the per-engine queue depth and its heartbeat age by the scheduler, its verdicts by web. A second listener republishing the same numbers from a second place is how two figures that should agree stop agreeing. What is genuinely missing is the engine's own internals - time in the author's setup script versus the student's statement, sweeper counts - and that is an open question rather than an omission | NOT RUN | - |
+| 12l.0 | 2026-10-31 | The design: interactive problems, written before any of it | **DONE** — `docs/handoff/phase12/DESIGN-interactive.md`. The decisions it settles, each with the reason: the interactor IS the judge (no second checker pass, because two programs that can each fail is already the most fragile thing in the engine); two boxes that share nothing but the conversation (the worker relays, rather than FIFOs in a directory both boxes could write to); the interactor's CPU excluded by construction; mutual idle as the student's TLE; no expected output; no custom input; no interactive problem in an assessment until SPEC's two clean practice contests have happened | Claude |
+| 12l.1 | 2026-10-31 | The engine: protocol 5, two boxes talking, and the verdict precedence | **DONE.** `Sandbox.execPair` runs both isolate processes with their stdio piped through the worker — no `--stdin`, no `--stdout`, and the banned flag that keeps every descriptor open is still never emitted (`test/argv.test.ts`). The interactor is compiled, cached and interpreted by the CHECKER's own code with its own exit codes; `prepareChecker` gained one argument so the author of a broken interactor reads "interactor does not compile" rather than being sent to look for a checker. The precedence is the design: infrastructure, the student's own limits, the deadlock, the interactor's failure, the student's crash **unless it was SIGPIPE**, then the interactor's verdict | Claude |
+| 12l.1 | 2026-10-31 | The interactive suite on REAL isolate (WSL2, isolate 2.7, gcc 13.2.0, testlib 0.9.41) | PASS **9/9**, and two of them are findings. A binary search on a guess-the-number problem → **AC** with the conversation recorded by the relay (`> 500000000` / `< lower` …); a linear search out of queries → **WA** in the interactor's own words; a missing flush → **TLE in 2.1 s** with the sentence about flushing; a program that only prints → **OLE**; a crash mid-conversation → **RE**; the solution's reported CPU under 500 ms with the interactor's excluded; a hidden case carrying no transcript, no stderr and no report; an interactor reporting FAIL releasing the job permanently and posting no verdict; two cases in a row with a fresh interactor box each | PASS | Claude |
+| 12l.1 | 2026-10-31 | Two verdicts the integration run got wrong before it got them right | **BOTH FIXED, and both would have been wrong verdicts.** (1) A segfault mid-conversation was reported **WA**, because the interactor then read EOF and said "wrong answer": the precedence now puts the solution's crash ABOVE the interactor's decision, except for SIGPIPE, which means the interactor had already decided and exited. (2) The deadlock case did not deadlock: a C++ program that forgets to flush still works, because `std::cin` is tied to `std::cout` and a read flushes the pending write — so the test now uses `printf`/`scanf`, which is the deadlock a student actually hits, and it fired the 2-second deadline exactly as designed | Claude |
+| 12l.1 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean across seven projects; **8,445 tests passed, 0 failed** - shared 1,936, judge-worker 434, sql-judge 43, db 336, design 87, scheduler 250, web 4,174, repo 1,185; build exit 0; every size budget met) | Claude |
+| 12l.1 | - | An interactive problem a student could reach | **NOT BUILT YET.** The engine judges one; nothing can author one. `ProblemVersion` has no interactor, the authoring surface still refuses INTERACTIVE in three places, and no web code puts an interactor in a job spec — so the only interactive problems that exist are the integration suite's. Slices 2 and 3 | NOT RUN | - |

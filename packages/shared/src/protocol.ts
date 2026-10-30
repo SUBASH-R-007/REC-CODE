@@ -33,7 +33,7 @@ import { functionSignatureSchema } from "./harness/signature";
  * union, and the honest thing for a worker that cannot parse what the
  * server might send is to drain rather than guess.
  */
-export const JUDGE_PROTOCOL_VERSION = 4;
+export const JUDGE_PROTOCOL_VERSION = 5;
 
 export const JUDGE_HEADERS = {
   protocol: "x-recx-judge-protocol",
@@ -257,6 +257,18 @@ export const checkerSpecSchema = z.object({
 });
 export type CheckerSpec = z.infer<typeof checkerSpecSchema>;
 
+/**
+ * An interactive problem's interactor (protocol 5, Phase 12l).
+ *
+ * The same shape as a checker's, because it is the same kind of thing: a
+ * testlib C++ program the AUTHOR wrote, compiled by the node with the
+ * pinned compiler and cached by its source hash. The difference is when it
+ * runs — beside the solution, talking to it — and that it is the one who
+ * decides the verdict, with the checker's own exit codes.
+ */
+export const interactorSpecSchema = checkerSpecSchema;
+export type InteractorSpec = z.infer<typeof interactorSpecSchema>;
+
 export const judgeJobSpecSchema = z.object({
   protocolVersion: z.literal(JUDGE_PROTOCOL_VERSION),
   /** Protocol 4: which engine this spec is for. */
@@ -281,6 +293,8 @@ export const judgeJobSpecSchema = z.object({
   subtasks: z.array(subtaskSpecSchema).max(64).default([]),
   /** compareMode CHECKER only. */
   checker: checkerSpecSchema.nullable().default(null),
+  /** compareMode INTERACTIVE only (protocol 5). */
+  interactor: interactorSpecSchema.nullable().default(null),
   /**
    * Blobs delivered inline with the claim instead of via /api/judge/blob —
    * only a custom run's stdin (≤ 64 KB), which is not a stored TestBlob.
