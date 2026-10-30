@@ -1,6 +1,8 @@
 import Link from "next/link";
 import {
   FUNCTION_COMPARATOR_DESCRIPTIONS,
+  INTERACTIVE_LABELS,
+  INTERACTIVE_NOTICES,
   SQL_LIMITS,
   SQL_NOTICES,
   readResultSet,
@@ -116,6 +118,36 @@ function SqlJudgingNotes({ ordered }: { ordered: boolean }) {
   );
 }
 
+/**
+ * How a conversation is judged (Phase 12l), in full sentences.
+ *
+ * The flush comes second because it is the mistake every student makes
+ * once and the one whose symptom — a program that seems to hang — looks
+ * like something else entirely.
+ */
+function InteractiveNotes() {
+  const notes = [
+    INTERACTIVE_NOTICES.dialogue,
+    INTERACTIVE_NOTICES.flush,
+    INTERACTIVE_NOTICES.deadlock,
+    INTERACTIVE_NOTICES.sampleData,
+    INTERACTIVE_NOTICES.transcript,
+    INTERACTIVE_NOTICES.noCustomInput,
+  ];
+  return (
+    <section aria-labelledby="problem-interactive-rules">
+      <h2 id="problem-interactive-rules" className="font-display text-base font-semibold">
+        How your conversation is judged
+      </h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-secondary">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** A SQL sample's expected side: the rows as a table, or the text as it came. */
 function SqlSampleOutput({ text }: { text: string }) {
   const resultSet = readResultSet(text);
@@ -125,6 +157,7 @@ function SqlSampleOutput({ text }: { text: string }) {
 
 export function ProblemDescription({ problem, statementHtml }: { problem: ProblemWorkspace; statementHtml: string }) {
   const sql = problem.ioMode === "SQL";
+  const interactive = problem.compareMode === "INTERACTIVE";
   return (
     <article aria-label="Problem description" className="space-y-6">
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
@@ -162,6 +195,7 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
       <div className={STATEMENT_CLASSES} dangerouslySetInnerHTML={{ __html: statementHtml }} />
 
       {sql && <SqlJudgingNotes ordered={problem.sqlOrdered === true} />}
+      {interactive && <InteractiveNotes />}
 
       {problem.constraints.length > 0 && (
         <section aria-labelledby="problem-constraints">
@@ -185,7 +219,7 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
           {problem.samples.map((sample, k) => (
             <div key={sample.index} className="space-y-2">
               <h3 className="text-sm font-semibold">Sample {k + 1}</h3>
-              <div className="grid gap-2 xl:grid-cols-2">
+              <div className={interactive ? "grid gap-2" : "grid gap-2 xl:grid-cols-2"}>
                 {sql ? (
                   <>
                     {/* The dataset the query runs against: the tables, and
@@ -193,6 +227,11 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
                     <SampleBlock title="Dataset" text={sample.input} />
                     <SqlSampleOutput text={sample.output} />
                   </>
+                ) : interactive ? (
+                  // One block, not two: there is no expected output for a
+                  // conversation, and the case's input is the examiner's
+                  // own data rather than anything the program reads.
+                  <SampleBlock title={INTERACTIVE_LABELS.data} text={sample.input} />
                 ) : (
                   <>
                     <SampleBlock title="Input" text={labelledLines(sample.input, problem.signature)} />

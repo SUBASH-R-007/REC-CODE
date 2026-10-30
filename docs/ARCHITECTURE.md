@@ -324,6 +324,23 @@ stdout, and it is judged by that one program rather than by a checker
 beside it or a float epsilon nothing reads. The import package gained
 `interactor.cpp` under the same rules, so a bulk import can carry one.
 
+**The student surface (slice 3).** A case with no expected output shows
+none: the console gives an interactive case TWO blocks — the examiner's
+data for that case, and the conversation the relay recorded — where every
+other kind of problem has three. The live stage of slice 2 is what asked
+for this: it found an empty block headed "Expected output" and a **Custom
+input** tab on a question that has no input to type.
+
+Four chips over the editor say it is a conversation, that every line must
+be flushed, and that silence on both sides is a deadlock; the Description
+tab says the same things in sentences, including that a sample shows the
+EXAMINER's data rather than anything the program reads. Every one of those
+sentences is `INTERACTIVE_NOTICES` in `@recx/shared`, and a repository
+test refuses a second copy — the same rule the SQL notices live by.
+
+There is no custom input, in both halves: the console offers no tab, and
+`runCode` refuses one with a sentence rather than ignoring it.
+
 **And not in an assessment.** SPEC §11 keeps interactive problems out of
 high-stakes sittings "until they have run cleanly through two practice
 contests" — a rule with a date on it rather than a property of the

@@ -20,6 +20,7 @@ import { CODE_EXTENSIONS, findFiles, isTestPath, readRepoFile } from "./support/
  */
 
 const WORKER = "apps/judge-worker/src";
+const WORKSPACE = "apps/web/src/components/workspace";
 const webSources = findFiles({ under: ["apps/web/src"], extensions: [...CODE_EXTENSIONS] }).filter((f) => !isTestPath(f));
 
 describe("the conversation happens in two boxes", () => {
@@ -86,6 +87,59 @@ describe("one judge, not two", () => {
     ]) {
       expect(catalog, name).toContain(name);
     }
+  });
+});
+
+describe("the sentences a student reads", () => {
+  it("are defined once, in @recx/shared", () => {
+    const shared = readRepoFile("packages/shared/src/interactive.ts");
+    expect(shared).toContain("export const INTERACTIVE_NOTICES");
+    expect(shared).toContain("export const INTERACTIVE_REFUSALS");
+    expect(shared).toContain("export const INTERACTIVE_LABELS");
+  });
+
+  it("are never retyped into a component", () => {
+    // The flush sentence is the one every surface wants to say in its own
+    // words; two copies is one copy that goes stale.
+    for (const file of webSources) {
+      const source = readRepoFile(file);
+      expect(source, `${file} must take the flush sentence from INTERACTIVE_NOTICES`).not.toContain(
+        "print(..., flush=True)",
+      );
+    }
+  });
+
+  it("reach the editor, the Description tab and the console from that one module", () => {
+    expect(readRepoFile(`${WORKSPACE}/interactive-note.tsx`)).toContain("INTERACTIVE_NOTICES");
+    const description = readRepoFile(`${WORKSPACE}/problem-description.tsx`);
+    for (const key of ["dialogue", "flush", "deadlock", "sampleData", "transcript", "noCustomInput"]) {
+      expect(description, `the Description tab must state INTERACTIVE_NOTICES.${key}`).toContain(
+        `INTERACTIVE_NOTICES.${key}`,
+      );
+    }
+    expect(readRepoFile(`${WORKSPACE}/result-view.tsx`)).toContain("INTERACTIVE_LABELS");
+  });
+
+  it("are what the submit boundary refuses with", () => {
+    const action = readRepoFile("apps/web/src/server/actions/judge.ts");
+    for (const key of ["customInput", "noSampleCase"]) {
+      expect(action, `the submit boundary must refuse with INTERACTIVE_REFUSALS.${key}`).toContain(
+        `INTERACTIVE_REFUSALS.${key}`,
+      );
+    }
+  });
+});
+
+describe("a case with no expected output shows none", () => {
+  it("the console leaves the expected block out for a conversation", () => {
+    const resultView = readRepoFile(`${WORKSPACE}/result-view.tsx`);
+    // `talk` is the flag; the expected block is behind !talk.
+    expect(resultView).toContain("{!talk &&");
+    expect(resultView).toContain('view.compareMode === "INTERACTIVE"');
+  });
+
+  it("and so does the statement", () => {
+    expect(readRepoFile(`${WORKSPACE}/problem-description.tsx`)).toContain('problem.compareMode === "INTERACTIVE"');
   });
 });
 

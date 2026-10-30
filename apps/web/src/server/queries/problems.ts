@@ -12,6 +12,7 @@ import {
   isTopic,
   submitEditorLanguage,
   type FunctionSignature,
+  type CompareMode,
   type IoMode,
   type LanguageKey,
   type SqlDialect,
@@ -288,6 +289,8 @@ export interface ProblemWorkspace {
   statementHtml: string;
   constraints: string[];
   ioMode: IoMode;
+  /** How the answer is compared; INTERACTIVE means a conversation (Phase 12l). */
+  compareMode: CompareMode;
   signature: FunctionSignature | null;
   /** SQL problems only (Phase 12k): the dialect, and whether the row order is part of the answer. */
   sqlDialect: SqlDialect | null;
@@ -342,6 +345,7 @@ interface WorkspaceContent {
   statementHtml: string;
   constraints: string[];
   ioMode: IoMode;
+  compareMode: CompareMode;
   signature: FunctionSignature | null;
   sqlDialect: SqlDialect | null;
   sqlOrdered: boolean | null;
@@ -387,6 +391,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
         statementMd: true,
         constraints: true,
         ioMode: true,
+        compareMode: true,
         functionSignature: true,
         sqlDialect: true,
         sqlOrdered: true,
@@ -420,6 +425,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       statementHtml: renderMarkdown(version.statementMd),
       constraints: asConstraints(version.constraints),
       ioMode: version.ioMode,
+      compareMode: version.compareMode,
       signature,
       sqlDialect: version.sqlDialect,
       sqlOrdered: version.sqlOrdered,
@@ -433,7 +439,7 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       starters: version.starterCodes.map((s) => ({ language: s.language, code: s.code })),
     };
   },
-  ["problem-workspace", "v2"],
+  ["problem-workspace", "v3"],
 );
 
 /**
@@ -511,6 +517,7 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
     statementHtml: content.statementHtml,
     constraints: content.constraints,
     ioMode: content.ioMode,
+    compareMode: content.compareMode,
     signature: sig,
     sqlDialect: content.sqlDialect,
     sqlOrdered: content.sqlOrdered,

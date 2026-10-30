@@ -17,6 +17,7 @@ export * from "./recommend";
 export * from "./mock-interview";
 export * from "./written";
 export * from "./editor-keymap";
+export * from "./interactive";
 export * from "./sql-problem";
 export * from "./sql-language";
 export * from "./proctor";

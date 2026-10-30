@@ -3424,3 +3424,39 @@ rows got an "end" before their "start" and the right constraint fired for
 the wrong reason, differently on each run. The suite now takes every
 Node-side timestamp from the database's clock. An invariant about ORDER
 cannot be tested with two rulers.
+
+## The student's side of a conversation (Phase 12l, slice 3)
+
+**A case with no expected output must show none.** The console's three
+blocks are input, expected and yours; an interactive case has the first and
+the third, and the slice-2 live stage found what happens when nobody says
+so — an empty box headed "Expected output", which reads as a question the
+student failed to answer. Two blocks, and the second one is the
+conversation.
+
+**The transcript is the only thing a student has.** There is no output
+file in an interactive case: without the relay's record there would be
+nothing to look at after a wrong answer, which is why the worker keeps it
+(slice 1) and why the label says what it is rather than calling it output.
+A hidden case still shows nothing at all — not the transcript, not the
+interactor's words, which describe the hidden data.
+
+**No custom input, said twice.** The console offers no tab and the action
+refuses one. A field that is accepted and ignored is worse than an absent
+field: a student types what they think the input is, gets a verdict about
+something else, and learns nothing.
+
+**The missing flush gets its own sentence everywhere.** It is the one
+mistake every student makes once, its symptom is a program that appears to
+hang, and the verdict it earns (TLE) says nothing about flushing by
+itself. So the chips say it, the Description tab says it with the language
+incantations, and the deadlock message says it again at the moment it
+happens.
+
+**Still not done: a contest.** SPEC allows an interactive problem in a
+contest and nothing refuses one, but the arena builds its own language
+list and its own console and neither has been read with a conversation in
+mind. And the two clean practice contests SPEC asks for before an
+ASSESSMENT may hold one have not happened — which is the whole reason the
+assessment trigger exists. An interactive problem is a practice problem
+today.

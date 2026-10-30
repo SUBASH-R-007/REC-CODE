@@ -186,6 +186,7 @@ describe("the Description tab of a SQL question", () => {
     statementHtml: "<p>List every student.</p>",
     constraints: [],
     ioMode: "SQL",
+    compareMode: "ROWS",
     signature: null,
     sqlDialect: "postgres17",
     sqlOrdered: true,
@@ -234,6 +235,7 @@ describe("the Description tab of a SQL question", () => {
       render(
         problem({
           ioMode: "STDIN",
+          compareMode: "TOKEN",
           sqlDialect: null,
           sqlOrdered: null,
           samples: [{ index: 0, input: "2 3\n", output: "5\n" }],

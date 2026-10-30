@@ -40,6 +40,7 @@ import {
   type EditorKind,
   type MobileTab,
 } from "@/components/workspace/layout";
+import { InteractiveNote } from "@/components/workspace/interactive-note";
 import { LanguageVersion } from "@/components/workspace/language-version";
 import { SqlNote } from "@/components/workspace/sql-note";
 import { ResultConsole, type ConsoleTab, type CustomInputState } from "@/components/workspace/result-console";
@@ -108,6 +109,7 @@ export function Workspace({
   panels,
   submissionCount,
   judgeLink = true,
+  interactive = false,
   editorPrefs,
 }: {
   problemId: string;
@@ -133,6 +135,12 @@ export function Workspace({
   submissionCount: number;
   /** Footer language links to /judge in a new tab; the arena and attempt surfaces pass false. */
   judgeLink?: boolean;
+  /**
+   * An interactive problem (Phase 12l): the answer is a conversation with
+   * the author's program, so there is no custom input to type and the
+   * editor carries the rules of a dialogue.
+   */
+  interactive?: boolean;
   /** The viewer's editor settings: font size, tab size and keymap (Phase 12j). */
   editorPrefs: EditorPrefs;
 }) {
@@ -163,6 +171,8 @@ export function Workspace({
    * gets the SQL behaviour without being told about it.
    */
   const sql = active ? isSqlLanguage(active.key) : false;
+  /** Neither kind of question has an input a student could type. */
+  const noCustomInput = sql || interactive;
   const [resetOpen, setResetOpen] = useState(false);
   const status = saveStatus(drafts.sync);
 
@@ -217,7 +227,7 @@ export function Workspace({
   // A SQL question's input is its dataset, and the author's datasets are
   // what the question means: there is nothing a student could type here,
   // so the tab is not offered rather than offered and ignored.
-  const customOn = custom.enabled && !sql;
+  const customOn = custom.enabled && !noCustomInput;
   const [announcement, setAnnouncement] = useState("");
 
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -516,6 +526,7 @@ export function Workspace({
         </div>
 
         {sql && <SqlNote />}
+        {interactive && <InteractiveNote />}
 
         {drafts.offer && (
           <RestoreBar offer={drafts.offer} onRestore={drafts.applyOffer} onDismiss={drafts.dismissOffer} />
@@ -559,7 +570,7 @@ export function Workspace({
             custom={custom}
             onCustomChange={setCustom}
             customHint={customHint}
-            allowCustom={!sql}
+            allowCustom={!noCustomInput}
           />
         </div>
 

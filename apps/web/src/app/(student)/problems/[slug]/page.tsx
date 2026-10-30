@@ -123,6 +123,7 @@ export default async function ProblemPage({ params }: Params) {
         problemId={problem.id}
         slug={problem.slug}
         languages={problem.languages}
+        interactive={problem.compareMode === "INTERACTIVE"}
         initialLanguage={initialLanguage}
         serverDrafts={drafts}
         sampleIndexes={problem.samples.map((s) => s.index)}

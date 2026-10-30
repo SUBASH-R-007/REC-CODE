@@ -2,12 +2,14 @@
 
 import { createHash } from "node:crypto";
 import {
+  INTERACTIVE_REFUSALS,
   LIMITS,
   SQL_LIMITS,
   SQL_REFUSALS,
   isSqlLanguage,
   looksLikeMultipleStatements,
   utf8Length,
+  type CompareMode,
   type IoMode,
   type JobKind,
   type LanguageKey,
@@ -57,6 +59,8 @@ interface JudgeTarget {
   sampleCount: number;
   totalCases: number;
   ioMode: IoMode;
+  /** INTERACTIVE means the answer is a conversation (Phase 12l). */
+  compareMode: CompareMode;
   /** FUNCTION problems: the live version signature (custom Run input is validated against it). */
   signature: FunctionSignature | null;
 }
@@ -74,7 +78,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     select: {
       id: true,
       status: true,
-      liveVersion: { select: { id: true, ioMode: true, functionSignature: true } },
+      liveVersion: { select: { id: true, ioMode: true, compareMode: true, functionSignature: true } },
     },
   });
   if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersion) {
@@ -114,6 +118,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     sampleCount,
     totalCases,
     ioMode: problem.liveVersion.ioMode,
+    compareMode: problem.liveVersion.compareMode,
     signature,
   };
 }
@@ -207,6 +212,15 @@ export async function runCode(input: RunCodeInput): Promise<ActionResult<{ id: s
       // are what the question means, so there is nothing to type here.
       if (parsed.customInput !== null) throw new ValidationError(SQL_REFUSALS.customInput);
       if (target.sampleCount === 0) throw new ValidationError(SQL_REFUSALS.noSampleCase);
+    }
+    /**
+     * Phase 12l. A conversation has no input to type: what a case gives
+     * the examiner is the author's, and the program's input is whatever
+     * the examiner replies. The console offers no tab for it either.
+     */
+    if (target.compareMode === "INTERACTIVE") {
+      if (parsed.customInput !== null) throw new ValidationError(INTERACTIVE_REFUSALS.customInput);
+      if (target.sampleCount === 0) throw new ValidationError(INTERACTIVE_REFUSALS.noSampleCase);
     }
     if (parsed.customInput === null && target.sampleCount === 0) {
       throw new ValidationError("This problem has no sample tests. Run it with custom input instead.");

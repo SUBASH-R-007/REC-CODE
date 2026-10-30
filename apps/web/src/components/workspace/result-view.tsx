@@ -1,5 +1,11 @@
 import { VerdictBadge } from "@recx/design";
-import { FUNCTION_COMPARATOR_DESCRIPTIONS, readResultSet, type CompareMode } from "@recx/shared";
+import {
+  FUNCTION_COMPARATOR_DESCRIPTIONS,
+  INTERACTIVE_LABELS,
+  INTERACTIVE_NOTICES,
+  readResultSet,
+  type CompareMode,
+} from "@recx/shared";
 import { ResultSetTable } from "@/components/workspace/result-set";
 import {
   formatMemoryKb,
@@ -97,7 +103,18 @@ function PointsLabel({ points }: { points: TestPointsView }) {
   );
 }
 
-function TestRow({ test, points, rows }: { test: TestView; points?: TestPointsView | undefined; rows?: boolean }) {
+function TestRow({
+  test,
+  points,
+  rows,
+  talk,
+}: {
+  test: TestView;
+  points?: TestPointsView | undefined;
+  rows?: boolean;
+  /** An interactive case: the blocks are the examiner's data and the conversation. */
+  talk?: boolean;
+}) {
   const metrics = (
     <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-xs text-text-secondary tabular-nums">
       {points && <PointsLabel points={points} />}
@@ -130,14 +147,21 @@ function TestRow({ test, points, rows }: { test: TestView; points?: TestPointsVi
             database's own message for a failed query (visible cases only —
             a hidden case's message never leaves the web boundary). */}
         {sample.message && <p className="mt-2 text-xs text-text-secondary">{sample.message}</p>}
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className={talk ? "mt-2 grid gap-2" : "mt-2 grid gap-2 sm:grid-cols-2"}>
           {sample.input !== null &&
             (rows ? (
               <OutputBlock title="Dataset" text={sample.input} />
+            ) : talk ? (
+              <OutputBlock title={INTERACTIVE_LABELS.data} text={sample.input} />
             ) : (
               <OutputBlock title="Input" text={sample.input} />
             ))}
-          {sample.expected !== null &&
+          {/* An interactive case has no expected output at all: the
+              examiner decides as it goes, and the stored blob is empty.
+              A block headed "Expected output" with nothing in it would be
+              a question a student could not answer. */}
+          {!talk &&
+            sample.expected !== null &&
             (rows ? (
               <SqlBlock title="Expected rows" text={sample.expected} />
             ) : (
@@ -146,11 +170,14 @@ function TestRow({ test, points, rows }: { test: TestView; points?: TestPointsVi
           {sample.stdout !== null &&
             (rows ? (
               <SqlBlock title="Your rows" text={sample.stdout} />
+            ) : talk ? (
+              <OutputBlock title={INTERACTIVE_LABELS.transcript} text={sample.stdout} />
             ) : (
               <OutputBlock title="Your output" text={sample.stdout} />
             ))}
           {sample.stderr ? <OutputBlock title="Error output (stderr)" text={sample.stderr} tone="danger" /> : null}
         </div>
+        {talk && sample.stdout !== null && <p className="mt-1 text-xs text-muted">{INTERACTIVE_NOTICES.transcript}</p>}
       </details>
     </li>
   );
@@ -234,16 +261,18 @@ function TestList({
   points,
   label,
   rows,
+  talk,
 }: {
   tests: TestView[];
   points?: ReadonlyMap<number, TestPointsView>;
   label: string;
   rows?: boolean;
+  talk?: boolean;
 }) {
   return (
     <ul className="divide-y divide-border rounded-xl border border-border" aria-label={label}>
       {tests.map((t) => (
-        <TestRow key={t.i} test={t} points={points?.get(t.i)} rows={rows} />
+        <TestRow key={t.i} test={t} points={points?.get(t.i)} rows={rows} talk={talk} />
       ))}
     </ul>
   );
@@ -259,11 +288,13 @@ function SubtaskResults({
   scoring,
   headingLevel,
   rows,
+  talk,
 }: {
   view: SubmissionStudentView;
   scoring: ScoreView;
   headingLevel: 3 | 4;
   rows?: boolean;
+  talk?: boolean;
 }) {
   const Heading = headingLevel === 3 ? "h3" : "h4";
   const byIndex = new Map(view.tests.map((t) => [t.i, t]));
@@ -294,7 +325,7 @@ function SubtaskResults({
             {tests.length > 0 ? (
               <ul className="divide-y divide-border" aria-label={`${subtaskLabel(st.index)} tests`}>
                 {tests.map((t) => (
-                  <TestRow key={t.i} test={t} rows={rows} />
+                  <TestRow key={t.i} test={t} rows={rows} talk={talk} />
                 ))}
               </ul>
             ) : (
@@ -307,7 +338,7 @@ function SubtaskResults({
           </section>
         );
       })}
-      {others.length > 0 && <TestList tests={others} label="Other test results" rows={rows} />}
+      {others.length > 0 && <TestList tests={others} label="Other test results" rows={rows} talk={talk} />}
     </div>
   );
 }
@@ -319,13 +350,16 @@ export function TestResults({ view, headingLevel = 3 }: { view: StudentView; hea
   // the blocks of a case are a dataset and two result sets rather than
   // three streams of text (Phase 12k).
   const rows = view.compareMode === "ROWS";
+  // INTERACTIVE is the other compare mode whose case has no expected
+  // output: what a student reads is the conversation (Phase 12l).
+  const talk = view.compareMode === "INTERACTIVE";
   if (view.kind === "submission" && scoring?.mode === "SUBTASK" && view.verdict !== "CE") {
-    return <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} rows={rows} />;
+    return <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} rows={rows} talk={talk} />;
   }
   if (view.tests.length === 0) return null;
   if (scoring?.mode === "PER_TEST") {
     const points = new Map(scoring.testPoints.map((p) => [p.i, p]));
-    return <TestList tests={view.tests} points={points} label="Test results" rows={rows} />;
+    return <TestList tests={view.tests} points={points} label="Test results" rows={rows} talk={talk} />;
   }
-  return <TestList tests={view.tests} label="Test results" rows={rows} />;
+  return <TestList tests={view.tests} label="Test results" rows={rows} talk={talk} />;
 }
