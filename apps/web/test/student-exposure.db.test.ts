@@ -1265,6 +1265,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "interviews#loadArchive": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).loadArchive!,
     "interviews#loadPendingExperiences": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).loadPendingExperiences!,
     "interviews#companyTagLabel": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).companyTagLabel!,
+    // Phase 12f. The recommender's candidate gathering touches problems,
+    // revision cards, company tags and placement drives in one go — the
+    // widest read on the dashboard, and the one most able to surface a
+    // draft problem or another student's row by widening a `where`.
+    "recommend#loadRecommendExtras": async () => (await load(path.join(QUERIES_DIR, "recommend.ts"))).loadRecommendExtras!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -1284,6 +1289,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "interviews#loadArchive": () => [[ids.user], [ids.user, "no-such-company"]],
     "interviews#loadPendingExperiences": () => [[]],
     "interviews#companyTagLabel": () => [["no-such-company"]],
+    "recommend#loadRecommendExtras": () => [[ids.user]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],

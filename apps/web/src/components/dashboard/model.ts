@@ -2,8 +2,16 @@ import { CAMPUS_TIME_ZONE, campusDay, dayDifference, effectiveStreak, levelProgr
 
 /**
  * Dashboard decisions as pure functions (no database, no clock reads):
- * the Continue card's choice, weekly-goal progress, the streak to show and
- * the week strip. Unit-tested in test/dashboard-*.test.ts.
+ * weekly-goal progress, the streak to show, the level and the week strip.
+ * Unit-tested in test/dashboard-*.test.ts.
+ *
+ * The Continue card's CHOICE used to live here as `selectContinue`, a
+ * four-rung ordering. Phase 12f replaced it with `recommend()` in
+ * @recx/shared, which has seven rungs and returns the reason beside the
+ * pick — the spec requires the reason to be rendered inline, and keeping
+ * the sentence with the rule that produced it is the only way the two
+ * cannot drift. The candidate shapes below are still built here, because
+ * the query builds them and the engine consumes them.
  */
 
 export type DashboardDifficulty = "EASY" | "MEDIUM" | "HARD";
@@ -39,32 +47,6 @@ export interface SuggestedCandidate {
   problem: ProblemRef;
   /** The viewer has never submitted anything. */
   firstEver: boolean;
-}
-
-export type ContinueAction =
-  | ({ kind: "attempted" } & AttemptedCandidate)
-  | ({ kind: "plan" } & PlanCandidate)
-  | ({ kind: "daily" } & DailyCandidate)
-  | ({ kind: "suggested" } & SuggestedCandidate)
-  | { kind: "none" };
-
-/**
- * ONE next action, in this order: the most recently attempted unsolved
- * problem; else the next unsolved item of an enrolled study plan; else
- * today's daily challenge (unless already solved); else a suggested Easy
- * problem; else nothing to do yet.
- */
-export function selectContinue(candidates: {
-  attempted?: AttemptedCandidate | null;
-  plan?: PlanCandidate | null;
-  daily?: DailyCandidate | null;
-  suggested?: SuggestedCandidate | null;
-}): ContinueAction {
-  if (candidates.attempted) return { kind: "attempted", ...candidates.attempted };
-  if (candidates.plan) return { kind: "plan", ...candidates.plan };
-  if (candidates.daily && !candidates.daily.solved) return { kind: "daily", ...candidates.daily };
-  if (candidates.suggested) return { kind: "suggested", ...candidates.suggested };
-  return { kind: "none" };
 }
 
 /** Problems a student aims to solve each campus (ISO, Asia/Kolkata) week. */

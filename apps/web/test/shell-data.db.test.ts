@@ -204,8 +204,11 @@ describe.skipIf(!ENABLED)("shell data paths against recx_test", () => {
       expect(data.recent).toEqual([]);
       expect(data.plans).toEqual([]);
       expect(data.week).toHaveLength(7);
-      expect(["suggested", "daily", "none"]).toContain(data.continueAction.kind);
-      if (data.continueAction.kind === "suggested") expect(data.continueAction.firstEver).toBe(true);
+      // Phase 12f: whatever rung fires for a student with nothing of their
+      // own, the recommendation must carry a reason. That is the spec's
+      // requirement and the thing a stub would quietly drop.
+      expect(["FRESH", "DAILY", "WEAK_TOPIC", null]).toContain(data.recommendation?.rule ?? null);
+      if (data.recommendation) expect(data.recommendation.reason.length).toBeGreaterThan(20);
     });
 
     it("puts the most recently attempted unsolved problem first and reads the week bucket", async () => {
@@ -220,7 +223,8 @@ describe.skipIf(!ENABLED)("shell data paths against recx_test", () => {
       await m.db.activityDay.create({ data: { userId: alice.id, date: today, submissions: 3, solved: 1 } });
 
       const data = await m.dashboard.getDashboard(alice.id, now);
-      expect(data.continueAction).toMatchObject({ kind: "attempted", problem: { id: attemptedId }, attempts: 2 });
+      expect(data.recommendation).toMatchObject({ rule: "FINISH", problem: { id: attemptedId } });
+      expect(data.recommendation!.reason).toContain("2 goes");
       expect(data.weekly).toMatchObject({ solved: 2, met: false, percent: 67 });
       expect(data.streak).toMatchObject({ current: 4, longest: 6, activeToday: true, atRisk: false });
       expect(data.level).toMatchObject({ level: 3, xpTotal: 300 });

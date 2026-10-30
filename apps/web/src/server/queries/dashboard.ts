@@ -1,16 +1,15 @@
 import "server-only";
 import type { VerdictDisplay } from "@recx/shared";
-import { campusDay, campusDayDate, isoWeekKey, solveXp } from "@recx/shared";
+import { campusDay, campusDayDate, isoWeekKey, recommend, solveXp, type Recommendation } from "@recx/shared";
 import { db } from "@/lib/db";
 import { displayFor } from "@/lib/judge/view";
+import { loadRecommendExtras } from "@/server/queries/recommend";
 import {
   levelView,
-  selectContinue,
   streakView,
   weekStart,
   weekStrip,
   weeklyGoalProgress,
-  type ContinueAction,
   type DailyCandidate,
   type LevelView,
   type PlanCandidate,
@@ -54,7 +53,11 @@ export interface EnrolledPlan {
 }
 
 export interface DashboardData {
-  continueAction: ContinueAction;
+  /**
+   * The ONE next action, with the reason beside it (Phase 12f). Null only
+   * when there is nothing published to recommend.
+   */
+  recommendation: Recommendation | null;
   weekly: WeeklyGoal;
   streak: StreakView;
   level: LevelView;
@@ -202,15 +205,36 @@ export async function getDashboard(userId: string, now: Date = new Date()): Prom
     };
   }
 
-  const continueAction = selectContinue({
-    attempted: attempted ? { problem: attempted.problem, attempts: attempted.attempts, lastAttemptAt: attempted.lastAttemptAt } : null,
-    plan,
-    daily,
-    suggested: suggestedRow ? { problem: suggestedRow, firstEver: (stats?.submissions ?? 0) === 0 } : null,
+  /**
+   * Phase 12f. The three new rungs — a due revision, a problem a company
+   * whose drive is coming has been reported asking, and the topic holding
+   * readiness back — are read here and handed to the pure engine with the
+   * four the dashboard already had.
+   */
+  const extras = await loadRecommendExtras(userId, now);
+  const recommendation = recommend({
+    unfinished: attempted
+      ? { problem: attempted.problem, attempts: attempted.attempts, lastAttemptAt: attempted.lastAttemptAt }
+      : null,
+    revision: extras.revision,
+    drive: extras.drive,
+    weakTopics: extras.weakTopics,
+    plan: plan
+      ? {
+          title: plan.plan.title,
+          kind: plan.plan.kind,
+          done: plan.plan.itemsDone,
+          total: plan.plan.itemsTotal,
+          problem: plan.problem,
+        }
+      : null,
+    daily: daily && !daily.solved ? { problem: daily.problem, xp: daily.xp } : null,
+    fresh: suggestedRow ? { problem: suggestedRow, firstEver: (stats?.submissions ?? 0) === 0 } : null,
+    recentTopics: extras.recentTopics,
   });
 
   return {
-    continueAction,
+    recommendation,
     weekly: weeklyGoalProgress(weekBucket),
     streak: streakView(stats, today),
     level: levelView(stats?.xpTotal ?? 0),

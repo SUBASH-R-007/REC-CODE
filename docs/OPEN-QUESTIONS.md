@@ -2868,3 +2868,60 @@ a code one. And the "curated by the placement cell … best guess" label has
 been asserted in two test suites but never seen in a browser, because the
 development database has no curated company — the only one in it was
 created by the archive itself, which is the other label.
+
+## The recommender, and the rung order that is an argument (Phase 12f)
+
+SPEC §11: "the rule-based, explainable recommender (no ML — it has neither
+the data nor an evaluation harness to beat a good rule, and it cannot
+explain itself; always render the reason inline, and rotate topics after 3
+consecutive picks from the same one)".
+
+**The reason travels with the pick.** `recommend()` returns the sentence,
+and the Continue card renders that string. The alternative — a component
+that switches on the rule and writes its own copy — is what the card did
+before this phase, and it is a second place the explanation can drift from
+the decision. A wrong explanation is worse than none, because a student
+believes it.
+
+**Two rung placements are decisions rather than conventions.** FINISH is
+top because a problem already in the student's head is the cheapest thing
+they can finish tonight. DRIVE is above REVISE because a drive has a date
+and a revision has a schedule designed to tolerate a day: missing today's
+revision costs a day on a ladder built for that, and missing the one
+problem a company has been reported asking costs the interview. The first
+draft had REVISE above DRIVE, and the browser run is what made the question
+concrete — every seeded student got "due for revision" while a drive six
+days away sat underneath it.
+
+**Rotation reads activity, not our own suggestions.** The spec says
+"3 consecutive picks from the same one". This reads the topics of the
+student's last three judged PROBLEMS instead, one topic per problem.
+Where the two agree it is the same signal; where they differ this one is
+better — a student who ignored three array suggestions has not done three
+array problems, and rotating them off arrays for it would be the product
+arguing with itself.
+
+**A gap this phase found.** `createDrive` has always taken a free-text
+`companyName` and never set `companyId`, so no drive in the system had a
+catalogue company — and the DRIVE rung, which needs one to look up "asked
+at" tags against, could never fire. It matches on the slug now, the same
+way the interview archive matches a typed company name; a drive for a
+company nobody has entered keeps a null link, which is right, because
+there are no tags for it either.
+
+**Not built, deliberately.** No stored picks: the recommendation is derived
+on every render, so there is nothing to go stale and nothing for a GET to
+write (`tests/repo/render-read-only.test.ts`). No "not interested" control
+— a dismissal needs somewhere to live, and the honest version of it is
+fixing the rung that produced the bad pick. No weighting or scoring across
+rungs: an ordered list is a thing a student can be told, and a weighted sum
+is not. No contest rung, because a contest is a scheduled event the
+dashboard already shows separately.
+
+**NOT RUN: the DRIVE rung has never been seen in a browser.** It is proved
+end to end against recx_test — the drive's company matched, the most-asked
+unsolved problem chosen, a draft problem and a solved one skipped, the
+horizon, the archive flag, the batch and the department filters all
+refused — but the development database has one published problem and every
+seeded student has solved it, so there is no unsolved tagged problem for
+the rung to pick. The first cohort with two published problems closes that.

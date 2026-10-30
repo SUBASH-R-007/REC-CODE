@@ -81,6 +81,11 @@ const PLACEMENT_READABLE_MODELS: Readonly<Record<string, string>> = {
   Submission: "counts and verdicts; the SOURCE is a separate model and is forbidden",
   // Phase 9f.
   PlacementDrive: "the company visits the cell keeps",
+  // Phase 12f. A drive now links the catalogue company by slug, so the
+  // recommender can look up what that company has been reported asking.
+  // `Company` holds a slug and a name and nothing about any student, which
+  // is why it is safe here and why it took until now to need it.
+  Company: "the catalogue company a drive is for; a slug and a name, nothing about a student",
   DriveEligibilityDecision: "the human decisions recorded against a drive",
   PlacementExport: "the record of who exported which cohort",
   ProfileExport: "a student's own signed link, read to count their live ones",

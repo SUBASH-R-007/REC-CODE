@@ -61,7 +61,7 @@ export default async function DashboardPage() {
       <AnnouncementBanner announcements={announcements} />
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <ContinueCard action={data.continueAction} now={now} className="lg:col-span-2" />
+        <ContinueCard recommendation={data.recommendation} className="lg:col-span-2" />
         <DailyChallengeCard daily={data.daily} />
       </div>
 

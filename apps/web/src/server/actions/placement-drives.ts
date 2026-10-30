@@ -73,8 +73,27 @@ export async function createDrive(input: unknown): Promise<ActionResult<{ driveI
     const actor = await requirePlacementAction();
     const parsed = driveSchema.parse(input);
 
+    /**
+     * Link the catalogue company when one exists (Phase 12f).
+     *
+     * `companyName` has always been free text, and `companyId` was never
+     * set by anything — so no drive had one, and the recommender's "before
+     * the drive" rule, which needs a company to look up "asked at" tags
+     * against, could never fire. Matched on the slug, the same way the
+     * interview archive matches a typed company name; a drive for a
+     * company nobody has entered keeps `companyId` null, which is right —
+     * there are no tags for it either.
+     */
+    const slug = parsed.companyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60);
+    const company = slug ? await db.company.findUnique({ where: { slug }, select: { id: true } }) : null;
+
     const row = await db.placementDrive.create({
       data: {
+        companyId: company?.id ?? null,
         companyName: parsed.companyName,
         tier: parsed.tier,
         driveOn: campusDayDate(new Date(`${parsed.driveOn}T00:00:00.000Z`)),
@@ -90,6 +109,7 @@ export async function createDrive(input: unknown): Promise<ActionResult<{ driveI
     await auditDrive(actor.id, "placement.drive_created", row.id, {
       tier: parsed.tier,
       thresholdScore: parsed.thresholdScore ?? null,
+      companyId: company?.id ?? null,
     });
     revalidatePath("/placement-cell/drives");
     return { driveId: row.id };

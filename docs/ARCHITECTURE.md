@@ -90,6 +90,43 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## The recommender (Phase 12f)
+
+SPEC §11: "rule-based, explainable (no ML — it has neither the data nor an
+evaluation harness to beat a good rule, and it cannot explain itself;
+always render the reason inline, and rotate topics after 3 consecutive
+picks from the same one)".
+
+`recommend()` in `@recx/shared` is a pure function over seven rungs, and it
+returns the REASON with the pick. The sentence is not assembled in the
+component: an explanation built a second time is one that can disagree with
+the decision, and a recommender a student cannot argue with is one they
+learn to ignore. `tests/repo/recommender-posture.test.ts` keeps both ends
+of that — no ML package in any workspace manifest, and `recommend()` called
+from exactly one place.
+
+The order, and why two of the placements are arguments:
+
+1. **FINISH** — an unsolved problem they already started. Cheapest thing
+   they can finish tonight, and already in their head.
+2. **DRIVE** — a problem a company whose drive is inside 21 days has been
+   reported asking (Phase 12e's tags). Above revision because a drive has a
+   date and a revision has a schedule built to tolerate a day.
+3. **REVISE** — a due revision card (Phase 12c).
+4. **WEAK_TOPIC** — the topic with the fewest UNASSISTED solves against the
+   PRODUCT per-topic target. Unassisted because that is what readiness
+   counts, and a recommender pointing at a topic the student "covered" with
+   the editorial open would argue with the score on the next page.
+5. **PLAN**, 6. **DAILY**, 7. **FRESH**.
+
+**Rotation reads what the student DID, not what we suggested.** The spec
+says rotate after three consecutive picks from one topic;
+`loadRecommendExtras` reads the topics of their last three judged
+PROBLEMS — one topic per problem, so five submissions on one array problem
+is one array problem. Same signal where it matters, better where it
+differs: a student who ignored three array suggestions has not done three
+array problems and should not be rotated off arrays for it.
+
 ## The interview archive (Phase 12e)
 
 SPEC §11 calls it "the only legal and genuinely REC-specific source of

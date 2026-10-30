@@ -3,58 +3,18 @@ import {
   WEEKLY_GOAL_PROBLEMS,
   campusHour,
   levelView,
-  selectContinue,
   streakView,
   weekStart,
   weekStrip,
   weeklyGoalProgress,
-  type ProblemRef,
 } from "@/components/dashboard/model";
 
-const problem = (slug: string, difficulty: ProblemRef["difficulty"] = "EASY"): ProblemRef => ({
-  id: `id-${slug}`,
-  slug,
-  displayCode: `P-${slug}`,
-  title: slug,
-  difficulty,
-});
-
-const attempted = { problem: problem("attempted"), attempts: 3, lastAttemptAt: new Date("2026-10-09T10:00:00Z") };
-const plan = {
-  problem: problem("plan-next", "MEDIUM"),
-  plan: { slug: "blind-75", title: "Blind 75", kind: "SHEET" as const, itemsDone: 4, itemsTotal: 75 },
-};
-const daily = { problem: problem("daily", "MEDIUM"), solved: false, xp: 240 };
-const suggested = { problem: problem("first-easy"), firstEver: true };
-
-describe("selectContinue — the one next action", () => {
-  it("prefers the most recently attempted unsolved problem", () => {
-    expect(selectContinue({ attempted, plan, daily, suggested })).toMatchObject({ kind: "attempted", problem: { slug: "attempted" } });
-  });
-
-  it("then the next item of an enrolled study plan", () => {
-    expect(selectContinue({ attempted: null, plan, daily, suggested })).toMatchObject({
-      kind: "plan",
-      problem: { slug: "plan-next" },
-      plan: { slug: "blind-75" },
-    });
-  });
-
-  it("then today's daily challenge, unless it is already solved", () => {
-    expect(selectContinue({ daily, suggested })).toMatchObject({ kind: "daily", xp: 240 });
-    expect(selectContinue({ daily: { ...daily, solved: true }, suggested })).toMatchObject({ kind: "suggested" });
-  });
-
-  it("then a suggested Easy problem", () => {
-    expect(selectContinue({ suggested })).toMatchObject({ kind: "suggested", firstEver: true });
-  });
-
-  it("returns none for an empty catalogue", () => {
-    expect(selectContinue({})).toEqual({ kind: "none" });
-    expect(selectContinue({ attempted: null, plan: null, daily: null, suggested: null })).toEqual({ kind: "none" });
-    expect(selectContinue({ daily: { ...daily, solved: true } })).toEqual({ kind: "none" });
-  });
-});
+/**
+ * The Continue card's CHOICE moved to `recommend()` in @recx/shared in
+ * Phase 12f — seven rungs instead of four, with the reason returned beside
+ * the pick — and is tested there (packages/shared/test/recommend.test.ts).
+ * What is left here is the rest of the dashboard's pure arithmetic.
+ */
 
 describe("weeklyGoalProgress", () => {
   it("counts every difficulty from the WEEK bucket", () => {
