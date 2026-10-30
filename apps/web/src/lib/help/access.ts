@@ -1,5 +1,13 @@
 import "server-only";
-import { aiHelperAccess, helpAccess, type AiAccess, type HelpAccess, type HelpContext } from "@recx/shared";
+import {
+  aiHelperAccess,
+  discussionAccess,
+  helpAccess,
+  type AiAccess,
+  type DiscussionAccess,
+  type HelpAccess,
+  type HelpContext,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -30,6 +38,8 @@ export interface HelpState {
   attempts: number;
   failedAttempts: number;
   solved: boolean;
+  /** The first solve followed a tier-3 hint, the editorial or the AI helper. */
+  assisted: boolean;
   /** Active workspace seconds (ProblemActivity). */
   activeSeconds: number;
   editorialVisibleAt: Date | null;
@@ -56,7 +66,7 @@ export async function getHelpState(
     }),
     db.userProblemStatus.findUnique({
       where: key,
-      select: { status: true, attempts: true, failedAttempts: true },
+      select: { status: true, attempts: true, failedAttempts: true, assisted: true },
     }),
     db.problemActivity.findUnique({ where: key, select: { activeSeconds: true } }),
   ]);
@@ -66,6 +76,7 @@ export async function getHelpState(
   const attempts = status?.attempts ?? 0;
   const failedAttempts = status?.failedAttempts ?? 0;
   const solved = status?.status === "SOLVED";
+  const assisted = status?.assisted ?? false;
   const activeSeconds = activity?.activeSeconds ?? 0;
   const editorialVisibleAt = problem.editorialVisibleAt ?? null;
 
@@ -76,6 +87,7 @@ export async function getHelpState(
     attempts,
     failedAttempts,
     solved,
+    assisted,
     activeSeconds,
     editorialVisibleAt,
     now,
@@ -96,6 +108,25 @@ export function hintAllowed(state: HelpState, tier: number): boolean {
 /** May the editorial be viewed / shown? (Reads the chokepoint's decision.) */
 export function editorialAllowed(state: HelpState): boolean {
   return state.access.editorial;
+}
+
+/**
+ * May this viewer read the discussion, and post in it? (Reads the
+ * chokepoint's decision.)
+ *
+ * The policy is `discussionAccess()` in @recx/shared: practice only,
+ * reading needs a solve of any kind and posting needs an unassisted one.
+ * It lives here with the hints for the same reason they do — "what may this
+ * student see on this problem" is one question, and answering it in two
+ * places is how the two answers drift apart.
+ */
+export function discussionAllowed(state: HelpState, moderator: boolean): DiscussionAccess {
+  return discussionAccess({
+    context: state.context,
+    solved: state.solved,
+    assisted: state.assisted,
+    moderator,
+  });
 }
 
 /**

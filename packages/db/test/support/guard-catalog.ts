@@ -577,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261030150000_phase12c_spaced_revision";
+export const CHECK_CATALOG_THROUGH = "20261030170000_phase12d_discussion";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1008,6 +1008,24 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["RevisionCard_learned_check", "RevisionCard"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261030150000_phase12c_spaced_revision" })),
+  ...(
+    [
+      // Each of these is something a student or a moderator is TOLD, so a
+      // row that breaks it makes the product lie rather than misbehave.
+      ["DiscussionPost_hidden_pair_check", "DiscussionPost"],
+      ["DiscussionPost_body_size_check", "DiscussionPost"],
+      ["DiscussionPost_hidden_reason_size_check", "DiscussionPost"],
+      ["DiscussionPost_not_own_parent_check", "DiscussionPost"],
+      ["DiscussionPost_shared_code_check", "DiscussionPost"],
+      ["DoubtThread_title_size_check", "DoubtThread"],
+      ["DoubtThread_body_size_check", "DoubtThread"],
+      ["DoubtThread_answered_pair_check", "DoubtThread"],
+      ["DoubtReply_body_size_check", "DoubtReply"],
+      ["ContentReport_one_target_check", "ContentReport"],
+      ["ContentReport_detail_size_check", "ContentReport"],
+      ["ContentReport_resolved_pair_check", "ContentReport"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261030170000_phase12d_discussion" })),
 ];
 
 /**

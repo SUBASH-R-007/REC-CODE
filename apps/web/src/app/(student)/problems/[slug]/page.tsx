@@ -16,6 +16,7 @@ import { getProblemWorkspace } from "@/server/queries/problems";
 import { HISTORY_LIMIT, recentSubmissions } from "@/server/queries/submissions";
 import { ActivityTracker } from "@/components/help/activity-tracker";
 import { EditorialPanel } from "@/components/help/editorial-panel";
+import { DiscussionPanel } from "@/components/discussion/discussion-panel";
 import { AssistantPanel } from "@/components/help/assistant-panel";
 import { HintsPanel } from "@/components/help/hints-panel";
 import { BookmarkButton } from "@/components/problems/bookmark-button";
@@ -153,6 +154,14 @@ export default async function ProblemPage({ params }: Params) {
                 ),
               }
             : {}),
+          // Phase 12d. Always present in practice: the doubts half is open
+          // to everybody, and the panel itself draws the lock over the
+          // solutions half when the gate says so.
+          discussion: (
+            <Suspense fallback={<PanelSkeleton />}>
+              <DiscussionPanel problemId={problem.id} />
+            </Suspense>
+          ),
         }}
       />
     </WorkspaceFrame>

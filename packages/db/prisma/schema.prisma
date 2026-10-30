@@ -187,6 +187,38 @@ enum AiAskKind {
   APPROACH
 }
 
+/// Phase 12d. A shared post is either an explanation of a solve or a nudge.
+enum DiscussionPostKind {
+  SOLUTION
+  TIP
+}
+
+/// Hidden, never deleted: a moderation decision nobody can see is worse for
+/// trust than the post it removed.
+enum DiscussionPostStatus {
+  VISIBLE
+  HIDDEN
+}
+
+enum DoubtStatus {
+  OPEN
+  ANSWERED
+}
+
+enum ReportReason {
+  SPOILER
+  WRONG
+  ABUSE
+  SPAM
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  UPHELD
+  DISMISSED
+}
+
 enum StudyPlanKind {
   SHEET
   TRACK
@@ -565,6 +597,12 @@ model User {
   editorialViews       EditorialView[]
   aiAssists            AiAssist[]
   revisionCards        RevisionCard[]
+  discussionPosts      DiscussionPost[]      @relation("PostAuthor")
+  moderatedPosts       DiscussionPost[]      @relation("PostModerator")
+  doubtThreads         DoubtThread[]
+  doubtReplies         DoubtReply[]
+  contentReports       ContentReport[]       @relation("ReportAuthor")
+  resolvedReports      ContentReport[]       @relation("ReportResolver")
   problemActivity      ProblemActivity[]
   enrollments          StudyPlanEnrollment[]
   bookmarks            Bookmark[]
@@ -732,6 +770,8 @@ model Problem {
   editorialViews  EditorialView[]
   aiAssists       AiAssist[]
   revisionCards   RevisionCard[]
+  discussion      DiscussionPost[]
+  doubts          DoubtThread[]
   activity        ProblemActivity[]
   studyPlanItems  StudyPlanItem[]
   bookmarks       Bookmark[]
@@ -1040,6 +1080,7 @@ model Submission {
 
   source  SubmissionSource?
   details SubmissionTestDetail[]
+  shared  DiscussionPost[]
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, problemId, createdAt(sort: Desc)])
@@ -1342,6 +1383,124 @@ model EditorialView {
   firstViewedAt DateTime @default(now())
 
   @@id([userId, problemId])
+}
+
+/// A post on a problem's discussion (Phase 12d).
+///
+/// Writing one requires an UNASSISTED solve of that problem and reading the
+/// list requires a solve of any kind (`discussionAccess()` in @recx/shared);
+/// the server decides both, as it does for hints. A reply is a post with a
+/// `parentId` — one level, because a thread that nests is a thread nobody
+/// moderates.
+///
+/// Hidden, never deleted. `status = HIDDEN` with a reason the author is
+/// shown: a moderation decision nobody can see teaches everybody that posts
+/// vanish, which costs more trust than the post was worth.
+model DiscussionPost {
+  id               String               @id @default(cuid())
+  problemId        String
+  problem          Problem              @relation(fields: [problemId], references: [id])
+  authorId         String
+  author           User                 @relation("PostAuthor", fields: [authorId], references: [id])
+  /// Null for a top-level post; a reply names the post it answers.
+  parentId         String?
+  parent           DiscussionPost?      @relation("PostReplies", fields: [parentId], references: [id])
+  replies          DiscussionPost[]     @relation("PostReplies")
+  kind             DiscussionPostKind
+  bodyMd           String               @db.Text
+  /// The language of the attached code, when the author shared any.
+  language         String?
+  /// The author's OWN accepted submission, so shared code is code the judge
+  /// accepted rather than something retyped from memory.
+  submissionId     String?
+  submission       Submission?          @relation(fields: [submissionId], references: [id])
+  status           DiscussionPostStatus @default(VISIBLE)
+  /// A TA or mentor marking this the one worth reading first.
+  editorialQuality Boolean              @default(false)
+  /// Set together when a moderator hides a post; the author is shown both.
+  hiddenById       String?
+  hiddenBy         User?                @relation("PostModerator", fields: [hiddenById], references: [id])
+  hiddenReason     String?
+  hiddenAt         DateTime?
+  createdAt        DateTime             @default(now())
+  editedAt         DateTime?
+  reports          ContentReport[]
+
+  @@index([problemId, status, createdAt])
+  @@index([parentId])
+  @@index([authorId])
+}
+
+/// A student's question about a problem (Phase 12d).
+///
+/// NOT gated: a doubt is asked by somebody stuck, which is the opposite of
+/// the state the solution gate protects. Only the asker and a mentor may
+/// reply (`mayReplyToDoubt()`), which is what stops the doubt list becoming
+/// the solution list by the back door.
+model DoubtThread {
+  id         String       @id @default(cuid())
+  problemId  String
+  problem    Problem      @relation(fields: [problemId], references: [id])
+  authorId   String
+  author     User         @relation(fields: [authorId], references: [id])
+  title      String
+  bodyMd     String       @db.Text
+  status     DoubtStatus  @default(OPEN)
+  /// Set when the ASKER marks a reply as the answer; only they may.
+  answeredAt DateTime?
+  createdAt  DateTime     @default(now())
+  editedAt   DateTime?
+  replies    DoubtReply[]
+  reports    ContentReport[]
+
+  @@index([problemId, status, createdAt])
+  @@index([authorId])
+}
+
+/// A reply on a doubt thread. `byMentor` is frozen at write time from the
+/// author's role, so a badge on an old answer still says what was true when
+/// it was given — a student whose role later changes does not retroactively
+/// gain or lose authority over an answer.
+model DoubtReply {
+  id         String      @id @default(cuid())
+  threadId   String
+  thread     DoubtThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User        @relation(fields: [authorId], references: [id])
+  bodyMd     String      @db.Text
+  byMentor   Boolean     @default(false)
+  /// The asker picked this one as the answer.
+  acceptedAt DateTime?
+  createdAt  DateTime    @default(now())
+
+  @@index([threadId, createdAt])
+}
+
+/// A student reporting a post or a doubt (Phase 12d).
+///
+/// Exactly one target, enforced by a CHECK: a report that names both or
+/// neither is a report a moderator cannot act on. Resolving one is a
+/// decision with a name on it, like every other decision in this product.
+model ContentReport {
+  id          String          @id @default(cuid())
+  postId      String?
+  post        DiscussionPost? @relation(fields: [postId], references: [id])
+  doubtId     String?
+  doubt       DoubtThread?    @relation(fields: [doubtId], references: [id])
+  reporterId  String
+  reporter    User            @relation("ReportAuthor", fields: [reporterId], references: [id])
+  reason      ReportReason
+  detail      String
+  status      ReportStatus    @default(OPEN)
+  resolvedById String?
+  resolvedBy  User?           @relation("ReportResolver", fields: [resolvedById], references: [id])
+  resolvedAt  DateTime?
+  resolution  String?
+  createdAt   DateTime        @default(now())
+
+  @@index([status, createdAt])
+  @@index([postId])
+  @@index([doubtId])
 }
 
 /// A problem coming back to a student on a spaced schedule (Phase 12c).

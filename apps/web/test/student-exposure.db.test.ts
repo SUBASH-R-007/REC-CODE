@@ -1250,6 +1250,14 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // frozen version's hidden tests by widening a select.
     "revision#loadRevisionQueue": async () => (await load(path.join(QUERIES_DIR, "revision.ts"))).loadRevisionQueue!,
     "revision#countDueRevisions": async () => (await load(path.join(QUERIES_DIR, "revision.ts"))).countDueRevisions!,
+    // Phase 12d. The discussion panel renders other students' words and
+    // joins the problem for its title, so it is exactly the shape that
+    // could widen into a frozen version's hidden tests. The two mentor
+    // queries are here as well because they render the same bodies to a
+    // reader who is NOT the author.
+    "discussion#loadDiscussionPanel": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadDiscussionPanel!,
+    "discussion#loadOpenDoubts": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadOpenDoubts!,
+    "discussion#loadModerationQueue": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadModerationQueue!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -1257,6 +1265,15 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "dashboard#getDashboard": () => [[ids.user]],
     "revision#loadRevisionQueue": () => [[ids.user]],
     "revision#countDueRevisions": () => [[ids.user]],
+    // As the student, on the published problem and on the draft one: the
+    // draft must be as unreachable here as everywhere else.
+    "discussion#loadDiscussionPanel": () => [
+      [{ id: ids.user, role: "STUDENT" }, ids.problem, "PRACTICE"],
+      [{ id: ids.user, role: "STUDENT" }, ids.draftProblem, "PRACTICE"],
+      [{ id: ids.user, role: "STUDENT" }, ids.problem, "CONTEST"],
+    ],
+    "discussion#loadOpenDoubts": () => [[]],
+    "discussion#loadModerationQueue": () => [[]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
@@ -1649,6 +1666,28 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * draft problem must not be distinguishable from the published one by
      * what comes back.
      */
+    /**
+     * Phase 12d. Seven, and the interesting ones are the refusals: S has
+     * not solved the fixture problem, so posting and reading are both
+     * closed, and the draft problem is closed twice over. Asking a doubt
+     * is NOT gated, so that one exercises the happy path and its output
+     * must still carry no canary.
+     */
+    "discussion#createDiscussionPost": [
+      () => [{ problemId: ids.problem, kind: "SOLUTION", bodyMd: "x".repeat(40), submissionId: null }],
+      () => [{ problemId: ids.draftProblem, kind: "TIP", bodyMd: "x".repeat(40), submissionId: null }],
+    ],
+    "discussion#replyToDiscussionPost": [() => [{ parentId: `${tag}-no-such-post`, bodyMd: "Not a real post." }]],
+    "discussion#editDiscussionPost": [() => [{ postId: `${tag}-no-such-post`, bodyMd: "x".repeat(40) }]],
+    "discussion#askDoubt": [
+      () => [{ problemId: ids.problem, title: "Why is my loop wrong?", bodyMd: "I tried two pointers and it fails." }],
+      () => [{ problemId: ids.draftProblem, title: "Why is my loop wrong?", bodyMd: "I tried two pointers and it fails." }],
+    ],
+    "discussion#replyToDoubt": [() => [{ threadId: `${tag}-no-such-thread`, bodyMd: "Not a real thread." }]],
+    "discussion#acceptDoubtAnswer": [() => [{ replyId: `${tag}-no-such-reply` }]],
+    "discussion#reportContent": [
+      () => [{ postId: `${tag}-no-such-post`, doubtId: null, reason: "SPOILER", detail: "Gives it all away." }],
+    ],
     "ai-helper#askAiHelper": [
       () => [{ problemId: ids.problem, kind: "MISTAKE" }],
       () => [{ problemId: ids.draftProblem, kind: "APPROACH" }],

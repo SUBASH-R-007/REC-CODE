@@ -172,6 +172,12 @@ const TARGETS: readonly Target[] = [
    * asserted) and by the manual pass recorded in docs/RUNBOOK.md §3.
    */
   { path: "/mentor", as: "admin", gating: false },
+  // Phase 12d. The two moderation surfaces: a queue of reports with a
+  // reason dialog on each, and the questions list with a reply box per
+  // thread — both are forms in a list, which is where label and heading
+  // mistakes land.
+  { path: "/mentor/doubts", as: "admin", gating: false },
+  { path: "/mentor/moderation", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
   { path: "/judge", as: null, gating: false },

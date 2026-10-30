@@ -698,6 +698,29 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     actions: ["help#revealHint", "help#viewEditorial"],
   },
   {
+    /**
+     * Phase 12d. Posting is gated on an UNASSISTED solve of that problem
+     * and reading on a solve of any kind, but neither is a ROLE check —
+     * both are the help chokepoint (lib/help/access.ts), which is why
+     * every signed-in role is here and the real gate is inside each body.
+     * Reporting is deliberately open to anybody signed in, including a
+     * student who cannot read the thread: a gate on the safety valve is
+     * not a safety valve.
+     */
+    key: "discussion.participate",
+    label: "Post, ask and reply in a problem's discussion",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: [
+      "discussion#createDiscussionPost",
+      "discussion#replyToDiscussionPost",
+      "discussion#editDiscussionPost",
+      "discussion#askDoubt",
+      "discussion#replyToDoubt",
+      "discussion#acceptDoubtAnswer",
+      "discussion#reportContent",
+    ],
+  },
+  {
     // Phase 12b. Signed in is the role check; everything that actually
     // decides an answer — practice only, enough effort, inside today's
     // allowance, and the helper switched on at all — is the help chokepoint
@@ -902,34 +925,50 @@ export const MENTOR_CAPABILITIES = deepFreeze([
     pages: ["app/mentor/page.tsx", "app/mentor/[menteeId]/page.tsx"],
   },
   /**
-   * All three are gated on the DISCUSSION models, including the editorial
-   * one. `Editorial` already exists — it is the Phase 3 problem editorial,
-   * written through the ADMIN authoring pipeline, and a mentor gets no part
-   * of that. What arrives in Phase 11 is the community surface: a mentor's
-   * explanation attached to a thread. Gating it on a model that already
-   * exists would make the test demand wiring for a power that has nowhere
-   * to be wired.
+   * All three waited on the DISCUSSION models and were wired in Phase 12d,
+   * when those models arrived. The spec is explicit that they ship
+   * together: "discussion and solution sharing gated behind an unassisted
+   * solve (with the TA_MENTOR moderation role shipping simultaneously, not
+   * after)".
+   *
+   * Note what is NOT here: editing somebody's words. A moderator's tools
+   * are hide (with a reason the author is shown), un-hide, and recommend.
+   * Rewriting a student's post would make the byline a lie.
    */
   {
     key: "mentor.discussion.moderate",
     label: "Moderate discussion",
     roles: MENTOR,
-    actions: [],
-    arrives: { phase: 11, models: ["DiscussionPost", "DoubtThread"] },
+    actions: ["moderation#hideDiscussionPost", "moderation#unhideDiscussionPost", "moderation#resolveContentReport"],
+    pages: ["app/mentor/moderation/page.tsx"],
   },
   {
     key: "mentor.solution.editorial",
-    label: "Explain a solution on a thread",
+    label: "Mark a post as the one worth reading first",
     roles: MENTOR,
-    actions: [],
-    arrives: { phase: 11, models: ["DiscussionPost", "DoubtThread"] },
+    actions: ["moderation#markPostEditorial"],
   },
+  /**
+   * Answering a doubt is `discussion#replyToDoubt`, which EVERY signed-in
+   * user may call — the student who asked answers their own question in it
+   * too. What a mentor gets is not a different action but a different
+   * result: `byMentor` is frozen from their role at write time, and the
+   * badge is on the reply for good. So this capability names no action of
+   * its own, and the self-service list owns the one action there is.
+   */
   {
     key: "mentor.doubts.answer",
-    label: "Answer student doubts",
+    label: "Answer a student's question with a TA badge",
     roles: MENTOR,
+    // The ACTION is `discussion#replyToDoubt`, which every signed-in user
+    // may call — the student who asked answers in it too. What a mentor
+    // gets is not a different call but a different result: the server
+    // freezes `byMentor` from their role, and the badge stays on the reply
+    // for good. What this capability owns is the QUEUE: without somewhere
+    // to find unanswered questions, a badge is worth nothing and a help
+    // channel dies in its second week.
     actions: [],
-    arrives: { phase: 11, models: ["DoubtThread"] },
+    pages: ["app/mentor/doubts/page.tsx"],
   },
 ] as const satisfies readonly Capability[]);
 

@@ -9,7 +9,15 @@ import { RoleShell } from "@/components/staff/role-shell";
 export default async function MentorLayout({ children }: { children: React.ReactNode }) {
   const user = await requireMentorPage();
   return (
-    <RoleShell user={user} area="Mentor" home="/mentor" nav={[{ href: "/mentor", label: "My mentees", match: "exact" }]}>
+    <RoleShell user={user} area="Mentor" home="/mentor" nav={[
+        { href: "/mentor", label: "My mentees", match: "exact" },
+        // Phase 12d. Moderation is college-wide, not per mentee: the queue
+        // is about public posts, and one narrowed to a mentor's own
+        // mentees would leave most of the board unmoderated while looking
+        // staffed.
+        { href: "/mentor/doubts", label: "Questions", match: "prefix" },
+        { href: "/mentor/moderation", label: "Moderation", match: "prefix" },
+      ]}>
       {children}
     </RoleShell>
   );

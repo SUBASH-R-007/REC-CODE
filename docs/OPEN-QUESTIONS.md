@@ -2739,3 +2739,66 @@ when cards fall due: the dashboard says it, and an email every morning about
 homework is how a feature gets muted. No revision for aptitude questions,
 which have their own once-per-question XP rule and would need their own
 answer.
+
+## Discussion, with the moderation role in the same change (Phase 12d)
+
+SPEC §11: "discussion and solution sharing gated behind an unassisted solve
+(with the TA_MENTOR moderation role shipping simultaneously, not after)."
+Both halves are here: the board, and the tools to run it.
+
+**The one place this reads the spec more finely than it is written.** The
+spec names a single gate; the implementation splits it. Reading a problem's
+solutions needs a solve of any kind, and POSTING needs an unassisted one.
+The reason is that the single sentence is doing two jobs. The spoiler
+problem is solved by any solve — once you have an accepted submission,
+nobody's answer can spoil anything. The quality problem is the other one,
+and it is the one the word "unassisted" is about: "here is how I did it"
+from somebody who did it with the editorial open is not what other students
+came for. Splitting them means a student who needed a hint can still read
+and still ask, and the people posting are the people who got there alone.
+If that reading is wrong, the fix is one line in `discussionAccess()`.
+
+**Why only the asker and a mentor may reply to a question.** This is the
+hole an anti-spoiler gate on solutions alone leaves open: a question thread
+that any student could answer is the solution list again, reachable by
+exactly the people the gate keeps out. Narrowing replies also makes the
+thread a help channel rather than a second board, which is what a stuck
+student actually wants.
+
+**Why the moderation role could not wait.** A place where students post
+about problems, with nobody able to take a post down, is not a feature at
+launch. So `/mentor/moderation` (the report queue, with every post hidden
+in the last 30 days listed underneath so a decision can be looked at again)
+and `/mentor/doubts` (every unanswered question, oldest first) ship in the
+same change as the board. The three capabilities that have carried
+`arrives: { phase: 11, models: ["DiscussionPost", "DoubtThread"] }` since
+Phase 4 are now wired to real guards.
+
+**Hidden, never deleted — and the notice says who and why.** A post that
+simply vanishes teaches everybody that posts vanish, and leaves an appeal
+with nothing to look at. The author sees the moderator's sentence word for
+word, which is also why hiding asks for ten characters minimum and the
+database refuses a hidden row without one.
+
+**Deciding a report and hiding a post are two buttons.** One button that
+did both is how a queue gets cleared without anybody reading it, and the
+reason the author would be shown would be a sentence written to close a
+ticket.
+
+**Not built, deliberately.** No votes or reputation: a score on a post is a
+reason to post, and the thing being optimised stops being the explanation.
+No editing of a student's words by a moderator — hide and explain, never
+rewrite, or the byline is a lie. No discussion on contest or assessment
+problems outside practice, and no notifications when somebody replies: the
+first is the gate, and the second needs a digest rather than a per-event
+email, which is its own phase. No per-cohort moderation queues; one college
+has one board.
+
+**NOT RUN: nobody has moderated anything they did not themselves create.**
+The whole loop was driven against the production build — a student asks, a
+mentor answers with the badge, another student reports, a mentor hides with
+a reason, the author sees the notice and not the body, un-hide puts it back,
+the report is dismissed with a person and a sentence attached — but all of
+it with six seeded accounts and one problem. What a real board does to a
+report queue, and whether one TA can keep up with a cohort, is a question
+only a term answers.

@@ -90,6 +90,36 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## Discussion, doubts and moderation (Phase 12d)
+
+Four tables arriving together — `DiscussionPost`, `DoubtThread`,
+`DoubtReply`, `ContentReport` — because SPEC §11 asks for the moderation
+role "simultaneously, not after", and a board nobody can moderate is an
+incident with a date on it.
+
+**Two lists with different rules.** Solutions and tips need a solve to
+read and an UNASSISTED solve to post. Questions need nothing: being stuck
+is the reason to ask. The one thing that keeps those two consistent is
+that only the ASKER and a mentor may reply on a question — otherwise the
+question list becomes the solution list, reachable by exactly the people
+the solve gate keeps out.
+
+**One decider.** `discussionAccess()` in `@recx/shared` is the policy and
+`discussionAllowed()` on the help chokepoint is the only caller; the
+chokepoint now carries `assisted` alongside `solved` for that reason. Every
+action body re-asks it, and `tests/repo/discussion-posture.test.ts` fails
+the build for a write path in `lib/discussion/posts.ts` that neither calls
+the gate nor appears in its allow-list with a reason.
+
+**Hidden, never deleted.** A moderator hides with a reason the author is
+shown, un-hides, and recommends; nothing deletes, and the same fence
+refuses a delete anywhere under `apps/web/src`. The body of a hidden post
+never leaves the server — it is not fetched and filtered, it is not
+fetched. Moderation is college-wide rather than per mentee: `mentor-scope`
+answers "whose student is this" for private data, and a queue narrowed to
+a mentor's own mentees would leave most of the board unmoderated while
+looking staffed.
+
 ## Spaced revision (Phase 12c)
 
 A `RevisionCard` per student per problem, written by the progress engine the

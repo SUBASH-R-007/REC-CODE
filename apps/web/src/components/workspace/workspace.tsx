@@ -48,9 +48,9 @@ import type { StudentView } from "@/lib/judge/view";
 import type { WorkspaceLanguage } from "@/server/queries/problems";
 import { runCode, submitSolution } from "@/server/actions/judge";
 
-type StatementTab = "description" | "editorial" | "submissions" | "hints" | "assistant";
-/** Always present; "assistant" is optional and its tab exists only when it is given. */
-type FixedStatementTab = Exclude<StatementTab, "assistant">;
+type StatementTab = "description" | "editorial" | "submissions" | "hints" | "assistant" | "discussion";
+/** Always present; the optional ones get a tab only when their panel is given. */
+type FixedStatementTab = Exclude<StatementTab, "assistant" | "discussion">;
 
 /** "C++20 (GCC 13.2.0)" → "C++20" for the compact language picker. */
 function shortName(label: string): string {
@@ -118,7 +118,7 @@ export function Workspace({
    * tab at all, rather than a disabled one. A door a student cannot open is
    * still a door.
    */
-  panels: Record<FixedStatementTab, React.ReactNode> & { assistant?: React.ReactNode };
+  panels: Record<FixedStatementTab, React.ReactNode> & { assistant?: React.ReactNode; discussion?: React.ReactNode };
   submissionCount: number;
   /** Footer language links to /judge in a new tab; the arena and attempt surfaces pass false. */
   judgeLink?: boolean;
@@ -154,6 +154,7 @@ export function Workspace({
   const [statementTab, setStatementTab] = useState<StatementTab>("description");
   const [mobileTab, setMobileTab] = useState<MobileTab>("problem");
   const hasAssistant = panels.assistant !== undefined;
+  const hasDiscussion = panels.discussion !== undefined;
   const statementItems = useMemo<TabStripItem<StatementTab>[]>(() => {
     const items: [StatementTab, string][] = [
       ["description", "Description"],
@@ -162,13 +163,14 @@ export function Workspace({
       ["hints", "Hints"],
     ];
     if (hasAssistant) items.push(["assistant", "Assistant"]);
+    if (hasDiscussion) items.push(["discussion", "Discussion"]);
     return items.map(([value, label]) => ({
       value,
       label,
       tabId: `${baseId}-st-${value}`,
       panelId: `${baseId}-sp-${value}`,
     }));
-  }, [baseId, hasAssistant, submissionCount]);
+  }, [baseId, hasAssistant, hasDiscussion, submissionCount]);
   const mobileItems = useMemo<TabStripItem<MobileTab>[]>(
     () =>
       (

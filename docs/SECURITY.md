@@ -261,9 +261,9 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `placement.drives` | placement | - | - | - | yes | yes | 2 actions, 3 pages |
 | `placement.eligibility.decide` | placement | - | - | - | yes | yes | 1 action |
 | `mentor.mentees.view` | mentor | - | yes | yes | - | yes | 2 pages |
-| `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
-| `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
-| `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | arrives in Phase 11 |
+| `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | 3 actions, 1 page |
+| `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | 1 action |
+| `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | 1 page |
 | `judge.submit` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
@@ -275,6 +275,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
+| `discussion.participate` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
@@ -360,6 +361,17 @@ suite.
 * Proctoring (Phase 6) collects no webcam, microphone or screen recording by
   default and no content keystrokes or clipboard contents; see
   `docs/PROCTORING.md`.
+* **The discussion (Phase 12d) is the first place a student's words are
+  shown to other students, and the gate is a chokepoint rather than a
+  branch.** Reading a problem's solutions needs a solve; posting needs an
+  unassisted one; questions need neither, and only the asker and a mentor
+  may reply to one. All of it is `discussionAccess()` reached through the
+  help chokepoint, re-asked inside every action body. A hidden post's body
+  is never fetched, and nothing in a request path can delete a post — both
+  fenced by `tests/repo/discussion-posture.test.ts`. An attached
+  submission is checked to be the author's OWN accepted practice
+  submission; an id trusted here would be a way to render another
+  student's code.
 * **The AI helper (Phase 12b) is the one feature that sends student work to
   a third party, and it is off until a super-admin turns it on.** What is
   sent, per question: the public problem statement, that student's own
