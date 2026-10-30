@@ -6,6 +6,7 @@ import { SQL_DIALECT, SQL_DIALECT_LABEL, SQL_LIMITS } from "@recx/shared";
 import {
   removeStarterCode,
   setDraftChecker,
+  setDraftInteractor,
   setDraftHelp,
   updateDraftDetails,
   updateDraftJudging,
@@ -336,6 +337,67 @@ export function CheckerForm({ checkerSource }: { checkerSource: string | null })
         {checkerSource !== null && (
           <Button type="button" variant="outline" disabled={pending} onClick={() => save(null)}>
             Remove checker
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The interactor of an interactive problem (Phase 12l).
+ *
+ * The checker's form with three differences in the words, because an
+ * author reaching this box is deciding something else: this program TALKS
+ * to the student's, it decides the verdict by itself, and the cases carry
+ * no expected output for it to read.
+ */
+export function InteractorForm({ interactorSource }: { interactorSource: string | null }) {
+  const id = useId();
+  const seq = useDraftSeq();
+  const { run, pending, error } = useActionRunner();
+  const [source, setSource] = useState(interactorSource ?? "");
+  const save = (value: string | null) =>
+    run(() => setDraftInteractor({ versionId: seq.versionId, expectedEditSeq: seq.editSeq, source: value }), {
+      success: value === null ? "Interactor removed." : "Interactor saved.",
+      onSuccess: (d) => seq.setEditSeq(d.editSeq),
+    });
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save(source.trim() ? source : null);
+      }}
+    >
+      <Field
+        label="Interactor program (testlib C++)"
+        htmlFor={`${id}-interactor`}
+        hint="Interactive problems only. It runs beside the student's program, talks to it, and exits with the verdict (quitf(_ok) / _wa / _fail). A case's input is its data; there is no expected output."
+      >
+        <Textarea
+          id={`${id}-interactor`}
+          rows={12}
+          className="font-mono text-xs"
+          spellCheck={false}
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+        />
+      </Field>
+      <p className="text-xs text-text-secondary">
+        Call <code className="font-mono">registerInteraction(argc, argv)</code>, read the case data from{" "}
+        <code className="font-mono">inf</code>, read the student&apos;s queries from <code className="font-mono">ouf</code>, and
+        flush every reply (<code className="font-mono">std::endl</code>). Two seconds with neither program writing is reported
+        to the student as a deadlock.
+      </p>
+      <ErrorLine error={error} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" loading={pending}>
+          Save interactor
+        </Button>
+        {interactorSource !== null && (
+          <Button type="button" variant="outline" disabled={pending} onClick={() => save(null)}>
+            Remove interactor
           </Button>
         )}
       </div>

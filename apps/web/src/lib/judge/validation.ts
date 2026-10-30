@@ -4,6 +4,7 @@ import {
   deriveTimeLimitMs,
   isLanguageKey,
   SQL_LANGUAGE_KEY,
+  isSqlLanguage,
   languageRuntimeSchema,
   sqlRuntimeSchema,
   supportsFunctionMode,
@@ -251,22 +252,34 @@ export interface LanguageLimitRow {
 }
 
 /**
- * ProblemLanguageLimit rows for every enabled language: measured languages
- * from their worst (slowest) model solution, the rest from the fallback
- * multiplier. Memory is the version's limit for every language.
+ * ProblemLanguageLimit rows for every language this problem can be
+ * ANSWERED in: measured languages from their worst (slowest) model
+ * solution, the rest from the fallback multiplier. Memory is the version's
+ * limit for every language.
+ *
+ * `ioMode` is here because the set of answerable languages depends on it
+ * (Phase 12l, found by the live stage): a SQL problem is answered with SQL
+ * and nothing else, and no other problem is answered with SQL — the same
+ * rule the workspace and the submit boundary already follow. A limit for a
+ * language a student cannot choose is a stored row that reads as
+ * meaningful, and an interactive problem came out of its first publish
+ * with a `sql17` time limit beside its C++ one.
  */
 export function deriveLanguageLimits(input: {
   baseMs: number;
   memoryLimitKb: number;
   languages: readonly EnabledLanguage[];
   measurements: readonly ModelMeasurement[];
+  ioMode: IoMode;
 }): LanguageLimitRow[] {
   const worst = new Map<string, ModelMeasurement>();
   for (const m of input.measurements) {
     const seen = worst.get(m.language);
     if (!seen || m.measuredMs > seen.measuredMs) worst.set(m.language, m);
   }
+  const sql = input.ioMode === "SQL";
   return [...input.languages]
+    .filter((lang) => isSqlLanguage(lang.key) === sql)
     .sort((a, b) => a.key.localeCompare(b.key))
     .map((lang) => {
       const measured = worst.get(lang.key) ?? null;
@@ -497,6 +510,7 @@ async function computeLimits(client: Client, state: LoadedState, summary: Valida
     memoryLimitKb: state.version.memoryLimitKb,
     languages: [...state.configs.values()].map((c) => c.language),
     measurements,
+    ioMode: state.version.ioMode,
   });
 }
 

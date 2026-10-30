@@ -126,7 +126,7 @@ export default async function TestCasesPage({ params, searchParams }: Props) {
           <Card>
             <CardHeader title="Add a test" subtitle="Every test change means validation must run again." />
             <CardBody>
-              <AddTestForm scoring={version.scoringMode} />
+              <AddTestForm scoring={version.scoringMode} interactive={version.compareMode === "INTERACTIVE"} />
             </CardBody>
           </Card>
           <Card>

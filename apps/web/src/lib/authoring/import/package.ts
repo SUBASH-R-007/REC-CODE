@@ -43,6 +43,8 @@ export interface ProblemPackage {
   editorial: string | null;
   hints: string[];
   checker: string | null;
+  /** INTERACTIVE problems (Phase 12l): the interactor's source. */
+  interactor: string | null;
   tests: PackageTest[];
   solutions: { file: string; language: LanguageKey; expected: ReferenceExpectedVerdict; label: string; source: string }[];
   starters: { language: LanguageKey; code: string }[];
@@ -242,6 +244,7 @@ export function parseProblemPackage(entry: string, files: PackageFiles): ParsedP
   const solutions: ProblemPackage["solutions"] = [];
   const starters: ProblemPackage["starters"] = [];
   let checker: string | null = null;
+  let interactor: string | null = null;
   if (meta) {
     for (const s of meta.solutions) {
       const source = text(s.file, IMPORT_LIMITS.sourceBytes, true);
@@ -252,6 +255,7 @@ export function parseProblemPackage(entry: string, files: PackageFiles): ParsedP
       if (code !== null) starters.push({ language, code });
     }
     if (meta.checker !== null) checker = text(meta.checker, IMPORT_LIMITS.checkerBytes, true);
+    if (meta.interactor !== null) interactor = text(meta.interactor, IMPORT_LIMITS.checkerBytes, true);
   }
   for (const path of files.keys()) {
     if (!used.has(path)) warning(path, "Not part of the package format; ignored.");
@@ -264,7 +268,8 @@ export function parseProblemPackage(entry: string, files: PackageFiles): ParsedP
       floatEpsilon: meta.floatEpsilon,
       functionSignature: meta.functionSignature,
       checkerSha256: checker !== null ? sha256(checker) : null,
-      testlibId: checker !== null ? "testlib" : null,
+      interactorSha256: interactor !== null ? sha256(interactor) : null,
+      testlibId: checker !== null || interactor !== null ? "testlib" : null,
       scoringMode: meta.scoringMode,
       timeLimitMs: meta.timeLimitMs,
       memoryLimitKb: meta.memoryLimitKb,
@@ -293,7 +298,7 @@ export function parseProblemPackage(entry: string, files: PackageFiles): ParsedP
   }
   return {
     ok: true,
-    pkg: { meta, statement, editorial, hints, checker, tests, solutions, starters },
+    pkg: { meta, statement, editorial, hints, checker, interactor, tests, solutions, starters },
     packageSha256: packageSha256(meta, files),
     warnings,
   };

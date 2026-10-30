@@ -215,11 +215,26 @@ export async function addAssessmentProblem(
 
     const problem = await db.problem.findUnique({
       where: { slug: parsed.problemSlug },
-      select: { liveVersionId: true, liveVersion: { select: { id: true, revision: true, frozenAt: true } } },
+      select: {
+        liveVersionId: true,
+        liveVersion: { select: { id: true, revision: true, frozenAt: true, compareMode: true } },
+      },
     });
     if (!problem) throw new NotFoundError("No problem with that address.");
     if (!problem.liveVersion || problem.liveVersion.frozenAt === null) {
       throw new ValidationError("That problem is not published yet, so there is no frozen revision to pin.");
+    }
+    /**
+     * Phase 12l. SPEC §11 keeps interactive problems out of high-stakes
+     * assessments "until they have run cleanly through two practice
+     * contests". The database refuses the pin too
+     * (AssessmentProblem_no_interactive); this is the sentence an admin
+     * reads instead of a constraint violation.
+     */
+    if (problem.liveVersion.compareMode === "INTERACTIVE") {
+      throw new ValidationError(
+        "An interactive problem is not sat in an assessment yet: it has to run cleanly through two practice contests first. Put it in a contest or leave it in practice.",
+      );
     }
 
     try {

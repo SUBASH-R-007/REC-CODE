@@ -22,7 +22,7 @@ function ErrorLine({ error }: { error: string | null }) {
   ) : null;
 }
 
-export function AddTestForm({ scoring }: { scoring: string }) {
+export function AddTestForm({ scoring, interactive = false }: { scoring: string; interactive?: boolean }) {
   const id = useId();
   const seq = useDraftSeq();
   const { run, pending, error } = useActionRunner();
@@ -64,13 +64,26 @@ export function AddTestForm({ scoring }: { scoring: string }) {
         );
       }}
     >
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Field label="Input" htmlFor={`${id}-in`} hint="Exactly what the program reads (end with a newline).">
+      <div className={interactive ? "grid gap-4" : "grid gap-4 lg:grid-cols-2"}>
+        <Field
+          label="Input"
+          htmlFor={`${id}-in`}
+          hint={
+            interactive
+              ? "The interactor's data for this case — the secret it keeps and the budget it allows. The student's program never reads it."
+              : "Exactly what the program reads (end with a newline)."
+          }
+        >
           <Textarea id={`${id}-in`} rows={6} className="font-mono text-xs" spellCheck={false} value={input} onChange={(e) => setInput(e.target.value)} />
         </Field>
-        <Field label="Expected output" htmlFor={`${id}-out`}>
-          <Textarea id={`${id}-out`} rows={6} className="font-mono text-xs" spellCheck={false} value={output} onChange={(e) => setOutput(e.target.value)} />
-        </Field>
+        {/* Phase 12l: an interactive problem compares no output. The field
+            is absent rather than present and ignored, and the version's
+            cases are stored with the empty blob. */}
+        {!interactive && (
+          <Field label="Expected output" htmlFor={`${id}-out`}>
+            <Textarea id={`${id}-out`} rows={6} className="font-mono text-xs" spellCheck={false} value={output} onChange={(e) => setOutput(e.target.value)} />
+          </Field>
+        )}
       </div>
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex items-center gap-2 text-sm text-text">

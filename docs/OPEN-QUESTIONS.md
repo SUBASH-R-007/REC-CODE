@@ -3382,3 +3382,45 @@ SQL judge host, as there is no judge host and no database host. What IS
 exercised on every change is the thing they would deploy — the judge
 process against a real PostgreSQL 17, including the eleven-case adversarial
 suite — which is the half that would hurt if it were wrong.
+
+## Authoring an interactive problem (Phase 12l, slice 2)
+
+**The expected output of an interactive case does not exist, and the empty
+blob is the honest way to say so.** `TestCase.outputSha256` is required for
+every kind of problem and three other things depend on it (the bundle, the
+manifest, the import pairing). Making it nullable for one compare mode
+would weaken a constraint that holds everywhere else — the Phase 12g
+lesson — so an interactive case stores the empty blob, the authoring form
+stops asking for output, and `versionContentIssues` refuses a case that
+carries any. The one rule that cannot be a CHECK is exactly that one: no
+constraint can say "these bytes are meaningless".
+
+**One `testlibId` serves both programs.** A version has a checker or an
+interactor, never both, because `compareMode` is a single value and the
+database refuses the pair. A second column would have been a second place
+to disagree.
+
+**SPEC's assessment rule has a date on it, so it is enforced where it can
+be lifted deliberately.** A trigger on `AssessmentProblem`, a sentence in
+the action, and an entry in the guard catalogue: dropping the trigger makes
+`frozen-coverage.test.ts` fail until somebody also removes the catalogue
+line, which means lifting the rule costs a line in the gate log. That is
+the whole point — the two practice contests SPEC asks for have not happened,
+and nothing in a database remembers an intention.
+
+**A limit for a language nobody can choose.** The first publish of an
+interactive problem printed `sql17 2000 ms` beside `cpp20`, because the
+limit derivation walked every enabled `LanguageConfig` and Phase 12k put
+SQL in that list. Harmless in itself, and the other direction was not: a
+SQL problem was getting C++ limits. The derivation now takes the io mode,
+which is the same rule the workspace and the submit boundary follow — and
+the lesson is that adding a LANGUAGE, like adding an engine, means
+re-asking every list what it is a list of.
+
+**Two clocks in an invariant suite.** `governance-invariants.test.ts` set
+timestamps from Node in some steps and from PostgreSQL in others, and on a
+machine whose database runs in WSL2 those clocks drift by a second — so
+rows got an "end" before their "start" and the right constraint fired for
+the wrong reason, differently on each run. The suite now takes every
+Node-side timestamp from the database's clock. An invariant about ORDER
+cannot be tested with two rulers.

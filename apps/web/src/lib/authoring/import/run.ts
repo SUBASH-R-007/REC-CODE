@@ -86,6 +86,7 @@ async function writeVersion(
     pkg: ProblemPackage;
     tests: { inputSha256: string; outputSha256: string }[];
     checkerSha256: string | null;
+    interactorSha256: string | null;
     packageSha256: string;
     actorId: string;
   },
@@ -110,7 +111,8 @@ async function writeVersion(
       timeLimitMs: meta.timeLimitMs,
       memoryLimitKb: meta.memoryLimitKb,
       checkerSha256: input.checkerSha256,
-      testlibId: input.checkerSha256 ? TESTLIB_ID : null,
+      interactorSha256: input.interactorSha256,
+      testlibId: input.checkerSha256 || input.interactorSha256 ? TESTLIB_ID : null,
       origin: meta.origin,
       createdById: input.actorId,
       lastEditedById: input.actorId,
@@ -198,6 +200,8 @@ export async function importOnePackage(entry: string, files: PackageFiles, ctx: 
     });
   }
   const checkerSha256 = pkg.checker !== null ? (await ensureTestBlob(db, store, Buffer.from(pkg.checker, "utf8"))).sha256 : null;
+  const interactorSha256 =
+    pkg.interactor !== null ? (await ensureTestBlob(db, store, Buffer.from(pkg.interactor, "utf8"))).sha256 : null;
 
   const base = { entry, slug: meta.slug, packageSha256 };
   try {
@@ -242,6 +246,7 @@ export async function importOnePackage(entry: string, files: PackageFiles, ctx: 
             pkg,
             tests,
             checkerSha256,
+            interactorSha256,
             packageSha256,
             actorId: ctx.actorId,
           });
@@ -281,6 +286,7 @@ export async function importOnePackage(entry: string, files: PackageFiles, ctx: 
               pkg,
               tests,
               checkerSha256,
+              interactorSha256,
               packageSha256,
               actorId: ctx.actorId,
             });

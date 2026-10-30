@@ -133,6 +133,25 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
   const userIds = () => Object.values(u).filter(Boolean);
 
   const raw = (sql: string, ...params: unknown[]) => db.$executeRawUnsafe(sql, ...params);
+
+  /**
+   * THE DATABASE'S clock, not this process's.
+   *
+   * Every invariant here is about the ORDER of two timestamps, and the
+   * steps below set them two different ways: a Prisma write sends a value
+   * from Node, while an UPDATE with `now()` takes one from PostgreSQL. On
+   * a development machine where the database runs in a VM — WSL2 here —
+   * those two clocks drift apart by a second or more, and the suite then
+   * fails on rows whose "end" is a hair before their "start": the
+   * constraint firing is the right one doing the wrong job, and the
+   * failure count changes from run to run with the live skew.
+   *
+   * So the offset is measured once and every Node-side timestamp carries
+   * it. `dbNow()` is what `new Date()` meant everywhere below.
+   */
+  let clockOffsetMs = 0;
+  const dbNowMs = () => Date.now() + clockOffsetMs;
+  const dbNow = () => new Date(dbNowMs());
   const update = (table: string, id: string, step: Step) =>
     raw(`UPDATE "public"."${table}" SET ${step.set} WHERE "id" = $1`, id, ...(step.params ?? []));
 
@@ -169,6 +188,10 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     ({ db, mod, restore: restoreEnv } = await openTestDb());
     const [current] = await db.$queryRawUnsafe<Array<{ name: string }>>("SELECT current_database() AS name");
     expect(current?.name).toBe(dbName);
+    const [clock] = await db.$queryRawUnsafe<Array<{ now: Date }>>("SELECT now() AS now");
+    // The one place this process's own clock is read: measuring the gap.
+    const here = Date.now();
+    clockOffsetMs = clock?.now ? clock.now.getTime() - here : 0;
     expect(await disabledTriggers(db)).toEqual([]);
     const roles: Record<keyof typeof u, "SUPER_ADMIN" | "ADMIN" | "STUDENT"> = {
       superA: "SUPER_ADMIN",
@@ -241,13 +264,13 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       affectedCount: 2,
       reason: `${tag}: accreditation audit asked for the roster`,
       requestedById: u.superA,
-      expiresAt: new Date(Date.now() + 23 * HOUR),
+      expiresAt: new Date(dbNowMs() + 23 * HOUR),
       ...data,
     });
     const request = async (data: Partial<Prisma.PrivilegedOperationUncheckedCreateInput> = {}) =>
       (await db.privilegedOperation.create({ data: base(data), select: { id: true } })).id;
     /** A request already past its expiry: requested 4 minutes ago (inside the insert window), expired 3 minutes ago. */
-    const expiredRequest = () => request({ requestedAt: new Date(Date.now() - 4 * MINUTE), expiresAt: new Date(Date.now() - 3 * MINUTE) });
+    const expiredRequest = () => request({ requestedAt: new Date(dbNowMs() - 4 * MINUTE), expiresAt: new Date(dbNowMs() - 3 * MINUTE) });
     const op = (id: string) => db.privilegedOperation.findUniqueOrThrow({ where: { id } });
     const set = (id: string, step: Step | string) => update("PrivilegedOperation", id, typeof step === "string" ? { set: step } : step);
 
@@ -286,16 +309,16 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       expect(await op(id)).toMatchObject({ status: "PENDING", decidedById: null, decidedAt: null, breakGlass: false, artifactDownloads: 0 });
       await db.privilegedOperation.update({
         where: { id },
-        data: { status: "APPROVED", decidedById: u.superB, decidedAt: new Date(), decisionNote: "Checked the filter and the count." },
+        data: { status: "APPROVED", decidedById: u.superB, decidedAt: dbNow(), decisionNote: "Checked the filter and the count." },
       });
       // The executor claims with a conditional update; a second claim matches nothing.
       const claim = () =>
-        db.privilegedOperation.updateMany({ where: { id, status: "APPROVED" }, data: { status: "EXECUTING", executionStartedAt: new Date() } });
+        db.privilegedOperation.updateMany({ where: { id, status: "APPROVED" }, data: { status: "EXECUTING", executionStartedAt: dbNow() } });
       expect((await claim()).count).toBe(1);
       expect((await claim()).count).toBe(0);
       await db.privilegedOperation.update({
         where: { id },
-        data: { status: "EXECUTED", executedAt: new Date(), result: { rows: 2 }, artifactAvailableUntil: new Date(Date.now() + 24 * HOUR) },
+        data: { status: "EXECUTED", executedAt: dbNow(), result: { rows: 2 }, artifactAvailableUntil: new Date(dbNowMs() + 24 * HOUR) },
       });
       // Three downloads through the route's conditional increment; the fourth matches nothing.
       const download = () =>
@@ -346,7 +369,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       ).rejects.toThrow(/PrivilegedOperation_two_person/);
       await db.privilegedOperation.update({
         where: { id },
-        data: { status: "APPROVED", decidedById: u.superA, breakGlass: true, decidedAt: new Date(), decisionNote: "Break-glass: results due in an hour." },
+        data: { status: "APPROVED", decidedById: u.superA, breakGlass: true, decidedAt: dbNow(), decisionNote: "Break-glass: results due in an hour." },
       });
       const approved = await op(id);
       expect(approved).toMatchObject({ status: "APPROVED", decidedById: u.superA, breakGlass: true });
@@ -360,8 +383,8 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       await expect(set(id, `"status" = 'PENDING'`)).rejects.toThrow(/cannot move from APPROVED to PENDING/);
       expect(await op(id)).toEqual(approved);
 
-      await db.privilegedOperation.update({ where: { id }, data: { status: "EXECUTING", executionStartedAt: new Date() } });
-      await db.privilegedOperation.update({ where: { id }, data: { status: "FAILED", executedAt: new Date(), error: "batch 1 of 1 failed" } });
+      await db.privilegedOperation.update({ where: { id }, data: { status: "EXECUTING", executionStartedAt: dbNow() } });
+      await db.privilegedOperation.update({ where: { id }, data: { status: "FAILED", executedAt: dbNow(), error: "batch 1 of 1 failed" } });
       const failed = await op(id);
       expect(failed).toMatchObject({ status: "FAILED", breakGlass: true, error: "batch 1 of 1 failed" });
       await expect(set(id, `"status" = 'EXECUTING'`)).rejects.toThrow(/FAILED \(final\)/);
@@ -471,7 +494,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
           );
         }
         await expect(
-          db.privilegedOperation.update({ where: { id }, data: { status, decidedById: decider, decidedAt: new Date(Date.now() + HOUR), breakGlass: decider === u.superA } }),
+          db.privilegedOperation.update({ where: { id }, data: { status, decidedById: decider, decidedAt: new Date(dbNowMs() + HOUR), breakGlass: decider === u.superA } }),
         ).rejects.toThrow(/more than 5 minutes after the database clock/);
         expect((await op(id)).status).toBe("PENDING");
         // Inside the tolerance (an application clock a little ahead) is accepted.
@@ -479,7 +502,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         expect((await op(id)).status).toBe(status);
       }
       // The approve path's recipe: GREATEST(database clock, requestedAt), with requestedAt up to 5 minutes ahead.
-      const early = await request({ requestedAt: new Date(Date.now() + 4 * MINUTE) });
+      const early = await request({ requestedAt: new Date(dbNowMs() + 4 * MINUTE) });
       expect(
         await set(early, { set: `"status" = 'APPROVED', "decidedById" = $2, "decidedAt" = GREATEST(${clock}, "requestedAt")`, params: [u.superB] }),
       ).toBe(1);
@@ -526,14 +549,14 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       );
       const premature: Array<Partial<Prisma.PrivilegedOperationUncheckedCreateInput>> = [
         { decidedById: u.superB },
-        { decidedAt: new Date() },
+        { decidedAt: dbNow() },
         { decisionNote: "pre-approved" },
         { breakGlass: true },
-        { executionStartedAt: new Date() },
-        { executedAt: new Date() },
+        { executionStartedAt: dbNow() },
+        { executedAt: dbNow() },
         { result: { rows: 1 } },
         { error: "x" },
-        { artifactAvailableUntil: new Date(Date.now() + DAY) },
+        { artifactAvailableUntil: new Date(dbNowMs() + DAY) },
         { artifactDownloads: 1 },
       ];
       for (const extra of premature) {
@@ -546,7 +569,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
     it("dates a request now: requestedAt within 5 minutes of the database clock at INSERT, and expiresAt after it", async () => {
       const marker = `${tag}: clock window`;
-      const now = Date.now();
+      const now = dbNowMs();
       for (const requestedAt of [new Date(now - 6 * MINUTE), new Date(now + 6 * MINUTE), new Date(now - 30 * DAY), new Date(now + 30 * DAY)]) {
         await expect(
           db.privilegedOperation.create({ data: base({ reason: marker, requestedAt, expiresAt: new Date(requestedAt.getTime() + HOUR) }) }),
@@ -589,7 +612,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       ];
       for (const step of refused) await expect(set(late, step), step.set).rejects.toThrow(/expired at .* can no longer be approved or rejected/);
       await expect(
-        db.privilegedOperation.update({ where: { id: late }, data: { status: "APPROVED", decidedById: u.superB, decidedAt: new Date() } }),
+        db.privilegedOperation.update({ where: { id: late }, data: { status: "APPROVED", decidedById: u.superB, decidedAt: dbNow() } }),
       ).rejects.toThrow(/can no longer be approved or rejected/);
       expect((await op(late)).status).toBe("PENDING");
       expect(await set(late, STEP.EXPIRED())).toBe(1);
@@ -605,7 +628,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       expect((await op(fresh)).status).toBe("PENDING");
 
       // Approved just in time, executed after expiresAt has passed: allowed.
-      const short = await request({ expiresAt: new Date(Date.now() + 3 * SECOND) });
+      const short = await request({ expiresAt: new Date(dbNowMs() + 3 * SECOND) });
       expect(await set(short, STEP.APPROVED())).toBe(1);
       await sleep(3.5 * SECOND);
       expect(await set(short, STEP.EXECUTING())).toBe(1);
@@ -693,7 +716,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         // unique_violation on the only unique index over these columns: AdminScope_active_grant_key.
       ).rejects.toThrow(/23505[\s\S]*Key \("adminId", "departmentCode", "batchYear"\)/);
       await expect(grant()).rejects.toMatchObject({ code: "P2002" });
-      await db.adminScope.update({ where: { id: first.id }, data: { revokedAt: new Date(), revokedById: u.superB } });
+      await db.adminScope.update({ where: { id: first.id }, data: { revokedAt: dbNow(), revokedById: u.superB } });
       const again = await grant();
       expect(again.id).not.toBe(first.id);
       expect((await scope(first.id)).revokedById).toBe(u.superB);
@@ -705,7 +728,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     it("refuses edits of a grant, a half revoke, an undone or rewritten revoke, and DELETE", async () => {
       const active = await grant({ departmentCode: "ECE", batchYear: null });
       const revoked = await grant({ departmentCode: "MECH", batchYear: 2026 });
-      await db.adminScope.update({ where: { id: revoked.id }, data: { revokedAt: new Date(), revokedById: u.superA } });
+      await db.adminScope.update({ where: { id: revoked.id }, data: { revokedAt: dbNow(), revokedById: u.superA } });
       const before = { active: await scope(active.id), revoked: await scope(revoked.id) };
 
       const onActive: Array<[Step | string, RegExp]> = [
@@ -748,7 +771,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       kinds: ["EXTRA_TIME"] as Prisma.AccommodationUncheckedCreateInput["kinds"],
       extraTimePercent: 33,
       reason: `${tag}: documented by the accessibility office`,
-      validUntil: new Date(Date.now() + 120 * DAY),
+      validUntil: new Date(dbNowMs() + 120 * DAY),
       requestedById: u.admin,
       ...data,
     });
@@ -758,9 +781,9 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     const approval = (note?: string) => ({
       status: "APPROVED" as const,
       approvedBySuperAdminId: u.superA,
-      grantedAt: new Date(),
+      grantedAt: dbNow(),
       decidedById: u.superA,
-      decidedAt: new Date(),
+      decidedAt: dbNow(),
       ...(note === undefined ? {} : { decisionNote: note }),
     });
     const acc = (id: string) => db.accommodation.findUniqueOrThrow({ where: { id } });
@@ -819,20 +842,20 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       expect(await acc(a.id)).toMatchObject({ status: "REQUESTED", decidedById: null, grantedAt: null, revokedAt: null });
       await db.accommodation.update({ where: { id: a.id }, data: approval("Approved for this academic year.") });
       expect(await acc(a.id)).toMatchObject({ status: "APPROVED", approvedBySuperAdminId: u.superA, decidedById: u.superA });
-      await db.accommodation.update({ where: { id: a.id }, data: { status: "REVOKED", revokedAt: new Date(), revokedById: u.superB } });
+      await db.accommodation.update({ where: { id: a.id }, data: { status: "REVOKED", revokedAt: dbNow(), revokedById: u.superB } });
       expect(await acc(a.id)).toMatchObject({ status: "REVOKED", revokedById: u.superB, decisionNote: "Approved for this academic year." });
 
       // request → reject (decider, time and note).
       const b = await request(student);
       await db.accommodation.update({
         where: { id: b.id },
-        data: { status: "REJECTED", decidedById: u.superA, decidedAt: new Date(), decisionNote: "Documentation missing." },
+        data: { status: "REJECTED", decidedById: u.superA, decidedAt: dbNow(), decisionNote: "Documentation missing." },
       });
       expect(await acc(b.id)).toMatchObject({ status: "REJECTED", decidedById: u.superA, approvedBySuperAdminId: null, grantedAt: null });
 
       // request → withdraw (by the requester, recorded as the decider).
       const c = await request(student);
-      await db.accommodation.update({ where: { id: c.id }, data: { status: "WITHDRAWN", decidedById: u.admin, decidedAt: new Date() } });
+      await db.accommodation.update({ where: { id: c.id }, data: { status: "WITHDRAWN", decidedById: u.admin, decidedAt: dbNow() } });
       expect(await acc(c.id)).toMatchObject({ status: "WITHDRAWN", decidedById: u.admin });
 
       // A row never granted may be deleted; a granted one never.
@@ -879,11 +902,11 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       }
       const premature: Array<Partial<Prisma.AccommodationUncheckedCreateInput>> = [
         { decidedById: u.superA },
-        { decidedAt: new Date() },
+        { decidedAt: dbNow() },
         { decisionNote: "pre-approved" },
         { approvedBySuperAdminId: u.superA },
-        { grantedAt: new Date() },
-        { revokedAt: new Date() },
+        { grantedAt: dbNow() },
+        { revokedAt: dbNow() },
         { revokedById: u.superB },
       ];
       for (const extra of premature) {
@@ -1249,8 +1272,8 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       async function expectWaiting(pid: number, pending: Promise<Outcome>): Promise<void> {
         let settled: Outcome | null = null;
         void pending.then((o) => (settled = o));
-        const deadline = Date.now() + 10_000;
-        while (Date.now() < deadline) {
+        const deadline = dbNowMs() + 10_000;
+        while (dbNowMs() < deadline) {
           const [row] = await db.$queryRawUnsafe<Array<{ waiting: boolean }>>(
             `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid = $1::int AND NOT granted) AS waiting`,
             pid,
@@ -1396,7 +1419,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
           impersonatorId: u.superA,
           targetUserId: u.s1,
           reason: `${tag}: student reports a blank dashboard`,
-          expiresAt: new Date(Date.now() + 14 * MINUTE),
+          expiresAt: new Date(dbNowMs() + 14 * MINUTE),
           ...data,
         },
       });
@@ -1421,7 +1444,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
       // Close is a conditional update on endedAt IS NULL: exactly one path wins.
       const close = (endReason: "ENDED" | "EXPIRED") =>
-        db.impersonationSession.updateMany({ where: { id: s.id, endedAt: null }, data: { endedAt: new Date(), endReason } });
+        db.impersonationSession.updateMany({ where: { id: s.id, endedAt: null }, data: { endedAt: dbNow(), endReason } });
       expect((await close("ENDED")).count).toBe(1);
       expect((await close("EXPIRED")).count).toBe(0);
       const ended = await session(s.id);
@@ -1439,7 +1462,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
 
     it("refuses an empty or over-long window and impersonating yourself (CHECKs)", async () => {
-      const now = Date.now();
+      const now = dbNowMs();
       await expect(start({ startedAt: new Date(now), expiresAt: new Date(now) })).rejects.toThrow(/ImpersonationSession_window_check/);
       await expect(start({ startedAt: new Date(now), expiresAt: new Date(now - MINUTE) })).rejects.toThrow(/ImpersonationSession_window_check/);
       await expect(start({ startedAt: new Date(now), expiresAt: new Date(now + 15 * MINUTE + 1) })).rejects.toThrow(/ImpersonationSession_box/);
@@ -1448,7 +1471,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
 
     it("starts now: startedAt within 5 minutes of the database clock at INSERT", async () => {
-      const now = Date.now();
+      const now = dbNowMs();
       for (const startedAt of [new Date(now - 6 * MINUTE), new Date(now + 6 * MINUTE), new Date(now + DAY), new Date(now - DAY)]) {
         await expect(start({ startedAt, expiresAt: new Date(startedAt.getTime() + 10 * MINUTE) }), startedAt.toISOString()).rejects.toThrow(
           /startedAt must be within 5 minutes of the database clock/,
@@ -1477,7 +1500,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
 
     it("never ends before it started (CHECK)", async () => {
-      const s = await start({ startedAt: new Date(Date.now() - 2 * MINUTE), expiresAt: new Date(Date.now() + 10 * MINUTE) });
+      const s = await start({ startedAt: new Date(dbNowMs() - 2 * MINUTE), expiresAt: new Date(dbNowMs() + 10 * MINUTE) });
       await expect(set(s.id, `"endedAt" = "startedAt" - interval '1 second', "endReason" = 'ENDED'`)).rejects.toThrow(
         /ImpersonationSession_end_after_start_check/,
       );
@@ -1488,7 +1511,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     it("is created open: an INSERT carries no endedAt or endReason", async () => {
       const marker = `${tag}: born ended`;
       const count = () => db.impersonationSession.count({ where: { reason: marker } });
-      for (const extra of [{ endedAt: new Date(), endReason: "ENDED" as const }, { endedAt: new Date() }, { endReason: "REVOKED" as const }]) {
+      for (const extra of [{ endedAt: dbNow(), endReason: "ENDED" as const }, { endedAt: dbNow() }, { endReason: "REVOKED" as const }]) {
         await expect(start({ reason: marker, ...extra }), JSON.stringify(extra)).rejects.toThrow(/must be created open/);
       }
       await expect(
@@ -1513,12 +1536,12 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         );
       }
       await expect(
-        db.impersonationSession.update({ where: { id: s.id }, data: { endedAt: new Date(Date.now() + HOUR), endReason: "REVOKED" } }),
+        db.impersonationSession.update({ where: { id: s.id }, data: { endedAt: new Date(dbNowMs() + HOUR), endReason: "REVOKED" } }),
       ).rejects.toThrow(/more than 5 minutes after the database clock/);
       expect((await session(s.id)).endedAt).toBeNull();
       // Inside the tolerance is accepted (the close path writes GREATEST(now(), startedAt)).
       expect(await set(s.id, `"endedAt" = ${clock} + interval '4 minutes', "endReason" = 'ENDED'`)).toBe(1);
-      const ahead = await start({ targetUserId: u.s6, startedAt: new Date(Date.now() + 4 * MINUTE), expiresAt: new Date(Date.now() + 15 * MINUTE) });
+      const ahead = await start({ targetUserId: u.s6, startedAt: new Date(dbNowMs() + 4 * MINUTE), expiresAt: new Date(dbNowMs() + 15 * MINUTE) });
       expect(await set(ahead.id, `"endedAt" = GREATEST((now() AT TIME ZONE 'UTC'), "startedAt"), "endReason" = 'ENDED'`)).toBe(1);
     });
   });
@@ -1534,7 +1557,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
           body: "Lab sessions move to the afternoon.",
           audienceBatchYear: 2027,
           audienceDepartmentCode: "CSE",
-          endsAt: new Date(Date.now() + 7 * DAY),
+          endsAt: new Date(dbNowMs() + 7 * DAY),
           createdById: u.admin,
           ...data,
         },
@@ -1548,7 +1571,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         data: { title: "Lab timetable (revised)", body: "Lab sessions move to 2 pm.", tone: "IMPORTANT", link: "/sheets", audienceSection: "A" },
       });
       // Publish: publishedAt, publishedById and recipientCount in one UPDATE.
-      await db.announcement.update({ where: { id: a.id }, data: { publishedAt: new Date(), publishedById: u.admin, recipientCount: 4 } });
+      await db.announcement.update({ where: { id: a.id }, data: { publishedAt: dbNow(), publishedById: u.admin, recipientCount: 4 } });
       const published = await db.announcement.findUniqueOrThrow({ where: { id: a.id } });
 
       const frozen: Array<Step | string> = [
@@ -1569,8 +1592,8 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       expect(await db.announcement.findUniqueOrThrow({ where: { id: a.id } })).toEqual(published);
 
       // Still writable after publish: the banner end, and archiving (once).
-      await db.announcement.update({ where: { id: a.id }, data: { endsAt: new Date(Date.now() + DAY) } });
-      await db.announcement.update({ where: { id: a.id }, data: { archivedAt: new Date(), archivedById: u.admin } });
+      await db.announcement.update({ where: { id: a.id }, data: { endsAt: new Date(dbNowMs() + DAY) } });
+      await db.announcement.update({ where: { id: a.id }, data: { archivedAt: dbNow(), archivedById: u.admin } });
       for (const step of [`"archivedAt" = NULL`, `"archivedAt" = now() + interval '1 hour'`, { set: `"archivedById" = $2`, params: [u.superA] }]) {
         await expect(set(a.id, step), JSON.stringify(step)).rejects.toThrow(/are set once/);
       }
@@ -1586,10 +1609,10 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     it("is created as an unpublished draft with recipientCount 0", async () => {
       const marker = `${tag} born published`;
       const premature: Array<Partial<Prisma.AnnouncementUncheckedCreateInput>> = [
-        { publishedAt: new Date(), publishedById: u.admin },
-        { publishedAt: new Date() },
+        { publishedAt: dbNow(), publishedById: u.admin },
+        { publishedAt: dbNow() },
         { publishedById: u.admin },
-        { archivedAt: new Date() },
+        { archivedAt: dbNow() },
         { archivedById: u.admin },
         { recipientCount: 999_999 },
       ];
@@ -1612,7 +1635,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       const a = await draft();
       await expect(set(a.id, `"publishedAt" = now(), "recipientCount" = 3`)).rejects.toThrow(/Announcement_publish_pair_check/);
       await expect(set(a.id, { set: `"publishedById" = $2`, params: [u.admin] })).rejects.toThrow(/Announcement_publish_pair_check/);
-      await expect(db.announcement.update({ where: { id: a.id }, data: { publishedAt: new Date() } })).rejects.toThrow(
+      await expect(db.announcement.update({ where: { id: a.id }, data: { publishedAt: dbNow() } })).rejects.toThrow(
         /Announcement_publish_pair_check/,
       );
       expect((await db.announcement.findUniqueOrThrow({ where: { id: a.id } })).publishedAt).toBeNull();
@@ -1636,7 +1659,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     it("never changes id or createdById, draft or published", async () => {
       const d = await draft();
       const live = await draft();
-      await db.announcement.update({ where: { id: live.id }, data: { publishedAt: new Date(), publishedById: u.admin, recipientCount: 2 } });
+      await db.announcement.update({ where: { id: live.id }, data: { publishedAt: dbNow(), publishedById: u.admin, recipientCount: 2 } });
       for (const id of [d.id, live.id]) {
         const before = await db.announcement.findUniqueOrThrow({ where: { id } });
         for (const step of [`"id" = "id" || '-renamed'`, { set: `"createdById" = $2`, params: [u.superA] } as Step]) {
@@ -1653,10 +1676,10 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       const d = await draft();
       await expect(db.announcement.delete({ where: { id: d.id } })).resolves.toMatchObject({ id: d.id });
       const live = await draft();
-      await db.announcement.update({ where: { id: live.id }, data: { publishedAt: new Date(), publishedById: u.admin, recipientCount: 2 } });
+      await db.announcement.update({ where: { id: live.id }, data: { publishedAt: dbNow(), publishedById: u.admin, recipientCount: 2 } });
       const archived = await draft();
-      await db.announcement.update({ where: { id: archived.id }, data: { publishedAt: new Date(), publishedById: u.admin } });
-      await db.announcement.update({ where: { id: archived.id }, data: { archivedAt: new Date(), archivedById: u.admin } });
+      await db.announcement.update({ where: { id: archived.id }, data: { publishedAt: dbNow(), publishedById: u.admin } });
+      await db.announcement.update({ where: { id: archived.id }, data: { archivedAt: dbNow(), archivedById: u.admin } });
       for (const id of [live.id, archived.id]) {
         await expect(db.announcement.delete({ where: { id } })).rejects.toThrow(/was published and cannot be deleted/);
         await expect(raw(`DELETE FROM "Announcement" WHERE "id" = $1`, id)).rejects.toThrow(/was published and cannot be deleted/);

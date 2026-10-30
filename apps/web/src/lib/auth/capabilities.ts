@@ -540,6 +540,7 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "admin-problem-content#updateDraftDetails",
       "admin-problem-content#updateDraftJudging",
       "admin-problem-content#setDraftChecker",
+      "admin-problem-content#setDraftInteractor",
       "admin-problem-content#addDraftTests",
       "admin-problem-content#updateDraftTest",
       "admin-problem-content#removeDraftTests",

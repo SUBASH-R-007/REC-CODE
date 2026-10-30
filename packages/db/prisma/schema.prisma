@@ -889,7 +889,12 @@ model ProblemVersion {
   sqlOrdered         Boolean?
   /// CHECKER compare mode: testlib-compatible checker source (C++20).
   checkerSha256      String?
-  /// Pinned testlib toolchain id the checker compiles against.
+  /// INTERACTIVE compare mode (Phase 12l): the author's testlib interactor
+  /// (C++20), which runs beside the solution and decides the verdict. A
+  /// version has a checker or an interactor, never both — compareMode is
+  /// one value (ProblemVersion_interactive_mode_mirror).
+  interactorSha256   String?
+  /// Pinned testlib toolchain id the checker or the interactor compiles against.
   testlibId          String?
   /// problems/{problemId}/v{revision}/tests.tar.zst — immutable once written.
   bundleKey          String?

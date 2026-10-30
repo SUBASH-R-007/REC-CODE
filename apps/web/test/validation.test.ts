@@ -183,6 +183,7 @@ describe("derived language limits", () => {
       baseMs: 1000,
       memoryLimitKb: 262_144,
       languages,
+      ioMode: "STDIN",
       measurements: [
         { language: "cpp20", measuredMs: 120, generation: "w/a/1000" },
         { language: "py312", measuredMs: 900, generation: "w/a/1000" },
@@ -207,6 +208,34 @@ describe("derived language limits", () => {
       measuredOnGeneration: null,
     });
     for (const row of rows) expect(row.memoryLimitKb).toBe(262_144);
+  });
+
+  it("gives a limit only to a language the problem can be answered in", () => {
+    /**
+     * Phase 12l, found by the live stage: an interactive problem came out
+     * of its first publish with a `sql17` time limit beside its C++ one.
+     * A limit for a language a student cannot choose is a stored row that
+     * reads as meaningful.
+     */
+    const withSql = [...languages, { key: "sql17", fallbackMultiplier: 1, fallbackExtraMs: 0 }];
+    const program = deriveLanguageLimits({
+      baseMs: 1000,
+      memoryLimitKb: 262_144,
+      languages: withSql,
+      ioMode: "STDIN",
+      measurements: [],
+    });
+    expect(program.map((r) => r.language)).toEqual(["cpp20", "java21", "py312"]);
+
+    // And the other way round: a SQL problem is answered with SQL alone.
+    const query = deriveLanguageLimits({
+      baseMs: 5000,
+      memoryLimitKb: 262_144,
+      languages: withSql,
+      ioMode: "SQL",
+      measurements: [],
+    });
+    expect(query.map((r) => r.language)).toEqual(["sql17"]);
   });
 
   it("records where a measurement was taken", () => {

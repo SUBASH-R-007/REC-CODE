@@ -48,7 +48,10 @@ describe("problemPackageMetaSchema", () => {
   it("requires a declared comparator, with no default", () => {
     const { compareMode: _drop, ...rest } = meta();
     expect(messages(rest).join("\n")).toMatch(/compareMode is required/);
-    expect(messages(meta({ compareMode: "INTERACTIVE" })).join("\n")).toMatch(/compareMode is required/);
+    // Phase 12l: INTERACTIVE is a mode a package may declare now, and what
+    // it then needs is interactor.cpp.
+    expect(messages(meta({ compareMode: "INTERACTIVE" })).join("\n")).toMatch(/needs interactor\.cpp/);
+    expect(messages(meta({ compareMode: "NOPE" })).join("\n")).toMatch(/compareMode is required/);
   });
 
   it("needs a FUNCTION signature with a comparator, and no signature on STDIN", () => {

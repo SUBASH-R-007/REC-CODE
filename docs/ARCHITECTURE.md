@@ -308,6 +308,31 @@ all. A hidden case shows nothing, by the same rule as every other kind of
 problem — not the transcript, not even the interactor's report, which
 describes the hidden data.
 
+**Authoring one (slice 2).** The same pages as any other problem, with
+INTERACTIVE as a fifth comparator and one new box: the interactor's source,
+pasted and stored as a content-addressed blob exactly as a checker's is,
+and moving `judgeSeq` when it changes because it changes how the problem is
+judged. A case's input is the interactor's data and its expected output
+does not exist — the form stops asking, and the version's cases carry the
+empty blob, because making `TestCase.outputSha256` nullable would weaken a
+constraint that holds for every other kind of problem.
+
+Four CHECKs say what an interactive version is, and the authoring surface
+says the same things in sentences first: it has an interactor (frozen), it
+has one only if it is interactive, its conversation happens on stdin and
+stdout, and it is judged by that one program rather than by a checker
+beside it or a float epsilon nothing reads. The import package gained
+`interactor.cpp` under the same rules, so a bulk import can carry one.
+
+**And not in an assessment.** SPEC §11 keeps interactive problems out of
+high-stakes sittings "until they have run cleanly through two practice
+contests" — a rule with a date on it rather than a property of the
+platform, enforced where the pinning happens: a trigger on
+`AssessmentProblem`, a sentence in the admin action, and an entry in the
+guard catalogue so that lifting it later cannot be quiet. A contest may
+hold one; SPEC says so, which is why the trigger is not on
+`ContestProblem`.
+
 **Protocol 5.** The job spec carries the interactor, and a protocol-4
 worker would turn such a job into a permanent internal error — so the app
 refuses older workers with 426, the mechanism `docs/RUNBOOK.md` §2.9

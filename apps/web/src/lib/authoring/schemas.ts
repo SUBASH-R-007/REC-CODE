@@ -89,7 +89,18 @@ export const createProblemSchema = z.object({
   memoryLimitMb: memoryLimitMbSchema,
   origin: z.enum(CONTENT_ORIGINS).default("FACULTY"),
   topics: z.array(z.enum(TOPICS)).max(4, "Give at most four topics.").default([]),
-});
+})
+  .superRefine((v, ctx) => {
+    // The same pairing rule the judging form enforces (Phase 12l): a
+    // conversation happens on standard input and output.
+    if (v.compareMode === "INTERACTIVE" && v.ioMode !== "STDIN") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["compareMode"],
+        message: "An interactive problem reads and writes on standard input and output. Choose standard input.",
+      });
+    }
+  });
 export type CreateProblemInput = z.input<typeof createProblemSchema>;
 
 const draftRef = { versionId: idSchema, expectedEditSeq: editSeqSchema };
@@ -132,6 +143,19 @@ export const updateJudgingSchema = z
         message: "Say whether the row order is part of the answer.",
       });
     }
+    /**
+     * Phase 12l. A conversation happens on standard input and output: a
+     * FUNCTION problem's answer is a return value and a SQL problem's is a
+     * result set. The database refuses the pairing too
+     * (ProblemVersion_interactive_stdin_only), and so does the judge.
+     */
+    if (v.compareMode === "INTERACTIVE" && v.ioMode !== "STDIN") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["compareMode"],
+        message: "An interactive problem reads and writes on standard input and output. Choose standard input.",
+      });
+    }
   });
 
 export const checkerSchema = z.object({
@@ -140,6 +164,16 @@ export const checkerSchema = z.object({
     .string()
     .max(IMPORT_LIMITS.checkerBytes, "The checker is at most 256 KB.")
     .refine(noNul, "The checker contains a NUL character.")
+    .nullable(),
+});
+
+/** The interactor's source (Phase 12l): the same bounds as a checker's. */
+export const interactorSchema = z.object({
+  ...draftRef,
+  source: z
+    .string()
+    .max(IMPORT_LIMITS.checkerBytes, "The interactor is at most 256 KB.")
+    .refine(noNul, "The interactor contains a NUL character.")
     .nullable(),
 });
 

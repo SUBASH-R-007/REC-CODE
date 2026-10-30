@@ -24,6 +24,7 @@ const heldJobRowSchema = z.object({
   custom: z.boolean(),
   compareMode: z.string(),
   checkerSha256: z.string().nullable(),
+  interactorSha256: z.string().nullable(),
 });
 
 /**
@@ -33,7 +34,10 @@ const heldJobRowSchema = z.object({
  *  - a test input or expected output — every test for a submission or a
  *    validation run, sample tests only for a run, nothing for a custom-stdin
  *    run (its input came inline);
- *  - the version's checker source, when the version is CHECKER-compared.
+ *  - the version's checker source, when the version is CHECKER-compared;
+ *  - the version's interactor source, when it is INTERACTIVE (Phase 12l) —
+ *    the one program that decides that problem's verdict, and as much the
+ *    job's own data as the checker is.
  * Reference solutions and anything else are never reachable.
  */
 async function blobBelongsToJob(
@@ -45,7 +49,8 @@ async function blobBelongsToJob(
 ): Promise<boolean> {
   const custom = kind === "run" ? Prisma.sql`(j."customInput" IS NOT NULL)` : Prisma.sql`false`;
   const rows = await db.$queryRaw<unknown[]>`
-    SELECT j."problemVersionId", ${custom} AS custom, v."compareMode"::text AS "compareMode", v."checkerSha256"
+    SELECT j."problemVersionId", ${custom} AS custom, v."compareMode"::text AS "compareMode",
+           v."checkerSha256", v."interactorSha256"
     FROM ${JOB_TABLE[kind]} j JOIN "ProblemVersion" v ON v.id = j."problemVersionId"
     WHERE j.id = ${id} AND j."claimToken" = ${claimToken} AND j."claimedByNodeId" = ${nodeId}
       AND j."leaseExpiresAt" > now()`;
@@ -54,6 +59,7 @@ async function blobBelongsToJob(
   const job = parsed.data;
 
   if (job.compareMode === "CHECKER" && job.checkerSha256 === sha256) return true;
+  if (job.compareMode === "INTERACTIVE" && job.interactorSha256 === sha256) return true;
 
   const scope: TestScope = kind === "run" ? (job.custom ? "none" : "samples") : "all";
   if (scope === "none") return false;

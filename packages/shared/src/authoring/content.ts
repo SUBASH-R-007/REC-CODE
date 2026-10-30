@@ -15,8 +15,14 @@ import type { Verdict } from "../verdict";
  * string it returns is an error here.
  */
 
-/** STDIN compare modes an author may choose. INTERACTIVE is not available on this judge. */
-export const AUTHORABLE_COMPARE_MODES = ["EXACT", "TOKEN", "FLOAT", "CHECKER"] as const;
+/**
+ * STDIN compare modes an author may choose.
+ *
+ * INTERACTIVE joined the list in Phase 12l, when the engine learned to
+ * judge one. It is last on purpose: it is the only mode whose problem
+ * cannot be authored by typing expected output, and the form says so.
+ */
+export const AUTHORABLE_COMPARE_MODES = ["EXACT", "TOKEN", "FLOAT", "CHECKER", "INTERACTIVE"] as const;
 export type AuthorableCompareMode = (typeof AUTHORABLE_COMPARE_MODES)[number];
 
 /**
@@ -60,7 +66,10 @@ export type ContentIssueCode =
   | "SQL_FIELDS"
   | "SQL_NO_REFERENCE"
   | "SQL_FOREIGN_REFERENCE"
-  | "SQL_ARTEFACT";
+  | "SQL_ARTEFACT"
+  | "INTERACTIVE_NO_INTERACTOR"
+  | "INTERACTIVE_ARTEFACT"
+  | "INTERACTIVE_EXPECTED_OUTPUT";
 
 export interface ContentIssue {
   code: ContentIssueCode;
@@ -88,6 +97,8 @@ export interface VersionContentInput {
   floatEpsilon: number | null;
   functionSignature: unknown;
   checkerSha256: string | null;
+  /** INTERACTIVE versions only (Phase 12l). */
+  interactorSha256?: string | null;
   testlibId: string | null;
   scoringMode: ScoringMode;
   timeLimitMs: number;
@@ -178,6 +189,50 @@ function sqlIssues(v: VersionContentInput): Array<{ code: ContentIssueCode; mess
   return out;
 }
 
+/**
+ * An interactive version's own rules (Phase 12l).
+ *
+ * The database says the first three too (the CHECKs of migration
+ * 20261101140000), and deliberately: an author reads a sentence here
+ * rather than meeting a constraint violation. The one rule that is ONLY
+ * here is the expected output — no constraint can say "these bytes are
+ * meaningless", because `TestCase.outputSha256` is required for every kind
+ * of problem and an interactive case stores the empty blob in it.
+ */
+function interactiveIssues(v: VersionContentInput): Array<{ code: ContentIssueCode; message: string }> {
+  const out: Array<{ code: ContentIssueCode; message: string }> = [];
+  if (!v.interactorSha256 || !v.testlibId) {
+    out.push({
+      code: "INTERACTIVE_NO_INTERACTOR",
+      message:
+        "An interactive problem needs an interactor (C++ with testlib): it talks to the student's program and decides the verdict.",
+    });
+  }
+  if (v.checkerSha256) {
+    out.push({
+      code: "INTERACTIVE_ARTEFACT",
+      message: "An interactive problem is judged by its interactor, not by a checker as well. Remove the checker.",
+    });
+  }
+  if (v.floatEpsilon !== null) {
+    out.push({
+      code: "INTERACTIVE_ARTEFACT",
+      message: "An interactive problem compares no output, so a float tolerance would change nothing. Remove it.",
+    });
+  }
+  const withOutput = v.tests.filter((t) => t.outputBytes > 0).map((t) => t.index);
+  if (withOutput.length > 0) {
+    out.push({
+      code: "INTERACTIVE_EXPECTED_OUTPUT",
+      message:
+        `Test${withOutput.length === 1 ? "" : "s"} ${withOutput.slice(0, 5).join(", ")} carr${withOutput.length === 1 ? "ies" : "y"} ` +
+        "expected output, and an interactive problem compares none: the case's input is the interactor's data, and the interactor decides. " +
+        "Clear the expected output.",
+    });
+  }
+  return out;
+}
+
 /** Every structural problem of a revision's content. Empty of errors = may be approved and published. */
 export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   const issues: ContentIssue[] = [];
@@ -186,6 +241,9 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
 
   if (v.ioMode === "SQL") for (const issue of sqlIssues(v)) error(issue.code, issue.message);
   else for (const message of comparatorIssues(v)) error("COMPARATOR", message);
+  if (v.compareMode === "INTERACTIVE" && v.ioMode === "STDIN") {
+    for (const issue of interactiveIssues(v)) error(issue.code, issue.message);
+  }
   if (v.ioMode === "STDIN" && v.functionSignature !== null && v.functionSignature !== undefined) {
     error("SIGNATURE_ON_STDIN", "A standard-input problem must not carry a function signature.");
   }
@@ -198,7 +256,7 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   if (v.ioMode !== "SQL" && (v.sqlDialect || v.sqlOrdered !== null) && v.sqlOrdered !== undefined) {
     error("SQL_FIELDS", "Only a SQL problem carries a dialect and an ordering rule.");
   }
-  if (v.checkerSha256 && v.compareMode !== "CHECKER" && v.ioMode !== "SQL") {
+  if (v.checkerSha256 && v.compareMode !== "CHECKER" && v.ioMode !== "SQL" && v.compareMode !== "INTERACTIVE") {
     warning("CHECKER_UNUSED", "A checker is attached but the compare mode is not CHECKER, so it is never run.");
   }
 

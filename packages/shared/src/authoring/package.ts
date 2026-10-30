@@ -16,6 +16,11 @@ import { CONTENT_ORIGINS_LIST } from "./origins";
  *   <slug>/editorial.md       optional editorial
  *   <slug>/hints/1.md … 3.md  optional tiered hints
  *   <slug>/checker.cpp        CHECKER / CUSTOM_CHECKER only: a testlib checker
+ *   <slug>/interactor.cpp     INTERACTIVE only (Phase 12l): a testlib
+ *                             interactor. Its cases still come in pairs,
+ *                             with EMPTY .out files — an interactive
+ *                             problem compares no output, and the pairing
+ *                             is what keeps the format one format.
  *   <slug>/testcases/000.in   tests, paired .in/.out, contiguous from 000
  *   <slug>/testcases/000.out
  *   <slug>/solutions/…        reference solutions named in meta.solutions
@@ -32,6 +37,7 @@ export const PACKAGE_FILES = {
   statement: "statement.md",
   editorial: "editorial.md",
   checker: "checker.cpp",
+  interactor: "interactor.cpp",
   testsDir: "testcases",
   solutionsDir: "solutions",
   startersDir: "starters",
@@ -156,6 +162,8 @@ export const problemPackageMetaSchema = z
     solutions: z.array(solutionSchema).min(1, "List at least one reference solution.").max(30),
     starters: z.record(z.enum(LANGUAGE_KEYS), starterPath).default({}),
     checker: packagePathSchema.nullable().default(null),
+    /** INTERACTIVE only (Phase 12l). */
+    interactor: packagePathSchema.nullable().default(null),
   })
   .strict()
   .superRefine((meta, ctx) => {
@@ -182,6 +190,24 @@ export const problemPackageMetaSchema = z
     const needsChecker = meta.compareMode === "CHECKER" || customChecker;
     if (needsChecker && meta.checker === null) issue(["checker"], "A checker problem needs checker.cpp (meta.checker).");
     if (!needsChecker && meta.checker !== null) issue(["checker"], "A checker is given but the compare mode is not CHECKER.");
+    /**
+     * Phase 12l. The interactor is the same kind of artefact as the
+     * checker and obeys the same two rules, in both directions: an
+     * interactive problem has one, and nothing else does.
+     */
+    const interactive = meta.compareMode === "INTERACTIVE";
+    if (interactive && meta.interactor === null) {
+      issue(["interactor"], "An interactive problem needs interactor.cpp (meta.interactor).");
+    }
+    if (!interactive && meta.interactor !== null) {
+      issue(["interactor"], "An interactor is given but the compare mode is not INTERACTIVE.");
+    }
+    if (interactive && meta.ioMode !== "STDIN") {
+      issue(["compareMode"], "An interactive problem reads and writes on standard input and output.");
+    }
+    if (interactive && meta.floatEpsilon !== null) {
+      issue(["floatEpsilon"], "An interactive problem compares no output, so floatEpsilon would change nothing.");
+    }
     if (meta.compareMode === "FLOAT" && meta.floatEpsilon === null) issue(["floatEpsilon"], "FLOAT comparison needs floatEpsilon.");
 
     if ((meta.scoringMode === "SUBTASK") !== (meta.subtasks.length > 0)) {

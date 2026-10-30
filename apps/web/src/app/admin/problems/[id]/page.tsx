@@ -8,7 +8,15 @@ import { CONTENT_ORIGIN_LABEL } from "@recx/shared/authoring";
 import { requirePageRole } from "@/lib/auth/guards";
 import { renderMarkdown } from "@/lib/markdown";
 import { getAdminProblem } from "@/server/queries/admin-problems";
-import { CheckerForm, DetailsForm, HelpForm, JudgingForm, StarterCodeForm, TopicsForm } from "@/components/admin/problems/draft-forms";
+import {
+  CheckerForm,
+  DetailsForm,
+  HelpForm,
+  InteractorForm,
+  JudgingForm,
+  StarterCodeForm,
+  TopicsForm,
+} from "@/components/admin/problems/draft-forms";
 import { COMPARE_MODE_OPTIONS, LANGUAGE_OPTIONS, ORIGIN_OPTIONS, TOPIC_OPTIONS, VERDICT_OPTIONS } from "@/components/admin/problems/options";
 import { ProblemNav } from "@/components/admin/problems/problem-nav";
 import { ReferenceSolutions } from "@/components/admin/problems/reference-solutions";
@@ -235,7 +243,13 @@ export default async function AdminProblemPage({ params, searchParams }: Props) 
                     compareModes={COMPARE_MODE_OPTIONS}
                     sqlOrdered={sel.sqlOrdered}
                   />
-                  <CheckerForm checkerSource={sel.checkerSource} />
+                  {/* One or the other: compareMode is a single value, and the
+                      database refuses a version that carries both. */}
+                  {sel.compareMode === "INTERACTIVE" ? (
+                    <InteractorForm interactorSource={sel.interactorSource} />
+                  ) : (
+                    <CheckerForm checkerSource={sel.checkerSource} />
+                  )}
                 </CardBody>
               </Card>
               <Card>

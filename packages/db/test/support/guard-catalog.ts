@@ -84,6 +84,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_password_reset_change",
   // 20261030094500_phase12b_ai_helper
   "recx_refuse_ai_assist_change",
+  // 20261101140500_phase12l_assessment_rule
+  "recx_refuse_interactive_assessment_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -276,6 +278,21 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_unfrozen_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101140500_phase12l_assessment_rule
+  {
+    /**
+     * Phase 12l. SPEC §11 keeps interactive problems out of high-stakes
+     * assessments "until they have run cleanly through two practice
+     * contests" — a rule with a date on it, enforced where the pinning
+     * happens. Lifting it is one DROP TRIGGER and one line in the gate
+     * log; this entry is what makes the second part compulsory.
+     */
+    name: "AssessmentProblem_no_interactive",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_interactive_assessment_problem",
     level: "ROW",
   },
   {
@@ -1096,6 +1113,19 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProblemVersion_sql_no_checker", "ProblemVersion"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261101120500_phase12k_sql_checks" })),
+  ...(
+    [
+      // Phase 12l. What an interactive version IS: one that has the
+      // author's interactor (frozen), that has one only if it is
+      // interactive, whose conversation happens on stdin and stdout, and
+      // that is judged by that one program rather than by a checker beside
+      // it or a float epsilon nothing reads.
+      ["ProblemVersion_interactive_mode_mirror", "ProblemVersion"],
+      ["ProblemVersion_interactive_stdin_only", "ProblemVersion"],
+      ["ProblemVersion_interactive_no_checker", "ProblemVersion"],
+      ["ProblemVersion_interactive_no_epsilon", "ProblemVersion"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101140000_phase12l_interactive" })),
 ];
 
 /**

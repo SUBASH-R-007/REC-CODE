@@ -223,7 +223,9 @@ describe("comparatorIssues (the publish gate)", () => {
   it("STDIN: INTERACTIVE is unavailable and CHECKER needs a checker", () => {
     const stdin = { ioMode: "STDIN" as const, functionSignature: null };
     expect(comparatorIssues(fn({ ...stdin, compareMode: "TOKEN" }))).toEqual([]);
-    expect(comparatorIssues(fn({ ...stdin, compareMode: "INTERACTIVE" })).join()).toMatch(/Interactive/);
+    // Phase 12l: INTERACTIVE is judgeable now, and what it needs is the
+    // author's interactor — the same shape of rule as CHECKER's.
+    expect(comparatorIssues(fn({ ...stdin, compareMode: "INTERACTIVE" })).join()).toMatch(/needs an interactor/);
     expect(comparatorIssues(fn({ ...stdin, compareMode: "CHECKER" })).join()).toMatch(/needs a checker/);
     expect(comparatorIssues(fn({ ...stdin, compareMode: "FLOAT", floatEpsilon: -1 })).join()).toMatch(/greater than 0/);
   });

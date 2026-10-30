@@ -15,6 +15,8 @@ export interface ComparatorDeclaration {
   functionSignature: unknown;
   floatEpsilon: number | null;
   checkerSha256: string | null;
+  /** INTERACTIVE: the author's interactor (Phase 12l). */
+  interactorSha256?: string | null;
   testlibId: string | null;
 }
 
@@ -26,19 +28,34 @@ function epsilonIssue(floatEpsilon: number | null): string | null {
 }
 
 const CHECKER_MISSING = "A checker problem needs a checker source and a pinned testlib version.";
+const INTERACTOR_MISSING = "An interactive problem needs an interactor source and a pinned testlib version.";
 
 /** Every reason the version's comparator declaration cannot be published; empty = publishable. */
 export function comparatorIssues(v: ComparatorDeclaration): string[] {
   const issues: string[] = [];
   const hasChecker = Boolean(v.checkerSha256) && Boolean(v.testlibId);
-  if (v.compareMode === "INTERACTIVE") issues.push("Interactive problems are not available on this judge.");
+  const hasInteractor = Boolean(v.interactorSha256) && Boolean(v.testlibId);
 
   if (v.ioMode === "STDIN") {
     if (v.compareMode === "CHECKER" && !hasChecker) issues.push(CHECKER_MISSING);
+    /**
+     * Phase 12l. The interactor is the judge of an interactive problem, so
+     * a version without one cannot be judged at all — the same rule as a
+     * checker problem without its checker, and the database says it too
+     * (ProblemVersion_interactive_mode_mirror).
+     */
+    if (v.compareMode === "INTERACTIVE" && !hasInteractor) issues.push(INTERACTOR_MISSING);
     if (v.compareMode === "FLOAT") {
       const eps = epsilonIssue(v.floatEpsilon);
       if (eps) issues.push(eps);
     }
+    return issues;
+  }
+
+  // An interactive conversation needs stdin and stdout; a FUNCTION answer
+  // is a return value and a SQL answer is a result set.
+  if (v.compareMode === "INTERACTIVE") {
+    issues.push(`An interactive problem reads and writes on standard input and output, so it cannot be a ${v.ioMode} problem.`);
     return issues;
   }
 

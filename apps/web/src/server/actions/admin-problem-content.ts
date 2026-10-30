@@ -8,6 +8,7 @@ import {
   removeReferenceSolution as removeReference,
   removeStarterCode as removeStarter,
   setDraftChecker as setChecker,
+  setDraftInteractor as setInteractor,
   setDraftHelp as setHelp,
   updateDraftDetails as updateDetails,
   updateDraftJudging as updateJudging,
@@ -17,6 +18,7 @@ import {
 import {
   addTestsSchema,
   checkerSchema,
+  interactorSchema,
   helpSchema,
   referenceSolutionSchema,
   removeReferenceSchema,
@@ -129,6 +131,28 @@ export async function setDraftChecker(input: { versionId: string; expectedEditSe
     const head = await setChecker({ versionId: data.versionId, expectedEditSeq: data.expectedEditSeq, actorId: actor.id, source });
     return edited(actor.id, "checker", head, { attached: source !== null });
   }, "setDraftChecker");
+}
+
+/**
+ * Attach or remove the interactor of an interactive problem (Phase 12l).
+ *
+ * Its own action rather than a field of the judging form, exactly like the
+ * checker's: it is a source file, it is stored as a content-addressed blob,
+ * and attaching one changes how the problem is JUDGED — so it moves
+ * `judgeSeq` and the validation runs that came before it stop counting.
+ */
+export async function setDraftInteractor(input: {
+  versionId: string;
+  expectedEditSeq: number;
+  source: string | null;
+}): Promise<ActionResult<Edited>> {
+  return runAction(async () => {
+    const actor = await requireActionRole(...STAFF);
+    const data = interactorSchema.parse(input);
+    const source = data.source !== null && data.source.trim().length > 0 ? data.source : null;
+    const head = await setInteractor({ versionId: data.versionId, expectedEditSeq: data.expectedEditSeq, actorId: actor.id, source });
+    return edited(actor.id, "interactor", head, { attached: source !== null });
+  }, "setDraftInteractor");
 }
 
 export async function addDraftTests(input: {

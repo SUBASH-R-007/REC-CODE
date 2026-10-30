@@ -17,6 +17,9 @@ export const COMPARE_MODE_OPTIONS: readonly Option[] = [
   { value: "EXACT", label: "EXACT — byte-for-byte (after trailing-newline normalisation)" },
   { value: "FLOAT", label: "FLOAT — numbers within a tolerance" },
   { value: "CHECKER", label: "CHECKER — a testlib checker program decides" },
+  // Phase 12l. Last, because it is the only one whose problem is not
+  // authored by typing expected output: the interactor decides as it goes.
+  { value: "INTERACTIVE", label: "INTERACTIVE — a testlib interactor talks to the program and decides" },
 ];
 
 export const ORIGIN_OPTIONS: readonly Option[] = CONTENT_ORIGINS.map((o) => ({ value: o, label: CONTENT_ORIGIN_LABEL[o] }));

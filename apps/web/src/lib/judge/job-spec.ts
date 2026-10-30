@@ -100,6 +100,8 @@ export interface JobSpecInput {
   subtasks?: readonly JobSpecSubtaskRow[];
   /** CHECKER compare mode: the checker blob, or null when the version has none. */
   checker?: JobSpecChecker | null;
+  /** INTERACTIVE compare mode (Phase 12l): the interactor blob, same shape. */
+  interactor?: JobSpecChecker | null;
   languageLimit?: JobSpecLanguageLimit | null;
   /** The claiming node's startup credit for this language (ms, ≥ 0). */
   startupCreditMs?: number;
@@ -270,6 +272,27 @@ export function buildJudgeJobSpec(input: JobSpecInput): JudgeJobSpec {
     };
   }
 
+  /**
+   * Phase 12l. The interactor is to an interactive version what the checker
+   * is to a CHECKER one, with one difference worth stating: without it the
+   * job cannot be judged AT ALL, because nothing else decides the verdict.
+   * A version in that state should never exist (the database's own mirror
+   * CHECK), so finding one here is a data problem no retry can fix.
+   */
+  let interactor: JudgeJobSpec["interactor"] = null;
+  if (input.version.compareMode === "INTERACTIVE") {
+    if (input.version.ioMode !== "STDIN") {
+      throw new JobSpecError(`An interactive problem reads standard input; this version is ${input.version.ioMode}.`);
+    }
+    if (!input.interactor) throw new JobSpecError("An INTERACTIVE version has no interactor source.");
+    if (!input.interactor.testlibId) throw new JobSpecError("An INTERACTIVE version has no pinned testlib toolchain.");
+    interactor = {
+      source: { sha256: input.interactor.sha256, sizeBytes: input.interactor.sizeBytes },
+      language: "cpp20",
+      testlibId: input.interactor.testlibId,
+    };
+  }
+
   const timeLimitMs = jobTimeLimitMs({
     kind: input.kind,
     baseMs,
@@ -300,6 +323,7 @@ export function buildJudgeJobSpec(input: JobSpecInput): JudgeJobSpec {
     tests,
     subtasks: subtaskSpecs(input, tests),
     checker,
+    interactor,
     inlineBlobs,
   });
   if (!spec.success) {

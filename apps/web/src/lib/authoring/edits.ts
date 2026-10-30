@@ -69,6 +69,15 @@ export async function updateDraftJudging(
    */
   const sql = input.ioMode === "SQL";
   const compareMode = sql ? "ROWS" : effectiveCompareMode(input.ioMode, input.compareMode, signature);
+  /**
+   * Phase 12l. An interactive version compares no output, so a float
+   * tolerance on one would be a stored number that changes nothing (the
+   * database says so too: ProblemVersion_interactive_no_epsilon), and it
+   * is judged by its interactor rather than by a checker beside it.
+   * Switching a version AWAY from INTERACTIVE drops the interactor, which
+   * is the other half of the same mirror CHECK.
+   */
+  const interactive = compareMode === "INTERACTIVE";
   return retryingTransaction(async (tx) => {
     const head = await touchDraft(tx, { ...input, kind: "judging" });
     await tx.problemVersion.update({
@@ -81,7 +90,8 @@ export async function updateDraftJudging(
         sqlOrdered: sql ? (input.sqlOrdered ?? true) : null,
         // A SQL problem has no checker: the comparison is the result set.
         ...(sql ? { checkerSha256: null, testlibId: null } : {}),
-        floatEpsilon: input.floatEpsilon,
+        ...(interactive ? { checkerSha256: null } : { interactorSha256: null }),
+        floatEpsilon: interactive ? null : input.floatEpsilon,
         scoringMode: input.scoringMode,
         stopOnFirstFailure: input.stopOnFirstFailure,
         timeLimitMs: input.timeLimitMs,
@@ -100,6 +110,30 @@ export async function setDraftChecker(input: EditBase & { source: string | null 
     await tx.problemVersion.update({
       where: { id: input.versionId },
       data: { checkerSha256: blob?.sha256 ?? null, testlibId: blob ? TESTLIB_ID : null },
+    });
+    return head;
+  });
+}
+
+/**
+ * Attach (or remove, with null) the testlib INTERACTOR (Phase 12l).
+ *
+ * Its own edit rather than a field of the judging form, exactly like the
+ * checker's: a source file is pasted and stored as a content-addressed
+ * blob, and attaching one is a change to how the problem is JUDGED, so it
+ * moves `judgeSeq` and invalidates the validation runs that came before.
+ *
+ * `testlibId` is shared with the checker because a version has one or the
+ * other, never both — `compareMode` is a single value, and the database
+ * refuses the pair (ProblemVersion_interactive_no_checker).
+ */
+export async function setDraftInteractor(input: EditBase & { source: string | null }): Promise<DraftHead> {
+  const blob = input.source === null ? null : await ensureTestBlob(db, getTestDataStore(), Buffer.from(input.source, "utf8"));
+  return retryingTransaction(async (tx) => {
+    const head = await touchDraft(tx, { ...input, kind: "judging" });
+    await tx.problemVersion.update({
+      where: { id: input.versionId },
+      data: { interactorSha256: blob?.sha256 ?? null, testlibId: blob ? TESTLIB_ID : null },
     });
     return head;
   });

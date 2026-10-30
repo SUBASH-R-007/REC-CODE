@@ -259,6 +259,7 @@ const versionSelect = {
   timeLimitMs: true,
   memoryLimitKb: true,
   checkerSha256: true,
+  interactorSha256: true,
   testlibId: true,
   testCases: {
     orderBy: { index: "asc" },
@@ -298,13 +299,22 @@ export function startupCreditFor(startupMs: unknown, language: string): number {
 async function versionParts(
   row: VersionRow,
   language: string,
-): Promise<Pick<JobSpecInput, "version" | "tests" | "subtasks" | "checker" | "languageLimit">> {
-  const { testCases, subtasks, languageLimits, checkerSha256, testlibId, ...version } = row;
+): Promise<Pick<JobSpecInput, "version" | "tests" | "subtasks" | "checker" | "interactor" | "languageLimit">> {
+  const { testCases, subtasks, languageLimits, checkerSha256, interactorSha256, testlibId, ...version } = row;
+  const testlibProgram = async (sha256: string, what: string): Promise<JobSpecChecker> => {
+    const blob = await db.testBlob.findUnique({ where: { sha256 }, select: { sizeBytes: true } });
+    if (!blob) throw new JobSpecError(`The version's ${what} blob is missing.`);
+    return { sha256, sizeBytes: blob.sizeBytes, testlibId };
+  };
   let checker: JobSpecChecker | null = null;
   if (version.compareMode === "CHECKER" && checkerSha256) {
-    const blob = await db.testBlob.findUnique({ where: { sha256: checkerSha256 }, select: { sizeBytes: true } });
-    if (!blob) throw new JobSpecError("The version's checker blob is missing.");
-    checker = { sha256: checkerSha256, sizeBytes: blob.sizeBytes, testlibId };
+    checker = await testlibProgram(checkerSha256, "checker");
+  }
+  // Phase 12l: the same resolution for the interactor, which a version has
+  // instead of a checker rather than as well as one.
+  let interactor: JobSpecChecker | null = null;
+  if (version.compareMode === "INTERACTIVE" && interactorSha256) {
+    interactor = await testlibProgram(interactorSha256, "interactor");
   }
   const limit = languageLimits.find((l) => l.language === language) ?? null;
   return {
@@ -312,6 +322,7 @@ async function versionParts(
     tests: testCases,
     subtasks,
     checker,
+    interactor,
     languageLimit: limit ? { timeLimitMs: limit.timeLimitMs, memoryLimitKb: limit.memoryLimitKb } : null,
   };
 }

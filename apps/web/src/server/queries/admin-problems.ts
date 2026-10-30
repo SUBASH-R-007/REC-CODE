@@ -235,6 +235,8 @@ export interface AdminProblemDetail {
     timeLimitMs: number;
     memoryLimitKb: number;
     checkerSource: string | null;
+    /** INTERACTIVE versions (Phase 12l): the interactor's source. */
+    interactorSource: string | null;
     tests: { total: number; samples: number };
     references: { id: string; language: string; label: string | null; expectedVerdict: Verdict; source: string; measuredMs: number | null }[];
     starters: { language: string; code: string }[];
@@ -317,6 +319,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
         timeLimitMs: true,
         memoryLimitKb: true,
         checkerSha256: true,
+        interactorSha256: true,
         createdById: true,
         lastEditedById: true,
         submittedById: true,
@@ -333,11 +336,14 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       },
     });
     const samples = await db.testCase.count({ where: { problemVersionId: v.id, isSample: true } });
-    let checkerSource: string | null = null;
-    if (v.checkerSha256) {
-      const blob = await db.testBlob.findUnique({ where: { sha256: v.checkerSha256 } });
-      if (blob) checkerSource = (await readBlobBytes(getTestDataStore(), blob)).toString("utf8");
-    }
+    const testlibSource = async (sha256: string | null): Promise<string | null> => {
+      if (!sha256) return null;
+      const blob = await db.testBlob.findUnique({ where: { sha256 } });
+      return blob ? (await readBlobBytes(getTestDataStore(), blob)).toString("utf8") : null;
+    };
+    const checkerSource = await testlibSource(v.checkerSha256);
+    // Phase 12l: a version has a checker or an interactor, never both.
+    const interactorSource = await testlibSource(v.interactorSha256);
     const people = await userNames([v.createdById, v.lastEditedById, v.submittedById, v.approvedById, ...v.reviews.map((r) => r.actorId)]);
     const name = (id: string | null) => (id ? (people.get(id) ?? "unknown") : null);
     const content = await loadVersionContentInput(db, v.id);
@@ -365,6 +371,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       timeLimitMs: v.timeLimitMs,
       memoryLimitKb: v.memoryLimitKb,
       checkerSource,
+      interactorSource,
       tests: { total: v._count.testCases, samples },
       references: v.referenceSolutions,
       starters: v.starterCodes,
@@ -444,7 +451,16 @@ export interface DraftTestRow {
 
 export interface DraftTests {
   problem: { id: string; slug: string; displayCode: string; title: string };
-  version: { id: string; revision: number; stage: ReviewStage; editable: boolean; editSeq: number; scoringMode: string };
+  version: {
+    id: string;
+    revision: number;
+    stage: ReviewStage;
+    editable: boolean;
+    editSeq: number;
+    scoringMode: string;
+    /** Phase 12l: an interactive problem's cases carry no expected output. */
+    compareMode: string;
+  };
   tests: DraftTestRow[];
   subtasks: { index: number; points: number; aggregation: "MIN" | "SUM_FRACTION"; dependsOn: number[] }[];
 }
@@ -479,6 +495,7 @@ export async function getDraftTests(viewer: StaffViewer, problemId: string, rev:
       frozenAt: true,
       editSeq: true,
       scoringMode: true,
+      compareMode: true,
       subtasks: { orderBy: { index: "asc" }, select: { index: true, points: true, aggregation: true, dependsOn: true } },
       testCases: {
         orderBy: { index: "asc" },
@@ -511,7 +528,15 @@ export async function getDraftTests(viewer: StaffViewer, problemId: string, rev:
   }
   return {
     problem: { id: problem.id, slug: problem.slug, displayCode: problem.displayCode, title: problem.title },
-    version: { id: v.id, revision: v.revision, stage, editable: stage === "DRAFT", editSeq: v.editSeq, scoringMode: v.scoringMode },
+    version: {
+      id: v.id,
+      revision: v.revision,
+      stage,
+      editable: stage === "DRAFT",
+      editSeq: v.editSeq,
+      scoringMode: v.scoringMode,
+      compareMode: v.compareMode,
+    },
     tests,
     subtasks: v.subtasks,
   };

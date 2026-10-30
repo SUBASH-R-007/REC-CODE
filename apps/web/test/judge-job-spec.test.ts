@@ -206,6 +206,66 @@ describe("buildJudgeJobSpec — v2 subtasks", () => {
   });
 });
 
+describe("buildJudgeJobSpec — the interactor (Phase 12l)", () => {
+  const interactiveVersion = {
+    ...version,
+    ioMode: "STDIN" as const,
+    functionSignature: null,
+    compareMode: "INTERACTIVE" as const,
+  };
+  const INTERACTOR = { sha256: sha("interactor source"), sizeBytes: 17, testlibId: "testlib-0.9.41" };
+
+  it("references the interactor blob with its pinned testlib", () => {
+    const spec = buildJudgeJobSpec(submissionInput({ version: interactiveVersion, interactor: INTERACTOR }));
+    expect(judgeJobSpecSchema.safeParse(spec).success).toBe(true);
+    expect(spec.interactor).toEqual({
+      source: { sha256: INTERACTOR.sha256, sizeBytes: INTERACTOR.sizeBytes },
+      language: "cpp20",
+      testlibId: "testlib-0.9.41",
+    });
+    // One judge, not two.
+    expect(spec.checker).toBeNull();
+  });
+
+  it("sends no interactor for any other compare mode, even when one is stored", () => {
+    expect(buildJudgeJobSpec(submissionInput({ interactor: INTERACTOR })).interactor).toBeNull();
+  });
+
+  it("refuses an interactive version with nothing to judge it", () => {
+    expect(() => buildJudgeJobSpec(submissionInput({ version: interactiveVersion, interactor: null }))).toThrow(
+      /no interactor source/,
+    );
+    expect(() =>
+      buildJudgeJobSpec(submissionInput({ version: interactiveVersion, interactor: { ...INTERACTOR, testlibId: null } })),
+    ).toThrow(/testlib/);
+  });
+
+  it("refuses a conversation on a problem that has no stdin", () => {
+    // A FUNCTION answer is a return value; there is no dialogue to have.
+    expect(() =>
+      buildJudgeJobSpec(
+        submissionInput({
+          version: { ...interactiveVersion, ioMode: "FUNCTION" as const, functionSignature: version.functionSignature },
+          interactor: INTERACTOR,
+        }),
+      ),
+    ).toThrow(/standard input/);
+  });
+
+  it("keeps it for a sample run, which is a conversation too", () => {
+    const spec = buildJudgeJobSpec(
+      submissionInput({
+        kind: "run",
+        lane: "RUN",
+        customInput: null,
+        version: interactiveVersion,
+        interactor: INTERACTOR,
+      }),
+    );
+    expect(spec.interactor).not.toBeNull();
+  });
+});
+
 describe("buildJudgeJobSpec — v2 checker", () => {
   const checkerVersion = { ...version, ioMode: "STDIN" as const, functionSignature: null, compareMode: "CHECKER" as const };
 
