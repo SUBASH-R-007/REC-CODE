@@ -90,6 +90,37 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## The interview archive (Phase 12e)
+
+SPEC §11 calls it "the only legal and genuinely REC-specific source of
+company tags and 'asked at' frequency, and therefore load-bearing rather
+than a nicety". Two tables: `InterviewExperience` and the join
+`InterviewExperienceProblem`.
+
+**There is no prose.** One free-text column, `companyName`, so a student
+can name a company nobody has entered; everything else is a closed list or
+a number. An account written in a hurry names interviewers, repeats
+questions under an NDA and says things about a company the college would
+have to answer for — and prose cannot be counted, which is what the
+archive is for. `tests/repo/interview-archive-posture.test.ts` asserts the
+model's field list exactly, so adding a `notes` column is a failing build.
+
+**Attributed in the database, anonymous on the page.** The student-facing
+read never SELECTS a name; `anonymousAuthor()` is built from the batch and
+department it does take, and drops the section because batch + department
++ section is three or four people. Moderators see the author, because a
+row nobody stands behind cannot be followed up.
+
+**"Asked at" frequency is maintained, not computed** (SPEC §4(d)).
+Approving an experience increments `ProblemCompanyTag.frequency` for each
+named problem and flips the tag's `source` to `EXPERIENCE`; reversing an
+approval decrements, and a tag that reaches zero is deleted rather than
+left as a company claiming a problem nobody reported. All of it in the
+same transaction as the decision. The catalogue then labels the track —
+"curated by the placement cell … best guess" or "from N interviews
+students reported here" — which is SPEC §11's own requirement that
+curation be "explicitly labelled as curated".
+
 ## Discussion, doubts and moderation (Phase 12d)
 
 Four tables arriving together — `DiscussionPost`, `DoubtThread`,

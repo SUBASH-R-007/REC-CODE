@@ -577,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261030170000_phase12d_discussion";
+export const CHECK_CATALOG_THROUGH = "20261030200000_phase12e_interview_archive";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1026,6 +1026,24 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ContentReport_resolved_pair_check", "ContentReport"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261030170000_phase12d_discussion" })),
+  ...(
+    [
+      // The archive's rows are a public claim about a named company, so
+      // each CHECK holds up something a reader is told about one.
+      ["InterviewExperience_decided_pair_check", "InterviewExperience"],
+      ["InterviewExperience_author_check", "InterviewExperience"],
+      ["InterviewExperience_held_check", "InterviewExperience"],
+      ["InterviewExperience_rounds_check", "InterviewExperience"],
+      ["InterviewExperience_duration_check", "InterviewExperience"],
+      ["InterviewExperience_company_name_check", "InterviewExperience"],
+      ["InterviewExperience_role_check", "InterviewExperience"],
+      ["InterviewExperience_reason_size_check", "InterviewExperience"],
+      ["InterviewExperience_round_kinds_check", "InterviewExperience"],
+      // Phase 1 created the column; this is the migration that starts
+      // moving it, so it is the one that has to say it is a count.
+      ["ProblemCompanyTag_frequency_check", "ProblemCompanyTag"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261030200000_phase12e_interview_archive" })),
 ];
 
 /**

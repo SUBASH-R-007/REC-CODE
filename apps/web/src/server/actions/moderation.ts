@@ -12,6 +12,8 @@ import {
   type ResolvedReport,
 } from "@/lib/discussion/moderation";
 import type { HidePostInput, MarkEditorialInput, ResolveReportInput, UnhidePostInput } from "@/lib/discussion/schema";
+import { decideExperienceAs, type DecisionResult } from "@/lib/interviews/archive";
+import type { DecideExperienceInput } from "@/lib/interviews/schema";
 import { runAction, type ActionResult } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
 
@@ -105,4 +107,37 @@ export async function resolveContentReport(input: ResolveReportInput): Promise<A
     revalidatePath(QUEUE);
     return result;
   }, "resolveContentReport");
+}
+
+/**
+ * Deciding an interview-experience submission (Phase 12e).
+ *
+ * SECURITY-sensitive, and the most consequential decision in this module:
+ * approving one makes a public claim about a named company, and the
+ * company tags a student revises against move in the same transaction.
+ * So the reason is required, the student is shown it, and the audit row
+ * records how many tags the decision moved.
+ */
+export async function decideInterviewExperience(input: DecideExperienceInput): Promise<ActionResult<DecisionResult>> {
+  return runAction(async () => {
+    const actor = await requireMentorAction();
+    const result = await decideExperienceAs(actor.id, input);
+    await audit({
+      actorId: actor.id,
+      action: "interview.experience_decided",
+      entityType: "InterviewExperience",
+      entityId: result.id,
+      sensitivity: "SECURITY",
+      metadata: {
+        approved: result.approved,
+        authorId: result.authorId,
+        companyId: result.companyId,
+        problemsTagged: result.problemsTagged,
+      },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath("/mentor/experiences");
+    revalidatePath("/interviews");
+    return result;
+  }, "decideInterviewExperience");
 }

@@ -17,6 +17,7 @@ export default async function MentorLayout({ children }: { children: React.React
         // staffed.
         { href: "/mentor/doubts", label: "Questions", match: "prefix" },
         { href: "/mentor/moderation", label: "Moderation", match: "prefix" },
+        { href: "/mentor/experiences", label: "Interview submissions", match: "prefix" },
       ]}>
       {children}
     </RoleShell>

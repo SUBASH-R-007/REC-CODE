@@ -220,12 +220,27 @@ export interface CatalogCompany {
  */
 export const listCatalogCompanies: () => Promise<CatalogCompany[]> = unstable_cache(
   async (): Promise<CatalogCompany[]> =>
+    /**
+     * Curated by the placement cell, OR reported by a student in the
+     * interview archive (Phase 12e).
+     *
+     * `curated` used to be the whole filter, and a company created from a
+     * reported interview is deliberately `curated: false` — it is not the
+     * college's guess, it is what somebody sat. Without the second clause
+     * those companies had real "asked at" tags and no way to filter by
+     * them, which is the archive doing its work and the catalogue hiding
+     * it. Either way the company needs at least one tag on a published
+     * problem, so an empty filter is never offered.
+     */
     db.company.findMany({
-      where: { curated: true, problems: { some: { problem: { status: "PUBLISHED" } } } },
+      where: {
+        problems: { some: { problem: { status: "PUBLISHED" } } },
+        OR: [{ curated: true }, { interviews: { some: { status: "APPROVED" } } }],
+      },
       orderBy: { name: "asc" },
       select: { id: true, slug: true, name: true },
     }),
-  ["catalog-companies", "v1"],
+  ["catalog-companies", "v2"],
   { tags: [PROBLEMS_TAG], revalidate: PROBLEM_POINTER_TTL_SECONDS },
 );
 

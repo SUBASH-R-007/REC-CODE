@@ -19,6 +19,7 @@ export type NavIconKey =
   | "contests"
   | "aptitude"
   | "placement"
+  | "interviews"
   | "leaderboard"
   | "profile"
   | "bookmarks"
@@ -96,6 +97,15 @@ export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
       // of preparation and belongs beside the things that measure it — and
       // because a student looking for "am I ready" does not look under
       // their own profile for it.
+      // Phase 12e. Beside Readiness, because both answer "what should I do
+      // before the drive" — and this one answers it with what companies
+      // actually asked rather than with a score.
+      item(
+        "/interviews",
+        "Interviews",
+        "interviews",
+        "What companies actually asked, reported by students here",
+      ),
       item(
         "/placement",
         "Readiness",

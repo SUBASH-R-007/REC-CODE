@@ -264,6 +264,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `mentor.discussion.moderate` | mentor | - | yes | yes | - | yes | 3 actions, 1 page |
 | `mentor.solution.editorial` | mentor | - | yes | yes | - | yes | 1 action |
 | `mentor.doubts.answer` | mentor | - | yes | yes | - | yes | 1 page |
+| `mentor.interviews.review` | mentor | - | yes | yes | - | yes | 1 action, 1 page |
 | `judge.submit` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `drafts.save` | self-service | yes | yes | yes | yes | yes | 1 action, 1 route |
 | `activity.record` | self-service | yes | yes | yes | yes | yes | 1 route |
@@ -275,6 +276,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
+| `interviews.share` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `discussion.participate` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
@@ -361,6 +363,16 @@ suite.
 * Proctoring (Phase 6) collects no webcam, microphone or screen recording by
   default and no content keystrokes or clipboard contents; see
   `docs/PROCTORING.md`.
+* **The interview archive (Phase 12e) stores who wrote a row and never
+  shows them.** The student-facing query does not select a name at all —
+  not selected and dropped, not selected — and the anonymous line is built
+  from the batch and department, deliberately without the section, since
+  batch + department + section identifies three or four people.
+  Moderators see the author. The archive also has no free-text body: one
+  bounded company-name column and closed lists, so there is nowhere to
+  write something about an interviewer or an NDA'd question in the first
+  place. Both are fenced by
+  `tests/repo/interview-archive-posture.test.ts`.
 * **The discussion (Phase 12d) is the first place a student's words are
   shown to other students, and the gate is a chokepoint rather than a
   branch.** Reading a problem's solutions needs a solve; posting needs an

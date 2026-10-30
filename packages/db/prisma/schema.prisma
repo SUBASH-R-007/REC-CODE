@@ -603,6 +603,8 @@ model User {
   doubtReplies         DoubtReply[]
   contentReports       ContentReport[]       @relation("ReportAuthor")
   resolvedReports      ContentReport[]       @relation("ReportResolver")
+  interviewExperiences InterviewExperience[] @relation("ExperienceAuthor")
+  decidedExperiences   InterviewExperience[] @relation("ExperienceModerator")
   problemActivity      ProblemActivity[]
   enrollments          StudyPlanEnrollment[]
   bookmarks            Bookmark[]
@@ -772,6 +774,7 @@ model Problem {
   revisionCards   RevisionCard[]
   discussion      DiscussionPost[]
   doubts          DoubtThread[]
+  interviews      InterviewExperienceProblem[]
   activity        ProblemActivity[]
   studyPlanItems  StudyPlanItem[]
   bookmarks       Bookmark[]
@@ -804,6 +807,7 @@ model Company {
   createdAt DateTime            @default(now())
   problems  ProblemCompanyTag[]
   placementDrives PlacementDrive[]
+  interviews      InterviewExperience[]
 }
 
 model ProblemCompanyTag {
@@ -1383,6 +1387,123 @@ model EditorialView {
   firstViewedAt DateTime @default(now())
 
   @@id([userId, problemId])
+}
+
+/// Phase 12e. One round of one interview, in fields rather than prose.
+enum InterviewRoundKind {
+  ONLINE_ASSESSMENT
+  TECHNICAL
+  SYSTEM_DESIGN
+  MANAGERIAL
+  HR
+}
+
+enum InterviewMode {
+  ON_CAMPUS
+  OFF_CAMPUS
+  REFERRAL
+}
+
+enum InterviewOutcome {
+  OFFER
+  NO_OFFER
+  WITHDREW
+  WAITING
+}
+
+enum InterviewPreparation {
+  REC_CODE_PRACTICE
+  REC_CODE_CONTESTS
+  APTITUDE_PRACTICE
+  MOCK_INTERVIEWS
+  CORE_CS_REVISION
+  PROJECT_DEEP_DIVE
+  RESUME_REVIEW
+}
+
+enum InterviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Where the row came from: a student, or the pre-launch collection from
+/// the two most recent graduated batches (SPEC §11).
+enum InterviewSource {
+  STUDENT
+  BOOTSTRAP
+}
+
+/// A student's account of one company's interview, in STRUCTURED FIELDS
+/// (Phase 12e).
+///
+/// SPEC §11 calls the archive "the only legal and genuinely REC-specific
+/// source of company tags and 'asked at' frequency, and therefore
+/// load-bearing rather than a nicety". Two things follow in the schema.
+///
+/// There is NO free-text field except `companyName`, which exists only so
+/// a student can name a company nobody has entered yet. An account of an
+/// interview written in a hurry names interviewers, repeats questions
+/// under an NDA, and says things about a company the college would have
+/// to answer for — and prose cannot be counted, which is the whole point.
+///
+/// The author is stored and never shown. A rejection with a name on it is
+/// a thing students do not post, and an archive nobody posts to is worth
+/// nothing; moderators see the author, because a row nobody stands behind
+/// cannot be followed up. `anonymousAuthor()` in @recx/shared is what the
+/// page renders instead, and it deliberately drops the section: batch plus
+/// department plus section is three or four people.
+model InterviewExperience {
+  id          String                @id @default(cuid())
+  /// Null only for a BOOTSTRAP row entered by an admin before launch.
+  authorId    String?
+  author      User?                 @relation("ExperienceAuthor", fields: [authorId], references: [id])
+  source      InterviewSource       @default(STUDENT)
+  /// The catalogue company, once one exists; `companyName` is what the
+  /// student typed and is kept either way so a rename never rewrites an
+  /// account of what happened.
+  companyId   String?
+  company     Company?              @relation(fields: [companyId], references: [id])
+  companyName String
+  role        String
+  mode        InterviewMode
+  /// Month precision: a drive is a month, and a day is identifying.
+  heldYear    Int
+  heldMonth   Int
+  rounds      Int
+  /// Minutes of the LONGEST round, which is what a student wants to know.
+  longestRoundMinutes Int?
+  outcome     InterviewOutcome
+  roundKinds  InterviewRoundKind[]
+  topics      String[]
+  preparation InterviewPreparation[]
+  status      InterviewStatus       @default(PENDING)
+  /// Set together: who decided, when, and the sentence the student is shown.
+  decidedById String?
+  decidedBy   User?                 @relation("ExperienceModerator", fields: [decidedById], references: [id])
+  decidedAt   DateTime?
+  decisionReason String?
+  createdAt   DateTime              @default(now())
+
+  problems InterviewExperienceProblem[]
+
+  @@index([status, createdAt])
+  @@index([companyId, status])
+  @@index([authorId])
+}
+
+/// A catalogue problem named in an experience. This join IS the "asked at"
+/// frequency: approving an experience increments the company tag, and
+/// reversing the approval decrements it, both in the same transaction as
+/// the decision (SPEC §4(d): never computed on read).
+model InterviewExperienceProblem {
+  experienceId String
+  experience   InterviewExperience @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+  problemId    String
+  problem      Problem             @relation(fields: [problemId], references: [id])
+
+  @@id([experienceId, problemId])
+  @@index([problemId])
 }
 
 /// A post on a problem's discussion (Phase 12d).

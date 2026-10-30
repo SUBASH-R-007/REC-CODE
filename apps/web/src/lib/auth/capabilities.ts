@@ -699,6 +699,17 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
   },
   {
     /**
+     * Phase 12e. A student's own account of their own interview, and
+     * withdrawing it while nobody has read it. Nothing here publishes
+     * anything: a submission waits for `mentor.interviews.review`.
+     */
+    key: "interviews.share",
+    label: "Share an interview I sat, and withdraw it before it is read",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["interviews#submitInterviewExperience", "interviews#withdrawInterviewExperience"],
+  },
+  {
+    /**
      * Phase 12d. Posting is gated on an UNASSISTED solve of that problem
      * and reading on a solve of any kind, but neither is a ROLE check —
      * both are the help chokepoint (lib/help/access.ts), which is why
@@ -969,6 +980,21 @@ export const MENTOR_CAPABILITIES = deepFreeze([
     // channel dies in its second week.
     actions: [],
     pages: ["app/mentor/doubts/page.tsx"],
+  },
+  /**
+   * Phase 12e. Not in SPEC §9's list of TA_MENTOR powers, because §9 was
+   * written before the archive existed; §11 says the archive is
+   * "moderated" and this is who moderates it. It is the most consequential
+   * thing in this list: approving one submission makes a public claim
+   * about a named company AND moves the "asked at" counts a student
+   * revises against. Audited at SECURITY for that reason.
+   */
+  {
+    key: "mentor.interviews.review",
+    label: "Read and decide students' interview submissions",
+    roles: MENTOR,
+    actions: ["moderation#decideInterviewExperience"],
+    pages: ["app/mentor/experiences/page.tsx"],
   },
 ] as const satisfies readonly Capability[]);
 

@@ -2802,3 +2802,69 @@ the report is dismissed with a person and a sentence attached — but all of
 it with six seeded accounts and one problem. What a real board does to a
 report queue, and whether one TA can keep up with a cohort, is a question
 only a term answers.
+
+## The interview archive, and why it has no writing box (Phase 12e)
+
+SPEC §11: "the moderated InterviewExperience archive — structured fields,
+not prose — which is the only legal and genuinely REC-specific source of
+company tags and 'asked at' frequency, and is therefore load-bearing rather
+than a nicety".
+
+**No prose means none.** Not a short note, not a moderated tips field. One
+free-text column exists — the company name, so a student can report a
+company nobody has entered — and everything else is a closed list or a
+number. Two reasons, and the first is the one that decided it: an account
+of an interview written in a hurry names interviewers, repeats questions
+under an NDA, and says things about a company the college would have to
+answer for; moderating three hundred of those is not a job anybody would
+keep doing. The second is that prose cannot be counted, and counting is
+what makes this load-bearing rather than a scrapbook. Where a tips box
+would have been there is a closed "what helped" list instead.
+
+**Attributed in the database, anonymous on the page.** A rejection with a
+name on it is a thing students will not post, and an archive nobody posts
+to is worth nothing — so students see "An ECE student, batch of 2027". The
+section is deliberately dropped: batch plus department plus section is
+three or four people, which is not anonymity. Moderators see the name,
+because a claim about a named company with nobody behind it cannot be
+followed up.
+
+**Three bugs this phase found, all of them by running the thing.**
+
+The CHECK that was meant to refuse an experience naming no round kind
+accepted every one of them: `array_length(x, 1)` returns NULL for an empty
+array, a comparison with NULL is NULL, and a CHECK that evaluates to NULL
+passes. It reads correctly and does nothing. Found on the database test's
+first run; the constraint now coalesces, and the migration says why.
+
+`withdrawInterviewExperience` had no zod boundary — it took
+`{ experienceId: string }` on trust, so a malformed call reached Prisma and
+came back as a masked "something went wrong" instead of a refusal. The
+student-exposure sweep called it with a nonsense id and the error surfaced
+in the log. Every other action in the product parses its input; this one
+was written last and skipped it.
+
+A company created from a reported interview is `curated: false`, which is
+honest — it is not the placement cell's guess — and the catalogue's company
+filter selected `curated: true` only. So the archive produced real
+"asked at" tags for a company that could not be filtered for. Found by
+loading `/problems?company=…` after the first real approval. The filter now
+offers a company that is curated OR has an approved experience.
+
+**Not built, deliberately.** No bulk importer for the pre-launch
+collection: the schema takes BOOTSTRAP rows with no author and a CHECK that
+says a row without one can only be that, but somebody still has to type
+them, and a CSV format for fifteen fields is a thing to design after seeing
+real collected data rather than before. No editing a submission after
+sending it — withdraw and send another, which is simpler to reason about
+and leaves no half-moderated row. No per-company page: the filter on
+`/interviews` and the one on the catalogue cover it, and a third surface
+would be a third place for the anonymity rule to be got wrong.
+
+**NOT RUN: the pre-launch collection, and a curated track seen on screen.**
+Nobody has collected anything from the two most recent graduated batches,
+which is the bootstrap SPEC §11 asks for and an operational task rather than
+a code one. And the "curated by the placement cell … best guess" label has
+been asserted in two test suites but never seen in a browser, because the
+development database has no curated company — the only one in it was
+created by the archive itself, which is the other label.

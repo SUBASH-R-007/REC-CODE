@@ -33,7 +33,7 @@ PASSES="${WARM_PASSES:-2}"
 # set; a route added to the suite belongs here too.
 ROUTES="
 /login /forgot-password /reset-password /dashboard /problems /problems/two-sum /problems/two-sum/submissions/none
-/leaderboard /revision /sheets /learn /profile /notes /bookmarks /help /judge /offline
+/leaderboard /revision /interviews /sheets /learn /profile /notes /bookmarks /help /judge /offline
 /contests /aptitude /placement /notifications /accessibility /api/health
 /account/leave /account/reactivate /account/new-password
 /admin /admin/students /admin/students/import /admin/cohorts /admin/sheets
@@ -44,7 +44,7 @@ ROUTES="
 /super /super/users /super/roles /super/settings/branding /super/settings/policy
 /super/settings/judge /super/settings/ai /super/settings/integrations /super/audit /super/impersonate
 /super/flags /super/jobs /super/data
-/mentor /mentor/doubts /mentor/moderation /placement-cell /placement-cell/heatmap /placement-cell/at-risk
+/mentor /mentor/doubts /mentor/moderation /mentor/experiences /placement-cell /placement-cell/heatmap /placement-cell/at-risk
 /placement-cell/aptitude /placement-cell/export /placement-cell/drives
 "
 

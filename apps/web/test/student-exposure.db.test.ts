@@ -1258,6 +1258,13 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "discussion#loadDiscussionPanel": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadDiscussionPanel!,
     "discussion#loadOpenDoubts": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadOpenDoubts!,
     "discussion#loadModerationQueue": async () => (await load(path.join(QUERIES_DIR, "discussion.ts"))).loadModerationQueue!,
+    // Phase 12e. The archive renders other students' submissions and joins
+    // the problem catalogue; `loadArchive` is also the one query in the
+    // product that must NOT select an author, and the sweep's canary over
+    // the whole payload is what would notice if it started to.
+    "interviews#loadArchive": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).loadArchive!,
+    "interviews#loadPendingExperiences": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).loadPendingExperiences!,
+    "interviews#companyTagLabel": async () => (await load(path.join(QUERIES_DIR, "interviews.ts"))).companyTagLabel!,
   };
   /** How each query in QUERY_CALLS is invoked (several calls where the fixture has several targets). */
   const QUERY_ARGS: Record<string, () => unknown[][]> = {
@@ -1274,6 +1281,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     ],
     "discussion#loadOpenDoubts": () => [[]],
     "discussion#loadModerationQueue": () => [[]],
+    "interviews#loadArchive": () => [[ids.user], [ids.user, "no-such-company"]],
+    "interviews#loadPendingExperiences": () => [[]],
+    "interviews#companyTagLabel": () => [["no-such-company"]],
     "aptitude#topicProgressFor": () => [[ids.user]],
     "aptitude#patternCardsFor": () => [[ids.user]],
     "aptitude#patternCoverFor": () => [[ids.aptitudePatternSlug, ids.user]],
@@ -1513,6 +1523,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "(student)/profile/page.tsx": () => ({}),
     "(student)/profile/settings/loading.tsx": () => ({}),
     "(student)/profile/settings/page.tsx": () => ({}),
+    "(student)/interviews/page.tsx": () => ({ searchParams: {} }),
     "(student)/revision/page.tsx": () => ({}),
     "(student)/sheets/[slug]/page.tsx": () => ({ params: { slug: ids.sheetSlug } }),
     "(student)/sheets/page.tsx": () => ({}),
@@ -1688,6 +1699,46 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "discussion#reportContent": [
       () => [{ postId: `${tag}-no-such-post`, doubtId: null, reason: "SPOILER", detail: "Gives it all away." }],
     ],
+    /**
+     * Phase 12e. A real submission (nothing about it is gated), and a
+     * withdrawal of an id that is not theirs.
+     */
+    "interviews#submitInterviewExperience": [
+      () => [
+        {
+          companyName: "A Company",
+          role: "Software Engineer",
+          mode: "ON_CAMPUS",
+          heldYear: 2026,
+          heldMonth: 3,
+          rounds: 3,
+          longestRoundMinutes: 45,
+          outcome: "WAITING",
+          roundKinds: ["TECHNICAL"],
+          topics: ["GRAPHS"],
+          preparation: ["REC_CODE_PRACTICE"],
+          problemIds: [ids.problem],
+        },
+      ],
+      // A draft problem must be as unnameable here as it is everywhere.
+      () => [
+        {
+          companyName: "A Company",
+          role: "Software Engineer",
+          mode: "OFF_CAMPUS",
+          heldYear: 2026,
+          heldMonth: 4,
+          rounds: 1,
+          longestRoundMinutes: null,
+          outcome: "NO_OFFER",
+          roundKinds: ["HR"],
+          topics: [],
+          preparation: [],
+          problemIds: [ids.draftProblem],
+        },
+      ],
+    ],
+    "interviews#withdrawInterviewExperience": [() => [{ experienceId: `${tag}-no-such-experience` }]],
     "ai-helper#askAiHelper": [
       () => [{ problemId: ids.problem, kind: "MISTAKE" }],
       () => [{ problemId: ids.draftProblem, kind: "APPROACH" }],

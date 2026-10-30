@@ -137,6 +137,10 @@ const TARGETS: readonly Target[] = [
   // Phase 12c. The revision queue: a list of links and a stats block, and
   // the one page whose whole job is to be opened every morning.
   { path: "/revision", as: "student", gating: false },
+  // Phase 12e. The archive, whose "share one" form is the largest set of
+  // checkbox groups in the product and the one most likely to lose its
+  // fieldset legends.
+  { path: "/interviews", as: "student", gating: false },
   { path: "/sheets", as: "student", gating: false },
   { path: "/learn", as: "student", gating: false },
   { path: "/profile", as: "student", gating: false },
@@ -178,6 +182,7 @@ const TARGETS: readonly Target[] = [
   // mistakes land.
   { path: "/mentor/doubts", as: "admin", gating: false },
   { path: "/mentor/moderation", as: "admin", gating: false },
+  { path: "/mentor/experiences", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
   // Public (signed out): the judge transparency page (Phase 4).
   { path: "/judge", as: null, gating: false },

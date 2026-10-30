@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Card, EmptyState, ButtonLink } from "@recx/design";
 import { requireUser } from "@/lib/auth/guards";
 import { listCatalog, listCatalogCompanies } from "@/server/queries/problems";
+import { companyTagLabel } from "@/server/queries/interviews";
 import {
   CATALOG_PAGE_SIZE,
   CATALOG_PATH,
@@ -31,6 +32,14 @@ export default async function ProblemsPage({ searchParams }: Props) {
   const filters: CatalogFilters = { ...parsed, company: company?.slug ?? null };
 
   const result = await listCatalog(user.id, { ...filters, companyId: company?.id ?? null });
+  /**
+   * SPEC §11 requires placement-cell curation to be "explicitly labelled
+   * as curated". A curated company track is somebody's best guess at what
+   * a company asks; an EXPERIENCE one is a count of what students actually
+   * reported in the archive. A student choosing what to revise the night
+   * before a drive is entitled to know which one they are looking at.
+   */
+  const provenance = company ? await companyTagLabel(company.slug) : null;
   const shown: CatalogFilters = { ...filters, page: result.page };
   const labels = { companyName: company?.name ?? null };
 
@@ -52,6 +61,13 @@ export default async function ProblemsPage({ searchParams }: Props) {
       </p>
 
       <CatalogFilterForm filters={filters} companies={companies} />
+
+      {provenance ? (
+        <p className="mt-4 rounded-xl border border-border bg-background p-3 text-sm text-text-secondary">
+          <span className="font-medium text-text">{company?.name}: </span>
+          {provenance.notice}
+        </p>
+      ) : null}
 
       <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h2
