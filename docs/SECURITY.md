@@ -567,6 +567,15 @@ role. Every `/super` page calls `requireSuperAdminPage()` itself.
   no CDN); Prisma `6.16.2`.
 * Adding a dependency needs a reason in review; prefer the platform and
   existing packages.
+* **The editor keymaps (Phase 12j) are pinned exactly and self-hosted.**
+  `monaco-vim` 0.4.4 and `monaco-emacs` 0.3.0 are copied into
+  `/monaco/keymaps` at build time and loaded through Monaco's own AMD
+  loader; `@replit/codemirror-vim` 6.4.0 and `@replit/codemirror-emacs`
+  6.1.0 are dynamic imports in the CodeMirror chunk. No keymap is fetched
+  unless a student has chosen one, none is served from a CDN (a jsdelivr
+  URL would work on a developer's machine and fail on an exam LAN), and
+  `tests/repo/editor-keymap-posture.test.ts` refuses a CDN host and a
+  top-level import of any of the four.
 
 ---
 

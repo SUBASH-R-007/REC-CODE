@@ -3082,3 +3082,62 @@ the production build with four signed-in people. What has not happened is
 a TA marking thirty answers in an evening, which is the only way to find
 out whether three criteria or six is the right number, and whether the
 0-4 ladder's rungs mean the same thing to two different TAs.
+
+## Two settings that did nothing, and the keymaps that found them (Phase 12j)
+
+**The bug this phase was really about.** `fontSize` and `tabSize` have
+been on the profile settings page since Phase 3. The form saved them, the
+page read them back to re-render itself, and **no editor ever asked for
+them**: Monaco and CodeMirror both hard-coded 14 px and 4 spaces. A
+student who set 18 px because they could not read 14 got a page that said
+"Settings saved." and changed nothing. Nobody noticed because the setting
+appeared to work -- it persisted. It was found while looking for somewhere
+to put the keymap, which is the honest version of how most of these are
+found.
+
+**Why the keymaps are self-hosted.** `monaco-vim` is 372 KB and
+`monaco-emacs` 31 KB, and the obvious way to load either is the CDN build
+both READMEs show. That would work on every developer's machine and fail
+in the lab: the exam LAN has no route off campus, and the CSP does not
+name a CDN. They are copied beside Monaco's own files at build time and
+loaded through Monaco's AMD loader, which also keeps them out of every
+JavaScript bundle -- a student on the standard keys downloads nothing, and
+the size budgets did not move by a byte.
+
+**Esc then Tab had to move above the editor.** Both keymaps bind Esc
+(vim's normal mode, emacs's Meta prefix) and both bind Tab. The escape
+hatch WCAG 2.1.2 requires cannot be something a preference switches off,
+so it is now a capture-phase listener on the wrapper around the editor,
+where it runs before Monaco, before CodeMirror and before the keymap.
+That shadows `<Tab>` after Esc in vim (jump forward in the jumplist) and
+`M-Tab` in emacs. Both are stated in the setting's own words, because a
+vim user pressing Esc then Tab and leaving the editor deserves to have
+been told, and because the alternative -- a keyboard trap for anybody who
+turned a keymap on -- is a defect rather than a trade.
+
+**The proctored arena keeps the standard keys, and that is not caution.**
+SPEC §5 defines the exam's typing telemetry in terms of CodeMirror's own
+transaction origins: `input.type` for typing, `input.paste` for a paste,
+absent for a programmatic change. A keymap's register commands -- vim's
+`"+p`, emacs's yank -- put text in the document through a path those
+origins do not describe, so the same signal would mean different things
+depending on a preference. Rather than ship that, the arena hands the
+editor `DEFAULT` and the page says why. Font size and tab size DO apply
+there: they change no signal, and somebody who needs 18 px to read needs
+it most in an exam.
+
+**Not built, deliberately.** No custom keybinding editor -- a student who
+wants `jk` mapped to Esc wants vim, and vim is what the keymap gives
+them; a bindings UI is a product of its own. No `:w` writing to the
+server (vim's command line accepts it and does nothing): saving is
+automatic, and a command that silently did nothing would be worse than
+one that is not there. No vim mode for the plain textarea fallback, which
+exists precisely because the editor has not loaded. No per-language
+keymaps, no `.vimrc` import, no macros across page loads.
+
+**NOT RUN: a contest with a keymap on.** Both keymaps are proved in a
+real browser in both editors -- modal editing, the status line, the `:`
+command line, emacs's `C-k`, the escape hatch, and nothing fetched on the
+standard keys. What has not happened is two hours of a real contest,
+which is where a keymap either disappears into the work or gets in the
+way.

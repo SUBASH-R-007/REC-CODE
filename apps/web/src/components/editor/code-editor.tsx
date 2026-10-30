@@ -2,12 +2,13 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@recx/design";
-import type { EditorController } from "@/components/editor/editor-types";
+import { EDITOR_KEYMAP_NOTICES } from "@recx/shared";
+import type { EditorController, EditorPrefs } from "@/components/editor/editor-types";
+import { EDITOR_PREFS_DEFAULT, editorLineHeight } from "@/components/profile/settings-schema";
 import { moveFocusOutside } from "@/components/editor/focus-escape";
 import { MEDIA, type EditorKind } from "@/components/workspace/layout";
 
-/** The plain textarea's metrics in CSS px (leading-[21px], p-3) — the same as Monaco's and CodeMirror's. */
-const PLAIN_LINE_HEIGHT = 21;
+/** The plain textarea's padding in CSS px (p-3) — the same as Monaco's and CodeMirror's. */
 const PLAIN_PADDING = 12;
 
 /**
@@ -15,15 +16,15 @@ const PLAIN_PADDING = 12;
  * down just enough that the caret line and the next clear an overlay
  * covering the bottom `occluded` px (lines are exact: wrap="off").
  */
-function keepPlainCaretClear(textarea: HTMLTextAreaElement, occluded: number): void {
+function keepPlainCaretClear(textarea: HTMLTextAreaElement, occluded: number, lineHeight: number): void {
   if (occluded <= 0) return;
   const visible = textarea.clientHeight - occluded;
-  if (visible < PLAIN_LINE_HEIGHT * 2) return;
+  if (visible < lineHeight * 2) return;
   const head = textarea.selectionDirection === "backward" ? textarea.selectionStart : textarea.selectionEnd;
   const text = textarea.value;
   let line = 0;
   for (let i = text.indexOf("\n"); i !== -1 && i < head; i = text.indexOf("\n", i + 1)) line++;
-  const wanted = PLAIN_PADDING + (line + 2) * PLAIN_LINE_HEIGHT - visible;
+  const wanted = PLAIN_PADDING + (line + 2) * lineHeight - visible;
   if (wanted > textarea.scrollTop) textarea.scrollTop = wanted;
 }
 
@@ -53,9 +54,14 @@ if (typeof window !== "undefined" && typeof window.matchMedia === "function" && 
  * changed `value` (language switch, reset, draft restore) is pushed into the
  * editor only when it differs from what the editor already holds.
  *
- * Keyboard (WCAG 2.1.2): Monaco captures Tab, so this wrapper adds the
- * documented way out — Esc, then Tab (Shift+Tab backwards) moves focus to
- * the next control outside the editor. CodeMirror has the same built in.
+ * Keyboard (WCAG 2.1.2): both real editors capture Tab, so this wrapper
+ * adds the documented way out — Esc, then Tab (Shift+Tab backwards) moves
+ * focus to the next control outside the editor. It is handled HERE, on the
+ * wrapper in the capture phase, for both editors: a keymap (Phase 12j)
+ * binds Esc and Tab itself, and an escape hatch inside the editor would be
+ * one a preference could take away. A keyboard trap is a defect; the
+ * shadowed binding it costs (vim's jumplist jump, emacs's M-Tab) is an
+ * inconvenience, and the setting says so.
  *
  * `occludedBottom`: the workspace's console drawer overlays the bottom of
  * the editor (it never resizes it). Whichever editor is showing — Monaco,
@@ -71,6 +77,7 @@ export function CodeEditor({
   onKind,
   onInsertion,
   forceKind,
+  prefs = EDITOR_PREFS_DEFAULT,
   occludedBottom = 0,
   className,
 }: {
@@ -96,6 +103,13 @@ export function CodeEditor({
    * nicer editor at the cost of the signal.
    */
   forceKind?: EditorKind;
+  /**
+   * The viewer's own editor settings (Phase 12j). Font size and tab size
+   * apply everywhere; a keymap is the caller's call — the proctored arena
+   * passes the default, because what it records about typing is defined in
+   * terms of the standard keys.
+   */
+  prefs?: EditorPrefs;
   /** CSS px at the bottom of the editor covered by an overlay (the console drawer); 0 = none. */
   occludedBottom?: number;
   className?: string;
@@ -104,14 +118,16 @@ export function CodeEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<EditorController | null>(null);
-  const latest = useRef({ value, onChange, language, label, onKind, onInsertion, forceKind });
+  const statusBarRef = useRef<HTMLDivElement>(null);
+  const latest = useRef({ value, onChange, language, label, onKind, onInsertion, forceKind, prefs });
   const [ready, setReady] = useState(false);
   const [kind, setKind] = useState<EditorKind | null>(null);
+  const [keymapFailed, setKeymapFailed] = useState(false);
 
   // Synced in the commit itself, so an editor created between a commit and
   // its passive effects compares against what is actually on screen.
   useLayoutEffect(() => {
-    latest.current = { value, onChange, language, label, onKind, onInsertion, forceKind };
+    latest.current = { value, onChange, language, label, onKind, onInsertion, forceKind, prefs };
   });
 
   // Choose and load the editor once per mount; hand the textarea over to it.
@@ -149,6 +165,9 @@ export function CodeEditor({
           label: latest.current.label,
           onChange: (next) => latest.current.onChange(next),
           onInsertion: (change) => latest.current.onInsertion?.(change),
+          prefs: latest.current.prefs,
+          keymapStatusBar: statusBarRef.current,
+          onKeymapFailed: () => setKeymapFailed(true),
         });
         controller = created;
         controllerRef.current = created;
@@ -182,26 +201,38 @@ export function CodeEditor({
     controllerRef.current?.setLabel(label);
   }, [label, ready]);
 
+  // The viewer changed a setting (or opened a second tab and changed it
+  // there): font size, tab size and keymap are pushed into the live editor.
+  useEffect(() => {
+    setKeymapFailed(false);
+    controllerRef.current?.setPrefs(prefs);
+  }, [prefs, ready]);
+
   // The console drawer opened, closed or resized: keep the caret above it.
   useEffect(() => {
     controllerRef.current?.setOccludedBottom(occludedBottom);
     const textarea = textareaRef.current;
     if (!textarea || occludedBottom <= 0) return;
-    keepPlainCaretClear(textarea, occludedBottom);
+    keepPlainCaretClear(textarea, occludedBottom, editorLineHeight(prefs.fontSize));
     // Chrome extends a textarea's scroll range for new padding only at the
     // next frame (until then the scroll is clamped to the old range): repeat
     // once a frame has gone by.
     let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => keepPlainCaretClear(textarea, occludedBottom));
+      frame = requestAnimationFrame(() =>
+        keepPlainCaretClear(textarea, occludedBottom, editorLineHeight(prefs.fontSize)),
+      );
     });
     return () => cancelAnimationFrame(frame);
-  }, [occludedBottom, ready]);
+  }, [occludedBottom, prefs.fontSize, ready]);
 
-  // Esc then Tab leaves Monaco. Capture phase on the wrapper runs before
-  // Monaco's own handlers on its hidden textarea, so the Tab never indents.
+  // Esc then Tab leaves the editor — Monaco or CodeMirror. The capture
+  // phase on the wrapper runs before anything inside (Monaco's handlers on
+  // its hidden textarea, CodeMirror's on its content element, and any
+  // keymap's on either), so the way out cannot be bound away and the Tab
+  // never indents.
   useEffect(() => {
     const wrapper = wrapperRef.current;
-    if (!wrapper || kind !== "monaco" || !ready) return;
+    if (!wrapper || !ready) return;
     let armed = false;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -227,7 +258,7 @@ export function CodeEditor({
       wrapper.removeEventListener("keydown", onKeyDown, true);
       wrapper.removeEventListener("pointerdown", disarm, true);
     };
-  }, [kind, ready]);
+  }, [ready]);
 
   return (
     <div
@@ -249,7 +280,7 @@ export function CodeEditor({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           // Typing, arrows, clicks: every caret move.
-          onSelect={(e) => keepPlainCaretClear(e.currentTarget, occludedBottom)}
+          onSelect={(e) => keepPlainCaretClear(e.currentTarget, occludedBottom, editorLineHeight(prefs.fontSize))}
           aria-label={label}
           aria-describedby={describedBy}
           spellCheck={false}
@@ -258,9 +289,31 @@ export function CodeEditor({
           autoCorrect="off"
           wrap="off"
           // Room to scroll the last lines above the drawer (the box itself keeps its size).
-          style={occludedBottom > 0 ? { paddingBottom: occludedBottom + PLAIN_PADDING } : undefined}
-          className="absolute inset-0 h-full w-full resize-none bg-surface p-3 font-mono text-sm leading-[21px] text-text outline-none [tab-size:4]"
+          style={{
+            fontSize: prefs.fontSize,
+            lineHeight: `${editorLineHeight(prefs.fontSize)}px`,
+            tabSize: prefs.tabSize,
+            ...(occludedBottom > 0 ? { paddingBottom: occludedBottom + PLAIN_PADDING } : {}),
+          }}
+          className="absolute inset-0 h-full w-full resize-none bg-surface p-3 font-mono text-text outline-none"
         />
+      )}
+
+      {/*
+        Vim's status line: the mode, and the `:` command line it types into.
+        Rendered even with no keymap on (the node has to exist before the
+        editor is created) and empty until one fills it, so it costs a 0 px
+        row. CodeMirror draws its own inside the editor.
+      */}
+      <div
+        ref={statusBarRef}
+        data-keymap-status=""
+        className="pointer-events-auto absolute bottom-0 left-0 right-0 z-[6] bg-surface px-3 font-mono text-xs text-text-secondary empty:hidden [&_input]:w-full [&_input]:bg-transparent [&_input]:outline-none"
+      />
+      {keymapFailed && (
+        <p role="status" className="absolute bottom-0 left-0 right-0 z-[6] bg-surface px-3 py-1 text-xs text-warning">
+          {EDITOR_KEYMAP_NOTICES.unavailable}
+        </p>
       )}
     </div>
   );

@@ -135,6 +135,17 @@ for oversights.
    screen-reader text below), which is what SC 2.1.2 requires of a
    non-standard exit.
 
+   **A keymap cannot take that exit away (Phase 12j).** A student may set
+   a vim or emacs keymap in their profile, and both bind Esc and Tab
+   themselves. Esc then Tab is therefore handled on the wrapper AROUND
+   the editor, in the capture phase, so it runs before Monaco, before
+   CodeMirror and before the keymap. The cost is one shadowed binding in
+   each mode — vim's `<Tab>` (jump forward in the jumplist) and emacs's
+   `M-Tab` — which the setting page states in the mode's own words. A
+   keyboard trap is a defect; a shadowed jumplist binding is an
+   inconvenience. The visible note names the keymap in use, so the keys
+   somebody is looking at are the keys the note describes.
+
 **Dark theme.** The canonical dark `--primary` falls below 4.5:1 for normal
 text (4.23:1 under white, 4.1–4.5:1 as text on the dark surfaces). The
 tokens are kept verbatim, and a dark-only rule in

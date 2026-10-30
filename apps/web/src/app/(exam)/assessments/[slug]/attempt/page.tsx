@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { msRemaining } from "@recx/shared";
 import { requireUser } from "@/lib/auth/guards";
+import { readEditorPrefs } from "@/components/profile/settings-schema";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { attemptLayoutOf } from "@/lib/exam/layout";
@@ -104,6 +105,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
       }}
       labSupervised={assessment.proctorMode === "LAB_SUPERVISED"}
       initialSources={recovered}
+      editorPrefs={readEditorPrefs(user.editorPrefs)}
     />
   );
 }

@@ -1,4 +1,5 @@
 "use server";
+import type { EditorKeymap } from "@recx/shared";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -34,6 +35,7 @@ export interface SavedSettings {
   bio: string;
   fontSize: number;
   tabSize: TabSize;
+  keymap: EditorKeymap;
 }
 
 export async function saveProfileSettings(
@@ -53,6 +55,7 @@ export async function saveProfileSettings(
         editorPrefs: mergeEditorPrefs(user.editorPrefs, {
           fontSize: input.fontSize,
           tabSize: input.tabSize,
+          keymap: input.keymap,
         }) as Prisma.InputJsonObject,
       },
     });
@@ -95,6 +98,7 @@ export async function saveProfileSettings(
       bio: input.bio,
       fontSize: input.fontSize,
       tabSize: input.tabSize,
+      keymap: input.keymap,
     };
   }, "saveProfileSettings");
 }

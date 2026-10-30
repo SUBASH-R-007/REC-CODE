@@ -44,6 +44,7 @@ export default async function ProfileSettingsPage() {
               bio: settings.bio,
               fontSize: settings.editor.fontSize,
               tabSize: settings.editor.tabSize,
+              keymap: settings.editor.keymap,
             }}
           />
         </CardBody>

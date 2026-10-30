@@ -90,6 +90,47 @@ The five structural decisions from the prompt are load-bearing:
 4. Append-only XP ledger with period buckets (Phase 3).
 5. Authoritative contest attempts + materialised standings (Phase 5).
 
+## Editor settings, and the keymaps (Phase 12j)
+
+SPEC §11: "vim/emacs keymaps". A student who has spent two years in vim
+types badly in anything else, and typing badly in a contest is a handicap
+the platform imposed rather than a skill it measured.
+
+The preference lives in the `User.editorPrefs` JSON the profile form
+already wrote — `settings-schema.ts` had predicted this exact key ("plain
+JSON that other keys (e.g. a keymap) may share") — so the phase needed no
+migration. It needed something else, though: until now `fontSize` and
+`tabSize` were saved by that form and read by **nothing**. Both editors
+hard-coded 14 px and 4 spaces, so two settings had been a control that
+lied since Phase 3. `EditorOptions` now carries the viewer's preferences,
+`EditorController.setPrefs()` applies a change to a live editor, and the
+line height follows the font size through one function
+(`editorLineHeight`) because three editors and a caret-reveal calculation
+have to agree on it.
+
+Both keymaps exist for both editors. Monaco's are the `monaco-vim` and
+`monaco-emacs` UMD builds, copied into `/monaco/keymaps` by
+`scripts/copy-monaco.mjs` and loaded through Monaco's OWN AMD loader —
+self-hosted for the same reasons as Monaco itself (a strict CSP, a cold
+cross-origin cost on 3 Mbps campus wifi, and an exam LAN with no route off
+campus), and therefore in no JavaScript bundle at all. CodeMirror's are
+`@replit/codemirror-vim` and `@replit/codemirror-emacs` behind dynamic
+imports, each its own chunk. A student on the standard keys downloads
+nothing extra, which is why the size budgets did not move.
+
+Two decisions are load-bearing enough to be fenced
+(`tests/repo/editor-keymap-posture.test.ts`). **The way out of the editor
+is above the editor**: Esc then Tab is a capture-phase listener on the
+wrapper, so it runs before Monaco, before CodeMirror and before any
+keymap, and WCAG 2.1.2 is not something a preference can switch off. It
+shadows one binding per mode (vim's `<Tab>` jumplist jump, emacs's
+`M-Tab`), and the setting page says so. **The proctored arena keeps the
+standard keys**: what it records about typing is defined in terms of
+CodeMirror's own transaction origins (SPEC §5), and a keymap's register
+commands — vim's `"+p`, emacs's yank — are a paste path those origins do
+not describe. Font size and tab size do apply there, because they change
+no signal.
+
 ## Written and system-design answers (Phase 12i)
 
 A TA writes a question and the rubric it will be marked against; both are

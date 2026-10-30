@@ -1,3 +1,5 @@
+import { editorKeyNote, type EditorKeymap } from "@recx/shared";
+
 /**
  * Workspace layout rules, as pure functions (unit-tested in
  * test/workspace-layout.test.ts) plus the matching media queries.
@@ -73,14 +75,16 @@ export function statementMinPercent(groupWidth: number): number {
 
 /**
  * The visible keyboard note next to the editor (WCAG 2.1.2: a non-standard
- * way out must be stated). Monaco and CodeMirror both leave on Esc then Tab
- * (Monaco through the workspace's own handler); their Tab-mode toggles
- * differ on Apple platforms. The plain textarea never captures Tab.
+ * way out must be stated). Monaco and CodeMirror both leave on Esc then
+ * Tab — handled by CodeEditor above both of them, so no keymap can bind it
+ * away (Phase 12j) — and their Tab-mode toggles differ on Apple platforms.
+ * The plain textarea never captures Tab.
+ *
+ * The wording itself lives in @recx/shared with the keymap copy, because
+ * the setting page and this note have to agree about the way out.
  */
-export function editorKeyHint(kind: EditorKind | "plain", apple: boolean): string | null {
-  if (kind === "plain") return null;
-  const toggle = !apple ? "Ctrl+M" : kind === "monaco" ? "Ctrl+Shift+M" : "Alt+Shift+M";
-  return `Esc then Tab leaves the editor · ${toggle} toggles Tab key`;
+export function editorKeyHint(kind: EditorKind | "plain", apple: boolean, keymap: EditorKeymap = "DEFAULT"): string | null {
+  return editorKeyNote({ kind, apple, keymap });
 }
 
 /** Focus mode's shortcut, as shown in labels. */

@@ -234,6 +234,9 @@ describe("settings validation", () => {
       bio: "Practising for placements.",
       fontSize: 16,
       tabSize: 2,
+      // Phase 12j. A form with no keymap field is the standard keymap,
+      // which is also what a browser that cannot render the select sends.
+      keymap: "DEFAULT",
     });
     expect(settingsSchema.parse(form({ ...valid, leaderboardOptOut: "on" })).leaderboardOptOut).toBe(true);
   });
@@ -257,13 +260,23 @@ describe("settings validation", () => {
 
   it("reads and merges editor prefs without losing other keys", () => {
     expect(readEditorPrefs({})).toEqual(EDITOR_PREFS_DEFAULT);
-    expect(readEditorPrefs({ fontSize: 18, tabSize: 2 })).toEqual({ fontSize: 18, tabSize: 2 });
-    expect(readEditorPrefs({ fontSize: 99, tabSize: "4" })).toEqual({ fontSize: EDITOR_PREFS_DEFAULT.fontSize, tabSize: 4 });
-    expect(readEditorPrefs(null)).toEqual(EDITOR_PREFS_DEFAULT);
-    expect(mergeEditorPrefs({ keymap: "vim", fontSize: 12 }, { fontSize: 16, tabSize: 2 })).toEqual({
-      keymap: "vim",
-      fontSize: 16,
+    expect(readEditorPrefs({ fontSize: 18, tabSize: 2, keymap: "VIM" })).toEqual({
+      fontSize: 18,
       tabSize: 2,
+      keymap: "VIM",
     });
+    // Each key falls back on its own: a nonsense font size does not cost
+    // somebody their keymap.
+    expect(readEditorPrefs({ fontSize: 99, tabSize: "4", keymap: "vim" })).toEqual({
+      fontSize: EDITOR_PREFS_DEFAULT.fontSize,
+      tabSize: 4,
+      keymap: EDITOR_PREFS_DEFAULT.keymap,
+    });
+    expect(readEditorPrefs(null)).toEqual(EDITOR_PREFS_DEFAULT);
+    // A key this form does not own survives the merge; the three it owns
+    // are written (Phase 12j added the keymap to them).
+    expect(
+      mergeEditorPrefs({ wordWrap: true, fontSize: 12 }, { fontSize: 16, tabSize: 2, keymap: "EMACS" }),
+    ).toEqual({ wordWrap: true, fontSize: 16, tabSize: 2, keymap: "EMACS" });
   });
 });

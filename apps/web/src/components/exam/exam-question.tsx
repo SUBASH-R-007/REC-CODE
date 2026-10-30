@@ -1,7 +1,9 @@
 "use client";
 
 import { useId } from "react";
+import { EDITOR_KEYMAP_NOTICES } from "@recx/shared";
 import { CodeEditor } from "@/components/editor/code-editor";
+import type { EditorPrefs } from "@/components/editor/editor-types";
 import type { ExamQuestionView } from "@/components/exam/exam-session";
 
 /**
@@ -26,6 +28,7 @@ export function ExamQuestion({
   onInsertion,
   position,
   total,
+  prefs,
 }: {
   readonly question: ExamQuestionView;
   readonly source: string;
@@ -33,6 +36,14 @@ export function ExamQuestion({
   readonly onInsertion: (change: { chars: number; origin: string | null }) => void;
   readonly position: number;
   readonly total: number;
+  /**
+   * The candidate's own font size and tab size (Phase 12j). The KEYMAP is
+   * deliberately not theirs here: what this editor records about typing is
+   * defined in terms of CodeMirror's own transaction origins, and a
+   * keymap's register commands are a paste path those origins do not
+   * describe. Comfort settings change no signal, so they apply.
+   */
+  readonly prefs: EditorPrefs;
 }) {
   const noteId = useId();
 
@@ -79,6 +90,7 @@ export function ExamQuestion({
       <section aria-label="Your answer" className="flex min-h-80 min-w-0 flex-1 flex-col">
         <p id={noteId} className="border-b border-border px-4 py-2 text-xs text-text-secondary">
           Tab indents. Press Esc then Tab to move focus out of the editor.
+          {prefs.keymap !== "DEFAULT" ? ` ${EDITOR_KEYMAP_NOTICES.examDefault}` : ""}
         </p>
         <div className="min-h-0 flex-1">
           <CodeEditor
@@ -90,6 +102,7 @@ export function ExamQuestion({
             language={question.language}
             label={`Code editor for question ${position}`}
             describedBy={noteId}
+            prefs={{ ...prefs, keymap: "DEFAULT" }}
             className="h-full"
           />
         </div>

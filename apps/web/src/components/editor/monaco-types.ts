@@ -61,12 +61,18 @@ export interface MonacoApi {
 
 /** The AMD loader's global `require` (vs/loader.js). */
 export interface AmdRequire {
-  (deps: string[], onLoad: () => void, onError?: (error: unknown) => void): void;
+  (deps: string[], onLoad: (...modules: unknown[]) => void, onError?: (error: unknown) => void): void;
   config(config: { paths: Record<string, string> }): void;
+}
+
+/** The AMD loader's `define`, used to alias a module id onto an object already in memory. */
+export interface AmdDefine {
+  (id: string, deps: string[], factory: () => unknown): void;
 }
 
 export interface MonacoWindow {
   require?: AmdRequire;
+  define?: AmdDefine;
   monaco?: MonacoApi;
   MonacoEnvironment?: { getWorkerUrl(moduleId: string, label: string): string };
 }

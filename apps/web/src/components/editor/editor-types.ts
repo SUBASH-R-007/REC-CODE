@@ -1,8 +1,12 @@
+import type { EditorPrefs } from "@/components/profile/settings-schema";
+
 /**
  * What the workspace's CodeEditor needs from a real editor, so Monaco
  * (≥ 768 px) and CodeMirror 6 (< 768 px) are interchangeable. Both
  * implementations are loaded lazily; neither is in any route's first load.
  */
+
+export type { EditorPrefs };
 
 export interface EditorOptions {
   value: string;
@@ -10,6 +14,26 @@ export interface EditorOptions {
   language: string;
   /** Accessible name, e.g. "Code editor, C++20 (GCC 13.2.0)". */
   label: string;
+  /**
+   * The viewer's own editor settings (Phase 12j): font size, tab size and
+   * keymap. Both implementations apply all three — until this phase the
+   * first two were saved on the profile and read by nothing, which is a
+   * control that lies.
+   */
+  prefs: EditorPrefs;
+  /**
+   * Where vim's status line (the mode, and the `:` command line) goes.
+   * Monaco's keymap wants a DOM node for it; without one there is no
+   * command line at all, so a vim user cannot type `:w`. CodeMirror draws
+   * its own inside the editor and ignores this.
+   */
+  keymapStatusBar?: HTMLElement | null;
+  /**
+   * The keymap module did not load (offline, a blocked path). The editor
+   * keeps working with its own keys, and the page says so rather than
+   * leaving somebody typing `j` into their program.
+   */
+  onKeymapFailed?: () => void;
   /** Called with the full text after every edit made in the editor. */
   onChange: (value: string) => void;
   /**
@@ -37,6 +61,12 @@ export interface EditorController {
   setValue(value: string): void;
   setLanguage(language: string): void;
   setLabel(label: string): void;
+  /**
+   * Apply the viewer's editor settings. Called on every change, so a
+   * keymap turned on in another tab reaches this editor on its next
+   * render rather than at the next reload.
+   */
+  setPrefs(prefs: EditorPrefs): void;
   /** Focus, optionally placing the caret at a character offset. */
   focus(caret?: number): void;
   /**

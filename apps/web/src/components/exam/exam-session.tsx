@@ -19,6 +19,7 @@ import { MonitoredChip } from "@/components/exam/monitored-chip";
 import { QuestionPalette } from "@/components/exam/question-palette";
 import { SaveStatePill, type SaveState } from "@/components/exam/save-state-pill";
 import { ExamQuestion } from "@/components/exam/exam-question";
+import type { EditorPrefs } from "@/components/editor/editor-types";
 import { ExamBottomBar } from "@/components/exam/exam-bottom-bar";
 import { TelemetryQueue } from "@/lib/exam/client/telemetry-queue";
 import { clearAttempt, markSynced, putDraft } from "@/lib/exam/client/draft-store";
@@ -62,6 +63,7 @@ export function ExamSession({
   candidate,
   labSupervised,
   initialSources,
+  editorPrefs,
 }: {
   readonly attemptId: string;
   readonly questions: readonly ExamQuestionView[];
@@ -71,6 +73,8 @@ export function ExamSession({
   readonly labSupervised: boolean;
   /** Recovered from the write-ahead store, newest-wins over the starter code. */
   readonly initialSources: Readonly<Record<string, string>>;
+  /** The candidate's font size and tab size; the keymap is the arena's (Phase 12j). */
+  readonly editorPrefs: EditorPrefs;
 }) {
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -584,6 +588,7 @@ export function ExamSession({
           onInsertion={onInsertion}
           position={current + 1}
           total={questions.length}
+          prefs={editorPrefs}
         />
       </div>
 

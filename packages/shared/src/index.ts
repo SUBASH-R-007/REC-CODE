@@ -16,6 +16,7 @@ export * from "./interview-archive";
 export * from "./recommend";
 export * from "./mock-interview";
 export * from "./written";
+export * from "./editor-keymap";
 export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";

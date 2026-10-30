@@ -4,6 +4,14 @@ import { useActionState, useId, useState } from "react";
 import { CircleAlert, CircleCheck } from "lucide-react";
 import { Button, Select, cn } from "@recx/design";
 import type { ProfileVisibility } from "@recx/db";
+import {
+  EDITOR_KEYMAPS,
+  EDITOR_KEYMAP_HINT,
+  EDITOR_KEYMAP_LABEL,
+  EDITOR_KEYMAP_NOTICES,
+  EDITOR_KEYMAP_SHADOWED,
+  type EditorKeymap,
+} from "@recx/shared";
 import { saveProfileSettings } from "@/server/actions/profile";
 import {
   BIO_MAX,
@@ -21,6 +29,7 @@ export interface SettingsFormValues {
   bio: string;
   fontSize: number;
   tabSize: TabSize;
+  keymap: EditorKeymap;
 }
 
 const FONT_SIZES = Array.from({ length: FONT_SIZE_MAX - FONT_SIZE_MIN + 1 }, (_, i) => FONT_SIZE_MIN + i);
@@ -43,6 +52,7 @@ export function SettingsForm({ initial }: { initial: SettingsFormValues }) {
   const [bio, setBio] = useState(initial.bio);
   const [fontSize, setFontSize] = useState(String(initial.fontSize));
   const [tabSize, setTabSize] = useState<TabSize>(initial.tabSize);
+  const [keymap, setKeymap] = useState<EditorKeymap>(initial.keymap);
   const id = useId();
   const bioCount = bioLength(bio);
 
@@ -161,6 +171,30 @@ export function SettingsForm({ initial }: { initial: SettingsFormValues }) {
               ))}
             </div>
           </fieldset>
+          <div className="sm:col-span-2">
+            <label htmlFor={`${id}-keymap`} className="mb-1.5 block text-sm font-medium text-text">
+              Keymap
+            </label>
+            <Select
+              id={`${id}-keymap`}
+              name="keymap"
+              value={keymap}
+              onChange={(e) => setKeymap(e.target.value as EditorKeymap)}
+              className="min-h-11"
+              aria-describedby={`${id}-keymap-hint`}
+            >
+              {EDITOR_KEYMAPS.map((option) => (
+                <option key={option} value={option}>
+                  {EDITOR_KEYMAP_LABEL[option]}
+                </option>
+              ))}
+            </Select>
+            <p id={`${id}-keymap-hint`} className="mt-1.5 text-sm text-text-secondary">
+              {EDITOR_KEYMAP_HINT[keymap]} {EDITOR_KEYMAP_SHADOWED[keymap] ?? ""}
+            </p>
+            <p className="mt-1 text-xs text-muted">{EDITOR_KEYMAP_NOTICES.setting}</p>
+            <p className="mt-1 text-xs text-muted">{EDITOR_KEYMAP_NOTICES.examDefault}</p>
+          </div>
         </div>
       </fieldset>
 

@@ -23,6 +23,7 @@ import { BookmarkButton } from "@/components/problems/bookmark-button";
 import { WorkspaceFrame } from "@/components/shell/workspace-frame";
 import { ProblemDescription } from "@/components/workspace/problem-description";
 import { SubmissionsTab } from "@/components/workspace/submissions-tab";
+import { readEditorPrefs } from "@/components/profile/settings-schema";
 import { Workspace } from "@/components/workspace/workspace";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -129,6 +130,7 @@ export default async function ProblemPage({ params }: Params) {
         customHint={customHint}
         header={header}
         submissionCount={history.length}
+        editorPrefs={readEditorPrefs(user.editorPrefs)}
         panels={{
           description: <ProblemDescription problem={problem} statementHtml={problem.statementHtml} />,
           editorial: (

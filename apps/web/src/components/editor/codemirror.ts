@@ -9,8 +9,11 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { HighlightStyle, bracketMatching, indentOnInput, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import { Prec } from "@codemirror/state";
 import { tags } from "@lezer/highlight";
-import type { CreateEditor, EditorController, LoadEditor } from "@/components/editor/editor-types";
+import type { EditorKeymap } from "@recx/shared";
+import type { CreateEditor, EditorController, EditorPrefs, LoadEditor } from "@/components/editor/editor-types";
+import { editorLineHeight } from "@/components/profile/settings-schema";
 
 /**
  * CodeMirror 6 for narrow screens (< 768 px), where Monaco is too heavy and
@@ -21,14 +24,28 @@ import type { CreateEditor, EditorController, LoadEditor } from "@/components/ed
  *
  * Tab indents (indentWithTab). The keyboard way out is CodeMirror's own:
  * Esc then Tab moves focus on, and Ctrl+M (Alt+Shift+M on macOS) toggles
- * "Tab moves focus" — both stated next to the editor.
+ * "Tab moves focus" — both stated next to the editor. CodeEditor handles
+ * Esc then Tab ABOVE this editor in the capture phase as well, so no
+ * keymap can take the way out (Phase 12j).
+ *
+ * Phase 12j: the viewer's font size, tab size and keymap are applied here.
+ * Each keymap is its own lazy chunk, fetched the first time somebody turns
+ * one on; the font size and the line height move together, because the
+ * scroll margins below are measured in line heights.
  */
 
 const External = Annotation.define<boolean>();
 
 /** CSS px, as in the theme below (and Monaco / the plain textarea). */
-const LINE_HEIGHT = 21;
 const CONTENT_PADDING = 12;
+
+/** The parts of the theme that follow the viewer's font size. */
+function sizeTheme(fontSize: number): Extension {
+  return EditorView.theme({
+    "&": { fontSize: fontSize + "px" },
+    ".cm-scroller": { lineHeight: editorLineHeight(fontSize) + "px" },
+  });
+}
 
 const theme = EditorView.theme({
   "&": {
@@ -100,12 +117,17 @@ async function languageSupport(id: string): Promise<Extension> {
  * it keeps the cursor in view, and the content gets as much bottom padding
  * so the last lines can scroll above it. The editor itself keeps its size.
  */
-function occlusion(px: number): Extension {
+function occlusion(px: number, lineHeight: number): Extension {
   if (px <= 0) return [];
   return [
-    EditorView.scrollMargins.of(() => ({ bottom: px + LINE_HEIGHT })),
+    EditorView.scrollMargins.of(() => ({ bottom: px + lineHeight })),
     EditorView.contentAttributes.of({ style: `padding-bottom: ${px + CONTENT_PADDING}px` }),
   ];
+}
+
+/** Tab size, in the two places CodeMirror keeps it. */
+function tabExtensions(tabSize: number): Extension {
+  return [indentUnit.of(" ".repeat(tabSize)), EditorState.tabSize.of(tabSize)];
 }
 
 function contentAttributes(label: string) {
@@ -119,11 +141,35 @@ function contentAttributes(label: string) {
   });
 }
 
+/**
+ * A keymap as a CodeMirror extension, loaded on demand.
+ *
+ * `Prec.highest` so the keymap's own bindings beat the default ones, which
+ * is what both extensions expect. The way OUT of the editor is handled
+ * above CodeMirror in the capture phase, so raising this precedence
+ * cannot trap anybody.
+ */
+async function keymapExtension(which: EditorKeymap): Promise<Extension> {
+  switch (which) {
+    case "VIM":
+      return Prec.highest((await import("@replit/codemirror-vim")).vim({ status: true }));
+    case "EMACS":
+      return Prec.highest((await import("@replit/codemirror-emacs")).emacs());
+    default:
+      return [];
+  }
+}
+
 const createCodeMirror: CreateEditor = (host, options) => {
   const languageSlot = new Compartment();
   const labelSlot = new Compartment();
   const occlusionSlot = new Compartment();
+  const sizeSlot = new Compartment();
+  const tabSlot = new Compartment();
+  const keymapSlot = new Compartment();
   let occluded = 0;
+  let prefs: EditorPrefs = options.prefs;
+  let lineHeight = editorLineHeight(prefs.fontSize);
 
   const view = new EditorView({
     parent: host,
@@ -137,14 +183,15 @@ const createCodeMirror: CreateEditor = (host, options) => {
         history(),
         indentOnInput(),
         bracketMatching(),
-        indentUnit.of("    "),
-        EditorState.tabSize.of(4),
+        tabSlot.of(tabExtensions(prefs.tabSize)),
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         syntaxHighlighting(highlight),
         theme,
+        sizeSlot.of(sizeTheme(prefs.fontSize)),
+        keymapSlot.of([]),
         languageSlot.of([]),
         labelSlot.of(contentAttributes(options.label)),
-        occlusionSlot.of(occlusion(0)),
+        occlusionSlot.of(occlusion(0, lineHeight)),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
           if (update.transactions.some((tr) => tr.annotation(External))) return;
@@ -169,6 +216,24 @@ const createCodeMirror: CreateEditor = (host, options) => {
       ],
     }),
   });
+
+  /**
+   * The keymap, fetched on demand. `keymapRequest` makes the last choice
+   * win when somebody switches twice while a chunk is still in flight.
+   */
+  let keymapRequest = 0;
+  const setKeymap = (which: EditorKeymap) => {
+    const request = ++keymapRequest;
+    keymapExtension(which)
+      .then((extension) => {
+        if (request === keymapRequest) view.dispatch({ effects: keymapSlot.reconfigure(extension) });
+      })
+      .catch((error: unknown) => {
+        console.warn("[editor] keymap failed to load", error);
+        options.onKeymapFailed?.();
+      });
+  };
+  if (prefs.keymap !== "DEFAULT") setKeymap(prefs.keymap);
 
   let languageRequest = 0;
   const setLanguage = (language: string) => {
@@ -196,6 +261,19 @@ const createCodeMirror: CreateEditor = (host, options) => {
     setLabel(label) {
       view.dispatch({ effects: labelSlot.reconfigure(contentAttributes(label)) });
     },
+    setPrefs(next) {
+      const was = prefs;
+      prefs = next;
+      lineHeight = editorLineHeight(next.fontSize);
+      const effects = [];
+      if (was.fontSize !== next.fontSize) {
+        effects.push(sizeSlot.reconfigure(sizeTheme(next.fontSize)));
+        if (occluded > 0) effects.push(occlusionSlot.reconfigure(occlusion(occluded, lineHeight)));
+      }
+      if (was.tabSize !== next.tabSize) effects.push(tabSlot.reconfigure(tabExtensions(next.tabSize)));
+      if (effects.length > 0) view.dispatch({ effects });
+      if (was.keymap !== next.keymap) setKeymap(next.keymap);
+    },
     focus(caret) {
       if (caret !== undefined) {
         const anchor = Math.max(0, Math.min(caret, view.state.doc.length));
@@ -209,13 +287,14 @@ const createCodeMirror: CreateEditor = (host, options) => {
       occluded = next;
       view.dispatch({
         effects: [
-          occlusionSlot.reconfigure(occlusion(next)),
+          occlusionSlot.reconfigure(occlusion(next, lineHeight)),
           ...(next > 0 ? [EditorView.scrollIntoView(view.state.selection.main.head, { y: "nearest" })] : []),
         ],
       });
     },
     dispose() {
       languageRequest++;
+      keymapRequest++;
       view.destroy();
     },
   };

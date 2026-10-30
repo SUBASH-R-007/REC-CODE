@@ -62,7 +62,7 @@ describe("saveProfileSettings", () => {
       visibility: "REC_ONLY",
       leaderboardOptOut: false,
       bio: null,
-      editorPrefs: { keymap: "vim", fontSize: 13 },
+      editorPrefs: { wordWrap: true, fontSize: 13 },
     };
     fakes.updates.length = 0;
     fakes.audits.length = 0;
@@ -77,10 +77,20 @@ describe("saveProfileSettings", () => {
   });
 
   it("updates only the caller's row and keeps editor keys it does not own", async () => {
-    const result = await saveProfileSettings(null, form({ ...BASE, bio: " Hello ", fontSize: "18", tabSize: "2" }));
+    const result = await saveProfileSettings(
+      null,
+      form({ ...BASE, bio: " Hello ", fontSize: "18", tabSize: "2", keymap: "VIM" }),
+    );
     expect(result).toEqual({
       ok: true,
-      data: { visibility: "REC_ONLY", leaderboardOptOut: false, bio: "Hello", fontSize: 18, tabSize: 2 },
+      data: {
+        visibility: "REC_ONLY",
+        leaderboardOptOut: false,
+        bio: "Hello",
+        fontSize: 18,
+        tabSize: 2,
+        keymap: "VIM",
+      },
     });
     expect(fakes.updates).toEqual([
       {
@@ -89,7 +99,7 @@ describe("saveProfileSettings", () => {
           visibility: "REC_ONLY",
           leaderboardOptOut: false,
           bio: "Hello",
-          editorPrefs: { keymap: "vim", fontSize: 18, tabSize: 2 },
+          editorPrefs: { wordWrap: true, fontSize: 18, tabSize: 2, keymap: "VIM" },
         },
       },
     ]);

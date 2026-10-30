@@ -19,6 +19,7 @@ import {
 import { Button, Dialog, EmptyState, Select, cn, useToast } from "@recx/design";
 import { VERDICT_LABEL, utf8Length, type LanguageKey } from "@recx/shared";
 import { CodeEditor } from "@/components/editor/code-editor";
+import type { EditorPrefs } from "@/components/editor/editor-types";
 import {
   EDITOR_DEFAULT_PERCENT,
   FOCUS_SHORTCUT,
@@ -98,6 +99,7 @@ export function Workspace({
   panels,
   submissionCount,
   judgeLink = true,
+  editorPrefs,
 }: {
   problemId: string;
   slug: string;
@@ -122,6 +124,8 @@ export function Workspace({
   submissionCount: number;
   /** Footer language links to /judge in a new tab; the arena and attempt surfaces pass false. */
   judgeLink?: boolean;
+  /** The viewer's editor settings: font size, tab size and keymap (Phase 12j). */
+  editorPrefs: EditorPrefs;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -148,7 +152,7 @@ export function Workspace({
   const [editorKind, setEditorKind] = useState<EditorKind>("monaco");
   const [apple, setApple] = useState(false);
   useEffect(() => setApple(isApplePlatform()), []);
-  const keyHint = editorKeyHint(editorKind, apple);
+  const keyHint = editorKeyHint(editorKind, apple, editorPrefs.keymap);
 
   // ── Tabs ──────────────────────────────────────────────────────────────
   const [statementTab, setStatementTab] = useState<StatementTab>("description");
@@ -499,6 +503,7 @@ export function Workspace({
               label={`Code editor, ${active.label}`}
               describedBy={hintId}
               onKind={setEditorKind}
+              prefs={editorPrefs}
               occludedBottom={occludedBottom}
             />
           </div>

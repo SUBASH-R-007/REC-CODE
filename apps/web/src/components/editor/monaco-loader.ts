@@ -1,4 +1,4 @@
-import type { AmdRequire, MonacoApi, MonacoWindow } from "@/components/editor/monaco-types";
+import type { AmdDefine, AmdRequire, MonacoApi, MonacoWindow } from "@/components/editor/monaco-types";
 
 /**
  * Lazily load the self-hosted Monaco AMD build from /monaco/vs (copied into
@@ -86,6 +86,16 @@ function injectLoader(): Promise<AmdRequire> {
     script.onerror = () => reject(new Error("Monaco loader failed to load"));
     document.head.appendChild(script);
   });
+}
+
+/**
+ * Monaco's own AMD loader, once it has installed itself — the way the
+ * keymap builds are fetched (Phase 12j). Null before `loadMonaco()`.
+ */
+export function amdLoader(): { require: AmdRequire; define: AmdDefine } | null {
+  const w = monacoWindow();
+  if (!w.require || typeof w.require.config !== "function" || !w.define) return null;
+  return { require: w.require, define: w.define };
 }
 
 export function loadMonaco(): Promise<MonacoApi> {
