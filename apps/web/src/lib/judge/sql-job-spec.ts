@@ -48,16 +48,25 @@ export function buildSqlJobSpec(input: SqlJobSpecInput): SqlJobSpec {
   }
 
   /**
-   * A Run shows a student what their query does on the cases they can
-   * already see. There is no custom input to run against: a SQL problem's
-   * input is its dataset, and the author's datasets are what the question
-   * means.
+   * Two kinds of job are not a plain submission.
+   *
+   * A RUN shows a student what their query does on the cases they can
+   * already see; there is no custom input to run against, because a SQL
+   * problem's input is its dataset and the author's datasets are what the
+   * question means.
+   *
+   * A VALIDATION run is a CAPTURE run: it executes the author's reference
+   * query and reports the result sets, which is how the expected results
+   * come to exist. There is nothing to compare against — the version's
+   * output blobs are still the empty placeholder a draft starts with — so
+   * none is sent.
    */
+  const capture = input.kind === "validation";
   const cases = (input.kind === "run" ? input.tests.filter((t) => t.isSample) : input.tests).map((test) => ({
     index: test.index,
     visible: test.isSample,
     setup: test.input,
-    expected: test.output,
+    expected: capture ? null : test.output,
     ordered: sqlOrdered,
   }));
   if (cases.length === 0) {
@@ -77,6 +86,7 @@ export function buildSqlJobSpec(input: SqlJobSpecInput): SqlJobSpec {
     dialect: sqlDialect,
     source: input.source,
     cases,
+    capture,
     stopOnFirstFailure: input.version.stopOnFirstFailure,
     statementTimeoutMs: SQL_LIMITS.statementTimeoutMs,
     maxRows: SQL_LIMITS.rows,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { LANGUAGE_KEYS, TOOLCHAIN_ID_PATTERN } from "./languages";
-import { SQL_LIMITS } from "./sql-problem";
+import { SQL_LIMITS, sqlResultSetSchema } from "./sql-problem";
 import { LIMITS } from "./limits";
 import { VERDICTS } from "./verdict";
 import { functionSignatureSchema } from "./harness/signature";
@@ -307,7 +307,12 @@ export const sqlCaseSpecSchema = z.object({
   visible: z.boolean(),
   /** The schema and seed rows this case starts from. */
   setup: blobRefSchema,
-  expected: blobRefSchema,
+  /**
+   * The expected result set. Null on a CAPTURE run, which is the run that
+   * produces it: an author never types expected rows, for the same reason
+   * they never type expected stdout.
+   */
+  expected: blobRefSchema.nullable(),
   /** Compared in order, or as a multiset. The problem's choice, per case on the wire. */
   ordered: z.boolean(),
 });
@@ -326,6 +331,14 @@ export const sqlJobSpecSchema = z.object({
   /** The student's statement. */
   source: z.string().max(SQL_LIMITS.submissionBytes),
   cases: z.array(sqlCaseSpecSchema).min(1).max(100),
+  /**
+   * A capture run: execute the author's REFERENCE query against each case
+   * and report the result sets instead of comparing them. This is what a
+   * validation run on a SQL version is — the author's query is the only
+   * definition of the right answer, and running it is how the expected
+   * result sets come to exist.
+   */
+  capture: z.boolean().default(false),
   stopOnFirstFailure: z.boolean(),
   /** Enforced by the database, not by a timer in the service. */
   statementTimeoutMs: z.literal(SQL_LIMITS.statementTimeoutMs),
@@ -411,6 +424,16 @@ export const resultRequestSchema = z.object({
     .default([]),
   /** Sum of per-test CPU ms — the user's daily CPU budget is charged this. */
   cpuMs: z.number().int().nonnegative(),
+  /**
+   * A SQL capture run's result sets, one per case (Phase 12k). Accepted on
+   * a VALIDATION job for a SQL version and nowhere else: the server writes
+   * them as the version's expected results, so a submission that could
+   * send them would be a submission that could choose its own answer.
+   */
+  sqlCaptured: z
+    .array(z.object({ index: z.number().int().nonnegative(), resultSet: sqlResultSetSchema }))
+    .max(100)
+    .optional(),
   judgeNodeId: z.string(),
   calibrationScore: z.number().nullable(),
 });

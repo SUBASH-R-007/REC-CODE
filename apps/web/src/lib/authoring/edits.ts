@@ -1,6 +1,6 @@
 import "server-only";
 import { Prisma, type ContentOrigin, type ScoringMode } from "@recx/db";
-import { TESTLIB_ID, type CompareMode, type IoMode, type LanguageKey } from "@recx/shared";
+import { SQL_DIALECT, TESTLIB_ID, type CompareMode, type IoMode, type LanguageKey } from "@recx/shared";
 import type { Difficulty, ReferenceExpectedVerdict } from "@recx/shared/authoring";
 import { db } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
@@ -54,9 +54,21 @@ export async function updateDraftJudging(
     stopOnFirstFailure: boolean;
     timeLimitMs: number;
     memoryLimitKb: number;
+    /** SQL versions only (Phase 12k): is the row order part of the answer? */
+    sqlOrdered?: boolean | null;
   },
 ): Promise<DraftHead> {
   const signature = input.ioMode === "FUNCTION" ? input.functionSignature : null;
+  /**
+   * Phase 12k. A SQL version's three facts are decided here rather than
+   * asked for: it compares ROWS (the database's own CHECK says the same),
+   * it is judged in the one dialect, and the ordering rule is the author's
+   * answer to one question. Switching a version AWAY from SQL clears all
+   * three, so a STDIN version can never be left carrying them — which is
+   * the other half of the same CHECK.
+   */
+  const sql = input.ioMode === "SQL";
+  const compareMode = sql ? "ROWS" : effectiveCompareMode(input.ioMode, input.compareMode, signature);
   return retryingTransaction(async (tx) => {
     const head = await touchDraft(tx, { ...input, kind: "judging" });
     await tx.problemVersion.update({
@@ -64,7 +76,11 @@ export async function updateDraftJudging(
       data: {
         ioMode: input.ioMode,
         functionSignature: signature === null ? Prisma.DbNull : (signature as Prisma.InputJsonValue),
-        compareMode: effectiveCompareMode(input.ioMode, input.compareMode, signature),
+        compareMode,
+        sqlDialect: sql ? SQL_DIALECT : null,
+        sqlOrdered: sql ? (input.sqlOrdered ?? true) : null,
+        // A SQL problem has no checker: the comparison is the result set.
+        ...(sql ? { checkerSha256: null, testlibId: null } : {}),
         floatEpsilon: input.floatEpsilon,
         scoringMode: input.scoringMode,
         stopOnFirstFailure: input.stopOnFirstFailure,
@@ -92,7 +108,8 @@ export async function setDraftChecker(input: EditBase & { source: string | null 
 export async function upsertReferenceSolution(
   input: EditBase & {
     referenceId?: string;
-    language: LanguageKey;
+    /** A LanguageKey, or the SQL language (Phase 12k). */
+    language: string;
     label: string;
     expectedVerdict: ReferenceExpectedVerdict;
     source: string;

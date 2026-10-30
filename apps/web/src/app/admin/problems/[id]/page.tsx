@@ -233,6 +233,7 @@ export default async function AdminProblemPage({ params, searchParams }: Props) 
                     timeLimitMs={sel.timeLimitMs}
                     memoryLimitMb={Math.round(sel.memoryLimitKb / 1024)}
                     compareModes={COMPARE_MODE_OPTIONS}
+                    sqlOrdered={sel.sqlOrdered}
                   />
                   <CheckerForm checkerSource={sel.checkerSource} />
                 </CardBody>

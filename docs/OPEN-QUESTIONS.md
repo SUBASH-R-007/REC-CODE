@@ -3246,3 +3246,48 @@ surface and the expected-result capture are the rest of slice 3. The
 end-to-end path (a TA writes a question, a student answers it, a verdict
 comes back) has therefore not run, and the gate row says so rather than
 implying a feature that is three commits from working.
+
+## Nobody types the expected rows (Phase 12k, slice 3b)
+
+**A validation run IS the capture run.** For a program, validation asks
+"does the model solution pass the tests?". For a SQL problem the question
+is circular — the reference query is the only definition of the right
+answer — so the run executes it against each dataset and REPORTS the rows,
+and the server stores them as the version's expected results. An author
+never types expected rows, for the same reason they never type expected
+stdout, and the run still fails loudly when the reference query does not
+parse or returns more rows than the cap.
+
+**The capture path is narrow because the alternative is a wrong answer
+nobody notices.** A validation job only (a submission could otherwise
+choose its own answer), a SQL version only, an unfrozen version only,
+cases that exist by index only, and only when EVERY case reported — a
+half-capture would leave one case's expected rows over from a previous
+dataset, and that version would publish looking complete.
+
+**Three gates had to learn there is a second engine, and the end-to-end
+run is what found all three.** The approve and publish gates demanded a
+C++ model solution, so a SQL problem could never publish. The submit
+boundary refused `sql17` outright, so no student could answer one. And
+`enabledConfigs` validated every `LanguageConfig` runtime against the
+toolchain schema, so the SQL row was SKIPPED WITH AN ERROR and its
+reference query was never "runnable" — which silently meant a SQL problem
+could not be validated, captured or published at all. Every one of them
+typechecked, every unit test passed, and the feature did not work. That is
+the argument for driving a phase end to end on the production build rather
+than trusting a green suite.
+
+**The frozen guard cannot be cleaned up after, and that is correct.** One
+database case needs a published version, to prove a capture cannot reach
+one. A frozen version and its children refuse deletion in the DATABASE —
+`ReferenceSolution of frozen ProblemVersion … is immutable` — so the case
+makes its own problem and leaves it behind in `recx_test` rather than the
+suite disabling a guard to tidy up. A test that disables a guard teaches
+everybody that guards are negotiable.
+
+**Not built, deliberately (it is slice 4).** The workspace still renders a
+SQL problem with the ordinary code editor: no SQL grammar, no dialect
+notice, no read-only or one-statement sentence, and a WA that does not
+show which row differed (the judge sends that sentence for a visible case;
+the submission result compaction drops it). A student could answer one
+today through the real action, and the page would not help them do it.

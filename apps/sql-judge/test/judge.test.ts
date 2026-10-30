@@ -199,6 +199,69 @@ describe("the cases as a whole", () => {
   });
 });
 
+describe("a capture run", () => {
+  const capturing = (over: Partial<SqlJobSpec> = {}) =>
+    spec({ kind: "validation", capture: true, stopOnFirstFailure: true, ...over });
+
+  it("reports what the reference query produced instead of comparing it", async () => {
+    const rows: SqlResultSet = { columns: ["id"], rows: [["1"], ["2"]] };
+    const outcome = await judgeSqlJob(capturing(), {
+      sandbox: sandboxThat(ok(rows)),
+      // A capture run reads no expected blob: there is not one yet.
+      readBlob: async (ref) => {
+        if (ref.sha256 === EXPECTED.sha256) throw new Error("a capture must not read an expected result");
+        return readBlob(ref);
+      },
+      logger: silentLogger(),
+    });
+    expect(outcome.verdict).toBe("AC");
+    expect(outcome.sqlCaptured).toEqual([
+      { index: 0, resultSet: { columns: ["id"], rows: [["1"], ["2"]] } },
+      { index: 1, resultSet: { columns: ["id"], rows: [["1"], ["2"]] } },
+    ]);
+  });
+
+  it("captures nothing when the reference query fails", async () => {
+    const outcome = await judgeSqlJob(capturing(), {
+      sandbox: sandboxThat({ kind: "error", code: "42703", ms: 1, message: 'column "nmae" does not exist' }),
+      readBlob,
+      logger: silentLogger(),
+    });
+    expect(outcome.verdict).toBe("CE");
+    expect(outcome.sqlCaptured).toBeUndefined();
+  });
+
+  it("captures nothing when one case floods, because a prefix is not an answer", async () => {
+    const outcome = await judgeSqlJob(capturing(), {
+      sandbox: sandboxThat(ok({ columns: ["id"], rows: [["1"]], truncated: true })),
+      readBlob,
+      logger: silentLogger(),
+    });
+    expect(outcome.verdict).toBe("OLE");
+    expect(outcome.sqlCaptured).toBeUndefined();
+    expect(outcome.tests[0]?.message).toContain("reference query returned more than");
+  });
+
+  it("refuses a comparison run whose case has no expected result", async () => {
+    await expect(
+      judgeSqlJob(
+        spec({
+          cases: [
+            {
+              index: 0,
+              visible: true,
+              setup: { sha256: SETUP.sha256, sizeBytes: SETUP.sizeBytes },
+              expected: null,
+              ordered: true,
+            },
+          ],
+        }),
+        { sandbox: sandboxThat(ok(expected)), readBlob, logger: silentLogger() },
+      ),
+    ).rejects.toThrow(/no expected result/);
+  });
+});
+
 describe("what it refuses to judge at all", () => {
   it("refuses a dialect it does not speak", async () => {
     await expect(

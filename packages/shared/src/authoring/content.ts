@@ -32,6 +32,14 @@ export type ReferenceExpectedVerdict = (typeof REFERENCE_EXPECTED_VERDICTS)[numb
 /** A C++ model solution in one of these is mandatory before publishing. */
 export const CPP_MODEL_LANGUAGES: readonly string[] = ["cpp17", "cpp20"];
 
+/**
+ * A SQL version's model solution is its REFERENCE QUERY, in the one
+ * language it can be written in (Phase 12k). It is an error rather than a
+ * warning: the expected result sets are produced by running it, so a SQL
+ * problem without one has no answer at all.
+ */
+export const SQL_REFERENCE_LANGUAGE = "sql17";
+
 /** Memory floor an author may set (16 MiB, the judge's own clamp). */
 export const MIN_MEMORY_LIMIT_KB = 16 * 1024;
 
@@ -48,7 +56,11 @@ export type ContentIssueCode =
   | "TEST_POINTS"
   | "SUBTASK_TABLE"
   | "STATEMENT_EMPTY"
-  | "NO_CPP_MODEL";
+  | "NO_CPP_MODEL"
+  | "SQL_FIELDS"
+  | "SQL_NO_REFERENCE"
+  | "SQL_FOREIGN_REFERENCE"
+  | "SQL_ARTEFACT";
 
 export interface ContentIssue {
   code: ContentIssueCode;
@@ -70,6 +82,9 @@ export interface VersionContentTest {
 export interface VersionContentInput {
   ioMode: IoMode;
   compareMode: CompareMode;
+  /** SQL versions only (Phase 12k): null for every other io mode. */
+  sqlDialect?: string | null;
+  sqlOrdered?: boolean | null;
   floatEpsilon: number | null;
   functionSignature: unknown;
   checkerSha256: string | null;
@@ -114,13 +129,63 @@ function subtaskIssues(v: VersionContentInput): string[] {
   return out;
 }
 
+/**
+ * A SQL version's own rules (Phase 12k).
+ *
+ * The CHECKs in the database say most of this too, and deliberately: an
+ * author should read it here, in a sentence, rather than meet a constraint
+ * violation. The one rule that is ONLY here is the reference query, because
+ * no constraint can say "this version has a model solution in the one
+ * language that can produce its expected results".
+ */
+function sqlIssues(v: VersionContentInput): Array<{ code: ContentIssueCode; message: string }> {
+  const out: Array<{ code: ContentIssueCode; message: string }> = [];
+  if (v.compareMode !== "ROWS") {
+    out.push({ code: "SQL_FIELDS", message: "A SQL problem compares result sets; set the compare mode to ROWS." });
+  }
+  if (!v.sqlDialect) {
+    out.push({ code: "SQL_FIELDS", message: "A SQL problem must state its dialect." });
+  }
+  if (v.sqlOrdered === null || v.sqlOrdered === undefined) {
+    out.push({
+      code: "SQL_FIELDS",
+      message: "Say whether the row order is part of the answer: a question with ORDER BY is marked in order.",
+    });
+  }
+  if (v.functionSignature !== null && v.functionSignature !== undefined) {
+    out.push({ code: "SQL_ARTEFACT", message: "A SQL problem has no function signature; remove it." });
+  }
+  if (v.checkerSha256 !== null || v.testlibId !== null) {
+    out.push({
+      code: "SQL_ARTEFACT",
+      message: "A SQL problem has no checker: the comparison is the result set. Remove the checker.",
+    });
+  }
+  const references = v.references.filter((r) => r.language === SQL_REFERENCE_LANGUAGE);
+  if (!references.some((r) => r.expectedVerdict === "AC")) {
+    out.push({
+      code: "SQL_NO_REFERENCE",
+      message: "A SQL problem needs a reference query (expected AC): running it is what produces the expected results.",
+    });
+  }
+  const foreign = v.references.filter((r) => r.language !== SQL_REFERENCE_LANGUAGE).map((r) => r.language);
+  if (foreign.length > 0) {
+    out.push({
+      code: "SQL_FOREIGN_REFERENCE",
+      message: `A SQL problem's solutions are queries; remove the ${[...new Set(foreign)].join(", ")} one${foreign.length === 1 ? "" : "s"}.`,
+    });
+  }
+  return out;
+}
+
 /** Every structural problem of a revision's content. Empty of errors = may be approved and published. */
 export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   const issues: ContentIssue[] = [];
   const error = (code: ContentIssueCode, message: string) => issues.push({ code, severity: "error", message });
   const warning = (code: ContentIssueCode, message: string) => issues.push({ code, severity: "warning", message });
 
-  for (const message of comparatorIssues(v)) error("COMPARATOR", message);
+  if (v.ioMode === "SQL") for (const issue of sqlIssues(v)) error(issue.code, issue.message);
+  else for (const message of comparatorIssues(v)) error("COMPARATOR", message);
   if (v.ioMode === "STDIN" && v.functionSignature !== null && v.functionSignature !== undefined) {
     error("SIGNATURE_ON_STDIN", "A standard-input problem must not carry a function signature.");
   }
@@ -130,7 +195,10 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
       error("COMPARATOR_NOT_JUDGEABLE", `The ${sig.data.comparator} comparator is not judged by this judge fleet yet.`);
     }
   }
-  if (v.checkerSha256 && v.compareMode !== "CHECKER") {
+  if (v.ioMode !== "SQL" && (v.sqlDialect || v.sqlOrdered !== null) && v.sqlOrdered !== undefined) {
+    error("SQL_FIELDS", "Only a SQL problem carries a dialect and an ordering rule.");
+  }
+  if (v.checkerSha256 && v.compareMode !== "CHECKER" && v.ioMode !== "SQL") {
     warning("CHECKER_UNUSED", "A checker is attached but the compare mode is not CHECKER, so it is never run.");
   }
 
@@ -168,8 +236,10 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   }
   for (const message of subtaskIssues(v)) error("SUBTASK_TABLE", message);
 
-  const cppModel = v.references.some((r) => r.expectedVerdict === "AC" && CPP_MODEL_LANGUAGES.includes(r.language));
-  if (!cppModel) warning("NO_CPP_MODEL", "There is no C++ (cpp17 / cpp20) model solution yet; validation needs one before publishing.");
+  if (v.ioMode !== "SQL") {
+    const cppModel = v.references.some((r) => r.expectedVerdict === "AC" && CPP_MODEL_LANGUAGES.includes(r.language));
+    if (!cppModel) warning("NO_CPP_MODEL", "There is no C++ (cpp17 / cpp20) model solution yet; validation needs one before publishing.");
+  }
   return issues;
 }
 

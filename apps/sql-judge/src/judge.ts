@@ -69,6 +69,13 @@ export interface BlobReader {
 
 export interface SqlOutcome {
   verdict: Verdict;
+  /**
+   * A capture run's result sets, one per case, in case order. Mutable
+   * arrays, because this is the payload shape the result request parses —
+   * `SqlResultSet` is read-only, which is right for comparing and wrong
+   * for sending.
+   */
+  sqlCaptured?: Array<{ index: number; resultSet: { columns: string[]; rows: Array<Array<string | null>> } }>;
   compile: { ok: boolean; output: string; timeMs: number; cached: boolean; resourceExceeded: boolean } | null;
   tests: TestResult[];
   passedCases: number;
@@ -116,6 +123,12 @@ export async function judgeSqlJob(
 
   const cases = [...spec.cases].sort((a, b) => a.index - b.index);
 
+  /**
+   * A capture run executes the author's reference query and REPORTS what it
+   * produced; it compares nothing, because what it produces is the thing
+   * everything else will be compared against.
+   */
+  const captured: Array<{ index: number; resultSet: { columns: string[]; rows: Array<Array<string | null>> } }> = [];
   const tests: TestResult[] = [];
   let passed = 0;
   let maxTimeMs = 0;
@@ -137,7 +150,24 @@ export async function judgeSqlJob(
     // that cannot parse never reads one.
     let verdict = judged.verdict;
     let message = judged.message;
-    if (outcome.kind === "ok") {
+    if (outcome.kind === "ok" && spec.capture) {
+      // Nothing to compare against: this run is what creates it.
+      if (outcome.result.truncated) {
+        verdict = "OLE";
+        message = `The reference query returned more than ${spec.maxRows} rows.`;
+      } else {
+        captured.push({
+          index: testCase.index,
+          resultSet: {
+            columns: [...outcome.result.columns],
+            rows: outcome.result.rows.map((row) => [...row]),
+          },
+        });
+      }
+    } else if (outcome.kind === "ok") {
+      if (!testCase.expected) {
+        throw new PermanentJudgeError(`case ${testCase.index} has no expected result, and this is not a capture run`);
+      }
       const expected = expectedOf(
         verify(testCase.expected, await deps.readBlob(testCase.expected), `case ${testCase.index} expected`),
         testCase.index,
@@ -150,6 +180,8 @@ export async function judgeSqlJob(
     // A submission that could not be prepared is a compile error, and the
     // other cases would say the same thing.
     if (verdict === "CE") {
+      // A reference query that will not parse is the author's problem, and
+      // there is nothing to capture.
       return {
         verdict: "CE",
         compile: { ok: false, output: message ?? "That query was refused.", timeMs: 0, cached: false, resourceExceeded: false },
@@ -187,10 +219,13 @@ export async function judgeSqlJob(
   }
 
   const verdict: Verdict = firstFailedIndex === null ? "AC" : (tests.find((t) => t.v !== "AC" && t.v !== "SKIPPED")?.v ?? "WA");
-  deps.logger.debug({ verdict, passed, total: cases.length }, "sql job judged");
+  deps.logger.debug({ verdict, passed, total: cases.length, captured: captured.length }, "sql job judged");
 
   return {
     verdict,
+    // Only a whole capture is reported: a run that failed on case two has
+    // nothing useful to say about what the expected results are.
+    ...(spec.capture && verdict === "AC" ? { sqlCaptured: captured } : {}),
     compile: null,
     tests,
     passedCases: passed,

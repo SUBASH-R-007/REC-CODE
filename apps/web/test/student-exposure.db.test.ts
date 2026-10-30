@@ -812,6 +812,40 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         raw(`ALTER TABLE "public"."MockAttempt" ENABLE TRIGGER "MockAttempt_written_once"`),
         raw(`DELETE FROM "public"."StudyPlan" WHERE "slug" = ANY($1::text[])`, [ids.sheetSlug, ids.trackSlug]),
         raw(`DELETE FROM "public"."ProblemStat" WHERE "problemId" = ANY($1::text[])`, problemIds),
+        /**
+         * Phase 12d added doubts and discussion, whose rows point at a
+         * PROBLEM — and the sweep calls the discussion queries as S, so by
+         * the time this runs the fixture problem owns a thread. Without
+         * these lines every test in the file passes and the SUITE fails in
+         * teardown on `DoubtThread_problemId_fkey`, which is the failure
+         * mode docs/CONVENTIONS.md warns about by name and which this file
+         * has already been bitten by twice (leave exceptions, profile
+         * exports). Found while running the whole database set together in
+         * Phase 12k.
+         */
+        raw(
+          `DELETE FROM "public"."DoubtReply" WHERE "threadId" IN (SELECT "id" FROM "public"."DoubtThread" WHERE "problemId" = ANY($1::text[]))`,
+          problemIds,
+        ),
+        raw(`DELETE FROM "public"."DoubtThread" WHERE "problemId" = ANY($1::text[])`, problemIds),
+        raw(`DELETE FROM "public"."DiscussionPost" WHERE "problemId" = ANY($1::text[])`, problemIds),
+        raw(`DELETE FROM "public"."RevisionCard" WHERE "problemId" = ANY($1::text[])`, problemIds),
+        raw(`DELETE FROM "public"."AiAssist" WHERE "problemId" = ANY($1::text[])`, problemIds),
+        /**
+         * Phase 12e: the sweep submits an interview experience naming the
+         * fixture problem, so the join row and its parent go too. The
+         * experience belongs to the fixture user, and a withdrawn one is
+         * still a row.
+         */
+        raw(
+          `DELETE FROM "public"."InterviewExperienceProblem" WHERE "problemId" = ANY($1::text[])`,
+          problemIds,
+        ),
+        raw(`DELETE FROM "public"."InterviewExperience" WHERE "authorId" = ANY($1::text[])`, userIds),
+        // Phase 12h / 12i: a mock interview or a written answer may name the
+        // fixture problem or user for the same reason.
+        raw(`DELETE FROM "public"."MockInterviewSnapshot" WHERE "interviewId" IN (SELECT "id" FROM "public"."MockInterview" WHERE "problemId" = ANY($1::text[]))`, problemIds),
+        raw(`DELETE FROM "public"."MockInterview" WHERE "problemId" = ANY($1::text[])`, problemIds),
         ...["TestCase", "ReferenceSolution", "Hint", "Editorial", "StarterCode", "Subtask", "ProblemLanguageLimit"].map((t) =>
           raw(`DELETE FROM "public"."${t}" WHERE "problemVersionId" IN (${versionScope})`, problemIds),
         ),

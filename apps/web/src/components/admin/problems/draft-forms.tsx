@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Button, Field, Input, Select, Textarea } from "@recx/design";
+import { SQL_DIALECT, SQL_DIALECT_LABEL, SQL_LIMITS } from "@recx/shared";
 import {
   removeStarterCode,
   setDraftChecker,
@@ -163,6 +164,7 @@ export function JudgingForm({
   timeLimitMs,
   memoryLimitMb,
   compareModes,
+  sqlOrdered,
 }: {
   ioMode: string;
   functionSignatureJson: string;
@@ -173,11 +175,14 @@ export function JudgingForm({
   timeLimitMs: number;
   memoryLimitMb: number;
   compareModes: readonly Option[];
+  /** SQL versions only (Phase 12k); null for every other io mode. */
+  sqlOrdered: boolean | null;
 }) {
   const id = useId();
   const seq = useDraftSeq();
   const { run, pending, error } = useActionRunner();
   const [mode, setMode] = useState(ioMode);
+  const isSql = mode === "SQL";
 
   return (
     <form
@@ -199,6 +204,7 @@ export function JudgingForm({
               stopOnFirstFailure: form.get("stopOnFirstFailure") === "on",
               timeLimitMs: text("timeLimitMs"),
               memoryLimitMb: text("memoryLimitMb"),
+              ...(isSql ? { sqlOrdered: form.get("sqlOrdered") === "on" } : {}),
             }),
           { success: "Judging settings saved. Validate again before publishing.", onSuccess: (d) => seq.setEditSeq(d.editSeq) },
         );
@@ -209,9 +215,20 @@ export function JudgingForm({
           <Select id={`${id}-io`} name="ioMode" value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="STDIN">STDIN — read input, print output</option>
             <option value="FUNCTION">FUNCTION — implement a method</option>
+            <option value="SQL">SQL — one query against a dataset</option>
           </Select>
         </Field>
-        <Field label="Comparator" htmlFor={`${id}-compare`} hint={mode === "FUNCTION" ? "Set by the comparator in the signature." : undefined}>
+        <Field
+          label="Comparator"
+          htmlFor={`${id}-compare`}
+          hint={
+            isSql
+              ? "A SQL problem compares result sets; this is ignored."
+              : mode === "FUNCTION"
+                ? "Set by the comparator in the signature."
+                : undefined
+          }
+        >
           <Select id={`${id}-compare`} name="compareMode" defaultValue={compareMode === "INTERACTIVE" ? "TOKEN" : compareMode}>
             {compareModes.map((m) => (
               <option key={m.value} value={m.value}>
@@ -241,6 +258,28 @@ export function JudgingForm({
         <input type="checkbox" name="stopOnFirstFailure" defaultChecked={stopOnFirstFailure} className="h-4 w-4 accent-primary" />
         Stop judging at the first failing test
       </label>
+      {isSql && (
+        <div className="space-y-2 rounded-xl border border-border bg-background p-3">
+          <p className="text-sm text-text-secondary">
+            Judged on {SQL_DIALECT_LABEL[SQL_DIALECT]}, one statement per submission, read-only, stopped after{" "}
+            {SQL_LIMITS.statementTimeoutMs / 1000} seconds. Each case is a dataset (the test&apos;s input) and the
+            expected rows, which the reference query produces when you validate.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-text">
+            <input
+              type="checkbox"
+              name="sqlOrdered"
+              defaultChecked={sqlOrdered ?? true}
+              className="h-4 w-4 accent-primary"
+            />
+            The row order is part of the answer (the question asks for ORDER BY)
+          </label>
+          <p className="text-xs text-muted">
+            Off means the rows are compared as a set. Getting this wrong either fails a correct answer or accepts a
+            wrong one, so it is asked rather than guessed.
+          </p>
+        </div>
+      )}
       {mode === "FUNCTION" && (
         <Field label="Function signature (JSON)" htmlFor={`${id}-sig`} hint="Declares the method, its types and the comparator.">
           <Textarea

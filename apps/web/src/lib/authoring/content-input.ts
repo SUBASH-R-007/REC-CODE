@@ -13,6 +13,8 @@ export async function loadVersionContentInput(client: Db | DbTx, versionId: stri
     select: {
       ioMode: true,
       compareMode: true,
+      sqlDialect: true,
+      sqlOrdered: true,
       floatEpsilon: true,
       functionSignature: true,
       checkerSha256: true,
@@ -40,6 +42,8 @@ export async function loadVersionContentInput(client: Db | DbTx, versionId: stri
   return {
     ioMode: v.ioMode,
     compareMode: v.compareMode,
+    sqlDialect: v.sqlDialect,
+    sqlOrdered: v.sqlOrdered,
     floatEpsilon: v.floatEpsilon,
     functionSignature: v.functionSignature,
     checkerSha256: v.checkerSha256,

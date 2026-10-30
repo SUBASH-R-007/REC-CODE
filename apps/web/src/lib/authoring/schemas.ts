@@ -1,6 +1,14 @@
 import "server-only";
 import { z } from "zod";
-import { IO_MODES, LANGUAGE_KEYS, LIMITS, SCORING_MODES, SUBTASK_AGGREGATIONS, TOPICS } from "@recx/shared";
+import {
+  IO_MODES,
+  LANGUAGE_KEYS,
+  LIMITS,
+  SCORING_MODES,
+  SQL_LANGUAGE_KEY,
+  SUBTASK_AGGREGATIONS,
+  TOPICS,
+} from "@recx/shared";
 import {
   AUTHORABLE_COMPARE_MODES,
   CONTENT_ORIGINS,
@@ -95,17 +103,36 @@ export const updateDetailsSchema = z.object({
   origin: z.enum(CONTENT_ORIGINS),
 });
 
-export const updateJudgingSchema = z.object({
-  ...draftRef,
-  ioMode: z.enum(IO_MODES),
-  functionSignature: signatureJsonSchema,
-  compareMode: z.enum(AUTHORABLE_COMPARE_MODES, { errorMap: () => ({ message: "Choose a comparator: every problem declares one." }) }),
-  floatEpsilon: z.coerce.number().positive("The tolerance is greater than 0.").max(1, "The tolerance is at most 1.").nullable(),
-  scoringMode: z.enum(SCORING_MODES),
-  stopOnFirstFailure: z.boolean(),
-  timeLimitMs: timeLimitSchema,
-  memoryLimitMb: memoryLimitMbSchema,
-});
+export const updateJudgingSchema = z
+  .object({
+    ...draftRef,
+    ioMode: z.enum(IO_MODES),
+    functionSignature: signatureJsonSchema,
+    /**
+     * A SQL version's comparator is not the author's to choose — it
+     * compares result sets — so the form still sends one of the four
+     * authorable modes and the server ignores it for SQL. Offering ROWS
+     * here would be offering it on a STDIN problem, which the database
+     * refuses anyway.
+     */
+    compareMode: z.enum(AUTHORABLE_COMPARE_MODES, { errorMap: () => ({ message: "Choose a comparator: every problem declares one." }) }),
+    floatEpsilon: z.coerce.number().positive("The tolerance is greater than 0.").max(1, "The tolerance is at most 1.").nullable(),
+    scoringMode: z.enum(SCORING_MODES),
+    stopOnFirstFailure: z.boolean(),
+    timeLimitMs: timeLimitSchema,
+    memoryLimitMb: memoryLimitMbSchema,
+    /** SQL versions only (Phase 12k). */
+    sqlOrdered: z.boolean().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.ioMode === "SQL" && v.sqlOrdered === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["sqlOrdered"],
+        message: "Say whether the row order is part of the answer.",
+      });
+    }
+  });
 
 export const checkerSchema = z.object({
   ...draftRef,
@@ -180,7 +207,15 @@ export const referenceSolutionSchema = z.object({
   ...draftRef,
   /** Present to edit an existing reference solution; absent to add one. */
   referenceId: idSchema.optional(),
-  language: z.enum(LANGUAGE_KEYS, { errorMap: () => ({ message: "Choose a language." }) }),
+  /**
+   * Phase 12k: a SQL problem's model solution is its reference QUERY, in
+   * the one language it can be written in. Everything else about a
+   * reference solution — the label, the expected verdict, the optimistic
+   * concurrency — is the same.
+   */
+  language: z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY] as [string, ...string[]], {
+    errorMap: () => ({ message: "Choose a language." }),
+  }),
   label: z.string().trim().min(1, "Give the solution a label (e.g. Model, Brute force).").max(80),
   expectedVerdict: z.enum(REFERENCE_EXPECTED_VERDICTS, { errorMap: () => ({ message: "Choose the expected verdict." }) }),
   source: sourceText,

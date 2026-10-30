@@ -137,6 +137,26 @@ row — key `sql17`, with a `SqlRuntime` rather than a `LanguageRuntime`,
 because `LANGUAGE_KEYS` describes toolchains and a statement handed to a
 database has no argv, no environment and no `/opt/toolchains` directory.
 
+**Authoring, and where the expected rows come from.** A TA writes a SQL
+problem on the same pages as any other: the create form offers SQL as a
+third input mode, the judging section asks the one question only a human
+can answer (is the row order part of the answer?), each case is a dataset
+typed as the test's "input", and the model solution is a reference QUERY in
+the `sql17` language. The expected result sets are never typed: a
+validation run on a SQL version is a CAPTURE run, which executes the
+author's reference query against each dataset and reports what it produced,
+and `lib/judge/sql-capture.ts` stores those rows as the version's expected
+output blobs. Until then each case carries an empty placeholder, and the
+publish gate's existing rule — a passed validation at the current
+`judgeSeq` — is what stops a version publishing with a stale or missing
+capture.
+
+The capture path is deliberately narrow: a validation job only, a SQL
+version only, an unfrozen version only, cases that already exist by index
+only, and only when every case reported a result. A half-captured version
+would publish with one case's expected rows left over from a previous
+dataset.
+
 **Routing.** `engineForIoMode()` is the one place that maps a problem to an
 engine, and `queueNameFor()` the one place that maps an engine and a lane to
 a queue. The web enqueuer reads the engine from the row itself rather than

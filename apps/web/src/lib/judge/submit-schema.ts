@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LANGUAGE_KEYS, LIMITS, utf8Length } from "@recx/shared";
+import { LANGUAGE_KEYS, SQL_LANGUAGE_KEY, LIMITS, utf8Length } from "@recx/shared";
 
 /**
  * Input schemas for the workspace's Submit and Run actions. Pure (no I/O) so
@@ -33,7 +33,13 @@ export const slugSchema = z
   .max(100, "That problem link is not valid.")
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "That problem link is not valid.");
 
-export const languageSchema = z.enum(LANGUAGE_KEYS, {
+/**
+ * Phase 12k: `sql17` is a language a student submits in, and not a
+ * toolchain — see `packages/shared/src/sql-language.ts`. It is accepted
+ * here and refused by the submit action for any problem that is not a SQL
+ * problem, which is where the version is in hand.
+ */
+export const languageSchema = z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY] as [string, ...string[]], {
   errorMap: () => ({ message: "Choose a supported language." }),
 });
 

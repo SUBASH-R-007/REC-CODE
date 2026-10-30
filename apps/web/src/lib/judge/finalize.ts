@@ -15,6 +15,7 @@ import { getTestDataStore } from "@/lib/testdata/store";
 import { JOB_ENTITY, markInternalError, publishProgress, requeueLease } from "./claim";
 import { buildRunResult, buildSubmissionDetails, compactTestResults, truncateBytes, type SampleText } from "./truncate";
 import { recordJudgeUsage } from "./usage";
+import { storeSqlCapture } from "./sql-capture";
 import { advanceValidation, validationOutcome } from "./validation";
 import { verdictReached } from "@/lib/metrics";
 
@@ -341,6 +342,27 @@ export async function finalizeValidation(node: JudgeNode, body: ResultRequest): 
    * every time a staff member validated a problem.
    */
   verdictReached(body.verdict, head.language);
+
+  /**
+   * Phase 12k: a SQL validation run is a CAPTURE run — the author's
+   * reference query against each dataset — and what it reports becomes the
+   * version's expected results. Stored after the run row is committed, and
+   * never for anything but a validation job on an unfrozen SQL version
+   * (`storeSqlCapture` re-checks all of that itself).
+   *
+   * A refusal is logged rather than thrown: the run is already recorded,
+   * and the validation status is what decides whether the version may
+   * publish — a version whose capture did not store cannot pass it.
+   */
+  if (body.sqlCaptured && body.sqlCaptured.length > 0) {
+    const captured = await storeSqlCapture(id, body).catch((error: unknown) => {
+      console.error(`[validation] storing the SQL capture for run ${id} failed:`, error);
+      return { stored: false as const, reason: "the capture could not be stored" };
+    });
+    if (captured.stored) console.info(`[validation] run ${id}: stored ${captured.cases} expected result sets`);
+    else console.error(`[validation] run ${id}: the capture was not stored — ${captured.reason}`);
+  }
+
   // The result is committed; moving the pipeline on must never fail the
   // worker's callback (the CLI and the next result retry it).
   await advanceValidation(head.problemVersionId).catch((error: unknown) =>

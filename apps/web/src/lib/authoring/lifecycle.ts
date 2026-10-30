@@ -1,6 +1,12 @@
 import "server-only";
 import { Prisma, type ContentOrigin, type Topic } from "@recx/db";
-import { functionCompareMode, functionSignatureSchema, type CompareMode, type IoMode } from "@recx/shared";
+import {
+  SQL_DIALECT,
+  functionCompareMode,
+  functionSignatureSchema,
+  type CompareMode,
+  type IoMode,
+} from "@recx/shared";
 import type { Difficulty } from "@recx/shared/authoring";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -91,7 +97,16 @@ export async function createProblemWithDraft(
             constraints: [...(data.constraints ?? [])],
             ioMode: data.ioMode,
             ...(signature ? { functionSignature: signature as Prisma.InputJsonValue } : {}),
-            compareMode: effectiveCompareMode(data.ioMode, data.compareMode, signature),
+            /**
+             * Phase 12k. A SQL problem compares result sets, is judged in
+             * the one dialect, and starts ordered — the author's three
+             * facts, decided here rather than asked for on a form whose
+             * other fields describe programs. The database's CHECKs say the
+             * same thing from the other side.
+             */
+            ...(data.ioMode === "SQL"
+              ? { compareMode: "ROWS" as const, sqlDialect: SQL_DIALECT, sqlOrdered: true }
+              : { compareMode: effectiveCompareMode(data.ioMode, data.compareMode, signature) }),
             timeLimitMs: data.timeLimitMs,
             memoryLimitKb: data.memoryLimitKb,
             origin: data.origin,

@@ -61,6 +61,7 @@ export const SENSITIVE_PREFIXES = [
   "apps/web/src/lib/judge/claim.ts",
   "apps/web/src/lib/judge/finalize.ts",
   "apps/web/src/lib/judge/validation.ts",
+  "apps/web/src/lib/judge/sql-capture.ts",
   "apps/web/src/lib/testdata/",
   "apps/web/src/lib/authoring/",
   "apps/web/src/lib/privileged/",
@@ -81,6 +82,8 @@ const SENSITIVE_REASONS: Record<(typeof SENSITIVE_PREFIXES)[number], string> = {
   "apps/web/src/lib/judge/claim.ts": "builds job specs holding hidden test keys, checker and reference sources",
   "apps/web/src/lib/judge/finalize.ts": "reads test bytes to write sample details; validation finalise reads references",
   "apps/web/src/lib/judge/validation.ts": "validation and publish: reads references, test blobs, writes bundles",
+  "apps/web/src/lib/judge/sql-capture.ts":
+    "writes a SQL version's expected result sets as test blobs, from a capture run (Phase 12k)",
   "apps/web/src/lib/testdata/": "the test-data store and blob reads",
   "apps/web/src/lib/authoring/": "problem authoring: edits hidden tests, references and checkers",
   "apps/web/src/lib/privileged/": "SUPER_ADMIN executors (problem/version delete, global rejudge, purge)",

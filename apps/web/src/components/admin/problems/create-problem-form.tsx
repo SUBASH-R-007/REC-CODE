@@ -119,6 +119,7 @@ export function CreateProblemForm({
           <Select id={`${id}-io`} name="ioMode" value={ioMode} onChange={(e) => setIoMode(e.target.value)}>
             <option value="STDIN">STDIN — read input, print output</option>
             <option value="FUNCTION">FUNCTION — implement a method</option>
+            <option value="SQL">SQL — one query against a dataset</option>
           </Select>
         </Field>
         <Field

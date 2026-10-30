@@ -227,6 +227,8 @@ export interface AdminProblemDetail {
     ioMode: IoMode;
     functionSignatureJson: string;
     compareMode: CompareMode;
+    /** SQL versions only (Phase 12k). */
+    sqlOrdered: boolean | null;
     floatEpsilon: number | null;
     scoringMode: "ICPC" | "SUBTASK" | "PER_TEST";
     stopOnFirstFailure: boolean;
@@ -308,6 +310,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
         ioMode: true,
         functionSignature: true,
         compareMode: true,
+        sqlOrdered: true,
         floatEpsilon: true,
         scoringMode: true,
         stopOnFirstFailure: true,
@@ -355,6 +358,7 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       ioMode: v.ioMode,
       functionSignatureJson: v.functionSignature === null ? "" : JSON.stringify(v.functionSignature, null, 2),
       compareMode: v.compareMode,
+      sqlOrdered: v.sqlOrdered,
       floatEpsilon: v.floatEpsilon,
       scoringMode: v.scoringMode,
       stopOnFirstFailure: v.stopOnFirstFailure,

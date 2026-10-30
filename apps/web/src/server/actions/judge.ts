@@ -1,7 +1,7 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { LIMITS, utf8Length, type JobKind, type LanguageKey } from "@recx/shared";
+import { LIMITS, isSqlLanguage, utf8Length, type JobKind, type LanguageKey } from "@recx/shared";
 import { functionSignatureSchema, supportsFunctionMode, validateFunctionInput, type FunctionSignature } from "@recx/shared/harness";
 import { requireActionUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -51,7 +51,13 @@ interface JudgeTarget {
 }
 
 /** The published problem's live version + the current config for a language. */
-async function loadTarget(slug: string, language: LanguageKey): Promise<JudgeTarget> {
+/**
+ * Phase 12k: the language is a string rather than a `LanguageKey`, because
+ * `sql17` is a language a student submits in and not a toolchain. Which
+ * languages a given problem accepts is decided below, against the version:
+ * a SQL problem takes SQL and nothing else, and no other problem takes SQL.
+ */
+async function loadTarget(slug: string, language: string): Promise<JudgeTarget> {
   const problem = await db.problem.findUnique({
     where: { slug },
     select: {
@@ -63,7 +69,15 @@ async function loadTarget(slug: string, language: LanguageKey): Promise<JudgeTar
   if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersion) {
     throw new NotFoundError("That problem is not available.");
   }
-  if (problem.liveVersion.ioMode === "FUNCTION" && !supportsFunctionMode(language)) {
+  const sqlProblem = problem.liveVersion.ioMode === "SQL";
+  if (sqlProblem !== isSqlLanguage(language)) {
+    throw new ValidationError(
+      sqlProblem
+        ? "That problem is answered with a SQL query."
+        : "SQL is only for a SQL problem; choose a programming language.",
+    );
+  }
+  if (problem.liveVersion.ioMode === "FUNCTION" && !supportsFunctionMode(language as LanguageKey)) {
     throw new ValidationError("This problem is not available in that language yet.");
   }
 

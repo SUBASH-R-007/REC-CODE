@@ -3,7 +3,9 @@ import type { DbTx, Prisma } from "@recx/db";
 import {
   deriveTimeLimitMs,
   isLanguageKey,
+  SQL_LANGUAGE_KEY,
   languageRuntimeSchema,
+  sqlRuntimeSchema,
   supportsFunctionMode,
   type IoMode,
   type Verdict,
@@ -147,15 +149,33 @@ function runProblem(ref: ReferenceState, run: ValidationRunState): string | null
  * stage-1 set; a stage-2 run older than that belongs to an earlier round
  * (judged with earlier limits) and does not count.
  */
-export function summarizeValidation(refs: readonly ReferenceState[]): ValidationSummary {
+export function summarizeValidation(refs: readonly ReferenceState[], ioMode: IoMode = "STDIN"): ValidationSummary {
   const blockers: string[] = [];
   const notes = refs.filter((r) => !r.runnable).map(unrunnableNote);
   const models = refs.filter((r) => r.runnable && stageOf(r.expectedVerdict) === 1);
   const wrongs = refs.filter((r) => r.runnable && stageOf(r.expectedVerdict) === 2);
 
-  const cppModels = refs.filter((r) => stageOf(r.expectedVerdict) === 1 && CPP_MODEL_LANGUAGES.includes(r.language));
-  if (cppModels.length === 0) blockers.push("No C++ (cpp17 / cpp20) model solution exists.");
-  else if (!cppModels.some((r) => r.runnable)) blockers.push("Every C++ model solution is in a language that is not enabled.");
+  /**
+   * The model solution a version cannot publish without.
+   *
+   * For a program that is a C++ one: the time limits every other language
+   * is derived from are measured against it. For a SQL problem (Phase 12k)
+   * it is the reference QUERY — there is no C++ anything, and the query is
+   * what produced the expected results, so it is even more load-bearing
+   * here than a model solution usually is.
+   */
+  const sql = ioMode === "SQL";
+  const required = sql ? [SQL_LANGUAGE_KEY] : CPP_MODEL_LANGUAGES;
+  const requiredModels = refs.filter((r) => stageOf(r.expectedVerdict) === 1 && required.includes(r.language));
+  if (requiredModels.length === 0) {
+    blockers.push(sql ? "No reference query (expected AC) exists." : "No C++ (cpp17 / cpp20) model solution exists.");
+  } else if (!requiredModels.some((r) => r.runnable)) {
+    blockers.push(
+      sql
+        ? "The reference query cannot be run: the SQL language is not enabled."
+        : "Every C++ model solution is in a language that is not enabled.",
+    );
+  }
 
   const result = (phase: ValidationPhase, extra: Partial<ValidationSummary> = {}): ValidationSummary => ({
     phase,
@@ -318,6 +338,24 @@ async function enabledConfigs(client: Client): Promise<Map<string, { id: string;
   });
   const out = new Map<string, { id: string; language: EnabledLanguage }>();
   for (const row of rows) {
+    /**
+     * Phase 12k: SQL is a language a student writes in but not a toolchain,
+     * so its row carries a `SqlRuntime` rather than a `LanguageRuntime`.
+     * Validating it against the toolchain schema would skip it with an
+     * error, and a SQL version's reference query would never be runnable —
+     * which is to say a SQL problem could never be validated, captured or
+     * published. The fallbacks are zero because a SQL job's time limit is
+     * the statement timeout, which the server fixes.
+     */
+    if (row.key === SQL_LANGUAGE_KEY) {
+      const sql = sqlRuntimeSchema.safeParse(row.runtime);
+      if (!sql.success) {
+        console.error(`[validation] LanguageConfig ${row.id} (${row.key}) has an invalid SQL runtime; skipped`);
+        continue;
+      }
+      out.set(row.key, { id: row.id, language: { key: row.key, fallbackMultiplier: 1, fallbackExtraMs: 0 } });
+      continue;
+    }
     const runtime = languageRuntimeSchema.safeParse(row.runtime);
     if (!runtime.success || runtime.data.key !== row.key) {
       console.error(`[validation] LanguageConfig ${row.id} (${row.key}) has an invalid runtime; skipped`);
@@ -511,7 +549,7 @@ export interface ValidationStatus extends ValidationSummary {
 
 function statusOf(state: LoadedState, versionId: string): ValidationStatus {
   return {
-    ...summarizeValidation(state.refs),
+    ...summarizeValidation(state.refs, state.version.ioMode),
     versionId,
     problemId: state.version.problemId,
     revision: state.version.revision,
@@ -571,7 +609,7 @@ export async function startValidation(
       return {
         runIds: ids,
         cancelled: superseded.count,
-        notes: summarizeValidation(state.refs).notes,
+        notes: summarizeValidation(state.refs, state.version.ioMode).notes,
         problemId: state.version.problemId,
         revision: state.version.revision,
         judgeSeq: state.version.judgeSeq,
@@ -606,7 +644,7 @@ export async function advanceValidation(versionId: string): Promise<{ stage2Runs
       await lockVersion(tx, versionId);
       const state = await loadState(tx, versionId);
       if (state.version.frozenAt) return { stage2Runs: [], limitsWritten: false, problemId: state.version.problemId };
-      const summary = summarizeValidation(state.refs);
+      const summary = summarizeValidation(state.refs, state.version.ioMode);
       if (!["STAGE2_NEEDED", "STAGE2_RUNNING", "COMPLETE"].includes(summary.phase)) {
         return { stage2Runs: [], limitsWritten: false, problemId: state.version.problemId };
       }
@@ -815,7 +853,7 @@ export async function publishVersion(versionId: string, options: PublishOptions)
         });
         if (!problem) throw new ValidationSetupError("The problem disappeared.");
 
-        const summary = summarizeValidation(state.refs);
+        const summary = summarizeValidation(state.refs, state.version.ioMode);
         const content = await loadVersionContentInput(tx, versionId);
         const blockers = [
           ...summary.blockers,
