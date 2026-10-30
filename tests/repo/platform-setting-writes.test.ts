@@ -4,7 +4,7 @@ import { findFiles, isTestPath, lexSource, lineAt, readRepoFile } from "./suppor
 /**
  * PlatformSetting and PlatformTheme writes are SUPER_ADMIN-only capability
  * "settings.write" (lib/auth/capabilities.ts). In apps/web/src they may
- * appear only in the four audited super-admin action files; anywhere else
+ * appear only in the five audited super-admin action files; anywhere else
  * a write would bypass the guard and the audit. (The seed and other
  * scripts are not request paths and are not scanned.)
  */
@@ -14,6 +14,8 @@ const ALLOWED = new Set([
   "apps/web/src/server/actions/super-settings.ts",
   "apps/web/src/server/actions/super-flags.ts",
   "apps/web/src/server/actions/super-branding.ts",
+  // Phase 12b: the AI helper's kill switch, model and per-student allowance.
+  "apps/web/src/server/actions/super-ai.ts",
 ]);
 
 const MODEL_WRITE =
@@ -60,7 +62,7 @@ describe("PlatformSetting / PlatformTheme writes", () => {
     for (const allowed of ALLOWED) expect(files).toContain(allowed);
   });
 
-  it("happen only in the four super-admin settings actions", () => {
+  it("happen only in the five super-admin settings actions", () => {
     const outside = files
       .filter((f) => !ALLOWED.has(f))
       .flatMap((f) => settingWrites(f, readRepoFile(f)))

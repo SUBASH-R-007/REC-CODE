@@ -1,6 +1,6 @@
 /**
  * The /super tree: one separate layout (app/super/layout.tsx) and these
- * twelve routes, in sidebar order. test/super-nav.test.ts holds every href
+ * thirteen routes, in sidebar order. test/super-nav.test.ts holds every href
  * to an implemented page. Showing a link is never the access check: every
  * page and action guards itself (requireSuperAdminPage / requireSuperAdmin).
  */
@@ -16,6 +16,7 @@ export const SUPER_NAV: readonly SuperNavItem[] = Object.freeze([
   { href: "/super/settings/branding", label: "Branding" },
   { href: "/super/settings/policy", label: "Policy" },
   { href: "/super/settings/judge", label: "Judge settings" },
+  { href: "/super/settings/ai", label: "AI helper" },
   { href: "/super/settings/integrations", label: "Integrations" },
   { href: "/super/audit", label: "Audit log" },
   { href: "/super/impersonate", label: "Impersonate" },

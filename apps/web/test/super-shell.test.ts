@@ -62,6 +62,10 @@ describe("super navigation", () => {
       "/super/settings/branding",
       "/super/settings/policy",
       "/super/settings/judge",
+      // Phase 12b: the AI helper's kill switch and its model choice. It is a
+      // nav entry because the one person who may turn it off must be able to
+      // find it without knowing the URL.
+      "/super/settings/ai",
       "/super/settings/integrations",
       "/super/audit",
       "/super/impersonate",
@@ -91,14 +95,15 @@ describe("super navigation", () => {
 describe("every /super layout and page guards itself", () => {
   const pages = files(SUPER_DIR, /^(page|layout)\.tsx$/);
 
-  it("finds the layout and the fifteen pages", () => {
-    // 15 pages + the layout. /super/integrity arrived with Phase 6e,
-    // /super/calendar with Phase 8a and /super/settings/inactivity with 8b.
+  it("finds the layout and the sixteen pages", () => {
+    // 16 pages + the layout. /super/integrity arrived with Phase 6e,
+    // /super/calendar with Phase 8a, /super/settings/inactivity with 8b and
+    // /super/settings/ai with 12b.
     // The count is deliberately hard-coded:
     // the per-page assertion below only checks the pages it FINDS, so
     // without this a new /super page that forgot its guard would be caught
     // and a new /super page that was never discovered would not.
-    expect(pages.length).toBe(16);
+    expect(pages.length).toBe(17);
   });
 
   it.each(pages.map((p) => [path.relative(SUPER_DIR, p)]))("%s calls requireSuperAdminPage()", (rel) => {

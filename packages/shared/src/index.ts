@@ -8,6 +8,7 @@ export * from "./sanitize";
 export * from "./freeze";
 export * from "./time";
 export * from "./help";
+export * from "./ai-helper";
 export * from "./progress";
 export * from "./proctor";
 export * from "./accommodation";

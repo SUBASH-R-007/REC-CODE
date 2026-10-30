@@ -2624,3 +2624,62 @@ cheap while it is a draft and impossible after. There is no seat mapping
 not). There is no way to remove a hall once scheduled, only to stop using
 it. And nobody has yet run a real assessment end to end: the drill that
 proves this is a cohort sitting one, not a fixture.
+
+## The AI helper, and the thing it has never actually done (Phase 12b)
+
+A student stuck on a **practice** problem can now ask the assistant what
+they have got wrong, or how to approach it. Three decisions are worth
+recording, and one gap is worth naming loudly.
+
+**It goes through the existing help chokepoint, not beside it.**
+`apps/web/src/lib/help/access.ts` says of itself that every hint and
+editorial read — "anything later phases add" — asks `getHelpState()` and
+obeys its answer, and that there are no per-feature branches. The assistant
+is that later phase. `aiAllowed()` takes the same `HelpState` the hints do,
+with the same server-decided context, so the assistant cannot be reachable
+on a surface where a hint is not. A new `if (context === "PRACTICE")`
+somewhere in the AI code would have worked today and rotted the moment
+somebody added a fourth context.
+
+**Asking makes a later first solve ASSISTED.** This is the decision that
+cost the most thought and is the least visible in the UI. Readiness (SPEC
+§9) is built on *unassisted* coverage; an assistant that reads a student's
+draft and names the bug is past anything a tier-3 hint does, and a solve
+that followed one is not evidence the student could have got there alone.
+An assistant that did not mark the solve would have inflated every
+readiness number in the college, silently, and nobody would have found it
+from the outside. So `AiAssist` is a row the finaliser reads exactly as it
+reads `HintReveal`, and the table is append-only — a deletable row would
+let the XP and the readiness number resting on it be rewritten afterwards.
+
+**The key is environment-only and the model is a setting.** The super-admin
+asked for "customisable between multiple models, and the ability to turn it
+off". Both are on `/super/settings/ai`, read per request so the kill switch
+takes effect on the next one. The API key is not there and cannot be put
+there: a key in a `PlatformSetting` row is a key in every `pg_dump` and on
+every admin's screen. The model catalogue is closed for the same kind of
+reason — the id reaches an external API, and "whatever somebody typed" is
+not a thing to send to one. The one escape hatch is *College-hosted model*,
+where the deployment names the endpoint.
+
+**NOT RUN: no model has ever answered.** This is the gap. There is no
+`AI_API_KEY` on this machine and no account to get one from, so every path
+up to the HTTP call is tested — the refusals, the prompt bytes, the
+recording, the sanitising, both request shapes, the timeout, the failure
+row — against a fake `fetch`, and the real call has never been made. What
+that leaves unproven is small but real: that a live Anthropic response
+parses as this code expects, and that a real model obeys the system prompt's
+"never a complete solution" under pressure from a student's half-written
+program. The first is a ten-minute check with a key. The second is a
+judgement that has to be made by reading real answers, in practice, over a
+week — and the daily per-student allowance exists partly so that week is
+affordable.
+
+**Also not built, and deliberate.** There is no conversation: each question
+is answered on its own, because a thread is a place for a student to argue
+the model into writing the solution. There is no "ask about this line".
+There is no per-cohort or per-problem switch — the helper is on for
+everyone or nobody, which is the only setting a super-admin can reason
+about on the morning somebody complains. And the assistant is not offered
+to staff: an admin who wants to know whether a problem is confusing should
+read the hint tiers and the submission log, which are the evidence.

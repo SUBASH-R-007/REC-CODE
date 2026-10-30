@@ -650,7 +650,18 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         seed: 1,
         startedAt: new Date(now.getTime() - 10 * 60_000),
         expiresAt: new Date(now.getTime() + 50 * 60_000),
-        layout: { order: [1] },
+        // A REAL v1 layout pinning the canary-bearing frozen version. It used
+        // to be a `{ order: [1] }` placeholder from before the format
+        // existed, which nothing read; since Phase 12a the arena page parses
+        // the layout to render, so rendering this fixture's arena threw
+        // before it could be swept for canaries — exactly the page this
+        // sweep most needs to see.
+        layout: {
+          v: 1,
+          questions: [
+            { questionId: assessmentProblem.id, problemVersionId: ids.live, sourcePosition: 1, points: 1, seed: 1 },
+          ],
+        },
         tokenHash: createHash("sha256").update(ATTEMPT_TOKEN).digest("hex"),
         proctorMode: "ADVISORY",
         status: "IN_PROGRESS",
@@ -1004,6 +1015,22 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         () => params({ attemptId: ids.submitAttempt }),
       ),
       status: [200],
+    },
+    /**
+     * Phase 12a. Starting or resuming a sitting. The slug is one that does
+     * not exist, deliberately: the fixture's own attempt is still live and
+     * the heartbeat and snapshot recipes above depend on its token, and a
+     * resume rotates that token. What this sweep needs from the route is
+     * the refusal — a 303 to the list, carrying no canary and saying
+     * nothing about whether the assessment exists but is closed to this
+     * student or does not exist at all.
+     */
+    "api/exam/start/[slug]/route.ts#POST": {
+      call: call(
+        () => studentRequest(`/api/exam/start/${tag}-no-such-assessment`, { method: "POST" }),
+        () => params({ slug: `${tag}-no-such-assessment` }),
+      ),
+      status: [303],
     },
     "api/exam/device/assert/route.ts#POST": {
       call: call(() =>
@@ -1607,6 +1634,17 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "account#selfClearRestriction": [() => []],
     "bookmarks#toggleBookmark": [() => [{ problemId: ids.problem, bookmarked: false }], () => [{ problemId: ids.problem, bookmarked: true }]],
     "drafts#saveDraft": [() => [{ problemId: ids.problem, language: "py312", source: "print(input())\n", clientUpdatedAt: Date.now() }]],
+    /**
+     * Phase 12b. The AI helper is off in the fixture (no PlatformSetting row
+     * and no key), so both calls refuse before anything is sent — which is
+     * the shape this sweep is for: the refusal must carry no canary, and the
+     * draft problem must not be distinguishable from the published one by
+     * what comes back.
+     */
+    "ai-helper#askAiHelper": [
+      () => [{ problemId: ids.problem, kind: "MISTAKE" }],
+      () => [{ problemId: ids.draftProblem, kind: "APPROACH" }],
+    ],
     "help#revealHint": [() => [{ problemId: ids.problem, tier: 1 }], () => [{ problemId: ids.draftProblem, tier: 1 }]],
     "help#viewEditorial": [() => [{ problemId: ids.problem }], () => [{ problemId: ids.draftProblem }]],
     "judge#runCode": [

@@ -65,7 +65,15 @@ export function helpAccess(input: HelpInput): HelpAccess {
   return { maxHintTier: tier, editorial, nextUnlock };
 }
 
-/** True when using this help makes a later first solve ASSISTED. */
-export function makesSolveAssisted(kind: { hintTier: number } | { editorial: true }): boolean {
-  return "editorial" in kind ? true : kind.hintTier >= 3;
+/**
+ * True when using this help makes a later first solve ASSISTED.
+ *
+ * The AI helper counts, always. It reads the student's own draft and names
+ * what is wrong with it, which is past anything hint 3 does; a solve that
+ * followed one is not evidence the student could have got there alone, and
+ * readiness is built on exactly that evidence.
+ */
+export function makesSolveAssisted(kind: { hintTier: number } | { editorial: true } | { ai: true }): boolean {
+  if ("editorial" in kind || "ai" in kind) return true;
+  return kind.hintTier >= 3;
 }

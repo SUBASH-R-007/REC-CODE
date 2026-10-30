@@ -181,6 +181,12 @@ enum HelpContext {
   ASSESSMENT
 }
 
+/// What a student asked the AI helper for. Both are explanations.
+enum AiAskKind {
+  MISTAKE
+  APPROACH
+}
+
 enum StudyPlanKind {
   SHEET
   TRACK
@@ -557,6 +563,7 @@ model User {
   xpBuckets            XpBucket[]
   hintReveals          HintReveal[]
   editorialViews       EditorialView[]
+  aiAssists            AiAssist[]
   problemActivity      ProblemActivity[]
   enrollments          StudyPlanEnrollment[]
   bookmarks            Bookmark[]
@@ -722,6 +729,7 @@ model Problem {
   statuses        UserProblemStatus[]
   hintReveals     HintReveal[]
   editorialViews  EditorialView[]
+  aiAssists       AiAssist[]
   activity        ProblemActivity[]
   studyPlanItems  StudyPlanItem[]
   bookmarks       Bookmark[]
@@ -1332,6 +1340,42 @@ model EditorialView {
   firstViewedAt DateTime @default(now())
 
   @@id([userId, problemId])
+}
+
+/// One question put to the AI helper and the answer it gave.
+///
+/// Kept for three reasons, in order: a solve that followed one is ASSISTED
+/// and the finaliser reads this table exactly as it reads HintReveal; the
+/// student can reopen what they were told without asking again; and somebody
+/// has to be able to audit what the college spent and what the model said.
+///
+/// The student's own draft is NOT stored. It is already in CodeDraft, and a
+/// second copy is a second thing to leak. The answer is, because a student
+/// may reread it and a reviewer may need to see it.
+///
+/// Practice only. The context column exists to say so in the data and carry
+/// the CHECK, not because another value is reachable.
+model AiAssist {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  problemId String
+  problem   Problem     @relation(fields: [problemId], references: [id])
+  context   HelpContext @default(PRACTICE)
+  kind      AiAskKind
+  /// The model that answered, as chosen in /super/settings/ai at the time.
+  modelId   String
+  /// Null exactly when the ask failed: a failure costs no quota and taints
+  /// no solve, because the student was told nothing.
+  answer    String?
+  failed    Boolean     @default(false)
+  tokensIn  Int?
+  tokensOut Int?
+  latencyMs Int?
+  askedAt   DateTime    @default(now())
+
+  @@index([userId, problemId])
+  @@index([userId, askedAt])
 }
 
 /// Active (focused, recently typing) workspace time per user per problem:

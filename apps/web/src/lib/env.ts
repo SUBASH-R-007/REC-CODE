@@ -53,6 +53,28 @@ const shape = {
     .default("false")
     .transform((v) => v === "true"),
   /**
+   * The AI helper's API key (Phase 12b). UNSET DISABLES the helper, however
+   * the super-admin's setting reads, because an assistant with no key cannot
+   * answer and a half-configured one must fail closed rather than at the
+   * student.
+   *
+   * It lives here and never in `PlatformSetting`: a key in a settings row is
+   * a key in every database dump, every backup and every admin's screen, and
+   * the super-admin surface deliberately chooses only WHICH model answers.
+   * In production it arrives as `AI_API_KEY_FILE` like every other
+   * credential (`@recx/shared/env-file`).
+   */
+  AI_API_KEY: z.string().min(8, "AI_API_KEY looks too short to be a key.").optional(),
+  /**
+   * Base URL for the chosen provider. Only read when the super-admin picked
+   * the college-hosted model; Anthropic's own endpoint is not configurable,
+   * because a configurable one is an exfiltration setting wearing a
+   * deployment hat.
+   */
+  AI_BASE_URL: z.string().url().optional(),
+  /** The model name the college-hosted endpoint expects. */
+  AI_MODEL: z.string().min(1).max(200).optional(),
+  /**
    * Development only: let judge nodes whose kernel hardening check fails
    * (a WSL2 dev kernel) serve every lane. Refused outright in production.
    */

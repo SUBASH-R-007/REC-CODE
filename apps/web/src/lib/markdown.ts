@@ -95,3 +95,22 @@ export function renderMarkdown(markdown: string): string {
   const html = marked.parse(markdown, { async: false });
   return sanitizeHtml(html, SANITIZE);
 }
+
+/**
+ * The same renderer for text a MODEL produced (the AI helper's answer).
+ *
+ * One difference: links are dropped and their text kept. An author writing a
+ * hint is accountable for the URL they put in it; a model is not, and a
+ * clickable destination nobody at the college chose, shown to a student
+ * inside the product's own panel, is not worth the formatting it buys.
+ */
+const SANITIZE_UNTRUSTED: sanitizeHtml.IOptions = {
+  ...SANITIZE,
+  allowedTags: SANITIZE.allowedTags ? [...SANITIZE.allowedTags].filter((t) => t !== "a") : undefined,
+  transformTags: { h1: "h3", h2: "h3" },
+};
+
+export function renderUntrustedMarkdown(markdown: string): string {
+  const html = marked.parse(markdown, { async: false });
+  return sanitizeHtml(html, SANITIZE_UNTRUSTED);
+}

@@ -95,6 +95,19 @@ services:
       METRICS_TOKEN_FILE: /run/secrets/metrics_token
       S3_ACCESS_KEY_ID_FILE: /run/secrets/minio_access_key
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/minio_secret_key
+      # The AI helper (Phase 12b) is OFF until a super-admin turns it on at
+      # /super/settings/ai, and it cannot answer without a key. The key is
+      # deliberately not wired here, because wiring it would make the secret
+      # FILE mandatory for every deployment — an empty one throws
+      # (@recx/shared/env-file), so a college that does not want an
+      # assistant would be made to invent a key. To enable it, put the key
+      # in /run/recx/secrets/ai_api_key on the host and uncomment the line
+      # here, the matching entry under `secrets:` below, and the secret
+      # definition at the foot of this file. docs/RUNBOOK.md §2.16.
+      #   AI_API_KEY_FILE: /run/secrets/ai_api_key
+      # For a college-hosted, OpenAI-compatible endpoint, also:
+      #   AI_BASE_URL: https://ai.rajalakshmi.edu.in/v1
+      #   AI_MODEL: rec-coder
     secrets:
       - database_url
       - ip_hash_pepper
@@ -233,3 +246,6 @@ secrets:
     file: /run/recx/secrets/minio_secret_key
   smtp_url:
     file: /run/recx/secrets/smtp_url
+  # Uncomment together with AI_API_KEY_FILE above (docs/RUNBOOK.md §2.16).
+  #  ai_api_key:
+  #    file: /run/recx/secrets/ai_api_key

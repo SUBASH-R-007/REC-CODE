@@ -1,5 +1,5 @@
 import "server-only";
-import { helpAccess, type HelpAccess, type HelpContext } from "@recx/shared";
+import { aiHelperAccess, helpAccess, type AiAccess, type HelpAccess, type HelpContext } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -96,4 +96,33 @@ export function hintAllowed(state: HelpState, tier: number): boolean {
 /** May the editorial be viewed / shown? (Reads the chokepoint's decision.) */
 export function editorialAllowed(state: HelpState): boolean {
   return state.access.editorial;
+}
+
+/**
+ * May the AI helper answer? (Reads the chokepoint's decision.)
+ *
+ * It takes the same HelpState as the hints — the same server-decided
+ * `context`, the same attempt and active-time counts — so the assistant
+ * cannot be reachable anywhere a hint is not. The two extra arguments are
+ * the things the chokepoint cannot know: whether a super-admin has the
+ * helper switched on, and how many questions this student has already used
+ * today.
+ */
+export function aiAllowed(
+  state: HelpState,
+  config: { enabled: boolean; dailyPerStudent: number },
+  askedToday: number,
+): AiAccess {
+  return aiHelperAccess({
+    context: state.context,
+    attempts: state.attempts,
+    failedAttempts: state.failedAttempts,
+    activeSeconds: state.activeSeconds,
+    solved: state.solved,
+    editorialVisibleAt: state.editorialVisibleAt,
+    now: state.now,
+    enabled: config.enabled,
+    askedToday,
+    dailyPerStudent: config.dailyPerStudent,
+  });
 }

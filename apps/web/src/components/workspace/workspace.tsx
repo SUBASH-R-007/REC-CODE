@@ -48,7 +48,9 @@ import type { StudentView } from "@/lib/judge/view";
 import type { WorkspaceLanguage } from "@/server/queries/problems";
 import { runCode, submitSolution } from "@/server/actions/judge";
 
-type StatementTab = "description" | "editorial" | "submissions" | "hints";
+type StatementTab = "description" | "editorial" | "submissions" | "hints" | "assistant";
+/** Always present; "assistant" is optional and its tab exists only when it is given. */
+type FixedStatementTab = Exclude<StatementTab, "assistant">;
 
 /** "C++20 (GCC 13.2.0)" → "C++20" for the compact language picker. */
 function shortName(label: string): string {
@@ -110,7 +112,13 @@ export function Workspace({
   /** Server-rendered title row (h1, difficulty, solve status, bookmark). */
   header: React.ReactNode;
   /** Server-rendered statement-side tabs. */
-  panels: Record<StatementTab, React.ReactNode>;
+  /**
+   * The statement-side tabs. `assistant` is optional on purpose: a surface
+   * that serves no AI helper (a contest, an exam) passes none and gets no
+   * tab at all, rather than a disabled one. A door a student cannot open is
+   * still a door.
+   */
+  panels: Record<FixedStatementTab, React.ReactNode> & { assistant?: React.ReactNode };
   submissionCount: number;
   /** Footer language links to /judge in a new tab; the arena and attempt surfaces pass false. */
   judgeLink?: boolean;
@@ -145,18 +153,22 @@ export function Workspace({
   // ── Tabs ──────────────────────────────────────────────────────────────
   const [statementTab, setStatementTab] = useState<StatementTab>("description");
   const [mobileTab, setMobileTab] = useState<MobileTab>("problem");
-  const statementItems = useMemo<TabStripItem<StatementTab>[]>(
-    () =>
-      (
-        [
-          ["description", "Description"],
-          ["editorial", "Editorial"],
-          ["submissions", submissionCount > 0 ? `Submissions (${submissionCount})` : "Submissions"],
-          ["hints", "Hints"],
-        ] as const
-      ).map(([value, label]) => ({ value, label, tabId: `${baseId}-st-${value}`, panelId: `${baseId}-sp-${value}` })),
-    [baseId, submissionCount],
-  );
+  const hasAssistant = panels.assistant !== undefined;
+  const statementItems = useMemo<TabStripItem<StatementTab>[]>(() => {
+    const items: [StatementTab, string][] = [
+      ["description", "Description"],
+      ["editorial", "Editorial"],
+      ["submissions", submissionCount > 0 ? `Submissions (${submissionCount})` : "Submissions"],
+      ["hints", "Hints"],
+    ];
+    if (hasAssistant) items.push(["assistant", "Assistant"]);
+    return items.map(([value, label]) => ({
+      value,
+      label,
+      tabId: `${baseId}-st-${value}`,
+      panelId: `${baseId}-sp-${value}`,
+    }));
+  }, [baseId, hasAssistant, submissionCount]);
   const mobileItems = useMemo<TabStripItem<MobileTab>[]>(
     () =>
       (

@@ -204,6 +204,10 @@ const TARGETS: readonly Target[] = [
   { path: "/super/settings/branding", as: "admin", gating: true },
   { path: "/super/settings/policy", as: "admin", gating: true },
   { path: "/super/settings/judge", as: "admin", gating: true },
+  // Phase 12b. The AI helper's switch: a select, two numbers and a reason
+  // dialog, and the one page where a wrong label would hide what turning it
+  // on actually does.
+  { path: "/super/settings/ai", as: "admin", gating: true },
   { path: "/super/audit", as: "admin", gating: true },
   { path: "/super/impersonate", as: "admin", gating: true },
   { path: "/super/flags", as: "admin", gating: true },

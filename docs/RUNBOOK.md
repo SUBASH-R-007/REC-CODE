@@ -1348,6 +1348,79 @@ Run it once against a registry and record it in §3.
 
 ---
 
+### 2.16 Turning the AI helper on (Phase 12b)
+
+A student stuck on a **practice** problem can ask the assistant what they
+have got wrong, or how to approach it. It never appears in a contest or an
+assessment, and it ships **off**.
+
+Two switches, deliberately in different places, and both must be on:
+
+| Switch | Where | Who owns it |
+|---|---|---|
+| Whether a model can be reached at all | `AI_API_KEY` in the server environment | whoever runs the deployment |
+| Whether the helper answers, and which model | `/super/settings/ai` | the super-admin |
+
+The key is not in the database on purpose: a key in a settings row is a key
+in every backup, every `pg_dump` and on every admin's screen. The
+super-admin surface chooses *which* model answers and can switch the whole
+thing off on the next request; it cannot read, set or clear the key.
+
+**On the host.**
+
+```sh
+# The key, owned by root and readable by nobody else.
+install -D -m 0600 /dev/null /run/recx/secrets/ai_api_key
+printf '%s' 'sk-…' > /run/recx/secrets/ai_api_key
+```
+
+Then uncomment `AI_API_KEY_FILE` in the web service's environment in
+`deploy/compose.app.yml`, the matching `- ai_api_key` under that service's
+`secrets:`, and the `ai_api_key:` definition at the foot of the file. They
+are commented rather than wired because an empty secret file **throws**
+(`packages/shared/env-file`, by design — a silently missing secret looks
+exactly like one that was never configured), so wiring them would make
+every deployment invent a key for a feature it may not want.
+
+For a college-hosted, OpenAI-compatible endpoint, also set `AI_BASE_URL`
+and `AI_MODEL`, and pick *College-hosted model* on the settings page.
+Anthropic's own endpoint is not configurable: a configurable one is an
+exfiltration setting wearing a deployment hat.
+
+**On the settings page.** `/super/settings/ai` → the assistant **On**, a
+model, questions per student per day, longest answer. Saving asks for a
+reason and writes a SECURITY audit row, like the governance kill switches,
+because turning it on starts sending students' draft code to a third party.
+Switching it off takes effect on the very next request.
+
+**What leaves the college, every time a student asks**: the public problem
+statement, that student's own draft code, the verdict of their own last
+practice submission, and the sample case it failed — the one the product
+already shows them. Never hidden test data, never another student's work,
+never anything that says who the student is. One module makes that call
+(`apps/web/src/lib/ai/provider.ts`) and `tests/repo/ai-helper-posture.test.ts`
+fails the build if a second one appears.
+
+**What it costs a student.** Asking makes a later *first* solve ASSISTED:
+it still counts as solved and still pays XP at the assisted rate, but it is
+excluded from the unassisted evidence a readiness score is built on — the
+same rule a tier-3 hint and the editorial already follow. Without it every
+readiness number in the college would quietly inflate. The button unlocks
+only after one judged submission or ten minutes of work on that problem.
+
+**If students say it is broken.** `/super/settings/ai` shows answered and
+failed counts for the last 30 days. A failure is recorded with no answer
+and costs the student no quota. The page also says, in a banner, when the
+deployment cannot answer at all — no key, or a college-hosted model with no
+`AI_BASE_URL`. While that is true the Assistant tab does not render, so
+students see no button rather than a button that fails.
+
+**To stop it immediately**: `/super/settings/ai` → **Off** → save. No deploy,
+no restart; the setting is read per request. Removing the key does the same
+thing and needs a restart.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -1584,3 +1657,10 @@ coordinator from actual runs — never in advance.
 | 11c | 2026-10-28 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` — Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted | PASS (lint 0 warnings; **7,462 tests passed, 0 failed**, 1,376 DB/Redis tests skipped by default: shared 1,730, judge-worker 414, db 301, design 84, scheduler 246, web 3,651, repo 1,036 — +15 over Phase 11b, all of them the new fences; `next build` exit 0; all size budgets met, `/assessments/[slug]/readiness` 118.7 KB of 130 after the private-window line, zero-JS `/login` confirmed from the served build) | Claude (coordinator) |
 | 11f | 2026-10-29 | An initial password an admin can set, and the one sign-in it is good for | **DONE.** Both ways of adding a student — `/admin/students/new` and the roster CSV import — now take an optional initial password, and both create accounts that must replace it. Blank keeps the older behaviour (no password; the holder uses the one-time link), which is still the better path wherever mail works. The danger is that a default password is in practice ONE password for a whole batch, so `User.mustChangePassword` makes it good for exactly one sign-in: while it is set, `requireUser` redirects every page to `/account/new-password` and `requireActionUser` throws on every action, the replacement is refused if it is the password they were given, and a CHECK refuses the flag on an account with no password at all. Sign-out still works (it reads the session directly). Verified against recx_test: 6 tests in `initial-password.db.test.ts` — including the database refusing the flag without a hash, the refusal of the given password, and every session being dropped when it is replaced — plus 2 in `add-student.db.test.ts`. Windows gate: lint 0 warnings, typecheck clean, **7,528 tests passed, 0 failed**, build exit 0, all size budgets met. **A batch was then run end to end** on the local stack against the production build (2026-10-29): three accounts imported with one shared initial password, all three created flagged; a wrong password refused; the given password signed in and landed on `/account/new-password`; `/dashboard`, `/problems` and `/profile/settings` each bounced back to it with a 307; the page refused the password the batch was given (“Choose a password different from the one you were given.”); a new one was accepted and landed on `/dashboard` signed in; the given password then answered `credentials` and the chosen one went straight to `/dashboard`; the other two accounts stayed flagged. The drill accounts were removed afterwards. STILL NOT RUN: a real intake, with students who were told the password by somebody other than the person who set it | PASS (gate and the batch drill); a real intake NOT RUN | Claude |
 | 12a | 2026-10-30 | Assessments: a way to create one, and always proctored | **DONE.** The sitting engine has existed since Phase 6 and nothing in the product could create the thing it runs — every assessment that ever ran was a test fixture. `/admin/assessments` now creates a draft, pins questions at their frozen revisions, schedules halls with their CIDR allowlists, and walks DRAFT → PUBLISHED → OPEN → CLOSED. `NONE` is gone as a proctor mode for an assessment, in the shared schema, at the server boundary and as `Assessment_proctored_check`: the Phase 11b audit found the engine never read the mode, so a `NONE` assessment watched its candidates exactly as closely as any other while telling them nobody was. Refused, each with a sentence and each also true of the data: an unproctored assessment, placement eligibility on anything but a lab sitting, publishing an empty paper, publishing a lab assessment with no hall, a lab hall with an empty or malformed allowlist, and any change to a published assessment's questions or terms. The migration refuses rather than rewrites a pre-existing `NONE` row — its first draft disabled `Assessment_published_immutable` to move them and `frozen-coverage.test.ts` failed the build, which is the fence working. Verified against recx_test: 5 tests in `admin-assessments.db.test.ts`, both doors on the unproctored refusal, the publish blockers and the full status walk. Windows gate: lint 0 warnings, typecheck clean, **7,622 tests passed, 0 failed**, build exit 0, all size budgets met. **A paper was then sat end to end** against the production build (2026-10-30): created through the admin actions with every refusal firing (unproctored, empty paper, a question added after publication), listed to a candidate, readiness 200, Start → 303 to the arena with the attempt cookie issued, the arena rendering the pinned question, and a second start resuming the same sitting. That run found the defect below and it is fixed in the same breath: **the arena could never start a sitting at all**, because the page called `startOrResumeAttempt` while rendering and Next refuses a cookie write there — true since Phase 6, invisible to 7,600 tests that call the function directly, and caught by the first real sitting. Starting is now `POST /api/exam/start/[slug]`. STILL NOT RUN: a cohort sitting one, and the lab and remote modes, which need a WebAuthn authenticator this machine has none of | PASS (gate and the sitting drill); a cohort sitting NOT RUN | Claude |
+| 12b | 2026-10-30 | The AI helper: practice only, off by default, and a super-admin owns it | **DONE.** A student stuck on a **practice** problem can ask the assistant what they have got wrong, or how to approach it, and gets an explanation rather than a solution. Three decisions carry the feature. **It goes through the existing help chokepoint rather than beside it:** `lib/help/access.ts` says of itself that every hint and editorial read — "anything later phases add" — asks `getHelpState()` and obeys it, with no per-feature branches, so `aiAllowed()` takes the same `HelpState` the hints do, with the same server-decided context, and the assistant cannot be reachable on a surface where a hint is not; CONTEST and ASSESSMENT get nothing, and in a sitting there is no tab at all rather than a disabled one. **Asking makes a later first solve ASSISTED** (`makesSolveAssisted({ ai: true })`, read by the finaliser exactly as it reads `HintReveal`) — readiness is built on unassisted coverage, and an assistant that did not mark the solve would have inflated every readiness number in the college silently. **The key is environment-only and the model is a setting:** `/super/settings/ai` chooses whether it answers, which of four models answers, the per-student daily allowance and the answer length, read per request so the kill switch lands on the next one; `AI_API_KEY` is never written to `PlatformSetting`, because a key in a settings row is a key in every backup and on every admin's screen. The model catalogue is closed (an id reaches an external API), with one escape hatch for a college-hosted OpenAI-compatible endpoint. Data: `AiAssist`, append-only with four CHECKs — practice-only in the data and not only at the boundary, an answer exactly when the ask did not fail, a bounded non-empty answer, non-negative usage — plus the no-TRUNCATE guard; the answer is stored (a student may reread it) and the draft that prompted it is not. The unlock is hint 2's threshold, deliberately: one judged submission or ten active minutes. Fenced by `tests/repo/ai-helper-posture.test.ts` (15): nothing in the exam, contest or judge trees imports the assistant; `lib/ai/provider.ts` is the only module that posts to an AI endpoint and has exactly one caller; `AI_API_KEY` is read only where it is declared and where it is sent, with `lib/ai/settings.ts` allowed a presence check and nothing more. Not built, deliberately: no conversation (a thread is where a student argues the model into writing the answer), no per-cohort switch, nothing for staff | PASS | Claude |
+| 12b | 2026-10-30 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` — Windows 11 (pnpm 9.15.9 via npx, Node 22.17.1), each gate run separately with its exit code asserted | PASS (lint 0 warnings; typecheck clean; **7,724 tests passed, 0 failed** — shared 1,761, judge-worker 414, db 312, design 87, scheduler 247, web 3,821, repo 1,082; build exit 0; every size budget met, `/problems/[slug] shell` 175.2 KB of 220 KB with the Assistant tab added) | Claude |
+| 12b | 2026-10-30 | `RECX_DB_TESTS=1` against recx_test: the `AiAssist` invariants, the guard catalogue and the student-exposure sweep | PASS (`ai-assist-invariants.db.test.ts` 10/10 — the practice-only CHECK refuses CONTEST and ASSESSMENT, the answer/failed pairing refuses both halves, an edit, a delete and a TRUNCATE are all refused through Prisma and through raw SQL; `guard-state.db.test.ts` 384 and `frozen-coverage.test.ts` 256 with the new function, trigger and four CHECKs catalogued; `student-exposure.db.test.ts` 14/14) | Claude |
+| 12b | 2026-10-30 | Two pre-existing Phase 12a gaps the exposure sweep found, both invisible to the Windows gate | **FIXED.** `student-exposure.db.test.ts` is `RECX_DB_TESTS=1` and skipped on Windows, so neither had been run since Phase 12a: `POST /api/exam/start/[slug]` was never added to `ROUTE_CALLS` (the sweep's own completeness assertion), and the fixture's live `AssessmentAttempt` carried `layout: { order: [1] }` — a placeholder from before the format existed, which nothing read until the arena page started parsing the layout to render, so rendering the arena as a student threw `stored attempt layout is not a v1 layout` instead of being swept for canaries. The attempt now carries a real v1 layout pinning the canary-bearing frozen version, and the start route has a recipe (a slug that does not exist, so the fixture's live token is not rotated out from under the heartbeat and snapshot recipes) | Claude |
+| 12b | 2026-10-30 | Manual, against the production build on this laptop with a **stand-in** OpenAI-compatible endpoint (`scratchpad/fake-model.mjs`, asserting the request shape and printing every prompt): the whole path end to end | PASS. Super-admin `RECADMIN01` → `/super/settings/ai` 200, model catalogue listed, no key anywhere in the HTML; `updateAiHelper` through the real action → `PlatformSetting "ai-helper"` written and one `settings.ai_helper_changed` SECURITY audit row per change. Student 2116231001001 → `/problems/two-sum` 200 with the Assistant tab present and both questions offered; `askAiHelper` answered twice, the allowance counting 3 → 2 → 1 → **0** and the fourth ask refused by the cap **without reaching the model** (3 requests at the endpoint, not 4); the answer rendered as sanitised HTML with the model's `[docs](https://example.invalid/x)` **link stripped**; `AiAssist` rows carry PRACTICE, the model id, both token counts and a latency. What actually crossed the wire, read in the endpoint's log: the public statement, the student's own `cpp20` draft, `Their last judged submission: AC`, and nothing else — a grep for the student's college id, an `@rajalakshmi` address, "Hidden test" and "expected output" matched only the system prompt's own line telling the model it is not given the hidden tests. Kill switch: `updateAiHelper` off → the tab gone from the workspace on the very next request and both asks refused. Provider down (endpoint killed): the ask refused with "could not answer just now" and an `AiAssist` row written `failed=true, answer IS NULL`, no tokens, latency recorded — and `/super/settings/ai` then read **Answered 5, Failed 2, Students who asked 1** | PASS | Claude |
+| 12b | — | A real model has never answered | **NOT RUN.** There is no `AI_API_KEY` on this machine and no account to get one from, so the HTTP call was exercised against a stand-in that implements the OpenAI-compatible shape, and the Anthropic shape only against a fake `fetch` in `apps/web/test/ai-helper.test.ts`. Two things stay unproven: that a live Anthropic response parses as this code expects (ten minutes with a key), and that a real model obeys "never a complete solution" under pressure from a half-written program — which is a judgement to be made by reading real answers over a week, not a test. `docs/OPEN-QUESTIONS.md` carries both | NOT RUN | — |
+| 12b | — | The assisted-solve warning was not seen in a browser | **NOT RUN.** `marksAssisted` is `!solved`, and `two-sum` is the only published problem in the development database — every seeded student has already solved it, so every real ask in the run above correctly returned `marksAssisted: false` and the confirm dialog never appeared. The flag itself is asserted both ways in `packages/shared/test/ai-helper.test.ts` and `apps/web/test/ai-helper.test.ts`; what has not been looked at is the dialog on screen. It will be the first thing a student with an unsolved problem sees | NOT RUN | — |

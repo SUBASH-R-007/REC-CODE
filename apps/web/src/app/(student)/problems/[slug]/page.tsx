@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { DifficultyBadge, Skeleton, SolveStatus } from "@recx/design";
+import { aiUsable, getAiRuntime } from "@/lib/ai/settings";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { LANGUAGE_COOKIE } from "@/lib/drafts/keys";
@@ -15,6 +16,7 @@ import { getProblemWorkspace } from "@/server/queries/problems";
 import { HISTORY_LIMIT, recentSubmissions } from "@/server/queries/submissions";
 import { ActivityTracker } from "@/components/help/activity-tracker";
 import { EditorialPanel } from "@/components/help/editorial-panel";
+import { AssistantPanel } from "@/components/help/assistant-panel";
 import { HintsPanel } from "@/components/help/hints-panel";
 import { BookmarkButton } from "@/components/problems/bookmark-button";
 import { WorkspaceFrame } from "@/components/shell/workspace-frame";
@@ -60,13 +62,17 @@ export default async function ProblemPage({ params }: Params) {
   if (!problem) notFound();
 
   const key = { userId: user.id, problemId: problem.id };
-  const [history, serverDrafts, bookmark, progress, cookieStore] = await Promise.all([
+  const [history, serverDrafts, bookmark, progress, cookieStore, aiRuntime] = await Promise.all([
     recentSubmissions(user.id, problem.id),
     loadServerDrafts(user.id, problem.id),
     db.bookmark.findUnique({ where: { userId_problemId: key }, select: { problemId: true } }),
     db.userProblemStatus.findUnique({ where: { userId_problemId: key }, select: { status: true } }),
     cookies(),
+    getAiRuntime(),
   ]);
+  // Whether the Assistant tab exists at all. The setting read is cache()d
+  // per request, so asking here and again inside the panel is one query.
+  const assistantAvailable = aiUsable(aiRuntime);
 
   const languageKeys = problem.languages.map((l) => l.key);
   const initialLanguage = pickInitialLanguage({
@@ -135,6 +141,18 @@ export default async function ProblemPage({ params }: Params) {
               <HintsPanel problemId={problem.id} versionId={problem.versionId} />
             </Suspense>
           ),
+          // The tab exists only when the assistant could actually answer: a
+          // super-admin has it on and the deployment has a key. Omitting the
+          // key omits the tab, rather than offering a button that refuses.
+          ...(assistantAvailable
+            ? {
+                assistant: (
+                  <Suspense fallback={<PanelSkeleton />}>
+                    <AssistantPanel problemId={problem.id} />
+                  </Suspense>
+                ),
+              }
+            : {}),
         }}
       />
     </WorkspaceFrame>

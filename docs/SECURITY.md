@@ -224,7 +224,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | Capability | Tier | STUDENT | TA_MENTOR | ADMIN | PLACEMENT_OFFICER | SUPER_ADMIN | Bound to |
 | --- | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `roles.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
-| `settings.write` | super-admin | - | - | - | - | yes | 7 actions, 4 pages |
+| `settings.write` | super-admin | - | - | - | - | yes | 8 actions, 5 pages |
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 5 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
@@ -275,6 +275,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `contests.enter` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `bookmarks.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `help.reveal` | self-service | yes | yes | yes | yes | yes | 2 actions |
+| `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |
@@ -359,6 +360,17 @@ suite.
 * Proctoring (Phase 6) collects no webcam, microphone or screen recording by
   default and no content keystrokes or clipboard contents; see
   `docs/PROCTORING.md`.
+* **The AI helper (Phase 12b) is the one feature that sends student work to
+  a third party, and it is off until a super-admin turns it on.** What is
+  sent, per question: the public problem statement, that student's own
+  draft, the verdict of their own last practice submission and the sample
+  case it failed — never hidden test data, never another student's work,
+  never anything identifying the student. It answers in PRACTICE only; the
+  database refuses a row saying otherwise (`AiAssist_practice_only_check`).
+  One module makes the call (`apps/web/src/lib/ai/provider.ts`), which is
+  what `tests/repo/ai-helper-posture.test.ts` keeps true, and an answer is
+  stored (a student may reread it) while the draft that prompted it is not.
+  Operations: `docs/RUNBOOK.md` §2.16.
 
 ## 8. Audit log
 
@@ -472,7 +484,13 @@ role. Every `/super` page calls `requireSuperAdminPage()` itself.
   `…-dev-only`).
 * Each process gets only what it needs: the judge worker has no database
   credentials; the scheduler uses the direct database URL; only the web app
-  holds `IP_HASH_PEPPER`.
+  holds `IP_HASH_PEPPER` and `AI_API_KEY`.
+* **The AI helper's key is environment-only.** It is never written to
+  `PlatformSetting`, because a key in a settings row is a key in every
+  backup and on every admin's screen; the super-admin surface chooses which
+  model answers and cannot read, set or clear the key. Outside the env
+  schema it is read in exactly one module — the provider — and a presence
+  check elsewhere decides whether to show the feature at all.
 * Judge node tokens and session tokens are stored only as sha256 hashes.
   On a judge host the node token lives in `/etc/recjudge/worker.env`
   (root, 0600); after first boot the host's cloud-init copies of user-data

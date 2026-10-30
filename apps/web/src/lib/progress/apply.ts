@@ -341,12 +341,13 @@ export async function applySubmissionProgressSafely(
 
 /**
  * Everything a first solve needs: difficulty of the pinned version, whether
- * help made it assisted (a tier-3 hint or the editorial seen BEFORE the
- * submission was created), the day's daily challenge, active time and topics.
+ * help made it assisted (a tier-3 hint, the editorial, or an AI helper
+ * answer BEFORE the submission was created), the day's daily challenge,
+ * active time and topics.
  */
 async function loadSolveContext(tx: DbTx, input: SubmissionProgressInput, dayDate: Date): Promise<SolveContext> {
   const { userId, problemId, submittedAt } = input;
-  const [version, hint, editorial, daily, activity] = await Promise.all([
+  const [version, hint, editorial, aiAssist, daily, activity] = await Promise.all([
     tx.problemVersion.findUniqueOrThrow({
       where: { id: input.problemVersionId },
       select: { difficulty: true, problem: { select: { tags: { select: { topic: true } } } } },
@@ -360,6 +361,12 @@ async function loadSolveContext(tx: DbTx, input: SubmissionProgressInput, dayDat
       where: { userId_problemId: { userId, problemId } },
       select: { firstViewedAt: true },
     }),
+    // An answered AI ask before this submission. A failed ask told the
+    // student nothing, so it taints nothing.
+    tx.aiAssist.findFirst({
+      where: { userId, problemId, failed: false, askedAt: { lt: submittedAt } },
+      select: { id: true },
+    }),
     tx.dailyChallenge.findUnique({ where: { date: dayDate }, select: { problemId: true } }),
     tx.problemActivity.findUnique({
       where: { userId_problemId: { userId, problemId } },
@@ -369,7 +376,8 @@ async function loadSolveContext(tx: DbTx, input: SubmissionProgressInput, dayDat
   const editorialSeen = editorial !== null && editorial.firstViewedAt.getTime() < submittedAt.getTime();
   const assisted =
     (hint !== null && makesSolveAssisted({ hintTier: hint.tier })) ||
-    (editorialSeen && makesSolveAssisted({ editorial: true }));
+    (editorialSeen && makesSolveAssisted({ editorial: true })) ||
+    (aiAssist !== null && makesSolveAssisted({ ai: true }));
   return {
     difficulty: version.difficulty,
     assisted,

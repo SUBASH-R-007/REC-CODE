@@ -132,12 +132,17 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       "super-inactivity#saveInactivityPolicy",
       "super-inactivity#activateInactivityPolicy",
       "super-inactivity#setAutoDisableEnabled",
+      // Phase 12b. The AI helper's kill switch and its model choice. Audited
+      // at SECURITY, because turning it on starts sending students' draft
+      // code to a third party.
+      "super-ai#updateAiHelper",
     ],
     pages: [
       "app/super/settings/policy/page.tsx",
       "app/super/flags/page.tsx",
       "app/super/settings/branding/page.tsx",
       "app/super/settings/inactivity/page.tsx",
+      "app/super/settings/ai/page.tsx",
     ],
   },
   {
@@ -691,6 +696,16 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     label: "Reveal hints and editorials",
     roles: EVERY_SIGNED_IN_ROLE,
     actions: ["help#revealHint", "help#viewEditorial"],
+  },
+  {
+    // Phase 12b. Signed in is the role check; everything that actually
+    // decides an answer — practice only, enough effort, inside today's
+    // allowance, and the helper switched on at all — is the help chokepoint
+    // (lib/help/access.ts), not a role.
+    key: "ai.ask",
+    label: "Ask the AI helper about a practice problem",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["ai-helper#askAiHelper"],
   },
   {
     key: "notifications.manage",

@@ -42,7 +42,7 @@ ROUTES="
 /admin/judge /admin/contests /admin/assessments /admin/aptitude /admin/integrity
 /admin/inactivity /admin/plans
 /super /super/users /super/roles /super/settings/branding /super/settings/policy
-/super/settings/judge /super/settings/integrations /super/audit /super/impersonate
+/super/settings/judge /super/settings/ai /super/settings/integrations /super/audit /super/impersonate
 /super/flags /super/jobs /super/data
 /mentor /placement-cell /placement-cell/heatmap /placement-cell/at-risk
 /placement-cell/aptitude /placement-cell/export /placement-cell/drives

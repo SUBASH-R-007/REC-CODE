@@ -82,6 +82,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_profile_export_change",
   // 20261027190048_phase11a_password_reset
   "recx_refuse_password_reset_change",
+  // 20261030094500_phase12b_ai_helper
+  "recx_refuse_ai_assist_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -148,6 +150,8 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "PlacementDrive",
   "DriveEligibilityDecision",
   "ProfileExport",
+  // 20261030094500_phase12b_ai_helper
+  "AiAssist",
 ];
 
 export interface GuardTrigger {
@@ -518,6 +522,13 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     (t): GuardTrigger => ({ name: `${t}_no_truncate`, timing: "BEFORE TRUNCATE", table: t, fn: "recx_refuse_truncate", level: "STATEMENT" }),
   ),
   { name: "PasswordReset_spend_once", timing: "BEFORE UPDATE", table: "PasswordReset", fn: "recx_refuse_password_reset_change", level: "ROW" },
+  /**
+   * An AI answer is what makes a later solve ASSISTED, and ASSISTED is what
+   * keeps that solve out of the unassisted evidence readiness is built on.
+   * A row that could be edited or deleted would let the XP and the readiness
+   * number resting on it be re-written after the fact.
+   */
+  { name: "AiAssist_append_only", timing: "BEFORE UPDATE OR DELETE", table: "AiAssist", fn: "recx_refuse_ai_assist_change", level: "ROW" },
 ];
 
 /** Every table that has at least one guard trigger. */
@@ -566,7 +577,7 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261029185421_phase12a_assessment_proctored";
+export const CHECK_CATALOG_THROUGH = "20261030094500_phase12b_ai_helper";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -976,6 +987,16 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
     table: "Assessment",
     migration: "20261029185421_phase12a_assessment_proctored",
   },
+  ...(
+    [
+      // The assistant is a practice tool, said in the data and not only at
+      // the boundary; an answer exists exactly when the ask did not fail.
+      ["AiAssist_practice_only_check", "AiAssist"],
+      ["AiAssist_answer_pair_check", "AiAssist"],
+      ["AiAssist_answer_size_check", "AiAssist"],
+      ["AiAssist_usage_check", "AiAssist"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261030094500_phase12b_ai_helper" })),
 ];
 
 /**
