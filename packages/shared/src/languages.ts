@@ -22,6 +22,7 @@ export const LANGUAGE_KEYS = [
   "node22",
   "go123",
   "kotlin20",
+  "rust180",
 ] as const;
 
 export type LanguageKey = (typeof LANGUAGE_KEYS)[number];
@@ -59,6 +60,7 @@ export interface LanguageRuntime {
 const gcc = "gcc-13.2.0";
 const cpython = "cpython-3.12.6";
 const temurin = "temurin-21.0.4+7";
+const rust = "rust-1.80.0";
 
 function tc(id: string, ...rest: string[]) {
   return [TOOLCHAIN_ROOT, id, ...rest].join("/");
@@ -287,6 +289,80 @@ export const LANGUAGE_CATALOG: Readonly<Record<LanguageKey, LanguageRuntime>> = 
     fallbackMultiplier: 2.0,
     fallbackExtraMs: 500,
     editorLanguage: "kotlin",
+    enabledByDefault: false,
+  },
+  /**
+   * Rust (Phase 12o), SPEC §11's "rust180".
+   *
+   * `rustc` alone: no cargo, no crates, no network, no build cache — one
+   * file in, one static binary out, which is the only shape that works in
+   * a box with no writable home and no file locks (the same reason
+   * `install-go.sh` exists).
+   *
+   * Three flags carry decisions worth stating.
+   *
+   *   `-C target-feature=+crt-static` makes the binary STATIC, as C and
+   *   C++ are with `-static`: a box mounts the toolchain read-only and
+   *   nothing else, so a dynamically linked program would have to find
+   *   `libc.so.6` somewhere that does not exist.
+   *
+   *   `-C linker=…/gcc-13.2.0/bin/gcc` is why `gcc-13.2.0` is an extra
+   *   toolchain here. rustc does its final link through a C compiler, and
+   *   the box has no system one — the same dependency Kotlin has on the
+   *   JDK, declared the same way.
+   *
+   *   `--edition 2021` is pinned because the edition changes what the
+   *   SOURCE means, and a submission must mean the same thing in 2029.
+   *
+   * `-O` is opt-level 2, matching the C and C++ `-O2`. Panics stay
+   * unwinding (not `-C panic=abort`) so a student reads the panic message
+   * their program actually produced; either way the verdict is RE.
+   */
+  rust180: {
+    key: "rust180",
+    label: "Rust 1.80.0",
+    toolchainId: rust,
+    version: "1.80.0",
+    extraToolchainIds: [gcc],
+    sourceFile: "main.rs",
+    compile: {
+      argv: [
+        tc(rust, "bin/rustc"),
+        "--edition",
+        "2021",
+        "-O",
+        "-C",
+        "target-feature=+crt-static",
+        "-C",
+        `linker=${tc(gcc, "bin/gcc")}`,
+        "-C",
+        "codegen-units=1",
+        // As C and C++ do with `-s`: a judge never reads a core dump, and a
+        // stripped binary is a smaller compile artefact to cache and copy.
+        // Panic messages keep their line numbers — rustc embeds those as
+        // static strings, not as debug info.
+        "-C",
+        "strip=debuginfo",
+        "-o",
+        "main",
+        "main.rs",
+      ],
+      // rustc is slower than gcc on one file, and the static link is part of it.
+      slow: true,
+    },
+    run: { argv: ["./main"] },
+    /**
+     * `TMPDIR=/box` because a box has no /tmp and rustc makes a temporary
+     * directory for every compile — the first real verification run failed
+     * with "couldn't create a temp dir: No such file or directory", the
+     * same class of thing as Go needing `GOCACHE` inside the box.
+     */
+    env: { PATH: basePath(rust, gcc), TMPDIR: "/box", RUST_BACKTRACE: "0" },
+    ...nativeLimits,
+    // SPEC §7's table: "C/C++/Rust 1.0".
+    fallbackMultiplier: 1.0,
+    fallbackExtraMs: 0,
+    editorLanguage: "rust",
     enabledByDefault: false,
   },
 };

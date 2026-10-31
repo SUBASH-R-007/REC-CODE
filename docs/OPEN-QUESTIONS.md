@@ -3668,3 +3668,30 @@ catalogue makes compulsory.
 **A contest is already fine.** Its arena links to `/problems/<slug>`, so
 every one of those surfaces is the practice one. Not yet RUN with an
 output-only problem, which is recorded as such.
+
+## Adding a toolchain is cheap, and why (Phase 12o, slice 1)
+
+**The fleet decides what it can judge.** `installedLanguages()` reports the
+catalogue languages whose toolchain directories exist, and
+`advertisedLanguages()` narrows that to the ones whose hello-world
+compiled and ran in the sandbox at boot. So a catalogue entry on a host
+without the toolchain is inert, and an entry with a wrong argv never
+reaches a student: the node does not advertise it. That is what makes
+adding a language a catalogue entry plus an installer rather than a
+release.
+
+**rustc, not cargo.** A judge submission is one file. Cargo wants a
+writable home, a lock file and a network; rustc wants none of them. The
+same reasoning produced `install-go.sh`'s `recx-go-build`.
+
+**Static, through gcc, pinned edition.** Static because a box has no
+shared libraries; through gcc because rustc's final link runs a C
+compiler and the box has no system one (so gcc is an extra toolchain, as
+Temurin is for Kotlin); the edition pinned because it changes what the
+source means and a rejudge in 2029 must agree with the verdict in 2026.
+
+**What the first real run taught us.** A box has no `/tmp`, and rustc makes
+a temporary directory for every compile — the catalogue sets `TMPDIR=/box`.
+And `+crt-static` produces a static-PIE binary, which `file` names
+differently; the installer's own check had to learn that, because a check
+that refuses a correct install is worse than no check.

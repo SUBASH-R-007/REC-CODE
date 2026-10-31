@@ -427,14 +427,27 @@ judged with.
 | PyPy 3.10 | `pypy-7.3.17` (stdlib byte-compiled at install) | downloads.python.org + pypy.org/checksums.html (`install-pypy.sh`) | off |
 | JavaScript | `node-22.11.0` (npm/npx/corepack removed) | nodejs.org tarball + `SHASUMS256.txt` (`install-node.sh`) | off |
 | Go 1.23 | `go-1.23.2` + prebuilt standard library + `bin/recx-go-build` | go.dev tarball + go.dev's published sha256 (`install-go.sh`) | off |
+| Rust 1.80 | `rust-1.80.0` (rustc + std only: no cargo, rustup, clippy or rustfmt); links through `gcc-13.2.0` | static.rust-lang.org tarball + its published `.sha256` (`install-rust.sh`) | off |
 | (checkers) | `testlib-0.9.41/testlib.h` | github.com/MikeMirzayanov/testlib tag 0.9.41 = commit `68f9f300b6ab…`, file sha256 pinned (`install-testlib.sh`) | testlibId `testlib-0.9.41` |
 
 Since Phase 4 the FUNCTION-mode harness covers C++ (cpp17, cpp20), Python
 (py312, pypy310) and Java (java21) — §7 "FUNCTION problems". Java ships its
 harness but stays off by default (enabling it also needs Java model solutions
-for the STDIN seeds). C, JavaScript, Go and Kotlin have no FUNCTION harness;
-they stay off by default even though their toolchains ship, and a FUNCTION
-problem never offers them.
+for the STDIN seeds). C, JavaScript, Go, Kotlin and Rust have no FUNCTION
+harness; they stay off by default even though their toolchains ship, and a
+FUNCTION problem never offers them.
+
+**Rust (Phase 12o) is `rustc` and nothing else.** One file in, one STATIC
+binary out: `--edition 2021 -O -C target-feature=+crt-static -C
+linker=…/gcc-13.2.0/bin/gcc -C codegen-units=1`. Static because a box mounts
+the toolchain read-only and nothing else, so a dynamically linked program
+could not find libc; through gcc because rustc does its final link with a C
+compiler and the box has no system one, which is why `gcc-13.2.0` is an extra
+toolchain for `rust180` exactly as Temurin is for `kotlin20`. Cargo is not
+installed: it would want a writable `CARGO_HOME` and a network, and a judge
+submission is a single file. `install-rust.sh` runs the catalog's own compile
+argv at install time and refuses to finish unless the result is static and
+prints the expected line.
 
 `infra/judge/toolchains/verify-toolchains.sh` compiles and runs a hello-world
 for every catalog language **inside isolate**, with the catalog's exact argv

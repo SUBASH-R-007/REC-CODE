@@ -253,6 +253,38 @@ the cluster must refuse — run at boot and every six hours, reported in
 every heartbeat. Calibration is the one that has no meaning here yet and is
 sent as null.
 
+## Rust, the tenth toolchain (Phase 12o)
+
+SPEC §11: "rust180 and cs8". This is the first of the two, and what makes
+a new language cheap here is that the fleet decides for itself whether it
+has one: a node reports only the languages whose toolchain directories
+exist, and then narrows that list to the ones whose hello-world actually
+compiled and ran in the sandbox at boot. A catalogue entry on a host
+without the toolchain is inert, and a catalogue entry with a wrong argv
+never reaches a student — the node simply does not advertise it.
+
+**rustc and nothing else.** No cargo, no crates, no network, no build
+cache: one file in, one static binary out. Cargo would want a writable
+`CARGO_HOME` and a network it will never have, and a submission is a
+single file.
+
+Three flags carry decisions. `-C target-feature=+crt-static` makes the
+binary static, as C and C++ are with `-static`, because a box mounts the
+toolchain read-only and nothing else — a dynamically linked program could
+not find libc. `-C linker=…/gcc-13.2.0/bin/gcc` is why gcc is an extra
+toolchain for `rust180`: rustc does its final link through a C compiler
+and the box has no system one, the same dependency Kotlin has on the JDK.
+`--edition 2021` is pinned because an edition changes what the SOURCE
+means, and a 2026 submission must mean the same thing in 2029.
+
+**Two things only a real box could have told us.** rustc needs a temporary
+directory per compile, and a box has no `/tmp` — the first verification run
+failed with "couldn't create a temp dir", so the catalogue sets
+`TMPDIR=/box` (the same shape as Go's `GOCACHE`). And `+crt-static` here
+produces a static-PIE binary, which `file` calls "static-pie linked"
+rather than "statically linked", so the installer's own static check now
+accepts both and settles it with `readelf -d` instead.
+
 ## Output-only problems (Phase 12n)
 
 SPEC §11's other half, and the one that changes what a submission IS: the

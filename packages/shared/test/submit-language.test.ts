@@ -46,15 +46,16 @@ describe("the languages a submission may carry", () => {
     expect(submitLanguageLabel(SQL_LANGUAGE_KEY)).toBe(SQL_LANGUAGE_LABEL);
     expect(submitLanguageLabel(ANSWER_LANGUAGE_KEY)).toBe(ANSWER_LANGUAGE_LABEL);
     expect(submitLanguageLabel("cpp20")).toContain("C++20");
-    // A row whose LanguageConfig is long gone still renders.
-    expect(submitLanguageLabel("rust180")).toBe("rust180");
+    // A row whose LanguageConfig is long gone still renders. (Not a key
+    // the catalogue might gain later: Phase 12o made rust180 a real one.)
+    expect(submitLanguageLabel("cobol85")).toBe("cobol85");
   });
 
   it("gives each one an editor grammar, and an unknown key plaintext", () => {
     expect(submitEditorLanguage(SQL_LANGUAGE_KEY)).toBe(SQL_EDITOR_LANGUAGE);
     expect(submitEditorLanguage(ANSWER_LANGUAGE_KEY)).toBe(ANSWER_EDITOR_LANGUAGE);
     expect(submitEditorLanguage("py312")).toBe("python");
-    expect(submitEditorLanguage("rust180")).toBe("plaintext");
+    expect(submitEditorLanguage("cobol85")).toBe("plaintext");
   });
 
   it("opens a SQL editor with a comment and an answer box with nothing", () => {

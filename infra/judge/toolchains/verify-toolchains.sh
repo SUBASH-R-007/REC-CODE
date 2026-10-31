@@ -238,6 +238,19 @@ fun main() {
     println("Hello, $name! ${a.toLong() + b.toLong()}")
 }
 SRC
+cat > "$work/src/rust180" <<'SRC'
+use std::io::{self, Read};
+
+fn main() {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input).expect("stdin");
+    let mut it = input.split_whitespace();
+    let name = it.next().expect("name");
+    let a: i64 = it.next().expect("a").parse().expect("a");
+    let b: i64 = it.next().expect("b").parse().expect("b");
+    println!("Hello, {}! {}", name, a + b);
+}
+SRC
 cat > "$work/src/checker" <<'SRC'
 #include "testlib.h"
 

@@ -24,6 +24,7 @@ const HELLO: Readonly<Partial<Record<LanguageKey, string>>> = {
   node22: 'console.log("ok");\n',
   go123: 'package main\nimport "fmt"\nfunc main(){fmt.Println("ok")}\n',
   kotlin20: 'fun main(){println("ok")}\n',
+  rust180: 'fn main(){println!("ok");}\n',
 };
 
 export function helloWorldFor(language: LanguageRuntime): string | null {
