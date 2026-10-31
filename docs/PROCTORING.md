@@ -370,6 +370,43 @@ and §2's fullscreen paragraph is unchanged. It addresses drift, not
 intent, and nothing about it touches the second-device problem that §4
 says only a person in the room addresses.
 
+### What the same pass found instead (Phase 12s)
+
+Neither of the two options above is a security control, and the list they
+came from asked for "more security in proctoring". The two things worth
+having were not new features:
+
+* **Containment is checked when a sitting STARTS.** `checkContainment` ran
+  on every request a sitting makes, through the attempt guard — but not on
+  the request that creates the attempt. A candidate who pressed Start from
+  the wrong network, or in an ordinary browser instead of Safe Exam
+  Browser, got a sitting: the row was written, the clock started, an
+  attempt was spent, and the next request refused it. On a paper allowing
+  one attempt that is the paper. The controls were never what failed; what
+  failed was charging a candidate to find out. It is checked before the
+  attempt is created and before a resume, and the refusal names the
+  network or the .seb file.
+
+* **A sitting records the hall it is seated in.** §4 lists the CIDR
+  allowlist among the controls that *actually enforce* and says it is
+  re-verified on every heartbeat. `checkContainment` compares the address
+  against the hall's blocks only when the attempt has an
+  `examSessionId` — correctly, since an unseated candidate has no hall to
+  be inside — and **nothing in the application ever wrote that column**.
+  Every attempt row carried null, so the allowlist was re-verified against
+  nothing, on every heartbeat, for every sitting ever sat. (The
+  invigilator's own roster reads the same column, so every hall page
+  showed an empty room.) The sitting is linked to its live exam session at
+  start, and seated on resume if it began before the hall existed; it is
+  never re-pointed from one hall to another. The claim §4 makes is now the
+  claim the code implements.
+
+Both are covered by `apps/web/test/exam-start-hall.db.test.ts`, which
+drives the real start path against a real database and then reads the row.
+The containment unit tests were green throughout — they pass
+`examSessionId: "sess_1"` as a fixture, so they tested the function, which
+was right, and nobody tested whether anything filled in what it reads.
+
 ### Why no extension probe, and no devtools signal
 
 Both were asked for in the same breath as these two, and both are

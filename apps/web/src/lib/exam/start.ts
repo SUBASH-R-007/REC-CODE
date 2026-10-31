@@ -16,6 +16,7 @@ import {
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
+import { checkContainment } from "@/lib/exam/containment";
 import { examPaperLanguage } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
@@ -49,7 +50,13 @@ export type StartRefusal =
   | "no_attempts_left"
   | "finished"
   | "needs_lab_session"
-  | "needs_device";
+  | "needs_device"
+  /**
+   * Phase 12s. The hall's network and the kiosk's key, checked BEFORE a
+   * sitting is created rather than only on the request after it.
+   */
+  | "outside_allowlist"
+  | "seb_required";
 
 export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Object.freeze({
   not_found: "That assessment does not exist.",
@@ -61,7 +68,35 @@ export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Ob
     "This assessment is sat in a supervised lab. Your invigilator will seat you in an exam session first.",
   needs_device:
     "This assessment needs a registered device. Verify yours before starting — or ask your invigilator, who can enrol this machine or issue a loaner.",
+  /**
+   * Phase 12s. `checkContainment` returns a sentence of its own, and a more
+   * specific one for SEB, but a refusal travels back to the readiness page as
+   * a KEY in a query string and is rendered from this table — deliberately, so
+   * nothing a candidate can type ends up as text on the page. These two say
+   * the same thing in the same register, and the precise verdict is in the
+   * audit entry an invigilator can read.
+   */
+  outside_allowlist:
+    "This assessment can only be sat from the exam hall network. Tell your invigilator — if you are in the hall, the network has changed.",
+  seb_required:
+    "This assessment is sat in Safe Exam Browser. Open it from the configuration file your invigilator gave you, not in a normal browser.",
 });
+
+/**
+ * The proctor modes that hang off an exam session, and so look one up.
+ *
+ * LAB_SUPERVISED for the obvious reason: the CIDR allowlist and the seat
+ * label are columns on that row. KIOSK_SEB because the Safe Exam Browser
+ * keys ROTATE PER EXAM SESSION (SPEC §5) — `sebKeysFor` prefers
+ * `seb:<examSessionId>` over the platform-wide entry, so a kiosk sitting
+ * that is not linked to its hall can only ever be checked against the
+ * college-wide key, and a hall that rotated its own key would refuse the
+ * candidate who used the right .seb file.
+ *
+ * The other two modes have no hall: REMOTE_MONITORED is sat from wherever
+ * the candidate is, and an unproctored paper has nothing to seat.
+ */
+const HALL_MODES: ReadonlySet<string> = new Set(["LAB_SUPERVISED", "KIOSK_SEB"]);
 
 export type StartResult =
   | { readonly ok: true; readonly attempt: AssessmentAttempt; readonly layout: AttemptLayout; readonly resumed: boolean }
@@ -142,6 +177,8 @@ function audienceMatches(
  * the first load cannot be replayed by a second client afterwards.
  */
 export async function startOrResumeAttempt(args: {
+  /** The request itself: the SEB key is a hash OF THE URL, so the check needs it. */
+  readonly request: Request;
   readonly slug: string;
   readonly userId: string;
   readonly sessionId: string | null;
@@ -188,8 +225,74 @@ export async function startOrResumeAttempt(args: {
     where: { assessmentId: assessment.id, userId: args.userId },
     orderBy: { attemptNumber: "desc" },
   });
+  const resuming = existing !== null && acceptsWork(existing.status as AttemptStatus);
 
-  if (existing && acceptsWork(existing.status as AttemptStatus)) {
+  /**
+   * Whether this paper can be STARTED at all, asked before the hall is —
+   * so that a candidate reads the refusal that is actually about them.
+   *
+   * These four are facts about the paper and the attempts already spent,
+   * and they are free to check. A candidate at home whose paper closed
+   * yesterday should read "this assessment is not open", not "this
+   * assessment can only be sat from the exam hall network": both are true,
+   * one of them is the reason. A candidate who is resuming skips the lot —
+   * a sitting in progress continues past `closesAt` on purpose, which is
+   * why these were written after the resume branch to begin with.
+   */
+  if (!resuming) {
+    if (assessment.status !== "OPEN") return refuse("not_open");
+    if (now < assessment.opensAt || now >= assessment.closesAt) return refuse("not_open");
+    // Nothing to sit at all. Either kind counts; see paperQuestionCount.
+    if (paperQuestionCount(assessment) === 0) return refuse("not_open");
+    const spent = existing?.attemptNumber ?? 0;
+    if (existing && isFinished(existing.status as AttemptStatus) && spent >= assessment.maxAttempts) {
+      return refuse(spent === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left");
+    }
+    if (spent >= assessment.maxAttempts) return refuse("no_attempts_left");
+  }
+
+  /**
+   * The hall's network and the kiosk's key, BEFORE anything is created
+   * (Phase 12s).
+   *
+   * `checkContainment` runs on every request through `guardAttempt`, which
+   * is what makes "leaving the lab network ends the session" true — but it
+   * did not run on the request that STARTS the sitting. The sitting was
+   * created, the clock started, an attempt was spent, and the very next
+   * request refused it. For a paper with `maxAttempts: 1` that meant a
+   * candidate who pressed Start in an ordinary browser instead of Safe
+   * Exam Browser, or from the wrong network, burned their only attempt on
+   * a sitting they could never work in. Containment was never the thing
+   * that failed; what failed was charging them for finding out.
+   *
+   * Before the resume branch as well as the new-sitting one: resuming
+   * spends nothing, but a candidate whose wifi moved should read the
+   * network's sentence rather than be let in and cut off a second later.
+   *
+   * `audited: false` because there is no attempt row for an audit to point
+   * at yet — the refusal the candidate reads is the point here, and the
+   * audited refusals happen on the paths that have an attempt.
+   */
+  const hall = HALL_MODES.has(assessment.proctorMode)
+    ? await db.examSession.findFirst({
+        where: { assessmentId: assessment.id, startsAt: { lte: now }, endsAt: { gt: now } },
+        select: { id: true },
+      })
+    : null;
+  const containment = await checkContainment({
+    request: args.request,
+    attempt: {
+      id: "",
+      userId: args.userId,
+      assessmentId: assessment.id,
+      examSessionId: hall?.id ?? null,
+      proctorMode: assessment.proctorMode,
+    },
+    audited: false,
+  });
+  if (!containment.ok) return refuse(containment.refusal ?? "outside_allowlist");
+
+  if (resuming && existing) {
     const token = mintAttemptToken();
     const secondsLeft = Math.max(
       60,
@@ -203,6 +306,16 @@ export async function startOrResumeAttempt(args: {
         tokenHash: token.tokenHash,
         ipHashLast: (await requestIpHash()) ?? existing.ipHashLast,
         lockSessionId: args.sessionId ?? existing.lockSessionId,
+        /**
+         * Seated on resume if it was not seated at start: a sitting that
+         * began before the invigilator created the hall, or one started
+         * before this column was ever written, starts being checked against
+         * the allowlist from here on. Only ever null → a hall, never one
+         * hall to another: which room a sitting happened in is a fact, and a
+         * sitting that could be re-pointed could be re-pointed to a room
+         * whose allowlist admits anyone.
+         */
+        ...(existing.examSessionId === null && hall ? { examSessionId: hall.id } : {}),
         version: { increment: 1 },
       },
     });
@@ -211,27 +324,14 @@ export async function startOrResumeAttempt(args: {
   }
 
   // ── A new sitting ──────────────────────────────────────────────────────
-  if (assessment.status !== "OPEN") return refuse("not_open");
-  if (now < assessment.opensAt || now >= assessment.closesAt) return refuse("not_open");
-  // Nothing to sit at all. Either kind counts; see paperQuestionCount.
-  if (paperQuestionCount(assessment) === 0) return refuse("not_open");
-
+  // Whether there is one to start was settled above, before containment.
   const used = existing?.attemptNumber ?? 0;
-  if (existing && isFinished(existing.status as AttemptStatus) && used >= assessment.maxAttempts) {
-    return refuse(used === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left");
-  }
-  if (used >= assessment.maxAttempts) return refuse("no_attempts_left");
 
   // LAB_SUPERVISED means an invigilator seats the candidate in an ExamSession
   // first; the CIDR allowlist and the seat label hang off that row (slice 6d).
   // Refusing here rather than starting a sitting that cannot be supervised.
-  if (assessment.proctorMode === "LAB_SUPERVISED") {
-    const session = await db.examSession.findFirst({
-      where: { assessmentId: assessment.id, startsAt: { lte: now }, endsAt: { gt: now } },
-      select: { id: true },
-    });
-    if (!session) return refuse("needs_lab_session");
-  }
+  // The same hall the containment check above resolved.
+  if (assessment.proctorMode === "LAB_SUPERVISED" && !hall) return refuse("needs_lab_session");
 
   // ── A fresh device assertion (Phase 6d) ────────────────────────────────
   // SPEC §5 requires one to START a REMOTE_MONITORED or LAB_SUPERVISED
@@ -300,6 +400,26 @@ export async function startOrResumeAttempt(args: {
       // assertion cookie is gone.
       deviceRegistrationId: device?.deviceId ?? null,
       seatLabel: args.seatLabel ?? null,
+      /**
+       * The hall this sitting belongs to — and the whole reason the
+       * allowlist works at all (Phase 12s).
+       *
+       * `checkContainment` checks the CIDR allowlist only when
+       * `attempt.examSessionId !== null`, because an unseated candidate has
+       * no hall to be inside. Nothing in the application EVER wrote this
+       * column, so every attempt row carried null and that branch never ran
+       * once: docs/PROCTORING.md §4 listed the allowlist among the controls
+       * that "actually enforce" and promised it was "re-verified on every
+       * heartbeat", and it was being re-verified against nothing. The
+       * invigilator's own roster reads `where: { examSessionId }` too, so
+       * every hall page showed an empty room.
+       *
+       * It is not in the write-once tuple `recx_refuse_attempt_change()`
+       * freezes, deliberately: the hall is a fact about where a sitting is
+       * taking place, which an invigilator may establish after a candidate
+       * has begun.
+       */
+      examSessionId: hall?.id ?? null,
     },
   });
 

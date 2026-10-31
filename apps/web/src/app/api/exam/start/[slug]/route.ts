@@ -50,7 +50,15 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     ? await db.session.findUnique({ where: { tokenHash: hashSessionToken(token) }, select: { id: true } })
     : null;
 
-  const started = await startOrResumeAttempt({ slug, userId: user.id, sessionId: session?.id ?? null });
+  // The request itself, because containment is checked HERE now and not only
+  // on the next request: the hall's CIDR allowlist needs the client address
+  // and the Safe Exam Browser key is a hash of the URL (Phase 12s).
+  const started = await startOrResumeAttempt({
+    request,
+    slug,
+    userId: user.id,
+    sessionId: session?.id ?? null,
+  });
   if (!started.ok) {
     const to =
       started.refusal === "not_found"
