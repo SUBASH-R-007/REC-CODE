@@ -311,3 +311,79 @@ None of this is a claim about the sitting. The policy raises the cost of
 the easy routes on one machine. The phone on the candidate's lap is
 untouched by all of it, and §4's last line still holds: the human in the
 room is the control that matters most.
+
+---
+
+## 9. The two per-paper options (Phase 12s)
+
+Both were asked for directly, both are **off by default**, and neither
+changes anything in §2. They exist because an invigilator running a paper
+that matters should be able to raise the cost of the casual case, and
+because "off by default" is how the engine's own judgement stays the
+default.
+
+### `refuseOutsidePaste` — accept only text copied inside the sitting
+
+A paste into the editor is refused unless the candidate copied that exact
+text within this sitting. §2 says blocking paste does not stop clipboard
+transfer, and that remains true; this is not an attempt to disprove it.
+What it does is make the obvious route — alt-tab, copy from a PDF or a
+phone, paste — stop working, which is the route most people take.
+
+It is shaped so that all three of SPEC §5's objections to blocking still
+hold, because they were right:
+
+* **"students legitimately paste their own earlier code and sample
+  input"** — they still can. The sitting already keeps the hashes of
+  everything copied inside it and classifies each paste as
+  `INTERNAL_PASTE` or `EXTERNAL_PASTE` from that set, so "only what was
+  copied inside" was already a rule the client could evaluate. A
+  candidate's own work pastes normally; the sample input they copied off
+  the question pastes normally.
+* **"blocking drives them to clipboard-typing macros which silences the
+  signal"** — the refusal is still recorded as `EXTERNAL_PASTE` with its
+  size. Nothing is silenced. A candidate who then reaches for a macro
+  arrives as `CADENCE_BURST` and `SNAPSHOT_JUMP` instead, and the refused
+  paste sits in the timeline beside it.
+* **"preventDefault on contextmenu/copy breaks assistive technology"** —
+  only a paste into the editor is prevented. Copy, cut and the context
+  menu are untouched, here and everywhere.
+
+The decision is made from the copied text held in the page, synchronously,
+because `preventDefault` is only honoured inside the event's own tick and
+hashing is asynchronous. That text never leaves the browser: §5 forbids
+clipboard content capture, the wire schema is `.strict()` so there is no
+field to put it in, and the only thing sent is the event and its size — as
+before.
+
+### `sitInPopup` — open the sitting in a window of its own
+
+A window sized to the screen, with no address bar and no tab strip: one
+fewer thing to wander into. It is an enhancement on the readiness form
+rather than a replacement for it, so the three properties that form was
+built for survive — it still works before the page hydrates, a blocked
+popup falls back to the tab, and a candidate shut out by their own popup
+blocker is a failure mode worse than any tab.
+
+It is not containment and it is not full screen. Esc exits, alt-tab works,
+and §2's fullscreen paragraph is unchanged. It addresses drift, not
+intent, and nothing about it touches the second-device problem that §4
+says only a person in the room addresses.
+
+### Why no extension probe, and no devtools signal
+
+Both were asked for in the same breath as these two, and both are
+declined on the evidence already in this document rather than on taste.
+
+A page cannot enumerate extensions (§2). Probing
+`web_accessible_resources` finds only extensions that publish a known
+resource under a known id — so it finds the off-the-shelf ones and reveals
+nothing about the purpose-built one, which is the only one that matters.
+Worse, the extensions it reliably finds include screen readers, dyslexia
+fonts and colour filters: a signal whose best case is catching a casual
+cheat and whose common case is flagging a candidate for the software they
+need would not be a security feature.
+
+`DEVTOOLS_HEURISTIC` stays reserved for the reason §7 already gives: it is
+unreliable in both directions, and a signal that fires because a student
+zoomed to 150 % to read the question is worse than no signal.

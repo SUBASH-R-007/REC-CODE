@@ -61,6 +61,9 @@ export interface AssessmentDetail extends AssessmentRow {
   maxFocusWarnings: number;
   onLimit: string;
   strictMode: boolean;
+  /** Phase 12s: the two per-paper watching options. */
+  refuseOutsidePaste: boolean;
+  sitInPopup: boolean;
   audienceBatchYear: number | null;
   audienceDepartmentCode: string | null;
   audienceSection: string | null;
@@ -116,6 +119,8 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       maxFocusWarnings: true,
       onLimit: true,
       strictMode: true,
+      refuseOutsidePaste: true,
+      sitInPopup: true,
       audienceBatchYear: true,
       audienceDepartmentCode: true,
       audienceSection: true,
@@ -166,6 +171,8 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
     maxFocusWarnings: row.maxFocusWarnings,
     onLimit: row.onLimit,
     strictMode: row.strictMode,
+    refuseOutsidePaste: row.refuseOutsidePaste,
+    sitInPopup: row.sitInPopup,
     audienceBatchYear: row.audienceBatchYear,
     audienceDepartmentCode: row.audienceDepartmentCode,
     audienceSection: row.audienceSection,

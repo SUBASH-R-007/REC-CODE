@@ -52,7 +52,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
    * who arrives here without one is sent back to the readiness page, which
    * is where the button that starts it lives.
    */
-  const assessment = await db.assessment.findUnique({ where: { slug }, select: { id: true, proctorMode: true } });
+  const assessment = await db.assessment.findUnique({ where: { slug }, select: { id: true, proctorMode: true, refuseOutsidePaste: true } });
   if (!assessment) notFound();
   const live = await db.assessmentAttempt.findFirst({
     where: { assessmentId: assessment.id, userId: user.id, status: { in: ["IN_PROGRESS", "DISCONNECTED"] } },
@@ -122,6 +122,7 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
         section: [user.departmentCode, user.section].filter(Boolean).join(" · ") || null,
       }}
       labSupervised={assessment.proctorMode === "LAB_SUPERVISED"}
+      refuseOutsidePaste={assessment.refuseOutsidePaste}
       initialSources={recovered}
       editorPrefs={readEditorPrefs(user.editorPrefs)}
     />

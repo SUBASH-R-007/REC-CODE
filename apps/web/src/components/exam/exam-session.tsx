@@ -48,6 +48,13 @@ import { sha256Hex } from "@/lib/exam/client/sha256";
  * assistive technology."
  */
 
+/**
+ * How many distinct copies a sitting remembers for the paste refusal
+ * (Phase 12s). Generous for anybody working normally — a candidate copies
+ * a handful of times — and bounded so it cannot grow without limit.
+ */
+const COPIED_TEXT_MEMORY = 200;
+
 export interface ExamQuestionView {
   readonly questionId: string;
   readonly title: string;
@@ -80,6 +87,7 @@ export function ExamSession({
   initialStatus,
   candidate,
   labSupervised,
+  refuseOutsidePaste,
   mcqs,
   initialChoices,
   initialSources,
@@ -95,6 +103,13 @@ export function ExamSession({
   readonly initialStatus: string;
   readonly candidate: { readonly name: string; readonly section: string | null };
   readonly labSupervised: boolean;
+  /**
+   * Phase 12s. Refuse a paste into the editor whose text was not copied
+   * inside this sitting. The default is false and the engine's standing
+   * decision is to instrument rather than block; this is the per-paper
+   * option an invigilator may turn on.
+   */
+  readonly refuseOutsidePaste: boolean;
   /** Recovered from the write-ahead store, newest-wins over the starter code. */
   readonly initialSources: Readonly<Record<string, string>>;
   /** The candidate's font size and tab size; the keymap is the arena's (Phase 12j). */
@@ -116,6 +131,8 @@ export function ExamSession({
   );
   /** What this candidate has picked, by mcqId, in the order they were shown. */
   const [choices, setChoices] = useState<Record<string, number>>(() => ({ ...initialChoices }));
+  /** When the last paste was refused, for the transient notice (Phase 12s). */
+  const [pasteRefusedAt, setPasteRefusedAt] = useState<number | null>(null);
 
   const [clock, setClock] = useState({ msRemaining: initialMsRemaining, at: now() });
   const [status, setStatus] = useState(initialStatus);
@@ -149,6 +166,8 @@ export function ExamSession({
   // ── Refs for things the loops read without re-subscribing ──────────────
   const queue = useRef<TelemetryQueue | null>(null);
   const copiedHashes = useRef<Set<string>>(new Set());
+  /** The same copies as text, for the synchronous refusal (Phase 12s). */
+  const copiedTexts = useRef<Set<string>>(new Set());
   /** Phase 11b: the first edit, the last edit, and whether this idle gap was already recorded. */
   const firstKeystrokeAt = useRef<number | null>(null);
   const lastEditAt = useRef<number | null>(null);
@@ -439,6 +458,13 @@ export function ExamSession({
     [attemptId],
   );
 
+  /** The refusal notice is a moment's explanation, not a banner. */
+  useEffect(() => {
+    if (pasteRefusedAt === null) return;
+    const id = window.setTimeout(() => setPasteRefusedAt(null), 6_000);
+    return () => window.clearTimeout(id);
+  }, [pasteRefusedAt]);
+
   // The 30-second tick while dirty, and the "Saved · Ns ago" counter.
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -537,6 +563,20 @@ export function ExamSession({
     const onCopyOrCut = (event: ClipboardEvent, kind: "COPY" | "CUT") => {
       const text = window.getSelection()?.toString() ?? "";
       if (text === "") return;
+      /**
+       * The text itself, for the SYNCHRONOUS decision a refusal needs
+       * (Phase 12s): `preventDefault` is only honoured inside the paste
+       * event's own tick, and hashing through WebCrypto is a promise. It
+       * never leaves the browser — docs/PROCTORING.md §5 forbids clipboard
+       * content capture, and this is the same in-memory status the editor's
+       * own buffer has. Bounded, so a sitting that copies all afternoon
+       * cannot grow it without limit.
+       */
+      copiedTexts.current.add(text);
+      if (copiedTexts.current.size > COPIED_TEXT_MEMORY) {
+        const oldest = copiedTexts.current.values().next().value;
+        if (oldest !== undefined) copiedTexts.current.delete(oldest);
+      }
       void sha256Hex(text).then((hash) => {
         // The hash joins the internal set, so pasting it back reads as
         // INTERNAL_PASTE rather than as text from outside.
@@ -552,11 +592,51 @@ export function ExamSession({
       const text = event.clipboardData?.getData("text") ?? "";
       if (text === "") return;
       const size = new TextEncoder().encode(text).length;
+      /**
+       * Phase 12s, and only when the paper asked for it.
+       *
+       * The classification is already done below from `copiedHashes`, the
+       * set of hashes of everything copied inside this sitting — so
+       * "only what was copied inside" is a rule the client can already
+       * evaluate. What this adds is refusing the rest, and it is shaped
+       * to keep all three of SPEC §5's objections answered:
+       *
+       *   - a paste of the candidate's OWN earlier work still goes
+       *     through, which is the case §5 was protecting;
+       *   - the refusal is still RECORDED as EXTERNAL_PASTE with its
+       *     size, so the signal is not silenced — which was the
+       *     substantive objection, since a candidate who then reaches for
+       *     a clipboard-typing macro shows up as CADENCE_BURST and
+       *     SNAPSHOT_JUMP anyway;
+       *   - only a paste INTO THE EDITOR is prevented. Copy, cut and the
+       *     context menu are untouched here and everywhere, so assistive
+       *     technology keeps working.
+       *
+       * Synchronously, before the hash resolves, because preventDefault
+       * is only honoured within the event's own tick: the decision is
+       * made from the synchronous set and the event is recorded after.
+       */
+      const target = event.target;
+      const insideEditor =
+        target instanceof Element ? target.closest("[data-editor-root]") !== null : false;
+      if (refuseOutsidePaste && insideEditor && !copiedTexts.current.has(text)) {
+        event.preventDefault();
+        setPasteRefusedAt(Date.now());
+      }
       void sha256Hex(text).then((hash) => {
         const kind =
           hash === null
             ? "EXTERNAL_PASTE"
             : classifyPaste({ hash, internalHashes: copiedHashes.current });
+        /**
+         * No "refused" field, and not for want of wanting one: the wire
+         * schema is `.strict()` precisely so nothing can be added to it
+         * ("an attempt to add one is rejected rather than ignored"), and a
+         * batch carrying an unknown key is refused WHOLE — every event in
+         * it lost. A reviewer does not need it anyway: the event is an
+         * EXTERNAL_PASTE and the paper's `refuseOutsidePaste` says what
+         * happened to every one of them.
+         */
         record({ kind, atMs: atMs(), size, ...(hash ? { hash } : {}) });
         void queue.current?.flush();
         // A paste is worth a snapshot: it is the moment the timeline most
@@ -577,7 +657,7 @@ export function ExamSession({
       document.removeEventListener("paste", onPaste);
       document.removeEventListener("contextmenu", onContextMenu);
     };
-  }, [record, atMs, persist, revoked]);
+  }, [record, atMs, persist, revoked, refuseOutsidePaste]);
 
   // Environment hints, recorded once at start.
   useEffect(() => {
@@ -812,6 +892,23 @@ export function ExamSession({
           onToggle={() => setConsoleOpen((was) => !was)}
           error={runError}
         />
+      ) : null}
+
+      {/**
+        * The refusal, said once and briefly. A candidate who meant to
+        * paste their own earlier work needs to know why nothing appeared,
+        * and a candidate who meant to paste from elsewhere has been told
+        * the rule rather than left guessing.
+        */}
+      {pasteRefusedAt !== null ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="shrink-0 border-t border-warning/40 bg-warning-subtle px-4 py-2 text-sm text-warning"
+        >
+          That paste was not copied inside this sitting, so it was not inserted. Your own earlier work still pastes
+          normally. The attempt has been recorded.
+        </p>
       ) : null}
 
       <ExamBottomBar

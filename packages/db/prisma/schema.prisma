@@ -2943,6 +2943,20 @@ model Assessment {
   onLimit                     FocusLimitAction @default(AUTOSUBMIT)
   /// Stricter client guards (fullscreen required, readiness check enforced).
   strictMode                  Boolean          @default(false)
+  /// Phase 12s. Refuse a paste into the editor whose text was not copied
+  /// inside this sitting. OFF by default: SPEC §5's standing decision is
+  /// that paste is instrumented and not blocked, and all three of its
+  /// reasons survive this setting (see the migration). A refused paste is
+  /// still recorded as EXTERNAL_PASTE, so the signal is not silenced, and
+  /// copy, cut and the context menu are never touched. It raises the cost
+  /// of the casual case; docs/PROCTORING.md §2 says why it is not a wall.
+  refuseOutsidePaste          Boolean             @default(false)
+  /// Phase 12s. Open the sitting in a window of its own, sized to the
+  /// screen, instead of a tab: one fewer thing to wander into. Falls back
+  /// to the tab if the browser blocks the popup, because a candidate shut
+  /// out by their own popup blocker is a worse failure than a tab. Not
+  /// containment -- Esc and alt-tab are the user's (docs/PROCTORING.md §2).
+  sitInPopup                  Boolean             @default(false)
   /// Per-assessment secret for per-candidate randomisation:
   /// seed = HMAC-SHA256(seedSecret, attemptId) (SPEC section 5). Per
   /// assessment, not platform-wide, so one leaked secret cannot be used to

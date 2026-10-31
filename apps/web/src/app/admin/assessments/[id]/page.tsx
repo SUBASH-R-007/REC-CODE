@@ -54,6 +54,26 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
           <p className="mt-1 text-sm text-text-secondary">
             {assessment.slug} · {MODE_LABEL[assessment.proctorMode] ?? assessment.proctorMode}
           </p>
+          {/**
+            * The two per-paper watching options (Phase 12s), named only
+            * when they are on: a list of everything that is off is a list
+            * nobody reads. docs/PROCTORING.md §9 says what each does and
+            * what it does not.
+            */}
+          {assessment.refuseOutsidePaste || assessment.sitInPopup ? (
+            <p className="mt-1 flex flex-wrap gap-2 text-xs">
+              {assessment.refuseOutsidePaste ? (
+                <span className="rounded-md border border-primary/30 bg-primary-subtle px-1.5 py-0.5 text-text">
+                  Only text copied inside pastes
+                </span>
+              ) : null}
+              {assessment.sitInPopup ? (
+                <span className="rounded-md border border-primary/30 bg-primary-subtle px-1.5 py-0.5 text-text">
+                  Opens in its own window
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <Badge tone={assessment.status === "OPEN" ? "success" : assessment.status === "DRAFT" ? "warning" : "info"}>

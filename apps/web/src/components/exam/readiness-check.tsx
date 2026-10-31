@@ -37,16 +37,26 @@ const LABELS: Readonly<Record<CheckId, string>> = Object.freeze({
   device: "Your registered device works",
 });
 
+/**
+ * The name of the window a sitting opens in (Phase 12s). Named rather than
+ * anonymous so a candidate who submits the form twice lands back in the
+ * window they already have instead of collecting a second one.
+ */
+const EXAM_WINDOW_NAME = "recx-sitting";
+
 export function ReadinessCheck({
   slug,
   durationMinutes,
   questionCount,
   proctorNote,
+  sitInPopup = false,
 }: {
   readonly slug: string;
   readonly durationMinutes: number;
   readonly questionCount: number;
   readonly proctorNote: string | null;
+  /** Phase 12s. Open the sitting in its own window rather than this tab. */
+  readonly sitInPopup?: boolean;
 }) {
   const [passed, setPassed] = useState<Record<CheckId, boolean>>({
     fullscreen: false,
@@ -233,7 +243,37 @@ export function ReadinessCheck({
           works before this component hydrates, which on the worst connection
           in the hostel is the moment it matters.
         */}
-        <form method="post" action={`/api/exam/start/${slug}`}>
+        <form
+          method="post"
+          action={`/api/exam/start/${slug}`}
+          /**
+           * Phase 12s: when the paper asks for it, the sitting opens in a
+           * window of its own.
+           *
+           * As an enhancement ON the form rather than instead of it, because
+           * the comment above is the point: this form works before the
+           * component hydrates, and that is the moment it matters. So the
+           * window is opened inside the click — synchronously, which is the
+           * only time `window.open` is allowed — and the form is retargeted
+           * at it. If the browser blocked it, or if this handler never ran,
+           * `target` stays empty and the sitting opens in the tab exactly as
+           * it always did. A candidate shut out by their own popup blocker
+           * would be a far worse failure than a tab.
+           */
+          onSubmit={(event) => {
+            if (!sitInPopup) return;
+            const width = Math.max(800, window.screen.availWidth);
+            const height = Math.max(600, window.screen.availHeight);
+            const opened = window.open(
+              "",
+              EXAM_WINDOW_NAME,
+              `popup=yes,width=${width},height=${height},left=0,top=0`,
+            );
+            if (!opened) return;
+            event.currentTarget.target = EXAM_WINDOW_NAME;
+            opened.focus();
+          }}
+        >
           <button
             type="submit"
             disabled={!ready}

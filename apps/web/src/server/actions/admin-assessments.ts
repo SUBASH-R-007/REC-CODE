@@ -102,6 +102,15 @@ const createSchema = z
     maxFocusWarnings: intFromInput({ ...ASSESSMENT_LIMITS.maxFocusWarnings, label: "The focus warning limit" }),
     onLimit: z.enum(FOCUS_LIMIT_ACTIONS),
     strictMode: z.boolean(),
+    /**
+     * Phase 12s. Refuse a paste into the editor that was not copied inside
+     * the sitting. Off by default, and a watching knob rather than a term
+     * of the result, so it sits with strictMode rather than in the frozen
+     * tuple.
+     */
+    refuseOutsidePaste: z.boolean().optional().default(false),
+    /** Phase 12s. Open the sitting in its own window; falls back to a tab. */
+    sitInPopup: z.boolean().optional().default(false),
     audienceBatchYear: intFromInput({ min: 2000, max: 2100, label: "The batch" }).nullable().optional(),
     audienceDepartmentCode: z.string().trim().max(16).nullable().optional(),
     audienceSection: z.string().trim().max(4).nullable().optional(),
@@ -159,6 +168,8 @@ export async function createAssessment(
         maxFocusWarnings: parsed.maxFocusWarnings,
         onLimit: parsed.onLimit,
         strictMode: parsed.strictMode,
+        refuseOutsidePaste: parsed.refuseOutsidePaste,
+        sitInPopup: parsed.sitInPopup,
         audienceBatchYear: parsed.audienceBatchYear ?? null,
         audienceDepartmentCode: parsed.audienceDepartmentCode || null,
         audienceSection: parsed.audienceSection || null,

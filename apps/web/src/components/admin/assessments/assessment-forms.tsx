@@ -66,6 +66,8 @@ export function CreateAssessmentForm() {
             maxFocusWarnings: String(data.get("maxFocusWarnings") ?? "3"),
             onLimit: String(data.get("onLimit") ?? "AUTOSUBMIT") as (typeof FOCUS_LIMIT_ACTIONS)[number],
             strictMode: data.get("strictMode") === "on",
+            refuseOutsidePaste: data.get("refuseOutsidePaste") === "on",
+            sitInPopup: data.get("sitInPopup") === "on",
             audienceBatchYear: String(data.get("audienceBatchYear") ?? "") || null,
             audienceDepartmentCode: String(data.get("audienceDepartmentCode") ?? "") || null,
             audienceSection: String(data.get("audienceSection") ?? "") || null,
@@ -188,6 +190,35 @@ export function CreateAssessmentForm() {
       <label className="flex items-start gap-2 text-sm text-text">
         <input type="checkbox" name="strictMode" className="mt-1" />
         <span>Strict mode (full screen required throughout)</span>
+      </label>
+
+      <label className="flex items-start gap-2 text-sm text-text">
+        <input type="checkbox" name="sitInPopup" className="mt-1" />
+        <span>
+          Open the sitting in its own window
+          <span className="mt-0.5 block text-xs text-text-secondary">
+            A window sized to the screen, with no address bar and no tabs. If the browser blocks it the sitting opens
+            in the tab as usual, and Esc still leaves full screen — it is one fewer thing to wander into, not a lock.
+          </span>
+        </span>
+      </label>
+
+      {/**
+        * Phase 12s. Off by default on purpose: the engine's standing
+        * decision is that paste is instrumented rather than blocked. The
+        * sentence says what it does and what it does not, because an
+        * invigilator choosing it should not read it as a wall.
+        */}
+      <label className="flex items-start gap-2 text-sm text-text">
+        <input type="checkbox" name="refuseOutsidePaste" className="mt-1" />
+        <span>
+          Accept only text copied inside the sitting
+          <span className="mt-0.5 block text-xs text-text-secondary">
+            A paste into the editor is refused unless the candidate copied that text within this sitting, and the
+            refusal is still recorded. It does not stop a tool that types the clipboard as keystrokes, and copy, cut
+            and the right-click menu are left alone.
+          </span>
+        </span>
       </label>
 
       <Button type="submit" loading={pending}>

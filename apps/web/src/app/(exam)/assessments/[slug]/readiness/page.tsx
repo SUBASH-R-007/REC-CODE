@@ -1,3 +1,4 @@
+import { paperQuestionCount } from "@recx/shared";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
@@ -45,8 +46,9 @@ export default async function ReadinessPage({
       instructions: true,
       durationSec: true,
       proctorMode: true,
+      sitInPopup: true,
       affectsPlacementEligibility: true,
-      _count: { select: { problems: true } },
+      _count: { select: { problems: true, mcqs: true } },
     },
   });
   if (!assessment) notFound();
@@ -105,8 +107,18 @@ export default async function ReadinessPage({
       <ReadinessCheck
         slug={slug}
         durationMinutes={minutes}
-        questionCount={assessment._count.problems}
+        /**
+         * Both kinds (Phase 12s). Counting only the coding questions told a
+         * candidate with multiple-choice questions on their paper the wrong
+         * number before they started — the fourth place that mistake was
+         * made, which is why the rule is `paperQuestionCount` now.
+         */
+        questionCount={paperQuestionCount({
+          problems: { length: assessment._count.problems },
+          mcqs: { length: assessment._count.mcqs },
+        })}
         proctorNote={proctorNote}
+        sitInPopup={assessment.sitInPopup}
       />
     </div>
   );
