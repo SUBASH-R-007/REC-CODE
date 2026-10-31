@@ -46,7 +46,14 @@ export interface ProblemPackage {
   /** INTERACTIVE problems (Phase 12l): the interactor's source. */
   interactor: string | null;
   tests: PackageTest[];
-  solutions: { file: string; language: LanguageKey; expected: ReferenceExpectedVerdict; label: string; source: string }[];
+  /**
+   * A solution's language is a string rather than a `LanguageKey`: a SQL
+   * problem's model solution is its reference QUERY (`sql17`) and an
+   * output-only problem's is its model ANSWER (`answer1`), and neither is
+   * a toolchain. The import runner stores it on `ReferenceSolution`, whose
+   * column is a string for the same reason.
+   */
+  solutions: { file: string; language: string; expected: ReferenceExpectedVerdict; label: string; source: string }[];
   starters: { language: LanguageKey; code: string }[];
 }
 

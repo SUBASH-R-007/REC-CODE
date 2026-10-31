@@ -120,6 +120,7 @@ export function CreateProblemForm({
             <option value="STDIN">STDIN — read input, print output</option>
             <option value="FUNCTION">FUNCTION — implement a method</option>
             <option value="SQL">SQL — one query against a dataset</option>
+            <option value="OUTPUT_ONLY">OUTPUT_ONLY — submit the answer, not a program</option>
           </Select>
         </Field>
         <Field

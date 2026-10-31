@@ -290,6 +290,23 @@ output-only problem has exactly one case, and its data is the question.
 Both are the publish gate's rules and the spec builder's; no CHECK could
 hold either, because they span tables and blobs.
 
+**Authoring it (slice 2).** The gate's new rules are the two no CHECK
+could hold — exactly one case, and it is a sample — plus the model ANSWER,
+a reference solution in `answer1` whose validation proves the stored
+expected output and the comparator agree about the author's own answer.
+That is the mistake this kind of problem is prone to: a trailing newline,
+a rounded number, a different order. Two of the gate's usual rules are
+lifted here: the hidden test (a hidden case would be a question nobody can
+read) and the C++ model solution (the model is not a program).
+
+**Two gaps closed on the way.** The import package's `solutions[].language`
+was `LANGUAGE_KEYS`, so no package could ever have named a SQL problem's
+reference query — and the admin form's language list was the same, so
+neither reference could be added through the UI. Both now offer the two
+languages that are not toolchains, which is what makes a SQL problem and
+an output-only problem authorable the ordinary way rather than through a
+server action.
+
 **Found by the real-isolate run, before any student saw it:** the first
 spec builder forced ICPC scoring "because one case is one case". ICPC has
 no partial credit, so a checker that had just worked out 3 of 10 correct

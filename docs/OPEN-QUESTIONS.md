@@ -3591,3 +3591,26 @@ because one case is not a table of subtasks.
 **Still to come in this phase:** the authoring side (slice 2) and the
 student's answer box (slice 3). Until then an output-only version can be
 built only by hand, which is why nothing is published yet.
+
+## Authoring an output-only problem (Phase 12n, slice 2)
+
+**The model answer is the validation.** Every other kind of problem
+validates a model PROGRAM against its tests; here the reference solution
+IS the expected answer, so running it proves the stored output and the
+comparator agree. That is worth more than it sounds: the failure mode of
+an output-only problem is not a wrong algorithm, it is a trailing newline,
+a rounded number or a different ordering — and this is the only check that
+catches it before a student does.
+
+**Two rules lifted, for the same reason they exist.** A hidden test exists
+so a student cannot hard-code the samples; an output-only problem's answer
+IS the hard-coded sample, so a hidden case would be a question nobody can
+read. A C++ model solution exists so the time limit can be measured; this
+kind runs nothing.
+
+**And one found while here:** an output-only problem could not have been
+imported, and neither could a SQL problem, because the package's solution
+language enum was the toolchain list. The same was true of the admin
+form's language select, which is why Phase 12k's SQL problems were
+published through a server action rather than the UI. Both lists now carry
+`sql17` and `answer1`.

@@ -120,6 +120,23 @@ describe("one visible case, and nothing to run", () => {
     expect(action).toContain("ANSWER_REFUSALS.noRun");
   });
 
+  it("the publish gate asks for one visible case and the model answer", () => {
+    const content = readRepoFile("packages/shared/src/authoring/content.ts");
+    for (const code of ["ANSWER_ONE_CASE", "ANSWER_HIDDEN_CASE", "ANSWER_NO_EXPECTED", "ANSWER_NO_REFERENCE"]) {
+      expect(content, code).toContain(code);
+    }
+    // And lifts the two rules that do not apply to this kind.
+    expect(content).toMatch(/ioMode !== "OUTPUT_ONLY" && v\.tests\.every/);
+    expect(content).toMatch(/v\.ioMode !== "SQL" && v\.ioMode !== "OUTPUT_ONLY"/);
+  });
+
+  it("the model answer is a reference solution in the one language an answer is written in", () => {
+    const content = readRepoFile("packages/shared/src/authoring/content.ts");
+    expect(content).toContain('export const ANSWER_REFERENCE_LANGUAGE = "answer1"');
+    // Validation has to be able to see that language, or nothing publishes.
+    expect(readRepoFile("apps/web/src/lib/judge/validation.ts")).toContain("ANSWER_LANGUAGE_KEY");
+  });
+
   it("the sentences a student reads are defined once", () => {
     const shared = readRepoFile(SHARED);
     expect(shared).toContain("export const ANSWER_NOTICES");

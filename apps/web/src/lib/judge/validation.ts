@@ -1,6 +1,8 @@
 import "server-only";
 import type { DbTx, Prisma } from "@recx/db";
 import {
+  ANSWER_LANGUAGE_KEY,
+  answerRuntimeSchema,
   deriveTimeLimitMs,
   isLanguageKey,
   SQL_LANGUAGE_KEY,
@@ -373,6 +375,23 @@ async function enabledConfigs(client: Client): Promise<Map<string, { id: string;
       const sql = sqlRuntimeSchema.safeParse(row.runtime);
       if (!sql.success) {
         console.error(`[validation] LanguageConfig ${row.id} (${row.key}) has an invalid SQL runtime; skipped`);
+        continue;
+      }
+      out.set(row.key, { id: row.id, language: { key: row.key, fallbackMultiplier: 1, fallbackExtraMs: 0 } });
+      continue;
+    }
+    /**
+     * Phase 12n: the same, for the language that is not a language. An
+     * output-only version's model solution is its model ANSWER, and
+     * validating it is what proves the stored expected output and the
+     * comparator agree — so this row has to be here or an output-only
+     * problem could never be validated or published. The fallbacks are
+     * zero because nothing runs: no program, no time limit to derive.
+     */
+    if (row.key === ANSWER_LANGUAGE_KEY) {
+      const answer = answerRuntimeSchema.safeParse(row.runtime);
+      if (!answer.success) {
+        console.error(`[validation] LanguageConfig ${row.id} (${row.key}) has an invalid answer runtime; skipped`);
         continue;
       }
       out.set(row.key, { id: row.id, language: { key: row.key, fallbackMultiplier: 1, fallbackExtraMs: 0 } });

@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import {
+  ANSWER_LANGUAGE_KEY,
   DEBUG_BUDGET,
   IO_MODES,
   LANGUAGE_KEYS,
@@ -99,6 +100,18 @@ export const createProblemSchema = z.object({
         code: z.ZodIssueCode.custom,
         path: ["compareMode"],
         message: "An interactive problem reads and writes on standard input and output. Choose standard input.",
+      });
+    }
+    /**
+     * Phase 12n. An answer is compared as text, so every comparison but a
+     * conversation is available — and the database refuses that pairing
+     * too (ProblemVersion_output_only_fields).
+     */
+    if (v.ioMode === "OUTPUT_ONLY" && v.compareMode === "INTERACTIVE") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["compareMode"],
+        message: "An output-only problem compares the answer you submit; a conversation is not a comparison for one.",
       });
     }
   });
@@ -261,7 +274,7 @@ export const referenceSolutionSchema = z.object({
    * reference solution — the label, the expected verdict, the optimistic
    * concurrency — is the same.
    */
-  language: z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY] as [string, ...string[]], {
+  language: z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY, ANSWER_LANGUAGE_KEY] as [string, ...string[]], {
     errorMap: () => ({ message: "Choose a language." }),
   }),
   label: z.string().trim().min(1, "Give the solution a label (e.g. Model, Brute force).").max(80),

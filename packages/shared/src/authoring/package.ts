@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { ANSWER_LANGUAGE_KEY } from "../answer-problem";
 import { DEBUG_BUDGET } from "../debug-problem";
+import { SQL_LANGUAGE_KEY } from "../sql-language";
 import { deepFreeze } from "../freeze";
 import { FUNCTION_COMPARATORS, functionSignatureSchema } from "../harness/signature";
 import { LANGUAGE_KEYS } from "../languages";
@@ -120,7 +122,14 @@ const subtaskSchema = z
 const solutionSchema = z
   .object({
     file: packagePathSchema.refine((p) => p.startsWith(`${PACKAGE_FILES.solutionsDir}/`), "Solutions live under solutions/."),
-    language: z.enum(LANGUAGE_KEYS),
+    /**
+     * A toolchain, or one of the two languages that are not toolchains: a
+     * SQL problem's model solution is its reference QUERY (Phase 12k) and
+     * an output-only problem's is its model ANSWER (Phase 12n). The gate
+     * asks for each by name, so a package that could not name them could
+     * not describe either kind of problem.
+     */
+    language: z.enum([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY, ANSWER_LANGUAGE_KEY] as [string, ...string[]]),
     expected: z.enum(REFERENCE_EXPECTED_VERDICTS),
     label: z.string().trim().min(1).max(80),
   })
@@ -223,6 +232,20 @@ export const problemPackageMetaSchema = z
      * language at all, and the publish gate would refuse it later — better
      * here, naming the file that is missing.
      */
+    /**
+     * Phase 12n. An output-only package describes one case and names its
+     * model ANSWER; the publish gate says the rest (one case, visible,
+     * with expected output stored). What is worth refusing HERE is the
+     * pairing, because the whole package is built around it.
+     */
+    if (meta.ioMode === "OUTPUT_ONLY") {
+      if (interactive) issue(["compareMode"], "An output-only problem compares the answer; a conversation is not a comparison for one.");
+      if (meta.samples.length !== 1) issue(["samples"], "An output-only problem has exactly one case, and it is the sample.");
+      if (Object.keys(meta.starters).length > 0) issue(["starters"], "An output-only problem has no starter: the editor opens empty.");
+      if (!meta.solutions.some((s) => s.language === ANSWER_LANGUAGE_KEY && s.expected === "AC")) {
+        issue(["solutions"], `An output-only problem needs its model answer: a solution in ${ANSWER_LANGUAGE_KEY} expected AC.`);
+      }
+    }
     if (meta.maxEditedLines !== null) {
       if (Object.keys(meta.starters).length === 0) {
         issue(["starters"], "A debugging problem (maxEditedLines) needs the broken program under starters/.");

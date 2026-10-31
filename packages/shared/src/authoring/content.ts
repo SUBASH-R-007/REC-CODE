@@ -47,6 +47,14 @@ export const CPP_MODEL_LANGUAGES: readonly string[] = ["cpp17", "cpp20"];
  */
 export const SQL_REFERENCE_LANGUAGE = "sql17";
 
+/**
+ * An output-only version's model solution is its model ANSWER (Phase 12n),
+ * in the one language an answer is written in. An error rather than a
+ * warning, like the SQL reference query: validating it is what proves the
+ * stored expected output and the comparator agree.
+ */
+export const ANSWER_REFERENCE_LANGUAGE = "answer1";
+
 /** Memory floor an author may set (16 MiB, the judge's own clamp). */
 export const MIN_MEMORY_LIMIT_KB = 16 * 1024;
 
@@ -71,6 +79,12 @@ export type ContentIssueCode =
   | "INTERACTIVE_NO_INTERACTOR"
   | "INTERACTIVE_ARTEFACT"
   | "INTERACTIVE_EXPECTED_OUTPUT"
+  | "ANSWER_ONE_CASE"
+  | "ANSWER_HIDDEN_CASE"
+  | "ANSWER_NO_EXPECTED"
+  | "ANSWER_ARTEFACT"
+  | "ANSWER_NO_REFERENCE"
+  | "ANSWER_FOREIGN_REFERENCE"
   | "DEBUG_BUDGET_RANGE"
   | "DEBUG_NO_STARTER"
   | "DEBUG_NOT_APPLICABLE"
@@ -248,6 +262,79 @@ function interactiveIssues(v: VersionContentInput): Array<{ code: ContentIssueCo
 }
 
 /**
+ * An output-only version's own rules (Phase 12n).
+ *
+ * The two that matter most are the two no CHECK could hold, because they
+ * span tables and blobs: there is exactly ONE case, and it is a SAMPLE.
+ * One, because a submission carries one answer and a second case would be
+ * a question the student could not answer separately; visible, because its
+ * data IS the question and nobody can answer data they cannot see.
+ *
+ * The model answer is an ordinary reference solution in the one language
+ * an answer is written in, and validating it is a real check rather than a
+ * formality: it proves the stored expected output and the comparator agree
+ * about the author's own answer, which is exactly what a trailing newline
+ * or a rounded number gets wrong.
+ */
+function answerIssues(v: VersionContentInput): Array<{ code: ContentIssueCode; message: string }> {
+  const out: Array<{ code: ContentIssueCode; message: string }> = [];
+  if (v.compareMode === "INTERACTIVE" || v.compareMode === "ROWS") {
+    out.push({
+      code: "ANSWER_ARTEFACT",
+      message: `An answer is compared as text; choose ${AUTHORABLE_COMPARE_MODES.filter((m) => m !== "INTERACTIVE").join(", ")}.`,
+    });
+  }
+  if (v.functionSignature !== null && v.functionSignature !== undefined) {
+    out.push({ code: "ANSWER_ARTEFACT", message: "An output-only problem has no function signature; remove it." });
+  }
+  if (v.interactorSha256) {
+    out.push({ code: "ANSWER_ARTEFACT", message: "An output-only problem has no interactor: there is no conversation to hold." });
+  }
+  if (v.maxEditedLines !== null && v.maxEditedLines !== undefined) {
+    out.push({
+      code: "ANSWER_ARTEFACT",
+      message: "An output-only problem has no program to repair, so an edit budget would measure nothing. Remove it.",
+    });
+  }
+  const references = v.references.filter((r) => r.language === ANSWER_REFERENCE_LANGUAGE);
+  if (!references.some((r) => r.expectedVerdict === "AC")) {
+    out.push({
+      code: "ANSWER_NO_REFERENCE",
+      message:
+        "An output-only problem needs the model answer as a reference solution (expected AC) in the answer language: validating it is what proves the expected output and the comparator agree.",
+    });
+  }
+  const foreign = v.references.filter((r) => r.language !== ANSWER_REFERENCE_LANGUAGE).map((r) => r.language);
+  if (foreign.length > 0) {
+    out.push({
+      code: "ANSWER_FOREIGN_REFERENCE",
+      message: `An output-only problem's solutions are answers, not programs; remove the ${[...new Set(foreign)].join(", ")} one${foreign.length === 1 ? "" : "s"}.`,
+    });
+  }
+  if (v.tests.length !== 1) {
+    out.push({
+      code: "ANSWER_ONE_CASE",
+      message: `An output-only problem has exactly one case — one instance, one answer — and this one has ${v.tests.length}.`,
+    });
+    return out;
+  }
+  const [only] = v.tests as [VersionContentTest];
+  if (!only.isSample) {
+    out.push({
+      code: "ANSWER_HIDDEN_CASE",
+      message: "The case must be a sample: its data is the question, and nobody can answer data they cannot see.",
+    });
+  }
+  if (only.outputBytes === 0) {
+    out.push({
+      code: "ANSWER_NO_EXPECTED",
+      message: "The case has no expected answer stored, so there is nothing to compare a submission with.",
+    });
+  }
+  return out;
+}
+
+/**
  * A debugging version's own rules (Phase 12m).
  *
  * The first two the database says as well (the CHECKs of migration
@@ -314,6 +401,7 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   const warning = (code: ContentIssueCode, message: string) => issues.push({ code, severity: "warning", message });
 
   if (v.ioMode === "SQL") for (const issue of sqlIssues(v)) error(issue.code, issue.message);
+  else if (v.ioMode === "OUTPUT_ONLY") for (const issue of answerIssues(v)) error(issue.code, issue.message);
   else for (const message of comparatorIssues(v)) error("COMPARATOR", message);
   if (v.compareMode === "INTERACTIVE" && v.ioMode === "STDIN") {
     for (const issue of interactiveIssues(v)) error(issue.code, issue.message);
@@ -351,7 +439,14 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
 
   const samples = v.tests.filter((t) => t.isSample);
   if (samples.length === 0) error("NO_SAMPLE", "At least one sample test is needed (students see samples in the statement).");
-  if (v.tests.every((t) => t.isSample)) error("NO_HIDDEN_TEST", "At least one hidden (non-sample) test is needed.");
+  /**
+   * Phase 12n lifts the hidden-test rule for an output-only problem: its
+   * one case is the question, and a hidden second case would be a question
+   * nobody could read.
+   */
+  if (v.ioMode !== "OUTPUT_ONLY" && v.tests.every((t) => t.isSample)) {
+    error("NO_HIDDEN_TEST", "At least one hidden (non-sample) test is needed.");
+  }
   for (const t of samples) {
     if (!t.sampleInlineable) {
       error(
@@ -369,7 +464,7 @@ export function versionContentIssues(v: VersionContentInput): ContentIssue[] {
   }
   for (const message of subtaskIssues(v)) error("SUBTASK_TABLE", message);
 
-  if (v.ioMode !== "SQL") {
+  if (v.ioMode !== "SQL" && v.ioMode !== "OUTPUT_ONLY") {
     const cppModel = v.references.some((r) => r.expectedVerdict === "AC" && CPP_MODEL_LANGUAGES.includes(r.language));
     if (!cppModel) warning("NO_CPP_MODEL", "There is no C++ (cpp17 / cpp20) model solution yet; validation needs one before publishing.");
   }

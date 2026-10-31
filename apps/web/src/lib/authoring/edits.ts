@@ -90,7 +90,8 @@ export async function updateDraftJudging(
    * rather than leaving a number nothing can measure (the database says so
    * too: ProblemVersion_debug_budget_kind).
    */
-  const budget = sql || interactive ? null : (input.maxEditedLines ?? null);
+  const answerOnly = input.ioMode === "OUTPUT_ONLY";
+  const budget = sql || interactive || answerOnly ? null : (input.maxEditedLines ?? null);
   return retryingTransaction(async (tx) => {
     const head = await touchDraft(tx, { ...input, kind: "judging" });
     await tx.problemVersion.update({
