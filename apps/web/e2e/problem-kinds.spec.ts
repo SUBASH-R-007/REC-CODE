@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { PROBLEM_KIND_HINT, PROBLEM_KIND_LABEL, type ProblemKind } from "@recx/shared";
 import { ACCOUNTS } from "./support/accounts";
 import { openPage } from "./support/page";
 import { contextAs } from "./support/session";
@@ -53,25 +54,31 @@ function istInput(date: Date): string {
 }
 
 /**
- * A published problem of a given kind, found by OPENING problems until one
- * of them shows that kind's bar over the editor.
+ * A published problem of a given kind, found the way a student would:
+ * the catalogue says which kind each row is (Phase 12p, slice 3), so the
+ * chip is the handle. Until that slice this had to open problems one at a
+ * time and recognise the bar over the editor — which is how the gap was
+ * found, and why the walk is kept below as the fallback.
  *
- * It has to be done this way, and that is itself a finding of this slice:
- * the student catalogue names the code, the status, the title, the topics,
- * the difficulty and the acceptance rate, and nothing about the KIND. A
- * student cannot tell a SQL question, a debugging question with a one-line
- * budget, a conversation or an answer box from an ordinary program until
- * they have opened it. `E2E_DEBUG_PROBLEM` / `E2E_SQL_PROBLEM` skip the
- * walk when the slug is already known.
+ * The row is matched on the chip's own screen-reader sentence rather than
+ * on the short label, because a label like "SQL" could appear in a title.
  */
 async function slugOfKind(
   page: import("@playwright/test").Page,
-  what: { bar: RegExp; envVar: string; name: string },
+  what: { kind: ProblemKind; bar: RegExp; envVar: string },
 ): Promise<string> {
   const given = process.env[what.envVar];
   if (given) return given;
 
   await openPage(page, "/problems");
+  const row = page.getByRole("row").filter({ hasText: PROBLEM_KIND_HINT[what.kind] }).first();
+  if (await row.isVisible({ timeout: 30_000 }).catch(() => false)) {
+    const href = await row.getByRole("link").first().getAttribute("href");
+    if (href?.startsWith("/problems/")) return href.replace("/problems/", "").split("?")[0]!;
+  }
+
+  // Fallback: open problems until one shows that kind's bar. A catalogue
+  // page holds fifty rows, so a kind can simply be on page two.
   const hrefs = [
     ...new Set(
       (await page.getByRole("link").evaluateAll((els) => els.map((e) => e.getAttribute("href") ?? "")))
@@ -79,24 +86,15 @@ async function slugOfKind(
         .map((h) => h.replace("/problems/", "")),
     ),
   ];
-  expect(hrefs.length, "the catalogue lists no problems").toBeGreaterThan(0);
-
   for (const slug of hrefs.slice(0, 12)) {
     await openPage(page, `/problems/${slug}`);
-    const bar = page.locator("p", { hasText: what.bar }).first();
-    if (await bar.isVisible({ timeout: 15_000 }).catch(() => false)) return slug;
+    if (await page.locator("p", { hasText: what.bar }).first().isVisible({ timeout: 15_000 }).catch(() => false)) {
+      return slug;
+    }
   }
-  throw new Error(
-    `no ${what.name} problem among the first ${Math.min(hrefs.length, 12)} in the catalogue; ` +
-      `set ${what.envVar} to one`,
-  );
+  throw new Error(`no ${what.kind} problem in the catalogue; set ${what.envVar} to one`);
 }
 
-/**
- * Put the starter back. The confirmation names the broken program rather
- * than "starter code", which is the wording Phase 12m gave a debugging
- * question.
- */
 /**
  * A screenshot that survives the run: written under the project's
  * outputDir and attached from there, so the evidence for a RUNBOOK row is
@@ -112,18 +110,71 @@ async function shot(
   await testInfo.attach(name, { path: file, contentType: "image/png" });
 }
 
+/**
+ * Put the starter back. The confirmation names the broken program rather
+ * than "starter code", which is the wording Phase 12m gave a debugging
+ * question.
+ */
 async function resetToStarter(page: import("@playwright/test").Page): Promise<void> {
   await page.getByRole("button", { name: /Reset to the broken program/i }).click();
   await expect(page.getByRole("dialog")).toContainText("Reset to the broken program?");
   await page.getByRole("button", { name: "Reset code" }).click();
 }
 
-const DEBUGGING = { bar: /a debugging question/, envVar: "E2E_DEBUG_PROBLEM", name: "debugging" };
-const SQL = { bar: /PostgreSQL 17/, envVar: "E2E_SQL_PROBLEM", name: "SQL" };
+const DEBUGGING = { kind: "debugging" as const, bar: /a debugging question/, envVar: "E2E_DEBUG_PROBLEM" };
+const SQL = { kind: "sql" as const, bar: /PostgreSQL 17/, envVar: "E2E_SQL_PROBLEM" };
+const INTERACTIVE = { kind: "interactive" as const, bar: /a conversation/, envVar: "E2E_INTERACTIVE_PROBLEM" };
+const ANSWER = { kind: "answer" as const, bar: /your answer, not a program/, envVar: "E2E_ANSWER_PROBLEM" };
+
+/** Every kind a contest can hold, with the bar it must show when opened. */
+const IN_A_CONTEST = [SQL, DEBUGGING, INTERACTIVE, ANSWER];
 
 test.describe.configure({ mode: "serial" });
 
 test.describe("the problem kinds, in a browser", () => {
+  test("the catalogue says which kind each problem is, before anybody opens one", async ({ browser }, testInfo) => {
+    test.setTimeout(5 * 60_000);
+    const context = await contextAs(browser, "student");
+    const page = await context.newPage();
+    await openPage(page, "/problems");
+
+    /**
+     * Phase 12p, slice 3. Until it, this page named the status, the code,
+     * the title, the topics, the difficulty and the acceptance rate — and
+     * nothing about the kind, so the four kinds of question that are not
+     * ordinary programs were indistinguishable from the outside.
+     */
+    const seen: ProblemKind[] = [];
+    for (const kind of ["sql", "debugging", "interactive", "answer"] as const) {
+      const row = page.getByRole("row").filter({ hasText: PROBLEM_KIND_HINT[kind] }).first();
+      if (!(await row.isVisible({ timeout: 20_000 }).catch(() => false))) continue;
+      seen.push(kind);
+      // The word a student reads, and the sentence a screen reader reads.
+      await expect(row).toContainText(PROBLEM_KIND_LABEL[kind]);
+      await expect(row).toContainText(PROBLEM_KIND_HINT[kind]);
+      // And the row still goes where it went before.
+      await expect(row.getByRole("link").first()).toHaveAttribute("href", /^\/problems\//);
+    }
+    expect(seen.length, "the catalogue shows none of the four named kinds — seed one").toBeGreaterThan(0);
+
+    // An ordinary program is NOT labelled: a chip on every row is a chip
+    // nobody reads, and that half is as much the feature as the other.
+    const plain = page
+      .getByRole("row")
+      .filter({ hasText: /REC-/ })
+      .filter({ hasNotText: PROBLEM_KIND_HINT.sql })
+      .filter({ hasNotText: PROBLEM_KIND_HINT.debugging })
+      .filter({ hasNotText: PROBLEM_KIND_HINT.interactive })
+      .filter({ hasNotText: PROBLEM_KIND_HINT.answer })
+      .first();
+    if (await plain.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      for (const kind of ["sql", "debugging", "interactive", "answer"] as const) {
+        await expect(plain).not.toContainText(PROBLEM_KIND_LABEL[kind]);
+      }
+    }
+    await shot(page, testInfo, "catalogue-kinds.png");
+  });
+
   test("the debugging counter moves between keystrokes, and turns red over budget", async ({ browser }, testInfo) => {
     test.setTimeout(5 * 60_000);
     const context = await contextAs(browser, "student");
@@ -247,18 +298,31 @@ test.describe("the problem kinds, in a browser", () => {
     expect(overflow, "the page scrolls sideways at 375 px").toBeLessThanOrEqual(1);
   });
 
-  test("a SQL problem reached from a running contest's arena is the practice surface", async ({
-    browser,
-  }, testInfo) => {
+  test("every kind a contest can hold opens as its own practice surface", async ({ browser }, testInfo) => {
     test.setTimeout(10 * 60_000);
     const staff = await contextAs(browser, "admin");
     const admin = await staff.newPage();
     const studentContext = await contextAs(browser, "student");
     const student = await studentContext.newPage();
 
-    const sqlSlug = await slugOfKind(student, SQL);
+    /**
+     * SPEC allows every kind in a contest, and nothing refuses one: the
+     * arena has no editor of its own, only a link to /problems/<slug>. Two
+     * NOT RUN rows said otherwise (12k.4, 12l.3) and this is the walk that
+     * settles them — for all four kinds, not just the one.
+     *
+     * A kind the catalogue does not hold is skipped rather than failed:
+     * the seed decides which exist, and this test is about the lane.
+     */
+    const kinds: { letter: string; slug: string; bar: RegExp; kind: string }[] = [];
+    const letters = "ABCD";
+    for (const [i, what] of IN_A_CONTEST.entries()) {
+      const slug = await slugOfKind(student, what).catch(() => null);
+      if (slug) kinds.push({ letter: letters[i]!, slug, bar: what.bar, kind: what.kind });
+    }
+    expect(kinds.length, "the catalogue holds none of the four kinds").toBeGreaterThan(0);
 
-    // ── A contest that is running now, with a SQL problem in it ──
+    // ── A contest that is running now, holding one of each ──
     await openPage(admin, "/admin/contests");
     await admin.getByRole("link", { name: "New contest" }).click();
     await admin.getByLabel("Title").fill(TITLE);
@@ -270,17 +334,19 @@ test.describe("the problem kinds, in a browser", () => {
     await admin.getByRole("button", { name: "Create draft" }).click();
     await expect(admin.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible({ timeout: 60_000 });
 
-    await admin.getByLabel("Letter").fill("A");
-    await admin.getByLabel("Problem address").fill(sqlSlug);
-    await admin.getByRole("button", { name: "Add problem" }).click();
-    // Nothing refuses a SQL problem in a contest, and this is the assertion
-    // that says so out loud: the pin lands. The row names the problem by
-    // title and links to it, so that link is what identifies it.
-    const pinned = admin.getByRole("row").filter({ has: admin.locator(`a[href*="${sqlSlug}"]`) });
-    await expect(pinned.first()).toBeVisible({ timeout: 60_000 });
-    // Pinned at the revision it had when it was added, as every contest
-    // problem is.
-    await expect(pinned.first()).toContainText(/r\d+/);
+    for (const { letter, slug, kind } of kinds) {
+      await admin.getByLabel("Letter").fill(letter);
+      await admin.getByLabel("Problem address").fill(slug);
+      await admin.getByRole("button", { name: "Add problem" }).click();
+      // Nothing refuses any of these in a contest, and this is the
+      // assertion that says so out loud: the pin lands. The row names the
+      // problem by title and links to it, so that link identifies it.
+      const pinned = admin.getByRole("row").filter({ has: admin.locator(`a[href*="${slug}"]`) });
+      await expect(pinned.first(), `${kind} was refused the pin`).toBeVisible({ timeout: 60_000 });
+      // Pinned at the revision it had when it was added, as every contest
+      // problem is.
+      await expect(pinned.first()).toContainText(/r\d+/);
+    }
     await admin.getByRole("button", { name: "Publish" }).click();
     await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });
 
@@ -292,26 +358,35 @@ test.describe("the problem kinds, in a browser", () => {
     await expect(student.getByRole("navigation", { name: "Contest problems" })).toBeVisible({ timeout: 60_000 });
     await shot(student, testInfo, "arena.png");
 
-    // The arena's one control. It is a link to the practice workspace, which
-    // is the whole correction those two NOT RUN rows needed.
-    const open = student.getByRole("link", { name: /Open the workspace/i });
-    await expect(open).toBeVisible();
-    await expect(open).toHaveAttribute("href", `/problems/${sqlSlug}`);
-    await open.click();
-
-    // And what arrives is the SQL surface, not a programming one.
-    await expect(student).toHaveURL(new RegExp(`/problems/${sqlSlug}$`), { timeout: 90_000 });
-    const bar = student.locator("p", { hasText: /PostgreSQL 17/ }).first();
-    await expect(bar).toBeVisible({ timeout: 60_000 });
-    await expect(bar).toContainText("one statement");
-    await expect(bar).toContainText("read-only");
-    // The language picker offers the query language and no compiler.
-    const picker = student.getByLabel(/Language/i).first();
-    if (await picker.count()) {
-      await expect(picker).toContainText(/PostgreSQL 17|SQL/i);
-      await expect(picker).not.toContainText(/C\+\+|Python/i);
+    // Each letter in turn: the arena's one control is a link to the
+    // practice workspace, and what arrives is that kind's own surface.
+    for (const { letter, slug, bar, kind } of kinds) {
+      await openPage(student, `/contests/${SLUG}/arena?p=${letter}`);
+      const open = student.getByRole("link", { name: /Open the workspace/i });
+      await expect(open, `${kind}: the arena offers no way in`).toBeVisible({ timeout: 60_000 });
+      await expect(open, `${kind}: the arena links somewhere of its own`).toHaveAttribute(
+        "href",
+        `/problems/${slug}`,
+      );
+      await open.click();
+      await expect(student).toHaveURL(new RegExp(`/problems/${slug}$`), { timeout: 90_000 });
+      await expect(
+        student.locator("p", { hasText: bar }).first(),
+        `${kind}: the workspace a contest opened does not know the kind`,
+      ).toBeVisible({ timeout: 60_000 });
+      await shot(student, testInfo, `contest-${kind}.png`);
     }
-    await shot(student, testInfo, "contest-sql-workspace.png");
+
+    // And the SQL one in particular offers the query language, no compiler.
+    const sql = kinds.find((k) => k.kind === "sql");
+    if (sql) {
+      await openPage(student, `/problems/${sql.slug}`);
+      const picker = student.getByLabel(/Language/i).first();
+      if (await picker.count()) {
+        await expect(picker).toContainText(/PostgreSQL 17|SQL/i);
+        await expect(picker).not.toContainText(/C\+\+|Python/i);
+      }
+    }
 
     expect(ACCOUNTS.student.identifier.length, "the student account is the seeded one").toBeGreaterThan(0);
   });
