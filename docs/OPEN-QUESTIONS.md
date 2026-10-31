@@ -3795,3 +3795,37 @@ nothing hydrated - while the server-rendered HTML still looked correct and
 the plain textarea still took typing. A dead page and a broken feature look
 identical in a screenshot. Read the console before believing a live stage,
 and do not run the gate's build while a dev server is up.
+
+## A median over the dead (Phase 12p, slice 5)
+
+**The rule.** A judge node may serve ASSESSMENT and CONTEST only if its
+calibration score is within 10% of the fleet median. That is a good rule: a
+host that benchmarks far from its fleet will mis-scale time limits, and a
+mis-scaled time limit in an exam is a wrong verdict.
+
+**The bug.** The fleet was *every node whose row says ONLINE*. Nothing
+demotes that row when a node stops answering - the console only marks it
+"not heartbeating" - so a node that died last week still voted on the
+threshold. Found by trying to judge a contest on a workstation whose seed
+holds three nodes: the one real node was 35.5% from a median set by two
+that had never heartbeated at all, and lost both high-stakes lanes for it.
+
+**Why it matters beyond a workstation.** Picture a fleet of six, three of
+which fail at once. Their last scores stay in the median. The survivors are
+now measured against a fleet that no longer exists, and if the dead ones
+were faster or slower the living are declared outliers and barred from
+exams - during an incident, which is when the lanes are needed most.
+
+**The fix** is one condition in two places: the median is over nodes that
+are ONLINE *and* heartbeating, by the same `JUDGE_OFFLINE_AFTER_MS` the
+console uses to print "not heartbeating". A repository fence holds both
+halves, because the heartbeat and the console disagreeing about which fleet
+a node belongs to would be its own bug. A lone live node is then its own
+median, and cannot be an outlier - which is the right answer: there is
+nothing to compare it to.
+
+**What is still not proved.** Nothing has been submitted and judged inside
+a contest. The test for it is written and the node was booted and
+advertising all eleven languages; it is the quarantine that stopped the
+run, and the control for lifting one would not open on that machine. The
+row says so.

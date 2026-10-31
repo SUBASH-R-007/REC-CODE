@@ -136,8 +136,34 @@ describe("node health", () => {
       node({ calibrationScore: null }),
       node({ calibrationScore: 0 }),
     ];
-    expect(fleetCalibrationMedian(fleet)).toBe(100);
-    expect(fleetCalibrationMedian([])).toBeNull();
+    expect(fleetCalibrationMedian(fleet, now)).toBe(100);
+    expect(fleetCalibrationMedian([], now)).toBeNull();
+  });
+
+  it("leaves out ONLINE nodes that stopped heartbeating, however good their score looked", () => {
+    /**
+     * Phase 12p.5. Nothing demotes a node's row when it stops answering —
+     * the console just marks it "not heartbeating" — so without this the
+     * last score of a dead node keeps setting the threshold the live ones
+     * are measured against. Found on a workstation where two seeded nodes
+     * that had never heartbeated put the median 35.5 % away from the only
+     * running node and cost it ASSESSMENT and CONTEST.
+     */
+    const dead = new Date(now.getTime() - JUDGE_OFFLINE_AFTER_MS - 1);
+    const fleet = [
+      node({ calibrationScore: 100 }),
+      node({ calibrationScore: 400, lastHeartbeatAt: dead }),
+      node({ calibrationScore: 700, lastHeartbeatAt: null }),
+    ];
+    expect(fleetCalibrationMedian(fleet, now)).toBe(100);
+    // A lone live node is its own median, so it can never be an outlier.
+    expect(calibrationDeviation(100, fleetCalibrationMedian(fleet, now))).toBe(0);
+    // And a node that heartbeated a moment ago still counts.
+    const fresh = [
+      node({ calibrationScore: 100 }),
+      node({ calibrationScore: 400, lastHeartbeatAt: new Date(now.getTime() - 1_000) }),
+    ];
+    expect(fleetCalibrationMedian(fresh, now)).toBe(250);
   });
 
   it("deviation is signed and relative; > 10 % is an outlier", () => {

@@ -155,12 +155,30 @@ export interface NodeHealthInput {
 }
 
 /**
- * Median calibration score of the ONLINE nodes — the fleet median the
- * heartbeat uses for sensitive-lane eligibility (src/lib/judge/lanes.ts).
+ * Median calibration score of the nodes that are ONLINE *and still
+ * heartbeating* — the fleet median the heartbeat uses for sensitive-lane
+ * eligibility (src/lib/judge/lanes.ts).
+ *
+ * The heartbeat matters (Phase 12p.5). A node keeps `status = ONLINE`
+ * after it stops answering: nothing demotes a row, the console simply
+ * marks it "not heartbeating". Counting those scores lets dead nodes set
+ * the threshold that live ones are judged against — and the first time it
+ * was looked at, on a workstation whose seed holds three nodes and whose
+ * one real node was the only one running, the two that had never
+ * heartbeated put the median 35.5 % away and withheld ASSESSMENT and
+ * CONTEST from the only node that could serve them. The same shape in
+ * production is worse: half a fleet dying would bar the surviving half
+ * from exams, at exactly the wrong moment.
  */
-export function fleetCalibrationMedian(nodes: readonly NodeHealthInput[]): number | null {
+export function fleetCalibrationMedian(nodes: readonly NodeHealthInput[], now: Date): number | null {
   const scores = nodes
-    .filter((n) => n.status === "ONLINE" && n.calibrationScore !== null && n.calibrationScore > 0)
+    .filter(
+      (n) =>
+        n.status === "ONLINE" &&
+        !isHeartbeatStale(n.lastHeartbeatAt, now) &&
+        n.calibrationScore !== null &&
+        n.calibrationScore > 0,
+    )
     .map((n) => n.calibrationScore as number);
   return p50(scores);
 }

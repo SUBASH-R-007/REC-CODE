@@ -211,3 +211,24 @@ describe("judge isolation", () => {
     expect(importsMatching(files, isSpawnSpecifier).map(formatHit)).toEqual([]);
   });
 });
+describe("the fleet a node is measured against is the LIVE fleet (Phase 12p.5)", () => {
+  /**
+   * A judge node keeps `status = ONLINE` after it stops answering —
+   * nothing demotes the row, the console only marks it "not heartbeating".
+   * The calibration median decides whether a node may serve ASSESSMENT and
+   * CONTEST, so a median that counts dead nodes lets corpses bar the
+   * living from exams. Both places that compute it must exclude them.
+   */
+  it("the heartbeat's fleet query filters on the last heartbeat", () => {
+    const route = readRepoFile("apps/web/src/app/api/judge/heartbeat/route.ts");
+    const query = route.slice(route.indexOf("db.judgeNode.findMany"));
+    expect(query.slice(0, 400)).toContain("lastHeartbeatAt");
+    expect(query).toContain("JUDGE_OFFLINE_AFTER_MS");
+  });
+
+  it("the admin console's median uses the same rule, so the two agree", () => {
+    const metrics = readRepoFile("apps/web/src/lib/judge/metrics.ts");
+    const fn = metrics.slice(metrics.indexOf("export function fleetCalibrationMedian"));
+    expect(fn.slice(0, 500)).toContain("isHeartbeatStale");
+  });
+});

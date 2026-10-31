@@ -1,5 +1,10 @@
 import type { JudgeNodeStatus, Prisma } from "@recx/db";
-import { heartbeatRequestSchema, heartbeatResponseSchema, type HeartbeatRequest } from "@recx/shared";
+import {
+  JUDGE_OFFLINE_AFTER_MS,
+  heartbeatRequestSchema,
+  heartbeatResponseSchema,
+  type HeartbeatRequest,
+} from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import {
@@ -116,9 +121,23 @@ export async function POST(request: Request) {
      * host and a number from a database host measure different things, and
      * mixing them into one median would move the threshold every node is
      * judged against for no reason anybody could explain.
+     *
+     * And over nodes that are STILL HEARTBEATING (Phase 12p.5). A node
+     * keeps `status = ONLINE` after it stops answering — nothing demotes
+     * the row — so without this a dead node's last score keeps setting the
+     * threshold that live ones are measured against. It is not theoretical:
+     * on the workstation where this was found, two seeded nodes that had
+     * never heartbeated put the median 35.5 % away from the only running
+     * node and withheld ASSESSMENT and CONTEST from it.
      */
     const others = await db.judgeNode.findMany({
-      where: { status: "ONLINE", id: { not: node.id }, driver: hb.driver, calibrationScore: { not: null } },
+      where: {
+        status: "ONLINE",
+        id: { not: node.id },
+        driver: hb.driver,
+        calibrationScore: { not: null },
+        lastHeartbeatAt: { gt: new Date(now.getTime() - JUDGE_OFFLINE_AFTER_MS) },
+      },
       select: { calibrationScore: true },
     });
     const eligibility = sensitiveLaneEligibility({

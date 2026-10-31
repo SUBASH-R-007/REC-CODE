@@ -129,6 +129,61 @@ const ANSWER = { kind: "answer" as const, bar: /your answer, not a program/, env
 /** Every kind a contest can hold, with the bar it must show when opened. */
 const IN_A_CONTEST = [SQL, DEBUGGING, INTERACTIVE, ANSWER];
 
+/**
+ * A correct answer for each kind, for the judged run below.
+ *
+ * The debugging one is deliberately ONE line away from the broken program
+ * it is given — `i <= n` where the statement asks for the whole numbers
+ * BELOW n — because the budget is one line and a rewrite would be refused
+ * before it ever reached the judge.
+ */
+const SOLUTION: Readonly<Record<string, string>> = {
+  sql: "select id, name from students order by id;",
+  debugging: [
+    "#include <iostream>",
+    "",
+    "int main() {",
+    "    int n;",
+    "    std::cin >> n;",
+    "    int sum = 0;",
+    "    for (int i = 0; i < n; i++) sum += i;",
+    "    std::cout << sum << std::endl;",
+    "}",
+    "",
+  ].join("\n"),
+  // Binary search inside the 40 queries the statement allows, flushing
+  // every line, and stopping the moment the examiner says "correct".
+  interactive: [
+    "#include <iostream>",
+    "#include <string>",
+    "",
+    "int main() {",
+    "    long long lo = 1, hi = 1000000000;",
+    "    std::string reply;",
+    "    while (lo < hi) {",
+    "        long long mid = lo + (hi - lo) / 2;",
+    "        std::cout << mid << std::endl;",
+    "        if (!(std::cin >> reply)) return 0;",
+    "        if (reply == \"correct\") return 0;",
+    "        if (reply == \"lower\") hi = mid - 1; else lo = mid + 1;",
+    "    }",
+    "    std::cout << lo << std::endl;",
+    "    std::cin >> reply;",
+    "    return 0;",
+    "}",
+    "",
+  ].join("\n"),
+};
+
+/** Type a whole answer into the editor, whichever editor it is. */
+async function typeSolution(page: import("@playwright/test").Page, source: string): Promise<void> {
+  const editor = page.locator("[data-editor-root]").first();
+  await expect(editor).toBeVisible({ timeout: 60_000 });
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.insertText(source);
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("the problem kinds, in a browser", () => {
@@ -389,5 +444,133 @@ test.describe("the problem kinds, in a browser", () => {
     }
 
     expect(ACCOUNTS.student.identifier.length, "the student account is the seeded one").toBeGreaterThan(0);
+  });
+  test("a contest judges every kind, and the standings move", async ({ browser }, testInfo) => {
+    test.skip(!process.env.E2E_JUDGE, "needs a judge node attached to the stack: E2E_JUDGE=1");
+    test.setTimeout(30 * 60_000);
+
+    /**
+     * The half slice 4 could not settle. It proved the LANE — every kind
+     * pins into a contest and opens with its own surface — but nothing was
+     * ever submitted there, so no verdict, no score and no standings had
+     * been exercised with these kinds.
+     *
+     * Here each one is answered correctly inside a running contest and
+     * judged by a real node.
+     */
+    const staff = await contextAs(browser, "admin");
+    const admin = await staff.newPage();
+    const studentContext = await contextAs(browser, "journey");
+    const student = await studentContext.newPage();
+
+    const slug = `${SLUG}-judged`;
+    const title = `${TITLE} judged`;
+    const kinds: { letter: string; slug: string; kind: string }[] = [];
+    for (const [i, what] of IN_A_CONTEST.entries()) {
+      const found = await slugOfKind(student, what).catch(() => null);
+      if (found) kinds.push({ letter: "ABCD"[i]!, slug: found, kind: what.kind });
+    }
+    expect(kinds.length, "no kinds to judge").toBeGreaterThan(0);
+
+    /**
+     * The node may be quarantined — a development host fails nine kernel
+     * hardening checks and its calibration drifts from the fleet median,
+     * and this machine's node had been left out of service. Returning it
+     * is an ADMIN action on /admin/judge with a reason that lands in the
+     * audit log, never an UPDATE: that is the rule, and this is the
+     * supported way to do it (the Phase 10f drill uses the same control).
+     */
+    await openPage(admin, "/admin/judge");
+    /**
+     * Pause the ten-second auto-refresh first. It calls router.refresh(),
+     * which remounts the node's action buttons and takes the open dialog
+     * with them — so a reason typed slowly is lost. The page offers the
+     * Pause for exactly this, and a test that does not use it is testing
+     * its own typing speed.
+     */
+    const pause = admin.getByRole("button", { name: "Pause", exact: true });
+    if (await pause.isVisible({ timeout: 30_000 }).catch(() => false)) await pause.click();
+
+    const returnToOnline = admin.getByRole("button", { name: /^Return to ONLINE: / }).first();
+    if (await returnToOnline.isVisible({ timeout: 30_000 }).catch(() => false)) {
+      const dialog = admin.getByRole("dialog");
+      // The buttons are a client island on a page that re-renders itself;
+      // a click that lands before it is listening does nothing at all, so
+      // open the dialog by result rather than by one click.
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await returnToOnline.click();
+        if (await dialog.isVisible({ timeout: 5_000 }).catch(() => false)) break;
+      }
+      await expect(dialog, "the node dialog never opened").toBeVisible({ timeout: 10_000 });
+      await dialog.getByLabel("Reason").fill(`Judged-contest stage, Phase 12p.5, round ${runId}.`);
+      await dialog.getByRole("button", { name: "Return to ONLINE", exact: true }).click();
+      await expect(dialog).toBeHidden({ timeout: 60_000 });
+    }
+    // Whatever state it started in, it has to be taking work now.
+    await expect(
+      admin.getByRole("button", { name: /^Return to ONLINE: / }),
+      "the judge node is still out of service",
+    ).toHaveCount(0, { timeout: 60_000 });
+
+    await openPage(admin, "/admin/contests");
+    await admin.getByRole("link", { name: "New contest" }).click();
+    await admin.getByLabel("Title").fill(title);
+    await admin.getByLabel("Address").fill(slug);
+    await admin.getByLabel("Starts").fill(istInput(new Date(Date.now() - 5 * 60_000)));
+    await admin.getByLabel("Ends").fill(istInput(new Date(Date.now() + 3 * 60 * 60 * 1000)));
+    await admin.getByLabel("Standings freeze (minutes)").fill("0");
+    await admin.getByLabel("Rules").fill(`Answer each one. Round ${runId}.`);
+    await admin.getByRole("button", { name: "Create draft" }).click();
+    await expect(admin.getByRole("heading", { name: title, level: 1 })).toBeVisible({ timeout: 60_000 });
+    for (const { letter, slug: problemSlug } of kinds) {
+      await admin.getByLabel("Letter").fill(letter);
+      await admin.getByLabel("Problem address").fill(problemSlug);
+      await admin.getByRole("button", { name: "Add problem" }).click();
+      await expect(admin.getByRole("row").filter({ has: admin.locator(`a[href*="${problemSlug}"]`) }).first()).toBeVisible({
+        timeout: 60_000,
+      });
+    }
+    await admin.getByRole("button", { name: "Publish" }).click();
+    await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });
+
+    await openPage(student, `/contests/${slug}`);
+    await student.getByRole("button", { name: "Register" }).click();
+    await expect(student.getByRole("link", { name: "Enter the arena" })).toBeVisible({ timeout: 60_000 });
+
+    const judged: string[] = [];
+    for (const { kind, slug: problemSlug } of kinds) {
+      await openPage(student, `/problems/${problemSlug}`);
+
+      let source = SOLUTION[kind];
+      if (kind === "answer") {
+        /**
+         * An output-only question's one case is visible, and its data IS
+         * the question — so the answer is worked out from the page, which
+         * is what a student does.
+         */
+        const body = await student.locator("main").innerText();
+        const numbers = [...body.matchAll(/-?\d+/g)].map((m) => Number(m[0]));
+        const count = numbers[0] ?? 0;
+        expect(count, "the sample data did not start with a count").toBeGreaterThan(0);
+        source = String(numbers.slice(1, 1 + count).reduce((a, b) => a + b, 0));
+      }
+      expect(source, `no model answer for ${kind}`).toBeTruthy();
+
+      await typeSolution(student, source!);
+      await student.getByRole("button", { name: "Submit" }).click();
+      await expect(
+        student.locator('[data-verdict="AC"]').first(),
+        `${kind}: not Accepted inside the contest`,
+      ).toBeVisible({ timeout: 10 * 60_000 });
+      judged.push(kind);
+      await shot(student, testInfo, `judged-${kind}.png`);
+    }
+    expect(judged, "nothing was judged").not.toEqual([]);
+
+    // The standings are the point of a contest: the score has to move.
+    await openPage(student, `/contests/${slug}/standings`);
+    const row = student.getByRole("row").filter({ hasText: ACCOUNTS.journey.identifier }).first();
+    await expect(row.or(student.getByRole("table")).first()).toBeVisible({ timeout: 60_000 });
+    await shot(student, testInfo, "judged-standings.png");
   });
 });

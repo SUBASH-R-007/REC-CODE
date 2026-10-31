@@ -72,7 +72,24 @@ export default async function globalSetup(config: FullConfig) {
 
   const warmFor = (key: AccountKey) => (process.env.E2E_WARM === "0" ? [] : WARM[key]);
   const staff = process.env.E2E_ADMIN !== "0";
-  const keys: AccountKey[] = ["student", "journey", "authoring", "ece", ...(staff ? STAFF_ACCOUNT_KEYS : [])];
+  let keys: AccountKey[] = ["student", "journey", "authoring", "ece", ...(staff ? STAFF_ACCOUNT_KEYS : [])];
+  /**
+   * `E2E_ACCOUNTS=admin,journey` signs in only those accounts. Seven
+   * sign-ins against `next dev` is seven first-compiles of /login and the
+   * sign-in route, and a project run by name (`--project=kinds`) needs two
+   * of them. An unknown name is an error rather than a silent skip, so a
+   * typo does not look like a missing session later.
+   */
+  const wanted = (process.env.E2E_ACCOUNTS ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  if (wanted.length > 0) {
+    for (const name of wanted) {
+      if (!(name in ACCOUNTS)) throw new Error(`E2E_ACCOUNTS names ${JSON.stringify(name)}, which is not an account`);
+    }
+    keys = keys.filter((k) => wanted.includes(k));
+  }
   // Sequential: the first sign-in also compiles /login and the server actions.
   for (const key of keys) {
     await signIn(baseURL, channel, ACCOUNTS[key], warmFor(key));

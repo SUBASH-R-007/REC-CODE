@@ -118,7 +118,10 @@ export async function loadJudgeNodes(now: Date): Promise<{ nodes: AdminNodeRow[]
   });
   // Per ENGINE, like the heartbeat's own median: a hello-world CPU score
   // from a database host measures nothing a C++ time limit is derived from.
-  const fleetMedian = fleetCalibrationMedian(rows.filter((n) => n.driver !== "postgres"));
+  const fleetMedian = fleetCalibrationMedian(
+    rows.filter((n) => n.driver !== "postgres"),
+    now,
+  );
   const nodes = rows.map((n): AdminNodeRow => {
     const deviation = calibrationDeviation(n.calibrationScore, fleetMedian);
     return {
