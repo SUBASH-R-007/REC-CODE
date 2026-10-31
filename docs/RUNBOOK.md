@@ -115,8 +115,9 @@ Environment files (all gitignored; see the root `.env.example` for the map):
 
 | Copy | To | Fill in |
 |---|---|---|
-| `apps/web/.env.example` | `apps/web/.env.local` | `IP_HASH_PEPPER`, `SEED_ADMIN_PASSWORD`, `SEED_STUDENT_PASSWORD`, `JUDGE_DEV_NODE_TOKEN` |
+| `apps/web/.env.example` | `apps/web/.env.local` | `IP_HASH_PEPPER`, `SEED_ADMIN_PASSWORD`, `SEED_STUDENT_PASSWORD`, `JUDGE_DEV_NODE_TOKEN`, `JUDGE_DEV_SQL_NODE_TOKEN` |
 | `apps/judge-worker/.env.example` | `apps/judge-worker/.env.local` | `RECX_NODE_TOKEN` (= `JUDGE_DEV_NODE_TOKEN`) |
+| — (written by `scripts/dev/sql-sandbox-up.mjs`) | `apps/sql-judge/.env.local` | nothing; copy its `RECX_NODE_ID` / `RECX_NODE_TOKEN` back to `apps/web/.env.local` as `JUDGE_DEV_SQL_NODE_ID` / `JUDGE_DEV_SQL_NODE_TOKEN` |
 | the Prisma lines of `.env.example` | `packages/db/.env` | nothing (development values) |
 
 Generate each secret with
@@ -139,8 +140,12 @@ It reads `apps/web/.env.local`: `SEED_ADMIN_PASSWORD` and
 `RECADMIN01` and `RECSUPER02`; `RECADMIN02`, an admin scoped to CSE, every
 batch) and students (CSE 2027: `2116231001001`–`004`; ECE 2026:
 `2116226002001`, `2116226002002`) — only when an account is created, so
-re-running never resets a password — and `JUDGE_DEV_NODE_ID` / `JUDGE_DEV_NODE_TOKEN` register the
-development judge node (only the token's sha256 is stored). It also creates
+re-running never resets a password — and `JUDGE_DEV_NODE_ID` / `JUDGE_DEV_NODE_TOKEN`
+and `JUDGE_DEV_SQL_NODE_ID` / `JUDGE_DEV_SQL_NODE_TOKEN` register the two
+development judge nodes, one per engine (only each token's sha256 is stored).
+Leave the SQL pair unset and the SQL judge still boots, passes its self-check
+and listens — and then every heartbeat is refused with 401 while a SQL
+submission sits at `DISPATCHED` with nothing on screen to say why. It also creates
 the `LanguageConfig` rows, the default theme and the published two-sum
 problem. It is for local development only.
 
@@ -1576,10 +1581,20 @@ npx pnpm@9.15.9 --filter @recx/sql-judge dev
 The script writes `apps/sql-judge/.env.local` (gitignored) with both
 connection strings and generates the passwords; it is idempotent and keeps
 the passwords it already wrote. In development the node id defaults to
-`sql-dev-1`; the seed registers only ONE development judge node, so either
-register a second one or run the SQL judge with the dev node's credentials
-while the isolate worker is stopped (the `JudgeNode` row's `driver` column
-shows whichever process beat last).
+`sql-dev-1`, and it is a node of its own: copy the `RECX_NODE_ID` and
+`RECX_NODE_TOKEN` the script wrote into `apps/web/.env.local` as
+`JUDGE_DEV_SQL_NODE_ID` / `JUDGE_DEV_SQL_NODE_TOKEN` and re-run the seed,
+which registers both engines' nodes (§1.3). The script says so on its last
+line when that pair is still unset.
+
+Skip it and the failure is quiet in the worst way: the SQL judge boots,
+passes its self-check, reports `sql judge ready` on its queues — and then
+every heartbeat comes back `HTTP 401 — Judge node authentication failed.`
+as a warning in its log, while a student's SQL submission sits at
+`DISPATCHED` for ever with nothing on the page to say why. Running both
+engines under one node id instead works, but only one at a time: the
+`JudgeNode` row's `driver` column shows whichever process beat last, and the
+two overwrite each other's advertised languages.
 
 **What it does at boot, in order:**
 
@@ -2048,3 +2063,8 @@ coordinator from actual runs — never in advance.
 | 12p.5 | 2026-10-31 | `/admin/judge` refreshes itself out from under a dialog | NOTED. The page calls `router.refresh()` every ten seconds, which remounts the node's action buttons and takes an open dialog with it - a reason typed slowly is lost. The page already offers **Pause** for this, and the spec now uses it before touching a node. Worth considering whether the refresh should hold while a dialog is open | Claude |
 | 12p.5 | 2026-10-31 | `E2E_ACCOUNTS`, so a named project signs in what it needs | DONE. Global setup signed in all seven seeded accounts before every run; against `next dev` that is seven first-compiles of `/login` and the sign-in route, and it was timing out. `E2E_ACCOUNTS=admin,journey` now limits it, and an unknown name is an error rather than a silent skip | Claude |
 | 12p.5 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` - Windows 11 | PASS (lint 0 warnings; typecheck clean; **8,741 tests passed, 0 failed** - shared 2,022, judge-worker 455, sql-judge 43, db 364, design 87, scheduler 250, web 4,264, repo 1,256; build exit 0 on the second attempt, the first lost again to `copy-monaco.mjs` racing the five servers this session left running; every size budget met) | Claude |
+| 12q.1 | 2026-10-31 | The SQL judge was never registered, so SQL submissions were never judged | **FOUND AND FIXED.** `scripts/dev/sql-sandbox-up.mjs` generates the SQL judge's `RECX_NODE_ID` / `RECX_NODE_TOKEN` into `apps/sql-judge/.env.local`, but nothing registered the node those credentials name: the seed read one pair, `JUDGE_DEV_NODE_*`, and registered one node — the isolate one. The SQL judge therefore booted, passed its adversarial cluster self-check, logged `sql judge ready` on `judge-sql-practice` / `judge-sql-run` — and every heartbeat came back `HTTP 401 — Judge node authentication failed.` as a *warning* in its own log, while a student's `sql17` submission sat at `QUEUED` / `DISPATCHED` for ever with nothing on the page to say why. Nobody reading the judge's log would have called it broken. The seed now reads a pair per engine (`DEV_JUDGE_NODES`) and registers both, naming any pair that is unset; `.env.example` offers `JUDGE_DEV_SQL_NODE_ID` / `_TOKEN`; the sandbox script's last line now tells the operator that registering is a second step, because that script is where the credentials are made and `apps/sql-judge` has no `.env.example` of its own. `tests/repo/dev-judge-nodes.test.ts` (5 tests) fences both halves — every pair the seed reads is documented, every pair documented is read, both default to the same node id — so a third engine cannot be added with half the wiring | Claude |
+| 12q.1 | 2026-10-31 | Live, on the production build with both judges attached | **PASS.** `sql-dev-1` registered through `scripts/judge-node.ts add` (the audited CLI, never SQL) and `ONLINE` within a second of the SQL judge restarting, advertising `sql17`. Submitting on the **production build** (:3000) as seeded student `2116231001001`: `sql-students-4qgzh` with the reference `SELECT id, name FROM students ORDER BY id` → **AC, 2/2 cases, 1 ms, `judgeNodeId: sql-dev-1`**; the same query with `ORDER BY id DESC` → **WA, 0/2**, so row order is genuinely compared and not merely accepted. The isolate lane was already proven this session (`fix-the-sum-sxgsy`, cpp20, AC 2/2). Both engines ran at once, each as its own node, which is what the second registration buys | Claude |
+| 12q.1 | 2026-10-31 | `RECX_DIST_DIR` stays an override and does not become the development default | DECIDED, and the attempt reverted. Defaulting `next dev` to `.next-dev` does stop a `next build` from hollowing out a running dev server (the trap recorded at 12p.4), but Next writes whichever directory it is given into `tsconfig.json` **and** `next-env.d.ts`, reformatting both — so every developer would find two rewritten files in `git status` after every `pnpm dev`. The override already covers the one case that needs it, and `scripts/dev/linux-gate.sh` already refuses to run while a Next server is up. The reason is now in the `distDir` comment so it is not retried | Claude |
+| 12q.1 | 2026-10-31 | `pnpm dev` / `pnpm start` ignored the port their launcher chose | FIXED. `apps/web`'s `dev` and `start` scripts hard-coded `-p 3000`, so a launcher that picks a port and sets `PORT` (the editor's preview pane, `.claude/launch.json`) was ignored: the server bound 3000 anyway and either died on whatever already held it (`EADDRINUSE :::3000`, twice this session) or served where nobody was looking. Both now let Next read `PORT`, whose own default is still 3000, so §1.1 and §1.4's `http://localhost:3000` are unchanged. `scripts/dev/start-prod.mjs` takes `--port`, else `PORT`, else 3000, and still passes `-p` to `next start` explicitly | Claude |
+| 12q.1 | 2026-10-31 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` + `pnpm size` — Windows 11 | PASS (lint 0 warnings; typecheck clean; **8,746 tests passed, 0 failed** — shared 2,022, judge-worker 455, sql-judge 43, db 364, design 87, scheduler 250, web 4,264, repo 1,261; build exit 0 first attempt, with both Next servers stopped beforehand so neither `.next` nor `apps/web/public/monaco` was held; every size budget met, and no application source changed) | Claude |

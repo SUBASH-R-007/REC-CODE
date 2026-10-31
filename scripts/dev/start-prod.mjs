@@ -93,7 +93,14 @@ function parseEnvFile(text) {
 
 const argv = process.argv.slice(2);
 const portIndex = argv.findIndex((arg) => arg === "--port" || arg === "-p");
-const port = portIndex === -1 ? "3000" : (argv[portIndex + 1] ?? "3000");
+/**
+ * `--port`, else PORT, else 3000. The environment matters because a
+ * launcher (the editor's preview pane, .claude/launch.json) picks the port
+ * and sets PORT: a script that hard-codes one ignores that, binds 3000
+ * anyway, and either dies on whatever holds it or serves on a port nobody
+ * is looking at.
+ */
+const port = portIndex === -1 ? (process.env.PORT ?? "3000") : (argv[portIndex + 1] ?? "3000");
 
 if (!existsSync(path.join(WEB_DIR, ".next", "BUILD_ID"))) {
   console.error(

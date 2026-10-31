@@ -82,6 +82,13 @@ const nextConfig: NextConfig = {
    * so the node heartbeats to a development server on another port instead,
    * and the production app dispatches to the same Redis and reads the same
    * Postgres. A demo arrangement for one machine, never a deployment.
+   *
+   * Set it, and it stays an override rather than a default, because Next
+   * writes the directory it is given into `tsconfig.json` and
+   * `next-env.d.ts` — reformatting both as it goes. Defaulting development
+   * to a second directory would leave every developer with two rewritten
+   * files in `git status` after every `next dev`. Discard them when you do
+   * use it.
    */
   distDir: process.env.RECX_DIST_DIR ?? ".next",
   poweredByHeader: false,

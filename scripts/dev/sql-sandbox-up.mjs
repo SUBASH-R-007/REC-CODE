@@ -127,3 +127,18 @@ writeFileSync(ENV_FILE, contents, "utf8");
 
 console.log(`[sql-sandbox] ${DATABASE} ready on 127.0.0.1:${PORT} with roles ${OWNER} and ${STUDENT}`);
 console.log(`[sql-sandbox] wrote ${ENV_FILE} (gitignored; the passwords are only there)`);
+
+// The judge's own credentials are half the job: the app has to know the node
+// before it will accept a heartbeat from it. Without this step the SQL judge
+// boots, passes its self-check and listens, and then every heartbeat comes
+// back 401 while a student's SQL submission sits unjudged with nothing on
+// screen to say why — so say so here, where the credentials were just made.
+const webEnv = path.resolve("apps/web/.env.local");
+const registered = existsSync(webEnv) && /^JUDGE_DEV_SQL_NODE_TOKEN=.*\S/m.test(readFileSync(webEnv, "utf8"));
+if (registered) {
+  console.log(`[sql-sandbox] apps/web/.env.local already names this node; run the seed if you changed the token`);
+} else {
+  console.log(`[sql-sandbox] NEXT: copy RECX_NODE_ID and RECX_NODE_TOKEN from that file into`);
+  console.log(`[sql-sandbox]   apps/web/.env.local as JUDGE_DEV_SQL_NODE_ID / JUDGE_DEV_SQL_NODE_TOKEN,`);
+  console.log(`[sql-sandbox]   then re-run the seed. Until then the app refuses this node's heartbeats.`);
+}

@@ -12,8 +12,8 @@
  *
  * Reads apps/web/.env.local when present: DATABASE_URL, IP_HASH_PEPPER,
  * TESTDATA_*, SEED_ADMIN_PASSWORD, SEED_STUDENT_PASSWORD, and optionally
- * JUDGE_DEV_NODE_ID / JUDGE_DEV_NODE_TOKEN. Passwords and tokens are never
- * printed.
+ * JUDGE_DEV_NODE_ID / JUDGE_DEV_NODE_TOKEN and JUDGE_DEV_SQL_NODE_ID /
+ * JUDGE_DEV_SQL_NODE_TOKEN. Passwords and tokens are never printed.
  *
  * Seeded accounts (matched by collegeId): role, status and the password hash
  * are written only when an account is created. Re-running updates only the
@@ -863,19 +863,20 @@ async function seedDailyChallenge(db: Db, adminId: string): Promise<void> {
   log(`daily challenge ${day}: ${pick.slug}`);
 }
 
-// ── Dev judge node ───────────────────────────────────────────────────────
+// ── Dev judge nodes ──────────────────────────────────────────────────────
 
-async function seedJudgeNode(app: App) {
+/** The variable pairs a development engine authenticates with. */
+const DEV_JUDGE_NODES = [
+  { which: "JUDGE_DEV_NODE", engine: "isolate" },
+  { which: "JUDGE_DEV_SQL_NODE", engine: "postgres" },
+] as const;
+
+/** Register one development judge node, or bring its token into step. */
+async function seedOneJudgeNode(app: App, which: string, engine: string, id: string, token: string) {
   const { db } = app;
-  const id = process.env.JUDGE_DEV_NODE_ID;
-  const token = process.env.JUDGE_DEV_NODE_TOKEN;
-  if (!id || !token) {
-    log("JUDGE_DEV_NODE_ID / JUDGE_DEV_NODE_TOKEN not set: no dev judge node registered");
-    return;
-  }
-  if (!app.parseNodeId(id)) fail("JUDGE_DEV_NODE_ID must be 1–64 characters of letters, digits, '.', '_' or '-'.");
+  if (!app.parseNodeId(id)) fail(`${which}_ID must be 1–64 characters of letters, digits, '.', '_' or '-'.`);
   if (!app.parseBearer(`Bearer ${token}`)) {
-    fail("JUDGE_DEV_NODE_TOKEN must be 16–512 characters of letters, digits or ._~+/=- (it is never printed).");
+    fail(`${which}_TOKEN must be 16–512 characters of letters, digits or ._~+/=- (it is never printed).`);
   }
   const tokenHash = app.hashNodeToken(token);
   const existing = await db.judgeNode.findUnique({ where: { id }, select: { tokenHash: true } });
@@ -888,7 +889,7 @@ async function seedJudgeNode(app: App) {
       entityType: "JudgeNode",
       entityId: id,
       sensitivity: "SECURITY",
-      metadata: { via: "seed" },
+      metadata: { via: "seed", engine },
     });
     log(`judge node ${id}: registered (OFFLINE until it heartbeats)`);
   } else if (existing.tokenHash !== tokenHash) {
@@ -901,7 +902,30 @@ async function seedJudgeNode(app: App) {
       sensitivity: "SECURITY",
       metadata: { via: "seed" },
     });
-    log(`judge node ${id}: token updated from JUDGE_DEV_NODE_TOKEN`);
+    log(`judge node ${id}: token updated from ${which}_TOKEN`);
+  }
+}
+
+/**
+ * Development runs two judge engines, and each authenticates as a node of
+ * its own: the isolate worker (JUDGE_DEV_NODE_*) and the SQL judge
+ * (JUDGE_DEV_SQL_NODE_*, whose credentials scripts/dev/sql-sandbox-up.mjs
+ * writes into apps/sql-judge/.env.local). Registering only one of them is
+ * the quiet failure worth guarding against: the unregistered engine boots,
+ * passes its self-check, starts listening — and then every heartbeat is
+ * refused with 401, while a student's submission in that lane sits at
+ * DISPATCHED with nothing on screen to say why. So the seed registers
+ * whichever pairs are set and names the ones that are not.
+ */
+async function seedJudgeNode(app: App) {
+  for (const { which, engine } of DEV_JUDGE_NODES) {
+    const id = process.env[`${which}_ID`];
+    const token = process.env[`${which}_TOKEN`];
+    if (!id || !token) {
+      log(`${which}_ID / ${which}_TOKEN not set: no ${engine} judge node registered`);
+      continue;
+    }
+    await seedOneJudgeNode(app, which, engine, id, token);
   }
 }
 
