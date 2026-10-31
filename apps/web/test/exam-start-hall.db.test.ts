@@ -410,6 +410,119 @@ describe.skipIf(!ENABLED)("starting a sitting, against recx_test", () => {
     }
   });
 
+  it("seats a candidate in the room whose network they are on, when two are open", async () => {
+    /**
+     * Picking arbitrarily was harmless while this lookup only answered
+     * "does a hall exist". It stopped being harmless the moment the row's
+     * allowlist became the one the sitting is checked against: a candidate
+     * in Lab 3 compared against Lab 4's blocks is refused for being exactly
+     * where they should be.
+     */
+    const other = await db.examSession.create({
+      data: {
+        assessmentId,
+        label: "Lab 9",
+        // Later than the first hall, so the deterministic fallback would
+        // NOT pick it — only the address can.
+        startsAt: new Date(Date.now() - 30_000),
+        endsAt: new Date(Date.now() + 3_600_000),
+        allowedCidrs: ["172.19.0.0/16"],
+        createdById: actorId,
+      },
+      select: { id: true },
+    });
+    where.ip = "172.19.4.5";
+    try {
+      const result = await start.startOrResumeAttempt({
+        request: request(),
+        slug: tag,
+        userId: studentId,
+        sessionId: null,
+      });
+      expect(result.ok, result.ok ? "" : result.message).toBe(true);
+      const row = await db.assessmentAttempt.findFirstOrThrow({
+        where: { assessmentId, userId: studentId },
+        select: { examSessionId: true },
+      });
+      expect(row.examSessionId).toBe(other.id);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM "ExamSession" WHERE id = $1`, other.id);
+    }
+  });
+
+  it("links a paper in any proctor mode, which is what fills the invigilator's roster", async () => {
+    // A hall can be scheduled for a paper in any mode, and
+    // `ExamSession.attempts` is "candidates sitting in this hall". For the
+    // modes containment does not check, the link costs nothing and is the
+    // only thing that makes the roster show the room.
+    const paper = await db.assessment.create({
+      data: {
+        slug: `${tag}-advisory`,
+        title: "An advisory paper",
+        instructions: "Answer it.",
+        status: "OPEN",
+        proctorMode: "ADVISORY",
+        opensAt: new Date(Date.now() - 3_600_000),
+        closesAt: new Date(Date.now() + 3_600_000),
+        durationSec: 3_600,
+        maxAttempts: 1,
+        createdById: actorId,
+      } as never,
+      select: { id: true },
+    });
+    await db.assessmentMcq.create({
+      data: {
+        assessmentId: paper.id,
+        position: 1,
+        stem: "Which of these is a stable sort?",
+        options: ["Quicksort", "Merge sort"],
+        correctIndex: 1,
+        points: 1,
+      } as never,
+      select: { id: true },
+    });
+    const room = await db.examSession.create({
+      data: {
+        assessmentId: paper.id,
+        label: "Hall A",
+        startsAt: new Date(Date.now() - 60_000),
+        endsAt: new Date(Date.now() + 3_600_000),
+        createdById: actorId,
+      },
+      select: { id: true },
+    });
+    try {
+      const result = await start.startOrResumeAttempt({
+        request: request(),
+        slug: `${tag}-advisory`,
+        userId: studentId,
+        sessionId: null,
+      });
+      expect(result.ok, result.ok ? "" : result.message).toBe(true);
+      const seated = await db.assessmentAttempt.count({ where: { examSessionId: room.id } });
+      expect(seated).toBe(1);
+    } finally {
+      await db.$executeRawUnsafe(
+        `DELETE FROM "AuditLog" WHERE "entityType" = 'AssessmentAttempt' AND "entityId" IN (SELECT id FROM "AssessmentAttempt" WHERE "assessmentId" = $1)`,
+        paper.id,
+      );
+      await db.$executeRawUnsafe(`ALTER TABLE "public"."AssessmentAttempt" DISABLE TRIGGER "AssessmentAttempt_machine"`);
+      try {
+        await db.$executeRawUnsafe(`DELETE FROM "AssessmentAttempt" WHERE "assessmentId" = $1`, paper.id);
+      } finally {
+        await db.$executeRawUnsafe(`ALTER TABLE "public"."AssessmentAttempt" ENABLE TRIGGER "AssessmentAttempt_machine"`);
+      }
+      await db.$executeRawUnsafe(`DELETE FROM "ExamSession" WHERE id = $1`, room.id);
+      await db.$executeRawUnsafe(`DELETE FROM "AssessmentMcq" WHERE "assessmentId" = $1`, paper.id);
+      await db.$executeRawUnsafe(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`);
+      try {
+        await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, paper.id);
+      } finally {
+        await db.$executeRawUnsafe(`ALTER TABLE "public"."Assessment" ENABLE TRIGGER "Assessment_published_immutable"`);
+      }
+    }
+  });
+
   it("refuses when there is no hall at all, which is the older rule and still right", async () => {
     await db.$executeRawUnsafe(`UPDATE "ExamSession" SET "endsAt" = now() - interval '1 minute' WHERE id = $1`, hallId);
     try {

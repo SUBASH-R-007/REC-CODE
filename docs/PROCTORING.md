@@ -314,7 +314,7 @@ room is the control that matters most.
 
 ---
 
-## 9. The two per-paper options (Phase 12s)
+## 9. Phase 12s: two per-paper options, and what the pass found
 
 Both were asked for directly, both are **off by default**, and neither
 changes anything in §2. They exist because an invigilator running a paper
@@ -406,6 +406,49 @@ drives the real start path against a real database and then reads the row.
 The containment unit tests were green throughout — they pass
 `examSessionId: "sess_1"` as a fixture, so they tested the function, which
 was right, and nobody tested whether anything filled in what it reads.
+
+### Extensions: what is detectable, and what happens when one succeeds
+
+The request was to "detect or nullify any added extensions that could
+bypass our system". The first half cannot be done and the next section
+says why. This is the half that can, and it is the more useful half.
+
+**What a page can notice.** `Event.isTrusted` is false for any event
+produced by `dispatchEvent` and true for every event a person causes —
+including through a screen reader, a switch device or an on-screen
+keyboard, because those act *through* the browser rather than around it.
+So a forged paste, copy or cut arriving at the sitting is recorded as
+`AUTOMATION_HINT`, the same kind `navigator.webdriver` records: §6's
+context-only band, structurally unable to lift an attempt above NONE on
+its own. It is not a guess about tooling; it is the platform saying which
+of the two happened. Capped at three per sitting, because the second one
+says nothing the first did not.
+
+**What happens when an extension gets past the client.** This is the part
+that matters, and the answer is that the client was never the control.
+
+An extension that wants to defeat `refuseOutsidePaste` cannot un-prevent
+the default — so it has to put the text in some other way: the editor's
+own API, `execCommand`, or a keystroke loop. Each of those arrives as a
+large insert with no paste event in front of it, which is
+`PROGRAMMATIC_INSERT`, and as a snapshot whose content jumped, which is
+`SNAPSHOT_JUMP`. **`SNAPSHOT_JUMP` is derived on the server** from the
+snapshots themselves, so it does not depend on this page's cooperation at
+all.
+
+An extension that instead silences the proctoring script — removes the
+listeners, kills the telemetry queue — stops the events, and the absence
+is itself recorded: `HEARTBEAT_GAP` and `SEQUENCE_GAP` are server-derived
+from what did not arrive, and a sitting whose snapshots stop shows the
+candidate "Not saved" while the server sees the gap. Silence is not
+invisibility.
+
+And none of the controls §4 calls enforcing live in the page: the attempt
+token, the clock, the CIDR allowlist, the Safe Exam Browser key and the
+device assertion are all checked server-side on every request, by code an
+extension cannot reach. That is the design answer to the question. A
+control that an extension can switch off is not treated as a control here,
+which is why there is nothing for one to switch off.
 
 ### Why no extension probe, and no devtools signal
 

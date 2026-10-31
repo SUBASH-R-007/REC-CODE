@@ -6,6 +6,7 @@ import {
   acceptsWork,
   computeExpiresAt,
   isFinished,
+  matchesAnyCidr,
   requiresDeviceAssertion,
   paperQuestionCount,
   resolveLayout,
@@ -20,7 +21,7 @@ import { checkContainment } from "@/lib/exam/containment";
 import { examPaperLanguage } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
-import { hashUserAgent, requestIpHash } from "@/lib/ip";
+import { hashUserAgent, requestIp, requestIpHash } from "@/lib/ip";
 
 /**
  * Starting and resuming a sitting (Phase 6c).
@@ -83,20 +84,57 @@ export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Ob
 });
 
 /**
- * The proctor modes that hang off an exam session, and so look one up.
+ * The hall this sitting belongs to, if one is open for this paper.
  *
- * LAB_SUPERVISED for the obvious reason: the CIDR allowlist and the seat
- * label are columns on that row. KIOSK_SEB because the Safe Exam Browser
- * keys ROTATE PER EXAM SESSION (SPEC §5) — `sebKeysFor` prefers
+ * It matters most for LAB_SUPERVISED, where the CIDR allowlist and the seat
+ * label are columns on that row, and for KIOSK_SEB, where the Safe Exam
+ * Browser keys ROTATE PER EXAM SESSION (SPEC §5) — `sebKeysFor` prefers
  * `seb:<examSessionId>` over the platform-wide entry, so a kiosk sitting
  * that is not linked to its hall can only ever be checked against the
  * college-wide key, and a hall that rotated its own key would refuse the
  * candidate who used the right .seb file.
  *
- * The other two modes have no hall: REMOTE_MONITORED is sat from wherever
- * the candidate is, and an unproctored paper has nothing to seat.
+ * But a hall can be scheduled for a paper in ANY proctor mode
+ * (`scheduleExamSession` only requires an allowlist for the modes that need
+ * one), and `ExamSession.attempts` is documented as "candidates sitting in
+ * this hall". So every mode is linked: for the modes containment does not
+ * check, the link costs nothing and is what makes the invigilator's roster
+ * — `where: { examSessionId }` — show the room.
+ *
+ * Which hall, when a paper has two rooms open at once: the one whose
+ * network the candidate is on. Picking arbitrarily was harmless while this
+ * lookup only answered "does a hall exist", and stopped being harmless the
+ * moment the row's allowlist became the one a sitting is checked against —
+ * a candidate in Lab 3 compared against Lab 4's blocks is refused for being
+ * exactly where they should be. With no address to go on, or no room
+ * matching it, the order is deterministic (earliest, then id) so a
+ * candidate is not seated differently on each press.
  */
-const HALL_MODES: ReadonlySet<string> = new Set(["LAB_SUPERVISED", "KIOSK_SEB"]);
+async function pickHall(args: {
+  readonly assessmentId: string;
+  readonly now: Date;
+}): Promise<{ readonly id: string } | null> {
+  const halls = await db.examSession.findMany({
+    where: { assessmentId: args.assessmentId, startsAt: { lte: args.now }, endsAt: { gt: args.now } },
+    select: { id: true, allowedCidrs: true },
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+  });
+  const first = halls[0];
+  if (first === undefined) return null;
+  if (halls.length === 1) return { id: first.id };
+
+  const ip = await requestIp();
+  if (ip !== null) {
+    for (const hall of halls) {
+      const verdict = matchesAnyCidr(ip, hall.allowedCidrs);
+      // `empty` means the room has no allowlist, which says nothing about
+      // whether this candidate is in it — so it is not a match, it is a
+      // room that cannot be matched. The deterministic fallback takes it.
+      if (!verdict.empty && verdict.allowed) return { id: hall.id };
+    }
+  }
+  return { id: first.id };
+}
 
 export type StartResult =
   | { readonly ok: true; readonly attempt: AssessmentAttempt; readonly layout: AttemptLayout; readonly resumed: boolean }
@@ -273,12 +311,7 @@ export async function startOrResumeAttempt(args: {
    * at yet — the refusal the candidate reads is the point here, and the
    * audited refusals happen on the paths that have an attempt.
    */
-  const hall = HALL_MODES.has(assessment.proctorMode)
-    ? await db.examSession.findFirst({
-        where: { assessmentId: assessment.id, startsAt: { lte: now }, endsAt: { gt: now } },
-        select: { id: true },
-      })
-    : null;
+  const hall = await pickHall({ assessmentId: assessment.id, now });
   const containment = await checkContainment({
     request: args.request,
     attempt: {

@@ -55,6 +55,16 @@ import { sha256Hex } from "@/lib/exam/client/sha256";
  */
 const COPIED_TEXT_MEMORY = 200;
 
+/**
+ * How many forged events are worth recording in one sitting (Phase 12s).
+ *
+ * `AUTOMATION_HINT` is context for a reviewer, and the second one says
+ * nothing the first did not. A script that dispatches a paste event in a
+ * loop must not turn a context signal into a telemetry flood — the same
+ * reason `scriptErrors` stops at three.
+ */
+const FORGED_EVENT_CAP = 3;
+
 export interface ExamQuestionView {
   readonly questionId: string;
   readonly title: string;
@@ -174,6 +184,8 @@ export function ExamSession({
   const idleRecorded = useRef(false);
   /** A tight error loop must not become a telemetry flood; three is enough to say "the page is broken". */
   const scriptErrors = useRef(0);
+  /** Events the browser did not generate; capped for the same reason. */
+  const forgedEvents = useRef(0);
   const sourcesRef = useRef(sources);
   const questionIdRef = useRef(questionId);
   const dirty = useRef(false);
@@ -560,7 +572,39 @@ export function ExamSession({
   useEffect(() => {
     if (revoked) return;
 
+    /**
+     * An event the browser did not generate (Phase 12s).
+     *
+     * `isTrusted` is false for any event produced by `dispatchEvent`, and
+     * true for every event a person causes — including through a screen
+     * reader, a switch device or an on-screen keyboard, because those act
+     * through the browser rather than around it. So this is not a guess
+     * about software: it is the platform saying which of the two happened.
+     *
+     * It is the honest half of the extension question (docs/PROCTORING.md
+     * §9). A page cannot enumerate extensions and should not try; what it
+     * can notice is a clipboard or key event that arrived without a person
+     * behind it. `AUTOMATION_HINT` is the right kind for it — the same kind
+     * `navigator.webdriver` records — and SPEC §5 makes that kind
+     * context-only and structurally unable to lift an attempt above NONE on
+     * its own, which is exactly the weight this deserves: a reviewer reads
+     * it beside the timeline, and nobody is flagged by it.
+     *
+     * Nothing is blocked on it. A dispatched paste event inserts nothing by
+     * itself anyway — the script doing the dispatching has to insert the
+     * text some other way, and that route arrives as PROGRAMMATIC_INSERT
+     * and SNAPSHOT_JUMP, the second of which is derived on the server from
+     * the snapshots and so does not depend on this page at all.
+     */
+    const noteIfForged = (event: Event) => {
+      if (event.isTrusted) return;
+      if (forgedEvents.current >= FORGED_EVENT_CAP) return;
+      forgedEvents.current += 1;
+      record({ kind: "AUTOMATION_HINT", atMs: atMs() });
+    };
+
     const onCopyOrCut = (event: ClipboardEvent, kind: "COPY" | "CUT") => {
+      noteIfForged(event);
       const text = window.getSelection()?.toString() ?? "";
       if (text === "") return;
       /**
@@ -589,6 +633,7 @@ export function ExamSession({
     const onCut = (event: ClipboardEvent) => onCopyOrCut(event, "CUT");
 
     const onPaste = (event: ClipboardEvent) => {
+      noteIfForged(event);
       const text = event.clipboardData?.getData("text") ?? "";
       if (text === "") return;
       const size = new TextEncoder().encode(text).length;

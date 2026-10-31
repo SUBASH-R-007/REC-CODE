@@ -86,6 +86,38 @@ describe("the paste policy", () => {
     ).not.toThrow();
   });
 
+  it("notes an event the browser did not generate, and does not block on it", () => {
+    /**
+     * The honest half of the extension question (Phase 12s,
+     * docs/PROCTORING.md §9). A page cannot enumerate extensions and this
+     * does not try; `isTrusted` is the platform stating whether a person
+     * caused the event or `dispatchEvent` did, and assistive technology
+     * acts through the browser, so it produces trusted events like any
+     * other input.
+     *
+     * Recorded as AUTOMATION_HINT, which SPEC §5 makes context-only and
+     * structurally unable to lift an attempt above NONE on its own — the
+     * right weight for "software touched the clipboard here", and the
+     * reason this can be added without it becoming a way to flag somebody.
+     */
+    const s = SESSION();
+    expect(s).toContain("const noteIfForged");
+    expect(s, "the test is isTrusted, not a guess about tooling").toMatch(/if \(event\.isTrusted\) return;/);
+    expect(s).toMatch(/record\(\{ kind: "AUTOMATION_HINT", atMs: atMs\(\) \}\)/);
+    // Both clipboard paths ask, and the cap keeps a dispatch loop from
+    // becoming a flood, as the script-error counter does.
+    expect([...s.matchAll(/noteIfForged\(event\)/g)].length).toBe(2);
+    expect(s).toContain("FORGED_EVENT_CAP");
+    // Still the one preventDefault, in the paste handler: a dispatched
+    // paste inserts nothing by itself, so there is nothing to prevent.
+    expect([...s.matchAll(/preventDefault\(\)/g)].length).toBe(1);
+  });
+
+  it("records it as a kind that cannot flag anybody on its own", async () => {
+    const { isContextOnly } = await import("@recx/shared");
+    expect(isContextOnly("AUTOMATION_HINT")).toBe(true);
+  });
+
   it("tells the candidate why nothing appeared, and says their own work still pastes", () => {
     // A refusal with no explanation is a bug report. The notice names the
     // rule and the exception to it.
