@@ -79,7 +79,24 @@ export function ExamConsole({
         </p>
       ) : null}
       {open ? (
-        <div className="max-h-64 overflow-y-auto px-4 pb-4">
+        /**
+         * Focusable, because it scrolls (Phase 12u).
+         *
+         * axe's `scrollable-region-focusable`, serious: a region that
+         * scrolls and cannot be focused is a region a keyboard-only
+         * candidate cannot read the bottom of — and what is at the bottom
+         * here is the output of their own run. Phase 3 fixed exactly this
+         * on the practice workspace; the exam surface had never been
+         * scanned, which is why its copy of the same drawer kept the
+         * defect. `role="region"` with a name so it is announced as
+         * something you can step into rather than an unlabelled box.
+         */
+        <div
+          role="region"
+          aria-label="Run output"
+          tabIndex={0}
+          className="scroll-thin max-h-64 overflow-y-auto px-4 pb-4"
+        >
           <ResultPanel
             target={runId ? { kind: "run", id: runId } : null}
             sending={sending ? "run" : null}

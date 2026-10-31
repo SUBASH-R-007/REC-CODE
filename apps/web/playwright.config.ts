@@ -112,6 +112,19 @@ export default defineConfig({
       fullyParallel: false,
     },
     /**
+     * Phase 12u: the axe gate over the exam surface — the readiness page,
+     * the sitting on both kinds of question, the console and the ended
+     * state. `a11y` scans 64 pages and none of them is the screen a
+     * candidate cannot leave. NOT in any gate: it needs a live stack. Run
+     * it by name, `--project=exam-a11y`.
+     */
+    {
+      name: "exam-a11y",
+      testMatch: /exam-a11y\.spec\.ts$/,
+      outputDir: "./test-results/exam-a11y",
+      fullyParallel: false,
+    },
+    /**
      * Phase 12t: a candidate sits a mixed paper, from authoring to handed
      * in. The exam surface had no browser test at all, and every defect of
      * 12q-12s lived there. NOT in any gate: it needs a live stack, and the

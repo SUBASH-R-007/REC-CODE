@@ -49,9 +49,22 @@ export function ExamQuestion({
 
   return (
     <main className="flex min-w-0 flex-1 flex-col lg:flex-row">
+      {/*
+        `tabIndex={0}` because this pane SCROLLS and holds no focusable
+        content of its own (Phase 12u).
+
+        axe's `scrollable-region-focusable`, serious, and it only appears in
+        a state the path-based axe suite could never reach: the statement
+        fits until the run console opens, at which point this pane shrinks,
+        starts scrolling, and becomes a region a keyboard-only candidate
+        cannot read the bottom of — the bottom of their own question, in an
+        exam, with a clock running. It already carries a name, so it is
+        announced as "Question 1 of 2, region" and stepped into with Tab.
+      */}
       <section
         aria-label={`Question ${position} of ${total}`}
-        className="min-w-0 flex-1 overflow-auto border-b border-border p-6 lg:border-b-0 lg:border-r"
+        tabIndex={0}
+        className="scroll-thin min-w-0 flex-1 overflow-auto border-b border-border p-6 lg:border-b-0 lg:border-r"
       >
         <h1 className="font-display text-lg font-semibold text-text">
           {position}. {question.title}

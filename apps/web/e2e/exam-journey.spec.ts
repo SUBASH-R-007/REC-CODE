@@ -1,6 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { contextAs } from "./support/session";
 import { openPage } from "./support/page";
+import {
+  authorPaper,
+  goToQuestion,
+  paletteButton,
+  RIGHT_OPTION,
+  walkReadinessChecks,
+  type AuthoredPaper,
+} from "./support/exam-paper";
 
 /**
  * Phase 12t: somebody actually sits an assessment, in a browser.
@@ -40,39 +48,8 @@ import { openPage } from "./support/page";
  */
 
 const runId = Math.random().toString(36).slice(2, 8);
-const SLUG = `e2e-exam-${runId}`;
-const TITLE = `E2E Exam ${runId}`;
-/** Published by the seed, so there is a frozen revision to pin. */
-const PROBLEM_SLUG = "two-sum";
-const STEM = `Which of these is a stable sort? (${runId})`;
-const RIGHT_OPTION = "Merge sort";
 
 const JUDGE = process.env.E2E_JUDGE === "1";
-
-/**
- * A `datetime-local` field on an admin page is CAMPUS time (IST), whatever
- * the machine running this test is set to — typing the runner's local time
- * silently shifts the window. Same reasoning as `contest-journey`.
- */
-const IST = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Kolkata",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
-
-function istInput(date: Date): string {
-  const parts = IST.formatToParts(date);
-  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "00";
-  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
-}
-
-/** The palette button for a position, by the aria-label `paletteLabel` builds. */
-const paletteButton = (page: Page, position: number) =>
-  page.getByRole("button", { name: new RegExp(`^Question ${position},`) });
 
 /** The save pill, which is a live region. */
 const savePill = (page: Page) => page.getByRole("status").filter({ hasText: /Saved|Saving|Not saved/ }).first();
@@ -110,62 +87,15 @@ test.describe("exam journey", () => {
   test("author a mixed paper, sit it, answer both kinds, hand it in", async ({ browser }) => {
     test.setTimeout(12 * 60_000);
 
-    // ── 1. A staff member authors the paper ──
+    // ── 1. A staff member authors a mixed paper and opens it ──
     const staffContext = await contextAs(browser, "admin");
     const admin = await staffContext.newPage();
-
-    await openPage(admin, "/admin/assessments");
-    await expect(admin.getByRole("heading", { name: "Assessments", level: 1 })).toBeVisible();
-    await admin.getByRole("link", { name: /New assessment/i }).first().click();
-
-    await admin.getByRole("textbox", { name: "Title" }).fill(TITLE);
-    // "Address" also appears in the popup option's description ("no address
-    // bar"), so the field is asked for by role as well as name.
-    await admin.getByRole("textbox", { name: "Address" }).fill(SLUG);
-    await admin.getByRole("textbox", { name: "Instructions" }).fill(`Answer both questions. Round ${runId}.`);
-    /**
-     * ADVISORY, so no hall, no registered device and no kiosk key stand
-     * between this test and the sitting. Those refusals are driven directly
-     * by `exam-start-hall.db.test.ts`, which is the right place for them —
-     * what cannot be tested anywhere but a browser is everything after
-     * Start.
-     */
-    await admin.getByRole("radio", { name: /^Advisory/ }).check();
-    await admin.getByRole("textbox", { name: "Opens" }).fill(istInput(new Date(Date.now() - 5 * 60_000)));
-    await admin.getByRole("textbox", { name: "Closes" }).fill(istInput(new Date(Date.now() + 4 * 60 * 60_000)));
-    await admin.getByRole("textbox", { name: "Duration (minutes)" }).fill("90");
-    await admin.getByRole("textbox", { name: "Attempts allowed" }).fill("1");
-    // Phase 12s, and the reason this paper is the one that tests it: the
-    // refusal happens inside a browser paste event and nowhere else.
-    await admin.getByRole("checkbox", { name: /Accept only text copied inside the sitting/i }).check();
-    await admin.getByRole("button", { name: "Create the draft" }).click();
-
-    await expect(admin.getByRole("heading", { name: TITLE, level: 1 })).toBeVisible({ timeout: 60_000 });
-    await expect(admin.getByText("DRAFT").first()).toBeVisible();
-
-    // ── 2. One coding question and one multiple-choice question ──
-    await admin.getByRole("textbox", { name: "Problem address" }).fill(PROBLEM_SLUG);
-    await admin.getByRole("textbox", { name: "Position", exact: true }).first().fill("1");
-    await admin.getByRole("textbox", { name: "Points" }).fill("3");
-    await admin.getByRole("button", { name: "Add", exact: true }).click();
-    // The pinned revision is stated, as on a contest.
-    await expect(admin.getByText(/^r\d+$/).first()).toBeVisible({ timeout: 60_000 });
-
-    await admin.getByRole("textbox", { name: "Question", exact: true }).fill(STEM);
-    await admin.getByRole("textbox", { name: "Options, one per line" }).fill(["Quicksort", RIGHT_OPTION, "Heapsort"].join("\n"));
-    await admin.getByRole("textbox", { name: "Position", exact: true }).last().fill("2");
-    // 1-based in the form, 0-based in the row: the author counts off the
-    // list they just typed and the boundary converts it once (12r.3).
-    await admin.getByRole("textbox", { name: "Answer (line number)" }).fill("2");
-    await admin.getByRole("textbox", { name: "Marks" }).fill("2");
-    await admin.getByRole("button", { name: "Add question" }).click();
-    await expect(admin.getByText(STEM).first()).toBeVisible({ timeout: 60_000 });
-
-    // ── 3. Publish, then open it ──
-    await admin.getByRole("button", { name: /^Publish/ }).click();
-    await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });
-    await admin.getByRole("button", { name: /Open it for candidates/ }).click();
-    await expect(admin.getByText("OPEN").first()).toBeVisible({ timeout: 60_000 });
+    const paper: AuthoredPaper = await authorPaper(admin, {
+      runId,
+      // The reason this paper is the one that tests it: the refusal happens
+      // inside a browser paste event and nowhere else (Phase 12s).
+      refuseOutsidePaste: true,
+    });
 
     // ── 4. The candidate reads the readiness page ──
     const candidateContext = await contextAs(browser, "journey", {
@@ -174,13 +104,13 @@ test.describe("exam journey", () => {
     });
     const candidate = await candidateContext.newPage();
 
-    await openPage(candidate, `/assessments/${SLUG}/readiness`);
+    await openPage(candidate, `/assessments/${paper.slug}/readiness`);
     // The page's own heading is "Before you start"; the paper's title is the
     // heading under it.
     await expect(candidate.getByRole("heading", { name: "Before you start", level: 1 })).toBeVisible({
       timeout: 60_000,
     });
-    await expect(candidate.getByRole("heading", { name: TITLE, level: 2 })).toBeVisible();
+    await expect(candidate.getByRole("heading", { name: paper.title, level: 2 })).toBeVisible();
     /**
      * BOTH kinds, which is the fence for the blind spot found in four
      * separate places: this page counted `_count.problems` alone, so a
@@ -191,53 +121,17 @@ test.describe("exam journey", () => {
     await expect(candidate.getByText(/90 minutes/).first()).toBeVisible();
 
     // ── 5. The four checks, then Start ──
-    /**
-     * The button is disabled until all four pass and the box is ticked, and
-     * that gate is worth walking rather than working around: each check is
-     * a real browser capability a sitting depends on, and a machine that
-     * cannot do one of them should find out here rather than halfway
-     * through a paper.
-     */
+    await walkReadinessChecks(candidate);
     const start = candidate.getByRole("button", { name: "Start the assessment" });
-    await expect(start).toBeDisabled();
-
-    /**
-     * Each check is asserted as it is done, so a failure names the
-     * capability that was missing instead of only saying the button stayed
-     * disabled. Each row states its own state in words for a screen
-     * reader — "— passed" — which is what these read.
-     */
-    const row = (label: RegExp) => candidate.getByText(label).first();
-
-    await candidate.getByRole("button", { name: "Test full screen" }).click();
-    await expect(row(/Full screen works on this machine.*passed/)).toBeVisible({ timeout: 30_000 });
-
-    await candidate.getByRole("button", { name: "Test the connection" }).click();
-    await expect(row(/can reach the exam server.*passed/)).toBeVisible({ timeout: 30_000 });
-
-    // A real paste into the scratch box, which is what the check is for.
-    await candidate.evaluate(() => navigator.clipboard.writeText("readiness paste"));
-    await candidate.getByRole("textbox", { name: /Scratch box/i }).click();
-    await candidate.keyboard.press("ControlOrMeta+v");
-    await expect(row(/Pasting works, and is recorded rather than blocked.*passed/)).toBeVisible({
-      timeout: 30_000,
-    });
-
-    await candidate.getByRole("textbox", { name: /sample question/i }).fill("4");
-    await expect(row(/type an answer and read a question.*passed/)).toBeVisible({ timeout: 30_000 });
-
-    await candidate.getByRole("checkbox", { name: /I have read what is recorded/i }).check();
-
-    await expect(start).toBeEnabled({ timeout: 30_000 });
     await start.click();
-    await expect(candidate).toHaveURL(new RegExp(`/assessments/${SLUG}/attempt$`), { timeout: 120_000 });
+    await expect(candidate).toHaveURL(new RegExp(`/assessments/${paper.slug}/attempt$`), { timeout: 120_000 });
     // Two questions in the palette, not one: `items`, not `questions`.
     await expect(candidate.getByText(/Question 1 of 2/).first()).toBeVisible({ timeout: 60_000 });
     await expect(paletteButton(candidate, 2)).toBeVisible();
 
     // ── 6. The multiple-choice question: pick an option, watch it save ──
-    await paletteButton(candidate, 2).click();
-    await expect(candidate.getByText(STEM.slice(0, 30), { exact: false }).first()).toBeVisible({ timeout: 30_000 });
+    await goToQuestion(candidate, 2, 2);
+    await expect(candidate.getByText(paper.stem.slice(0, 30), { exact: false }).first()).toBeVisible({ timeout: 30_000 });
     // A real radio group, so an option is reachable by its own text.
     await candidate.getByRole("radio", { name: RIGHT_OPTION }).check();
     /**
@@ -250,11 +144,11 @@ test.describe("exam journey", () => {
     // And the answer survives a reload, which is what "saved" has to mean.
     await candidate.reload();
     await expect(paletteButton(candidate, 2)).toBeVisible({ timeout: 60_000 });
-    await paletteButton(candidate, 2).click();
+    await goToQuestion(candidate, 2, 2);
     await expect(candidate.getByRole("radio", { name: RIGHT_OPTION })).toBeChecked({ timeout: 60_000 });
 
     // ── 7. The coding question: type, and watch THAT save ──
-    await paletteButton(candidate, 1).click();
+    await goToQuestion(candidate, 1, 2);
     const editorRoot = candidate.locator("[data-editor-root]").first();
     await expect(editorRoot).toBeVisible({ timeout: 60_000 });
     await editorRoot.click();
@@ -328,7 +222,7 @@ test.describe("exam journey", () => {
      * could not press it, because the checks had not enabled it — which is
      * how that was found.
      */
-    await openPage(candidate, `/assessments/${SLUG}/readiness`);
+    await openPage(candidate, `/assessments/${paper.slug}/readiness`);
     await expect(candidate.getByText(/already finished this assessment/i).first()).toBeVisible({
       timeout: 60_000,
     });

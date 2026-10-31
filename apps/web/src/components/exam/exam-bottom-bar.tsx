@@ -86,7 +86,23 @@ export function ExamBottomBar({
   }
 
   return (
-    <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-border bg-elevated px-4">
+    /**
+     * It WRAPS (Phase 12u).
+     *
+     * `h-14` with six controls in a row does not fit a 375 px phone, and
+     * nothing here scrolled or wrapped: the children overflowed and
+     * overlapped, so a candidate aiming at "Submit test" hit "Save & next"
+     * instead — Playwright reported it as *"Save & next intercepts pointer
+     * events"* while trying to hand a paper in on a phone. Nothing blocks a
+     * sitting below 768 px (the contest arena does; an assessment does not,
+     * on purpose, because a phone may be all a candidate has), so the bar
+     * has to fit one.
+     *
+     * Wrapping rather than scrolling, because every control here has to
+     * stay visible: one of them is irreversible, and a Submit that has
+     * scrolled out of sight is a worse answer than a taller bar.
+     */
+    <footer className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-border bg-elevated px-4 py-2">
       {EXAM_BOTTOM_BAR_ACTIONS.filter((action) => action.id !== "clear" || onClear !== undefined).map((action) => (
         <button
           key={action.id}

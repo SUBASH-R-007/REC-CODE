@@ -1,7 +1,7 @@
-import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { ACCOUNTS, type AccountKey } from "./support/accounts";
 import { appliedTheme, openPage, presetTheme, settle, type Theme, waitForEditor } from "./support/page";
+import { expectNoGatingViolations, record, scan } from "./support/axe";
 
 /**
  * The axe gate (docs/ACCESSIBILITY.md §6): ZERO serious or critical
@@ -21,9 +21,12 @@ import { appliedTheme, openPage, presetTheme, settle, type Theme, waitForEditor 
  *   would gate the product on Next.js's own development UI.
  */
 
-const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const EXCLUDE = ["nextjs-portal"];
-const GATING_IMPACTS = new Set(["serious", "critical"]);
+/**
+ * The tag set, the one exclusion and what gates now live in
+ * `support/axe.ts`, because the exam surface is scanned by a second spec
+ * that has to author and start a sitting first, and the rules it scans by
+ * must be these rules (Phase 12u).
+ */
 
 interface Viewport {
   name: "desktop" | "mobile";
@@ -91,6 +94,14 @@ const TARGETS: readonly Target[] = [
   { path: "/forgot-password", as: null, gating: true },
   { path: "/reset-password?token=not-a-real-token", as: null, gating: true },
   { path: "/dashboard", as: "student", gating: true },
+  /**
+   * Phase 12u: the candidate's own list of papers, which is the way in to
+   * the one screen they cannot leave. The readiness page and the sitting
+   * itself cannot be reached from a path — a sitting has to be authored and
+   * started first — so they are scanned by `exam-a11y.spec.ts`, with the
+   * same rules from `support/axe.ts`.
+   */
+  { path: "/assessments", as: "student", gating: true },
   { path: "/problems", as: "student", gating: true },
   {
     path: "/problems/two-sum",
@@ -236,52 +247,6 @@ const TARGETS: readonly Target[] = [
   { path: "/judge", as: null, gating: true },
 ];
 
-interface Finding {
-  state: string;
-  id: string;
-  impact: string;
-  help: string;
-  nodes: number;
-  targets: string[];
-  /** The first few nodes: markup and axe's explanation (for fixing). */
-  details: { html: string; summary: string }[];
-}
-
-type Violations = Awaited<ReturnType<AxeBuilder["analyze"]>>["violations"];
-
-function summarise(state: string, violations: Violations): Finding[] {
-  return violations.map((v) => ({
-    state,
-    id: v.id,
-    impact: v.impact ?? "unknown",
-    help: v.help,
-    nodes: v.nodes.length,
-    targets: v.nodes.slice(0, 6).map((n) => n.target.map(String).join(" ")),
-    details: v.nodes.slice(0, 3).map((n) => ({
-      html: n.html.slice(0, 240),
-      summary: (n.failureSummary ?? "").replace(/\s+/g, " ").slice(0, 400),
-    })),
-  }));
-}
-
-function describeFindings(findings: readonly Finding[]): string {
-  if (findings.length === 0) return "none";
-  return findings.map((f) => `${f.impact}:${f.id}x${f.nodes}${f.state === "initial" ? "" : ` (${f.state})`}`).join(", ");
-}
-
-async function record(testInfo: TestInfo, label: string, findings: Finding[], url: string) {
-  const body = JSON.stringify({ label, url, violations: findings }, null, 2);
-  await testInfo.attach("axe-violations.json", { body, contentType: "application/json" });
-  testInfo.annotations.push({ type: "axe", description: `${label}: ${describeFindings(findings)}` });
-  console.log(`[axe] ${label} -> ${describeFindings(findings)}`);
-  if (findings.length > 0 && process.env.E2E_AXE_DETAILS === "1") console.log(body);
-}
-
-async function scan(page: Page, state: string): Promise<Finding[]> {
-  const results = await new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE).analyze();
-  return summarise(state, results.violations);
-}
-
 for (const target of TARGETS) {
   test.describe(`${target.gating ? "gate" : "report"} ${target.path}`, () => {
     for (const viewport of VIEWPORTS) {
@@ -314,13 +279,7 @@ for (const target of TARGETS) {
             }
             await record(testInfo, label, findings, page.url());
 
-            if (target.gating) {
-              const blocking = findings.filter((f) => GATING_IMPACTS.has(f.impact));
-              expect(blocking, `serious/critical axe violations on ${label}:
-${JSON.stringify(blocking, null, 2)}`).toEqual(
-                [],
-              );
-            }
+            if (target.gating) expectNoGatingViolations(findings, label);
           });
         });
       }
