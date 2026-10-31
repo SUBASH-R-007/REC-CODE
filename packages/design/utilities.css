@@ -1,0 +1,126 @@
+/* Shared utility classes, ported verbatim from the REC Learning LMS
+   src/app/globals.css. Import after theme.css. */
+
+/* Subtle ambient brand wash behind the app shell — cheap, static. */
+.app-backdrop {
+  background:
+    radial-gradient(60rem 40rem at 110% -10%, color-mix(in srgb, var(--primary) 7%, transparent), transparent 60%),
+    radial-gradient(50rem 35rem at -20% 110%, color-mix(in srgb, var(--primary) 5%, transparent), transparent 55%),
+    var(--background);
+}
+
+/* Glass surface — used selectively (headers, floating panels). */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+/* Card shadow scale tuned per theme. */
+.shadow-card {
+  box-shadow:
+    0 1px 2px hsl(var(--shadow-color) / 0.06),
+    0 4px 16px -4px hsl(var(--shadow-color) / 0.08);
+}
+.shadow-pop {
+  box-shadow:
+    0 2px 6px hsl(var(--shadow-color) / 0.1),
+    0 12px 32px -8px hsl(var(--shadow-color) / 0.18);
+}
+
+/* Focus ring — consistent, visible in both themes. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduced motion: collapse transitions/animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Skeleton shimmer (opacity only — cheap). */
+.skeleton {
+  background: color-mix(in srgb, var(--muted) 16%, transparent);
+  border-radius: var(--radius-sm);
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Thin scrollbars for internal panels. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Progress bar fill transition. */
+.progress-fill {
+  transition: width 0.4s ease;
+}
+
+/* Celebration pop-in for milestone dialogs (transform+opacity only). */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-pop-in {
+  animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slide-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-slide-up {
+  animation: slide-up 0.25s ease-out;
+}
+
+/* ── Dark-theme text contrast (WCAG 2.2 AA, SC 1.4.3) ──────────────────────
+   The canonical dark --primary (#8b5cf6, tokens.css, shared verbatim with
+   the LMS) measures 4.23:1 under white text and 4.1-4.5:1 as text on the
+   dark surfaces: below AA for normal-size text. The tokens stay verbatim;
+   in dark mode only, filled primary surfaces use --primary-active (#7c3aed,
+   5.7:1 under white) and primary-coloured text uses --primary-hover
+   (#9d74f8, 5.3:1 on --surface, 4.8:1 on --primary-subtle). Hover fills go
+   one step deeper so they keep white text legible. Unlayered on purpose so
+   it outranks the utility layer. See docs/OPEN-QUESTIONS.md (Phase 3). */
+.dark .bg-primary {
+  background-color: var(--primary-active);
+}
+.dark .hover\:bg-primary:hover,
+.dark .hover\:bg-primary-hover:hover {
+  background-color: var(--rec-purple-deep);
+}
+.dark .text-primary,
+.dark .hover\:text-primary:hover {
+  color: var(--primary-hover);
+}

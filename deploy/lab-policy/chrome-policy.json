@@ -1,0 +1,33 @@
+{
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "ExtensionInstallBlocklist": ["*"],
+  "ExtensionInstallAllowlist": [],
+  "ExtensionInstallForcelist": [],
+  "DeveloperToolsAvailability": 2,
+  "URLBlocklist": ["*"],
+  "URLAllowlist": ["https://exam.rec.invalid", "chrome://policy", "chrome://version"],
+  "DefaultSearchProviderEnabled": false,
+  "RestoreOnStartup": 4,
+  "RestoreOnStartupURLs": ["https://exam.rec.invalid/login"],
+  "HomepageLocation": "https://exam.rec.invalid/login",
+  "HomepageIsNewTabPage": false,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false,
+  "ScreenCaptureAllowed": false,
+  "ClearBrowsingDataOnExitList": [
+    "browsing_history",
+    "download_history",
+    "cookies_and_other_site_data",
+    "cached_images_and_files",
+    "password_signin",
+    "autofill",
+    "site_settings"
+  ],
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false
+}

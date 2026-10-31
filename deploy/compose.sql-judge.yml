@@ -1,0 +1,175 @@
+# REC Code — a SQL JUDGE host (Phase 12k, slice 5).
+#
+#   docker compose -f deploy/compose.sql-judge.yml --env-file deploy/sql-judge.env up -d
+#
+# One of these, beside the isolate judge hosts. It runs two things: the
+# sandbox cluster, and the process that hands student queries to it.
+#
+# ── Not run here ───────────────────────────────────────────────────────────
+# Never started: one laptop. The judge process itself runs natively against
+# a real PostgreSQL 17 in the WSL2 mirror, which is how every SQL judging
+# test in this repository is run — including the isolation suite, which is
+# the part that matters. What is untried is this file. `docs/RUNBOOK.md` §3
+# says so.
+#
+# ── Why the sandbox is its own cluster, on this host ───────────────────────
+# The application's database holds every submission, every attempt and every
+# audit row. A student's SELECT must never reach it, and "must never" is a
+# property of the TOPOLOGY, not of a query parser: this cluster has no
+# application table in it, the judge refuses to start if it finds one, and
+# the application has no route to this host at all. The sandbox is also
+# disposable by design — it holds nothing but per-submission schemas, so
+# losing it costs nothing and it is in no backup.
+#
+# It is on the judge host rather than on the database host for the same
+# reason the isolate judges are not: the thing running untrusted input does
+# not share a machine with the thing holding the data.
+#
+# ── This host has no public listener ───────────────────────────────────────
+# Nothing is published to the world. The judge CALLS OUT to the app host
+# (claim, fetch, result, heartbeat) with a node token that can do nothing
+# else, and the sandbox cluster is not published at all — only the judge
+# container, on this host's internal network, can reach it.
+
+name: recx-sql-judge
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # The sandbox. Not a replica of anything, backed up by nothing, and
+  # recreated from scratch by `scripts/ops/sql-sandbox-provision.sh` after a
+  # rebuild: everything in it is one submission old.
+  sandbox-db:
+    image: ${RECX_SANDBOX_POSTGRES_IMAGE:?set to postgres:17.6@sha256:... — the same digest the database host runs}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: recx_sql_sandbox
+      POSTGRES_USER: recx_sql_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/sandbox_owner_password
+    secrets:
+      - sandbox_owner_password
+    command:
+      - postgres
+      # A judging engine, not a database of record. Durability is traded for
+      # throughput ON PURPOSE: every byte in here is a per-submission schema
+      # that is dropped seconds later, and a crash loses nothing a rerun
+      # cannot produce. fsync stays ON — an unreadable cluster would need a
+      # human — but nothing waits for the disk.
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      # Connections: two per judging slot (owner + student), plus headroom
+      # for the sweeper and a person with psql.
+      - -c
+      - max_connections=${RECX_SANDBOX_MAX_CONNECTIONS:-64}
+      - -c
+      - shared_buffers=${RECX_SANDBOX_SHARED_BUFFERS:-512MB}
+      # A dataset is tiny and a student's query is small; what this cluster
+      # must not do is let one query eat the host.
+      - -c
+      - work_mem=16MB
+      - -c
+      - temp_file_limit=256MB
+      # The server is the clock: see apps/sql-judge/src/sandbox.ts. These are
+      # the ceilings — the judge sets its own, lower, per statement.
+      - -c
+      - statement_timeout=15s
+      - -c
+      - idle_in_transaction_session_timeout=30s
+      - -c
+      - log_min_duration_statement=2s
+      # No extension a student could reach, and no archiving: there is
+      # nothing here worth shipping anywhere.
+      - -c
+      - archive_mode=off
+    volumes:
+      - sandbox-data:/var/lib/postgresql/data
+    # No ports. The judge reaches it over the compose network and nothing
+    # else can: not the app host, not Prometheus, not this host's LAN.
+    networks: [sandbox]
+    logging: *logging
+
+  sql-judge:
+    image: ${RECX_SQL_JUDGE_IMAGE:?set to the SQL judge image@sha256:... built from infra/sql-judge}
+    restart: unless-stopped
+    depends_on: [sandbox-db]
+    # Nothing this process runs is untrusted CODE — the untrusted thing is a
+    # SQL statement, and the sandbox around it is the cluster's roles and
+    # timeouts, not the container's. So no privileges are needed or taken.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      NODE_ENV: production
+      RECX_APP_URL: ${RECX_APP_URL:?the app host's origin, e.g. https://code.rajalakshmi.edu.in}
+      RECX_NODE_ID: ${RECX_NODE_ID:?this host's node id, e.g. sql-judge-1}
+      RECX_NODE_TOKEN_FILE: /run/secrets/node_token
+      # Two connections per slot. docs/CAPACITY.md §6 sizes this against
+      # the cluster's max_connections above.
+      RECX_SLOTS: ${RECX_SQL_SLOTS:-4}
+      RECX_QUEUES: judge-sql-practice,judge-sql-run,judge-sql-rejudge
+      # Both roles live on sandbox-db. The owner creates and seeds a
+      # schema per case; the student runs the statement and can do nothing
+      # else — a SEPARATE role, not SET ROLE, because a session whose
+      # session_user is privileged has something to go back to.
+      RECX_SQL_OWNER_URL_FILE: /run/secrets/sandbox_owner_url
+      RECX_SQL_STUDENT_URL_FILE: /run/secrets/sandbox_student_url
+      REDIS_URL: ${RECX_REDIS_URL:?the app host's Redis, over the judge network}
+      LOG_LEVEL: ${RECX_LOG_LEVEL:-info}
+    secrets:
+      - node_token
+      - sandbox_owner_url
+      - sandbox_student_url
+    networks: [sandbox, judge]
+    logging: *logging
+
+  # The host's own CPU, memory and disk, for the two node_exporter metrics
+  # the alert rules read — the same service the isolate judge host runs, for
+  # the same reason: it still works when the judge process is the problem.
+  node-exporter:
+    image: ${RECX_NODE_EXPORTER_IMAGE:?set to quay.io/prometheus/node-exporter:v1.8.2@sha256:...}
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "${RECX_MONITORING_IP:?this host's address on the monitoring network}:9100:9100"
+    networks: [monitoring]
+    logging: *logging
+
+networks:
+  # The judge and its cluster, and nothing else on it.
+  sandbox:
+    internal: true
+  # Outbound to the app host and its Redis. No inbound.
+  judge:
+  # Prometheus scrapes the node exporter over this.
+  monitoring:
+
+volumes:
+  # Per-submission schemas and nothing else. In no backup, on purpose.
+  sandbox-data:
+
+secrets:
+  # Narrowly scoped, exactly like the isolate judge's: heartbeat, claim,
+  # fetch the bundle for the claimed job, post a result, release.
+  node_token:
+    file: /run/recx/secrets/sql_judge_node_token
+  # The sandbox cluster's two roles, as full connection URLs. Written by
+  # scripts/ops/sql-sandbox-provision.sh on this host; never in git, never
+  # on the app host, never in an image.
+  sandbox_owner_password:
+    file: /run/recx/secrets/sandbox_owner_password
+  sandbox_owner_url:
+    file: /run/recx/secrets/sandbox_owner_url
+  sandbox_student_url:
+    file: /run/recx/secrets/sandbox_student_url

@@ -1,0 +1,27 @@
+"use client";
+
+import { useEffect } from "react";
+import { Button, ButtonLink } from "@recx/design";
+
+export default function ProblemsError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 px-4 text-center">
+      <h1 className="font-display text-2xl font-bold">This page could not load</h1>
+      <p className="max-w-sm text-sm text-text-secondary">
+        Something went wrong while loading problems. Any code you typed is kept as a draft in this browser — please try
+        again.
+        {error.digest ? <span className="mt-1 block font-mono text-xs text-muted">Reference {error.digest}</span> : null}
+      </p>
+      <div className="flex gap-2">
+        <Button onClick={reset}>Try again</Button>
+        <ButtonLink href="/problems" variant="outline">
+          All problems
+        </ButtonLink>
+      </div>
+    </div>
+  );
+}

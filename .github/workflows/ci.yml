@@ -1,0 +1,533 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref — the latest push is the one that
+# matters.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The phase gate (docs/CONVENTIONS.md): lint, typecheck, test and build must
+  # be green on both Linux and Windows.
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+
+    # Service containers exist only on Linux runners. An empty image name
+    # skips the service, so the Windows leg runs without them and its
+    # database- and Redis-backed tests stay skipped (RECX_DB_TESTS and
+    # RECX_REDIS_TESTS unset).
+    services:
+      postgres:
+        image: ${{ matrix.os == 'ubuntu-24.04' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: recx
+          POSTGRES_PASSWORD: recx-dev-only
+          POSTGRES_DB: recx_test
+        # Same host port as local development, so test defaults line up.
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U recx -d recx_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: ${{ matrix.os == 'ubuntu-24.04' && 'redis:7' || '' }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      # CI-only values. Never used by any deployment.
+      DATABASE_URL: postgresql://recx:recx-dev-only@localhost:5433/recx_test
+      DATABASE_URL_DIRECT: postgresql://recx:recx-dev-only@localhost:5433/recx_test
+      RECX_TEST_DATABASE_URL: postgresql://recx:recx-dev-only@localhost:5433/recx_test
+      RECX_DB_TESTS: ${{ matrix.os == 'ubuntu-24.04' && '1' || '' }}
+      RECX_REDIS_TESTS: ${{ matrix.os == 'ubuntu-24.04' && '1' || '' }}
+      REDIS_URL: redis://127.0.0.1:6379
+      IP_HASH_PEPPER: ci-only-pepper-not-used-in-any-deployment
+      APP_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every migration is applied to recx_test (DATABASE_URL and
+      # DATABASE_URL_DIRECT above) before any test runs, so no database test
+      # depends on another suite having migrated it first.
+      - name: Apply migrations to the test database (the schema must apply from scratch)
+        if: runner.os == 'Linux'
+        run: pnpm db:migrate
+
+      # ── The drift check (Phase 10f) ─────────────────────────────────
+      #
+      # Does the migration folder produce the schema the code expects? The
+      # migrations have just been applied to an empty database above, so
+      # `migrate diff` between that database and schema.prisma must be
+      # EMPTY; `--exit-code` makes a difference a failure.
+      #
+      # It catches the mistake nobody notices locally: a change to
+      # schema.prisma committed without its migration. `prisma migrate dev`
+      # keeps the developer's own database correct, so everything passes on
+      # their machine and the next person's `migrate deploy` produces a
+      # schema the code cannot use.
+      - name: Schema drift (migrations vs schema.prisma)
+        if: runner.os == 'Linux'
+        working-directory: packages/db
+        run: |
+          pnpm exec prisma migrate diff             --from-schema-datasource prisma/schema.prisma             --to-schema-datamodel prisma/schema.prisma             --exit-code
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # Per-route JS budgets, the Monaco / CodeMirror lazy sets, Monaco-free
+      # routes, and /login served with zero JavaScript (the script serves the
+      # build in-process and inspects the HTML). docs/CAPACITY.md §7.
+      - name: Front-end size budgets
+        run: pnpm size
+
+      # The capacity burst harness (scripts/load) is not a workspace package,
+      # so the root typecheck / test scripts do not reach it yet.
+      - name: Burst harness — typecheck and unit tests
+        run: |
+          pnpm exec tsc --noEmit -p scripts/load/tsconfig.json
+          pnpm exec vitest run --root scripts/load
+
+  # End-to-end (apps/web/e2e): the axe accessibility gate and the keyboard-only
+  # solving journey against a migrated, seeded stack.
+  #
+  # CI has no judge: a real one needs isolate and the toolchains (the job
+  # below), and the mock driver fabricates verdicts, which would make "the
+  # journey reached Accepted" meaningless. So E2E_JUDGE is unset here and the
+  # journey's Run / Submit verdict steps are skipped (reported as skipped);
+  # everything else — filters, the statement, entering and leaving the
+  # editor, Ctrl+M, focus visibility at every stop, the next problem — runs.
+  # The verdict steps run against the live local stack with E2E_JUDGE=1
+  # (apps/web/e2e/README.md). The web runs as `next dev`, the mode of the live
+  # local stack the suite is developed against; the production build is made
+  # for HTTPS (Secure cookies, upgrade-insecure-requests) and is already
+  # built by the verify job. `next dev` injects its development overlay,
+  # which the axe scans exclude by name (justified in e2e/a11y.spec.ts).
+  e2e:
+    name: E2E (axe + keyboard)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: recx
+          POSTGRES_PASSWORD: recx-dev-only
+          POSTGRES_DB: recx_e2e
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U recx -d recx_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      # CI-only values. Never used by any deployment.
+      DATABASE_URL: postgresql://recx:recx-dev-only@localhost:5433/recx_e2e
+      DATABASE_URL_DIRECT: postgresql://recx:recx-dev-only@localhost:5433/recx_e2e
+      REDIS_URL: redis://127.0.0.1:6379
+      IP_HASH_PEPPER: ci-only-pepper-not-used-in-any-deployment
+      APP_URL: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: "1"
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-e2e-1
+      SEED_STUDENT_PASSWORD: ci-only-student-password-e2e-1
+      E2E_BASE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      # Accounts, two-sum (published), the authored drafts, study plans. The
+      # drafts need a judge to validate, so only two-sum is published here.
+      - name: Seed
+        run: pnpm db:seed
+
+      # Linux uses Playwright's bundled Chromium (Windows uses installed Chrome).
+      - name: Install Chromium for Playwright
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      # --disable-source-maps for the reason docs/RUNBOOK.md §1.5 gives: the
+      # retained maps for several thousand modules are the bulk of the heap
+      # growth that makes `next dev` restart itself mid-request, and a
+      # restart surfaces as ERR_EMPTY_RESPONSE inside whichever assertion
+      # was loading.
+      #
+      # That is exactly what happened on run 39480760114, in Next's own
+      # words — "⚠ Server is approaching the used memory threshold,
+      # restarting..." — one minute after the warm pass, so the global
+      # setup's first navigation got an empty response and the job failed
+      # before a single assertion ran. Next sizes that threshold from the V8
+      # heap limit, so the limit is now explicit and generous rather than
+      # whatever the runner's memory implies: this suite compiles most of
+      # the app's module graph in one process, which is the one case in this
+      # repository that genuinely needs the room. The suite tolerates a
+      # restart anyway (apps/web/e2e/support/page.ts), but a restart it
+      # never has to tolerate is better.
+      - name: Start the web app (next dev, background)
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: bash scripts/dev/ci-web-server.sh start
+
+      # `next dev` compiles a route on its first request, and this suite
+      # visits about sixty. Warming moves that cost out of the assertions:
+      # the first CI run of this job lost two tests to `page.goto: Timeout
+      # 90000ms exceeded`, one of them the RBAC test that walks every
+      # /super page in a single test. Signed out is enough — a route
+      # compiles before its guard redirects.
+      - name: Warm the routes the suite visits
+        run: bash scripts/dev/warm-routes.sh http://localhost:3000
+
+      # Warming leaves those sixty routes compiled on disk AND retained in
+      # heap, so the suite would start already near the threshold Next
+      # restarts itself at. Restarting keeps the disk cache and hands the
+      # run a fresh heap; docs/RUNBOOK.md §1.5 calls this out as the fix.
+      #
+      # Run 40657487686 is why it is here: three navigations survived a
+      # restart through the retry in e2e/support/page.ts, and two more —
+      # /account/reactivate and /admin/accommodations — did not, because a
+      # navigation in flight when the server goes down hangs to the
+      # navigation timeout instead of failing fast.
+      - name: Restart it with a fresh heap, keeping the warm disk cache
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: bash scripts/dev/ci-web-server.sh restart
+
+      # rbac and judge need no judge worker; authoring needs E2E_JUDGE=1 and
+      # runs only against the live local stack.
+      - name: Axe gate, keyboard journey (judge steps skipped), RBAC and /judge page
+        working-directory: apps/web
+        run: npx playwright test --project=a11y --project=keyboard --project=rbac --project=judge
+
+      - name: Web server log
+        if: failure()
+        run: tail -n 300 "$RUNNER_TEMP/web.log"
+
+      - name: Upload the Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The real sandbox: isolate 2.7 + every pinned toolchain on a Linux runner.
+  judge-integration:
+    name: Judge integration (isolate)
+    runs-on: ubuntu-24.04
+    # A cache miss for the from-source toolchains builds GCC (~40-60 min on a
+    # standard runner); the vendor toolchains install in a few minutes; with
+    # both caches warm the job takes a few minutes.
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install isolate (pinned tag + commit; no CPU pinning on a runner)
+        run: sudo bash infra/judge/install-isolate.sh
+
+      - name: Prepare /opt/toolchains for the caches
+        run: |
+          sudo mkdir -p /opt/toolchains
+          sudo chown "$(id -u):$(id -g)" /opt/toolchains
+
+      # Two caches, each keyed on its own scripts, so a change to a vendor
+      # install script never forces the hour-long GCC build (and vice versa).
+      - name: Restore toolchains built from source (GCC, CPython)
+        id: native
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /opt/toolchains/gcc-13.2.0
+            /opt/toolchains/cpython-3.12.6
+          key: toolchains-native-${{ runner.os }}-${{ hashFiles('infra/judge/toolchains/build-gcc.sh', 'infra/judge/toolchains/build-gcc-pch.sh', 'infra/judge/toolchains/build-cpython.sh') }}
+
+      - name: Restore vendor toolchains (Temurin, Kotlin, PyPy, Node.js, Go, testlib)
+        id: vendor
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /opt/toolchains/temurin-21.0.4+7
+            /opt/toolchains/kotlin-2.0.21
+            /opt/toolchains/pypy-7.3.17
+            /opt/toolchains/node-22.11.0
+            /opt/toolchains/go-1.23.2
+            /opt/toolchains/testlib-0.9.41
+          key: toolchains-vendor-${{ runner.os }}-${{ hashFiles('infra/judge/toolchains/install-*.sh') }}
+
+      - name: Build toolchains from source (cache miss)
+        if: steps.native.outputs.cache-hit != 'true'
+        run: sudo bash infra/judge/toolchains/build-all.sh cpython gcc gcc-pch
+
+      - name: Save toolchains built from source
+        if: steps.native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /opt/toolchains/gcc-13.2.0
+            /opt/toolchains/cpython-3.12.6
+          key: ${{ steps.native.outputs.cache-primary-key }}
+
+      - name: Install vendor toolchains (cache miss; checksum-verified)
+        if: steps.vendor.outputs.cache-hit != 'true'
+        run: sudo bash infra/judge/toolchains/build-all.sh temurin kotlin pypy node go testlib
+
+      - name: Save vendor toolchains
+        if: steps.vendor.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /opt/toolchains/temurin-21.0.4+7
+            /opt/toolchains/kotlin-2.0.21
+            /opt/toolchains/pypy-7.3.17
+            /opt/toolchains/node-22.11.0
+            /opt/toolchains/go-1.23.2
+            /opt/toolchains/testlib-0.9.41
+          key: ${{ steps.vendor.outputs.cache-primary-key }}
+
+      - name: Toolchains read-only and root-owned, as on a judge host
+        run: |
+          sudo chown -R root:root /opt/toolchains
+          sudo chmod -R a-w,a+rX /opt/toolchains
+          ls /opt/toolchains
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Every catalog language compiles and runs a hello-world inside isolate
+      # with the catalog's exact argv and the worker's own argv builder; the
+      # Java AppCDS archive maps; testlib checker exit codes are as expected.
+      - name: Toolchains inside isolate (verify-toolchains.sh)
+        run: bash infra/judge/toolchains/verify-toolchains.sh
+
+      # The sandbox suites: every file under
+      # apps/judge-worker/test/integration/, one fork, in sequence (they share
+      # box ids; verify-toolchains.sh above uses 800-899). The golden suite
+      # also judges every java21 reference solution (java21 ships its FUNCTION
+      # harness but is not enabled by default), as scripts/dev/linux-gate.sh does.
+      - name: Sandbox integration tests
+        env:
+          RECX_ISOLATE_INTEGRATION: "1"
+          RECX_GOLDEN_EXTRA_LANGUAGES: java21
+        run: pnpm --filter @recx/judge-worker test:integration
+
+  # The one check nothing on the development machine can do: whether the
+  # PromQL in infra/monitoring/alerts.yml parses, and whether Prometheus
+  # would load the config that references it. `reduce` in
+  # packages/shared/src/alerts.ts mirrors each expression and
+  # scripts/ops/fire-alerts.ts asserts the number crosses its threshold, but
+  # neither is a PromQL engine — and Prometheus cannot be installed on that
+  # machine without root. So it runs here.
+  monitoring:
+    name: Monitoring rules (promtool)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The apt package ships promtool alongside the server. Pinned to the
+      # distribution's version on purpose: a rule file that parses under the
+      # Prometheus the college will actually install is the thing being
+      # checked, not the newest release.
+      - name: Install promtool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends prometheus
+          promtool --version
+
+      # `promtool check config` validates that every file the config
+      # REFERENCES exists, and `prometheus.yml` points at the bearer token as
+      # a Docker secret on the monitoring host:
+      #
+      #   FAILED: error checking authorization credentials or bearer token
+      #   file "/run/secrets/recx_metrics_token": no such file or directory
+      #
+      # That is the config being right, not wrong — the token must never be
+      # inline (tests/repo/deploy-topology.test.ts refuses it). So CI makes an
+      # empty file where the host has a secret, and the FULL check runs: it
+      # resolves `rule_files` relative to the config too, which is how
+      # alerts.yml being reachable from prometheus.yml gets proved. A rules
+      # file nobody loads is the quietest way to have no alerting at all.
+      - name: Stand in for the monitoring host's secret
+        run: |
+          sudo install -D -m 600 /dev/null /run/secrets/recx_metrics_token
+          sudo sh -c 'printf not-a-real-token > /run/secrets/recx_metrics_token'
+
+      - name: Check the Prometheus config and the rule file
+        run: |
+          promtool check config infra/monitoring/prometheus.yml
+          promtool check rules infra/monitoring/alerts.yml
+
+  # Lighthouse CI against a production build with the reference device's
+  # throttling (docs/CAPACITY.md §8, where every number is explained).
+  #
+  # Its own job, deliberately: Lighthouse is slow and flaky under contention,
+  # and a flaky gate sharing a job with the axe one makes people re-run both
+  # — which is how an accessibility gate stops being trusted.
+  #
+  # `next start` rather than `next dev`: a dev-server timing says nothing
+  # about production (CAPACITY.md §7.3 records how little). The two URLs are
+  # the pages reachable without a session; the workspace needs one, so its
+  # budget is enforced by the `perf` Playwright project instead.
+  lighthouse:
+    name: Lighthouse (reference device budgets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: recx
+          POSTGRES_PASSWORD: recx-dev-only
+          POSTGRES_DB: recx_lh
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U recx -d recx_lh"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      # CI-only values. Never used by any deployment.
+      DATABASE_URL: postgresql://recx:recx-dev-only@localhost:5433/recx_lh
+      DATABASE_URL_DIRECT: postgresql://recx:recx-dev-only@localhost:5433/recx_lh
+      REDIS_URL: redis://127.0.0.1:6379
+      IP_HASH_PEPPER: ci-only-pepper-not-used-in-any-deployment
+      APP_URL: http://localhost:3210
+      NEXT_TELEMETRY_DISABLED: "1"
+      SEED_ADMIN_PASSWORD: ci-only-admin-password-lh-1
+      SEED_STUDENT_PASSWORD: ci-only-student-password-lh-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      # /problems renders the catalogue, so it needs the seeded problem.
+      - name: Seed
+        run: pnpm db:seed
+
+      - name: Build
+        run: pnpm --filter @recx/web build
+
+      # The assertions live in apps/web/lighthouserc.json so they can be run
+      # by hand with the same numbers CI uses.
+      - name: Lighthouse CI
+        working-directory: apps/web
+        run: npx --yes @lhci/cli@0.14.0 autorun
+
+      - name: Upload the Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          path: apps/web/.lighthouseci
+          retention-days: 14
+          if-no-files-found: ignore

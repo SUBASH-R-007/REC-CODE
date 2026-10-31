@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="REC Code">
+  <!--
+    The tab icon (Phase 10d). The shell's own mark: a rounded square in REC
+    purple carrying lucide's code glyph, which is what <Wordmark> draws.
+
+    Added because Lighthouse's errors-in-console audit failed on /login with
+    a 404 for /favicon.ico: the platform had no icon at all, so every page
+    load in every browser logged an error and no tab ever showed a mark.
+
+    The colour is written out rather than taken from a brand token: this file
+    is served as a static asset, before any CSS, and a themed icon would mean
+    rendering it per request. #6D28D9 is the canonical REC purple that
+    lib/brand/fallback.ts falls back to.
+  -->
+  <rect width="32" height="32" rx="8" fill="#6D28D9" />
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 11 L7 16 L12 21" />
+    <path d="M20 11 L25 16 L20 21" />
+    <path d="M17.5 9 L14.5 23" />
+  </g>
+</svg>

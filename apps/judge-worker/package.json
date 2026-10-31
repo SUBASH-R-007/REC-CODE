@@ -1,0 +1,30 @@
+{
+  "name": "@recx/judge-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Judge worker. Runs on dedicated, credential-free Linux hosts. Holds NO database URL, NO auth secret, NO object-storage master key and NO student PII. Must never depend on @recx/db.",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "RECX_ISOLATE_INTEGRATION=1 vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@prometheus-io/client": "0.16.1",
+    "@recx/shared": "workspace:*",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.7.0",
+    "pino": "^9.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

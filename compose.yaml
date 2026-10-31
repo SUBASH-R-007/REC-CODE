@@ -1,0 +1,102 @@
+# REC Code — local development services in containers.
+#
+#   docker compose up -d            → Postgres 17, Redis 7, MinIO (+ bucket)
+#   docker compose ps               → all services "healthy"
+#   docker compose down             → stop (named volumes keep the data)
+#   docker compose down -v          → stop and DELETE all local data
+#
+# This is the container alternative to scripts/dev/wsl-services.sh (native
+# services in WSL2, the path used on the main development machine — see
+# docs/RUNBOOK.md and docs/OPEN-QUESTIONS.md item 9). Both expose the same
+# ports, so apps/web/.env.local is identical either way:
+#
+#   Postgres  localhost:5433  (5432 inside; a Windows-native Postgres usually
+#                              owns host port 5432)
+#   Redis     localhost:6379
+#   MinIO     localhost:9000  S3 API, localhost:9001 web console
+#
+# Development credentials only. Nothing here is ever used in production.
+# The judge (isolate) is NOT containerised here: it needs a Linux host with
+# cgroup v2 and setuid isolate — see infra/judge/install-isolate.sh.
+
+name: recx
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recx
+      POSTGRES_PASSWORD: recx-dev-only
+      POSTGRES_DB: recx
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recx -d recx"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Redis is transport only (BullMQ queues + progress pub/sub); Postgres is
+  # truth. AOF with a once-a-second fsync, as in production.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Object storage for test-data bundles (TESTDATA_DRIVER=s3). Optional in
+  # development: the default TESTDATA_DRIVER=local needs no object store.
+  #
+  # Image: upstream minio/minio images are no longer published (the
+  # minio/minio repository is gone from Docker Hub and quay.io and the GitHub
+  # project is archived — checked 2026-10-10). This pins the community fork
+  # that continues the same server, by RELEASE tag AND manifest digest so a
+  # re-tag upstream can never change what runs here. Development only; the
+  # production object store is an open decision (docs/OPEN-QUESTIONS.md).
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: recx
+      MINIO_ROOT_PASSWORD: recx-dev-only-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: creates the private test-data bucket, then exits.
+  minio-init:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 recx recx-dev-only-minio &&
+        mc mb --ignore-existing local/recx-testdata &&
+        mc anonymous set none local/recx-testdata
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

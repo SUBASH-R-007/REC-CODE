@@ -1,0 +1,1019 @@
+# REC Code — Architecture
+
+REC Code is a coding practice, contest and proctored-assessment platform for
+Rajalakshmi Engineering College (~5,000 students). It is a separate
+application from the REC Learning LMS: same stack and design language, its own
+database (`recx`), and the LMS remains the identity source of record.
+
+## Processes
+
+```
+                 ┌──────────────────────────── app host ─────────────────────────────┐
+ browser ──TLS──▶│ Caddy ─▶ apps/web (Next.js 15, ×2)  ── pooled ──▶ Postgres 17 (recx)│
+                 │            │  ▲  SSE ◀── Redis pub/sub ◀───────────┐                │
+                 │            │  └── BullMQ enqueue ──▶ Redis 7 ──────┤                │
+                 │ apps/scheduler ── direct URL ──▶ Postgres          │                │
+                 │   reconciler (10s), node sweep, later cron jobs    │                │
+                 │ MinIO (test-data bundles)                          │                │
+                 └────────────────────────────────────────────────────┼────────────────┘
+                                                                      │
+                 ┌──────────── judge host(s) — credential-free ───────┼────────────────┐
+                 │ apps/judge-worker ── claims jobs from Redis ───────┘                │
+                 │   │  HTTPS (node token) ─▶ apps/web /api/judge/*  (claim, blob,     │
+                 │   │                        result, release, heartbeat)              │
+                 │   └─▶ IOI isolate 2.7 boxes (cgroup v2, no network, RAM box root)   │
+                 └────────────────────────────────────────────────────────────────────┘
+```
+
+* **apps/web** is the only process with `DATABASE_URL`. Server components read
+  with `db` directly; mutations are server actions returning
+  `ActionResult<T>`; judge workers talk to it over `/api/judge/*`.
+* **apps/judge-worker** holds no database URL, no auth secret, no storage
+  master key and no student PII. Its node token can only: claim a job, fetch
+  the blobs of the job it currently holds, post that job's result, release
+  it, and heartbeat. Egress is allow-listed to the app host and Redis.
+* **apps/scheduler** owns periodic work: the judge reconciler every 10 s
+  (submissions, runs, validation runs), the node-offline sweep and lane
+  hygiene, RunRequest TTL and retention purges (legal-hold aware), the daily
+  challenge (prepared before campus midnight) and the leaderboard freeze
+  (closed weeks and months → LeaderboardSnapshot); the dormancy sweep arrives
+  in Phase 8. It uses the direct, non-pooled database URL because it needs
+  advisory locks and `SKIP LOCKED` leases.
+
+## Packages
+
+| Package | Contents | Imported by |
+|---|---|---|
+| `@recx/shared` | Verdict, limits table, XP rules, 14-topic enum, language catalog, judge protocol (zod) + `JUDGE_PROTOCOL_VERSION`, FUNCTION harness (C++, Python, Java) + structured comparators (`@recx/shared/harness`), output sanitiser, the two-sum seed problem | everything |
+| `@recx/db` | Prisma schema + migrations, `createPrismaClient()` with the frozen-version guard | web, scheduler — **never** judge-worker |
+| `@recx/design` | verbatim LMS tokens, Tailwind v4 theme bridge, utilities, 13 primitives, `VerdictBadge`, server-only palette derivation | web |
+
+Single-source rule: Verdict, the limits table, XP constants, the topic enum and
+`JUDGE_PROTOCOL_VERSION` are defined only in `@recx/shared`. The Prisma enums
+are storage mirrors held equal by a parity test; any other copy fails
+`tests/repo/single-source.test.ts`.
+
+## Judge pipeline (Phase 1)
+
+1. **Submit** (server action): validate (zod, 256 KB source cap), write
+   `Submission` (`QUEUED`/`PENDING`) + `SubmissionSource` in one transaction,
+   **then** enqueue on BullMQ with `jobId = submission.id`, then mark
+   `DISPATCHED`. If Redis is down the row stays `QUEUED`; the reconciler
+   enqueues it later. Postgres is truth; Redis is transport.
+2. **Claim**: the worker POSTs `/api/judge/claim`; the web app runs the lease
+   `UPDATE … WHERE status IN ('QUEUED','JUDGING') AND (leaseExpiresAt IS NULL
+   OR leaseExpiresAt < now()) RETURNING …`, writing a fresh `claimToken` and a
+   2-minute lease. The response is the `JudgeJobSpec`: pinned problem version,
+   language runtime (from the `LanguageConfig` row), limits, test manifest
+   (sha256 + size only).
+3. **Fetch**: blobs come from `/api/judge/blob/{sha256}` (authorised only for
+   the claimed job's version) into a sha256-verified LRU cache on the judge.
+4. **Compile** in its own box (separate uid), then **run** each test in the
+   run box: only the current input is staged (`/box/input.txt`, 0444) and it
+   is unlinked before the next. Expected output never enters the box.
+5. **Progress** goes over Redis pub/sub (`recx:submission:{id}`) — never a DB
+   row per test. The browser receives it over SSE.
+6. **Result**: the worker POSTs `/api/judge/result` with its `claimToken` and
+   protocol version. The finalise transaction is guarded by `claimToken` and
+   `judgeState IN ('DISPATCHED','RUNNING')`, so a stale node's late result or a
+   retried callback is a no-op. Deterministic verdicts are never retried; only
+   infrastructure failures (`release`) are, up to 3 attempts, after which the
+   submission becomes `INTERNAL_ERROR` and is excluded from scoring.
+
+## Data model principles
+
+The five structural decisions from the prompt are load-bearing:
+
+1. Immutable `ProblemVersion` (frozen on publish; repository guard + DB trigger).
+2. Narrow `Submission` with jsonb per-test results; source in a 1:1 side table.
+3. Content-addressed `TestBlob` + immutable bundle keys.
+4. Append-only XP ledger with period buckets (Phase 3).
+5. Authoritative contest attempts + materialised standings (Phase 5).
+
+## A second judging engine: the SQL sandbox (Phase 12k)
+
+`apps/sql-judge` is a judge node like the isolate workers, with a different
+engine behind it. It consumes the `judge-sql-*` queues, claims a job
+through the same five endpoints, runs the student's single statement and
+posts the same result shape — so XP, the leaderboard, contests,
+assessments, rejudges, the lease, the attempt cap and "never retry a
+deterministic verdict" all keep meaning what they meant. The design and
+the reasoning are in `docs/handoff/phase12/DESIGN-sql.md`.
+
+What is different is the sandbox, and the credential. The isolate hosts
+hold no database URL at all; this one holds two, both to a cluster that
+holds no application data, and it refuses to start if either turns out to
+point at a database with application tables in it. `pg` is a dependency of
+this workspace and of no other (`tests/repo/sql-judge-posture.test.ts`).
+
+The sandbox per case: the owner connection creates a schema, runs the
+author's setup script inside it and grants the student role `SELECT` on
+what it made; the student's statement then runs on its OWN connection, as
+a role that owns nothing, inherits nothing and can create nothing, in a
+`READ ONLY` transaction with `search_path` pinned to that schema,
+`statement_timeout` at five seconds and a row cap; the schema is dropped in
+a `finally`, and a sweep at boot drops any a crashed process left behind.
+Two connections rather than `SET ROLE`, because a single statement can call
+`set_config('role', …)` and a session whose `session_user` is privileged
+has something to go back to. One statement, because the extended protocol
+refuses a second command — the server's rule, not a semicolon count.
+
+**A SQL problem in the model (slice 3).** `ProblemVersion.ioMode = SQL`,
+`compareMode = ROWS`, plus two SQL-only columns: `sqlDialect` (one value,
+stated rather than inferred) and `sqlOrdered` (whether the row order is part
+of the answer — per VERSION, because ordering is a property of the question,
+even though the wire carries it per case). No new table: a `TestCase`
+already has an input blob and an output blob, and for SQL those are the
+case's dataset and its expected result set, with the same immutability and
+the same sha256 discipline. That is what let SQL join the pipeline with no
+change to `Submission` at all — and so with no change to XP, the
+leaderboard, contests, assessments or rejudges.
+
+Four CHECKs hold the shape: a version is SQL exactly when it compares ROWS,
+each SQL column is present exactly for a SQL version, and a SQL version
+carries neither a function signature nor a checker (both would be read by
+rules that do not apply to a result set). SQL is also a `LanguageConfig`
+row — key `sql17`, with a `SqlRuntime` rather than a `LanguageRuntime`,
+because `LANGUAGE_KEYS` describes toolchains and a statement handed to a
+database has no argv, no environment and no `/opt/toolchains` directory.
+
+**Authoring, and where the expected rows come from.** A TA writes a SQL
+problem on the same pages as any other: the create form offers SQL as a
+third input mode, the judging section asks the one question only a human
+can answer (is the row order part of the answer?), each case is a dataset
+typed as the test's "input", and the model solution is a reference QUERY in
+the `sql17` language. The expected result sets are never typed: a
+validation run on a SQL version is a CAPTURE run, which executes the
+author's reference query against each dataset and reports what it produced,
+and `lib/judge/sql-capture.ts` stores those rows as the version's expected
+output blobs. Until then each case carries an empty placeholder, and the
+publish gate's existing rule — a passed validation at the current
+`judgeSeq` — is what stops a version publishing with a stale or missing
+capture.
+
+The capture path is deliberately narrow: a validation job only, a SQL
+version only, an unfrozen version only, cases that already exist by index
+only, and only when every case reported a result. A half-captured version
+would publish with one case's expected rows left over from a previous
+dataset.
+
+**Routing.** `engineForIoMode()` is the one place that maps a problem to an
+engine, and `queueNameFor()` the one place that maps an engine and a lane to
+a queue. The web enqueuer reads the engine from the row itself rather than
+taking it as a parameter: there are five enqueue call sites, none of them
+has the version in hand, and a SQL job on an isolate queue is a job an
+isolate node claims and cannot run. The scheduler's reconciler reads it the
+same way, as a `CASE WHEN` on the row it is reconciling.
+
+**The student surface (slice 4).** A SQL answer is a result set, and the
+whole surface follows from that one sentence.
+
+*What a student may choose.* `getProblemWorkspace()` offers a SQL problem
+`sql17` and nothing else, and offers `sql17` for no other problem — one
+line, both halves. The submit action refuses the other pairing anyway, so
+offering a C++ option on a SQL question would be offering a door that is
+locked. The editor opens on the dialect's grammar (Monaco's own `sql`
+tokenizer, `@codemirror/lang-sql` with the PostgreSQL dialect under 768 px)
+and, when the author wrote no starter, on a comment.
+
+*What a student is told before they type.* Four chips over the editor —
+the dialect, one statement, read-only, the five-second limit — and the
+same rules in full sentences in the Description tab, which also states
+whether the row order is part of the answer and that column names are not
+compared. Every sentence is `SQL_NOTICES` in `@recx/shared`; a repository
+test refuses a second copy of any of them (and refuses the dialect's name
+appearing anywhere in `apps/web/src`). The Description tab shows a query's
+own limit rather than the C++ time limit and a memory figure, neither of
+which describes a query.
+
+*What a student is told afterwards.* A case has three blocks rather than
+three streams of text: the dataset, the expected rows and their own rows,
+the last two rendered as TABLES with NULL written as a word — `''` and
+NULL are different answers and a blank cell cannot say which. The judge's
+one sentence about the case sits above them ("the rows are right and the
+order is not — row 1 differs"), and for a failed query it is the
+database's own message.
+
+That sentence needed a channel, and it reuses the two that already exist
+rather than inventing one. The student's result set travels in the
+protocol's `stdout` — a SQL submission's output IS a result set — so the
+web boundary's existing rule drops it for every hidden case with no new
+code. The sentence travels in `TestResult.message`, which the protocol has
+carried since Phase 1 and the web boundary dropped; `compactTestResults`
+now keeps it, for the indexes the VERSION marks as samples, read from the
+database rather than from the body a worker sent. Both sides of a table
+are clipped to `SQL_DISPLAY_ROWS` before they are stored, because a
+visible-case field is capped in BYTES and JSON cut mid-string is not a
+result set any more.
+
+A SQL question also has no custom input — its input is the author's
+dataset — so the console's Custom input tab is absent rather than present
+and ignored, and `runCode` refuses one with a sentence.
+
+**Operating two engines (slice 5).** The fleet's instruments were written
+when there was one engine, and each had to be asked what it means when
+there are two.
+
+*A lane's backlog* is the SUM of its two queues, everywhere: the fleet
+page's totals read both (they silently read only the isolate queue before,
+so SQL work waiting was invisible on the page whose job is to show waiting
+work), and the scheduler's `judge_queue_depth` has summed them since slice
+3a. The SPLIT is a second gauge, `judge_engine_queue_depth{queue,engine}`,
+rather than a label on the first — the alert rules read `max by (queue)`,
+and an extra label would turn a sum into a maximum and stop a rule firing
+at exactly the moment it should. `JudgeEngineBacklog` is the rule for the
+state the sum hides: one engine stopped while the lane total still looks
+survivable.
+
+*Calibration* is a hello-world CPU benchmark, which the SQL engine does
+not run. A `postgres` node is told so in words rather than being told its
+calibration is "missing", and the fleet median is taken over nodes of the
+same engine, because a CPU score from a database host measures nothing a
+C++ time limit is derived from. The consequence is unchanged: a SQL node
+does not serve ASSESSMENT or CONTEST, and that is the honest state until
+the query engine has a benchmark of its own.
+
+*A node's identity* gained one column, `JudgeNode.engineVersion`. The
+heartbeat had carried it since slice 2 and nothing stored it; folding it
+into `isolateVersion` would have been a column named after one engine
+holding another's version.
+
+*The topology* is a fourth host role: `deploy/compose.sql-judge.yml` runs
+the sandbox cluster and the judge together, on an internal network with no
+published port, because the thing running untrusted input does not share a
+machine with the thing holding the data — the same rule the isolate judges
+follow, applied to a sandbox that happens to be a database.
+
+The three health concepts the fleet already has are re-meant rather than
+dropped: `hardening.ts` checks the CLUSTER at boot (not the application's
+database, the student role unprivileged, a member of nothing, unable to
+create, no untrusted extension), and `selfcheck.ts` is the adversarial
+suite — eleven statements a student will eventually try, every one of which
+the cluster must refuse — run at boot and every six hours, reported in
+every heartbeat. Calibration is the one that has no meaning here yet and is
+sent as null.
+
+## C#, the eleventh toolchain (Phase 12o)
+
+SPEC §11 asked for `cs8`, and that key is a promise about the LANGUAGE, not
+about the runtime underneath it. The compiler is pinned with
+`-langversion:8.0`, so a C# submission means in 2029 what it meant in 2026;
+the runtime is .NET 10, the current LTS, because .NET 8 leaves support on
+2026-11-10 and a judge host should not ship a runtime that stops getting
+security fixes in a month. C# 12 would be a NEW key and a NEW directory, the
+same rule every other toolchain follows.
+
+**No MSBuild, no NuGet, no project.** The compile step is
+`bin/recx-cs-build`, written by the installer, for the reason Go has
+`recx-go-build`: the project system wants a writable home, a lock file and a
+network, and a submission is one file. The script runs `dotnet exec
+…/Roslyn/bincore/csc.dll` with a response file the installer already filled
+with every framework reference assembly — resolved once, on the host, because
+a box has no network to resolve them from — and then writes
+`main.runtimeconfig.json`, which is what turns the produced `main.dll` into a
+runnable framework-dependent app.
+
+**The environment is the rest of the story.** `DOTNET_CLI_HOME` and `TMPDIR`
+are `/box` because that is the only writable place; globalization is
+invariant because the box has no ICU data; the diagnostic IPC server is off
+because there is nothing in a box to attach with and it would otherwise open
+a socket under `TMPDIR`; W^X JIT pages are off because they need a double
+mapping the sandbox does not grant; telemetry is off because there is no
+network to send it to.
+
+**What the real box changed.** `buildIsolateArgv` refused to run cs8 at all:
+its environment-name guard allowed upper case only, and the runtime's own
+knobs are spelled `DOTNET_EnableWriteXorExecute` and
+`DOTNET_EnableDiagnostics` — `getenv` on Linux is case-sensitive, so there is
+no upper-case spelling to use instead. The guard now requires only that a
+name START with an upper-case letter or `_`, which still refuses a lower-case
+shadow of a real variable (`path` beside `PATH`) while letting a vendor spell
+its own knobs; case was never the safety property, and the value is still
+checked for control characters, `LD_*` is still refused outright, and the
+sandbox's own variables still cannot be overridden.
+
+## Rust, the tenth toolchain (Phase 12o)
+
+SPEC §11: "rust180 and cs8". This is the first of the two, and what makes
+a new language cheap here is that the fleet decides for itself whether it
+has one: a node reports only the languages whose toolchain directories
+exist, and then narrows that list to the ones whose hello-world actually
+compiled and ran in the sandbox at boot. A catalogue entry on a host
+without the toolchain is inert, and a catalogue entry with a wrong argv
+never reaches a student — the node simply does not advertise it.
+
+**rustc and nothing else.** No cargo, no crates, no network, no build
+cache: one file in, one static binary out. Cargo would want a writable
+`CARGO_HOME` and a network it will never have, and a submission is a
+single file.
+
+Three flags carry decisions. `-C target-feature=+crt-static` makes the
+binary static, as C and C++ are with `-static`, because a box mounts the
+toolchain read-only and nothing else — a dynamically linked program could
+not find libc. `-C linker=…/gcc-13.2.0/bin/gcc` is why gcc is an extra
+toolchain for `rust180`: rustc does its final link through a C compiler
+and the box has no system one, the same dependency Kotlin has on the JDK.
+`--edition 2021` is pinned because an edition changes what the SOURCE
+means, and a 2026 submission must mean the same thing in 2029.
+
+**Two things only a real box could have told us.** rustc needs a temporary
+directory per compile, and a box has no `/tmp` — the first verification run
+failed with "couldn't create a temp dir", so the catalogue sets
+`TMPDIR=/box` (the same shape as Go's `GOCACHE`). And `+crt-static` here
+produces a static-PIE binary, which `file` calls "static-pie linked"
+rather than "statically linked", so the installer's own static check now
+accepts both and settles it with `readelf -d` instead.
+
+## Output-only problems (Phase 12n)
+
+SPEC §11's other half, and the one that changes what a submission IS: the
+student is handed one hard instance and submits **the answer**, not a
+program.
+
+**A fourth `IoMode`.** `IoMode` already answers "how does the answer reach
+the judge?" — a program on stdin, a function, a query — so an answer file
+is a fourth value rather than a flag beside them, and every exhaustive
+switch stopped compiling until it had been thought about. Two migrations,
+because PostgreSQL will not let a new enum value be used in the
+transaction that adds it; the CHECKs come in the second, exactly as Phase
+12k split its SQL checks.
+
+**`answer1`: the second language that is not a toolchain.** A submission
+points at a `LanguageConfig`, which is what kept SQL inside the pipeline
+with no change to `Submission` at all, and the same holds here: no argv,
+no toolchain, nothing to compile. An output-only problem offers `answer1`
+and nothing else, and no other problem offers it — one line in the
+workspace query and the same line in the submit action.
+
+**The fleet still judges it — protocol 6.** A text comparison needs no
+sandbox, so it would be easy to do in the web process. We do not: a
+CHECKER answer-problem runs the AUTHOR's program, and author code may only
+ever run in a box. Keeping the kind in the fleet also means its verdicts
+come with a node, a lane, a rejudge path and a metrics row like every
+other verdict. So the job goes to an isolate node with no program at all:
+`JudgeJobSpec.language` is now nullable, null exactly when `ioMode` is
+OUTPUT_ONLY, and the worker's answer path compares the submitted text (or
+hands it to the checker) without creating a run box. A v5 worker cannot
+parse such a spec, which is the honest outcome — 426, drain, upgrade.
+
+**One case, and it is visible.** A submission carries one answer, so an
+output-only problem has exactly one case, and its data is the question.
+Both are the publish gate's rules and the spec builder's; no CHECK could
+hold either, because they span tables and blobs.
+
+**Authoring it (slice 2).** The gate's new rules are the two no CHECK
+could hold — exactly one case, and it is a sample — plus the model ANSWER,
+a reference solution in `answer1` whose validation proves the stored
+expected output and the comparator agree about the author's own answer.
+That is the mistake this kind of problem is prone to: a trailing newline,
+a rounded number, a different order. Two of the gate's usual rules are
+lifted here: the hidden test (a hidden case would be a question nobody can
+read) and the C++ model solution (the model is not a program).
+
+**The student surface (slice 3), and the one leak that mattered.** The
+case of an output-only problem is a SAMPLE, because its data is the
+question — and on every other kind of problem "sample" means the student
+sees the expected output too. Here that output IS THE ANSWER. So it is
+dropped in the two places it is READ (`getProblemWorkspace` and
+`loadSampleTexts`) rather than hidden where it is rendered: a page can only
+leak what it was given. The console then shows two blocks, the data and
+**Your answer**, with no expected block and no time or memory — nothing of
+the student's ran.
+
+The rest of the surface follows from "no program": the editor is a
+plaintext answer box, the language picker offers `answer1` alone, there is
+no Run button at all (the action refuses one too), the idle console says
+*"There is nothing to run"* instead of describing a Run, and the
+Description tab states the four rules of an answer.
+
+**And not in an assessment (slice 4).** The practice workspace is the only
+surface that knows this kind — the answer box, the one language, the data
+without the expected answer, no Run. An exam attempt builds its own editor
+and `submitAttempt` uses ONE language for every question in the sitting, so
+an output-only question there would show a candidate a code box for a
+question that wants an answer and submit it as whatever language the first
+question used. So the PIN is refused: a trigger on `AssessmentProblem`, a
+sentence in the admin action, an entry in the guard catalogue. The third
+rule of this shape after interactive problems (12l) and debugging ones
+(12m), and lifted the same way. A contest needs no rule, because its arena
+links to the ordinary workspace.
+
+**Two gaps closed on the way.** The import package's `solutions[].language`
+was `LANGUAGE_KEYS`, so no package could ever have named a SQL problem's
+reference query — and the admin form's language list was the same, so
+neither reference could be added through the UI. Both now offer the two
+languages that are not toolchains, which is what makes a SQL problem and
+an output-only problem authorable the ordinary way rather than through a
+server action.
+
+**Found by the real-isolate run, before any student saw it:** the first
+spec builder forced ICPC scoring "because one case is one case". ICPC has
+no partial credit, so a checker that had just worked out 3 of 10 correct
+values came back **WA**. An output-only problem's scoring mode is the
+author's, PER_TEST is what makes a checker's part marks mean anything, and
+SUBTASK is refused — one case is not a table of subtasks.
+
+## Debugging problems (Phase 12m)
+
+SPEC §11: *"debugging and output-only problem kinds"*. The first of the
+two, and it needed no engine at all — which is the finding worth writing
+down.
+
+**A debugging problem is an ordinary problem with an EDIT BUDGET.** The
+student is handed a program that is nearly right and asked to fix it in at
+most N changed lines; the fixed program then runs against the version's
+tests like any other STDIN or FUNCTION problem. The broken program is the
+`StarterCode` rows the version already has, so nothing new is stored but
+the number.
+
+**Non-null is the kind.** `ProblemVersion.maxEditedLines` — null for every
+other problem — and no `ProblemKind` enum beside it, because an enum value
+would invite code to ask "is this a debugging problem?" in places that
+should be asking "does this problem have an edit budget?", and the two
+could then disagree. The database says the rest: a whole number in 1..50,
+and never on a SQL or an interactive problem, neither of which hands the
+student a program to repair.
+
+**The budget is why it is a kind at all.** Without it the student deletes
+the program and writes their own, and the exercise — read somebody else's
+code, find the mistake — never happens. So the rule is enforced where a
+student can be told about it rather than where it would be cheapest: the
+submit and run actions refuse an over-budget source BEFORE the row, so a
+submission that cannot be judged on its merits never costs one of their
+daily submissions, and a Run cannot teach them that the rule does not
+apply until it suddenly does.
+
+**The judge never hears about it.** No field on the wire, nothing in the
+worker: a node has no starter and no business having one. A repository
+fence holds that true in both directions.
+
+**One count, three surfaces.** `countEditedLines` in `@recx/shared` is a
+line-level diff — `max(added, removed)` over the LCS, trimmed, blank lines
+dropped — read by the editor's live counter, by the submit refusal, and by
+the publish gate. A student told "4 lines" by the bar and "2" by the
+server can act on neither number, which is why there is one function and a
+fence refusing a second.
+
+**The gate proves the problem is solvable.** The two rules that cannot be
+CHECKs are the ones that matter: a budget with no starter is a question
+the workspace could offer in no language at all (a debugging problem is
+offered in exactly the languages its broken program is written in — each
+would be a different program with a different mistake), and a budget the
+author's OWN model solution does not fit is a question nobody can answer.
+The gate measures the model solution against the starter and says so.
+
+**The student surface (slice 3).** Two numbers over the editor: the
+budget, and the count as it stands. The count is the only thing on that bar
+a student can change and the only one that can refuse their submission, so
+it is beside the budget and turns red when it is over — and it comes from
+the same `countEditedLines` the action refuses on, against the same
+starter, so the bar cannot promise what the server will not honour. The
+Description tab says in sentences what the counter cannot: what does not
+count (blank lines, indentation), why there is a budget at all, and why
+the language picker is shorter than usual. Reset is relabelled *"Reset to
+the broken program"*, because that is what it does here.
+
+**And not in an assessment (slice 2).** The budget is refused in
+`submitSolution` and `runCode`, before the row. A sitting does not submit
+that way: `submitAttempt` writes one Submission per answered question when
+the time runs out, and refusing one there would throw away a candidate's
+work at the only moment they can do nothing about it. So the PIN is
+refused instead — a trigger on `AssessmentProblem`, a sentence in the
+admin action, an entry in the guard catalogue — which is the answer Phase
+12l reached for interactive problems, for the same reason: say it to the
+person choosing the question, not to the candidate answering it. A contest
+needs no rule at all: its arena sends the student to the ordinary
+workspace — it builds no editor of its own — so the budget is already
+shown and enforced there.
+
+**Found while building it:** `updateDraftJudging` never forwarded
+`sqlOrdered`. Phase 12k asked the author whether the row order is part of
+a SQL answer *"rather than guessing it"*, the form sent the answer, the
+schema validated it — and the action dropped it, so every SQL problem was
+published as ordered. One line, and a test beside the new one.
+
+## Interactive problems (Phase 12l, the engine)
+
+SPEC §11's last engine item, and its own description of it: *"the most
+fragile part of the engine"*. `CompareMode.INTERACTIVE` had been in the
+enum since the init migration and refused in four places; slice 1 makes
+the thing those refusals were protecting the platform from.
+
+**Two boxes, and they share nothing but the conversation.** The solution
+runs in the slot's RUN box and the author's INTERACTOR in its CHECKER box
+— a different uid, cgroup and mount namespace, which is the separation
+that box already exists to provide. Each is an ordinary isolate run with
+no `--stdin` and no `--stdout`, so the sandboxed program inherits the
+pipes isolate was handed, and the WORKER copies bytes between them
+(`Sandbox.execPair`). SPEC says FIFOs; a FIFO pair would need a directory
+bound into both boxes, which is a channel for more than the protocol —
+the solution could leave a file for the interactor to read. Being in the
+middle instead is also what makes the three rules of a conversation
+enforceable: a byte cap each way, an idle deadline, and a teardown that
+leaves neither box running.
+
+**The interactor is the judge.** It exits with the verdict, using the
+CHECKER's own exit codes (0 ok, 1 WA, 2 PE→WA, 3 FAIL→permanent release,
+16+n partial), and it is compiled, cached and interpreted by the checker's
+own code. There is no second comparison pass: a two-program protocol
+where either may fail is already the most fragile thing here, and a third
+would double the states nobody can reason about.
+
+**The interactor's CPU is excluded by construction** — two runs, two meta
+files, two cgroups, nothing to subtract.
+
+**Mutual idle is a deadlock, and it is the student's.** No byte in either
+direction for `LIMITS.interactive.idleMs` (2 s) means both programs are
+blocked reading. The verdict is TLE, with a sentence that names the cause:
+a missing flush. The integration suite proved how easily that sentence
+would have been wrong — a C++ program that forgets to flush still works,
+because `std::cin` is TIED to `std::cout` and a read flushes the pending
+write, so the deadlock a student actually hits comes from C stdio.
+
+**The precedence is the whole design**, because in a conversation both
+programs fail together and the second failure is usually caused by the
+first: infrastructure, then the student's own time / memory / output
+limits, then the deadlock, then the interactor's own failure, then the
+student's crash — *unless it was SIGPIPE*, which means the interactor had
+already decided and exited — then the interactor's verdict. Both
+directions of that one exception are a wrong verdict if missed: RE for an
+interactor's correct WA, or WA hiding a segfault.
+
+**What a student sees of a visible case is the conversation**, marked by
+direction (`> ` theirs, `< ` the interactor's), recorded by the relay
+because it was passing the bytes anyway. There is no output file in an
+interactive case; without the transcript a student would have nothing at
+all. A hidden case shows nothing, by the same rule as every other kind of
+problem — not the transcript, not even the interactor's report, which
+describes the hidden data.
+
+**Authoring one (slice 2).** The same pages as any other problem, with
+INTERACTIVE as a fifth comparator and one new box: the interactor's source,
+pasted and stored as a content-addressed blob exactly as a checker's is,
+and moving `judgeSeq` when it changes because it changes how the problem is
+judged. A case's input is the interactor's data and its expected output
+does not exist — the form stops asking, and the version's cases carry the
+empty blob, because making `TestCase.outputSha256` nullable would weaken a
+constraint that holds for every other kind of problem.
+
+Four CHECKs say what an interactive version is, and the authoring surface
+says the same things in sentences first: it has an interactor (frozen), it
+has one only if it is interactive, its conversation happens on stdin and
+stdout, and it is judged by that one program rather than by a checker
+beside it or a float epsilon nothing reads. The import package gained
+`interactor.cpp` under the same rules, so a bulk import can carry one.
+
+**The student surface (slice 3).** A case with no expected output shows
+none: the console gives an interactive case TWO blocks — the examiner's
+data for that case, and the conversation the relay recorded — where every
+other kind of problem has three. The live stage of slice 2 is what asked
+for this: it found an empty block headed "Expected output" and a **Custom
+input** tab on a question that has no input to type.
+
+Four chips over the editor say it is a conversation, that every line must
+be flushed, and that silence on both sides is a deadlock; the Description
+tab says the same things in sentences, including that a sample shows the
+EXAMINER's data rather than anything the program reads. Every one of those
+sentences is `INTERACTIVE_NOTICES` in `@recx/shared`, and a repository
+test refuses a second copy — the same rule the SQL notices live by.
+
+There is no custom input, in both halves: the console offers no tab, and
+`runCode` refuses one with a sentence rather than ignoring it.
+
+**And not in an assessment.** SPEC §11 keeps interactive problems out of
+high-stakes sittings "until they have run cleanly through two practice
+contests" — a rule with a date on it rather than a property of the
+platform, enforced where the pinning happens: a trigger on
+`AssessmentProblem`, a sentence in the admin action, and an entry in the
+guard catalogue so that lifting it later cannot be quiet. A contest may
+hold one; SPEC says so, which is why the trigger is not on
+`ContestProblem`.
+
+**Protocol 5.** The job spec carries the interactor, and a protocol-4
+worker would turn such a job into a permanent internal error — so the app
+refuses older workers with 426, the mechanism `docs/RUNBOOK.md` §2.9
+documents and the reason it exists. The mock driver refuses interactive
+jobs outright: a fabricated AC for a conversation that never happened
+would be indistinguishable from a real verdict.
+
+## Editor settings, and the keymaps (Phase 12j)
+
+SPEC §11: "vim/emacs keymaps". A student who has spent two years in vim
+types badly in anything else, and typing badly in a contest is a handicap
+the platform imposed rather than a skill it measured.
+
+The preference lives in the `User.editorPrefs` JSON the profile form
+already wrote — `settings-schema.ts` had predicted this exact key ("plain
+JSON that other keys (e.g. a keymap) may share") — so the phase needed no
+migration. It needed something else, though: until now `fontSize` and
+`tabSize` were saved by that form and read by **nothing**. Both editors
+hard-coded 14 px and 4 spaces, so two settings had been a control that
+lied since Phase 3. `EditorOptions` now carries the viewer's preferences,
+`EditorController.setPrefs()` applies a change to a live editor, and the
+line height follows the font size through one function
+(`editorLineHeight`) because three editors and a caret-reveal calculation
+have to agree on it.
+
+Both keymaps exist for both editors. Monaco's are the `monaco-vim` and
+`monaco-emacs` UMD builds, copied into `/monaco/keymaps` by
+`scripts/copy-monaco.mjs` and loaded through Monaco's OWN AMD loader —
+self-hosted for the same reasons as Monaco itself (a strict CSP, a cold
+cross-origin cost on 3 Mbps campus wifi, and an exam LAN with no route off
+campus), and therefore in no JavaScript bundle at all. CodeMirror's are
+`@replit/codemirror-vim` and `@replit/codemirror-emacs` behind dynamic
+imports, each its own chunk. A student on the standard keys downloads
+nothing extra, which is why the size budgets did not move.
+
+Two decisions are load-bearing enough to be fenced
+(`tests/repo/editor-keymap-posture.test.ts`). **The way out of the editor
+is above the editor**: Esc then Tab is a capture-phase listener on the
+wrapper, so it runs before Monaco, before CodeMirror and before any
+keymap, and WCAG 2.1.2 is not something a preference can switch off. It
+shadows one binding per mode (vim's `<Tab>` jumplist jump, emacs's
+`M-Tab`), and the setting page says so. **The proctored arena keeps the
+standard keys**: what it records about typing is defined in terms of
+CodeMirror's own transaction origins (SPEC §5), and a keymap's register
+commands — vim's `"+p`, emacs's yank — are a paste path those origins do
+not describe. Font size and tab size do apply there, because they change
+no signal.
+
+## Written and system-design answers (Phase 12i)
+
+A TA writes a question and the rubric it will be marked against; both are
+published together. A student reads the rubric, writes prose, hands it in;
+a TA marks each criterion out of four and writes a note. SPEC §11's last
+Phase 11+ item is "written/system-design with rubric grading", and the
+word doing the work is *rubric*: a mark says how it went, a rubric says
+what is being looked for, and a student who can see what is being looked
+for can practise against it.
+
+`packages/shared/src/written.ts` is the policy, with no database in it:
+two kinds (`SYSTEM_DESIGN`, `WRITTEN`), the question's three statuses, the
+answer's three, both transition tables, the 0–4 mark ladder with a label
+per rung so two TAs mean the same by a 3, `rubricScore()` (weights
+multiply, and the denominator is on the page so a student can check the
+arithmetic), and `unmarkedCriteria()`, which is what makes a rubric with a
+gap in it refusable.
+
+Four tables. `WrittenPrompt` and `WrittenCriterion` are the question;
+`WrittenAnswer` is one student's answer, keyed unique on
+`(promptId, authorId)` — one answer per student per question, because a
+second attempt at a design question is a different question rather than a
+retry; `WrittenMark` is one criterion's mark on one answer. Sixteen
+CHECKs, and two of them carry rules the application also enforces: a mark
+is **whole or it does not exist** (grader, moment, note and weighted total
+together, and never the author), and a published rubric is **fixed** —
+a student marked 12 of 16 against four criteria did not get that score
+against five.
+
+The writes are `apps/web/src/lib/written/answers.ts`. Grading is one
+transaction: the marks are replaced, the answer moves to GRADED, and the
+weighted total is **stored** rather than recomputed later, so retiring the
+question afterwards cannot move somebody's score. A grader may instead
+hand an answer back — SUBMITTED → DRAFT with a sentence the student is
+shown — which is a better outcome than 4 of 16 and is a grader's doing
+rather than a student's: a student who could withdraw a submission at will
+would make the queue meaningless.
+
+Reads split along the line the discussion board draws. A question's
+markdown is a TA's and renders with `renderMarkdown`; an answer's is a
+student's, read by a member of staff signed in with a mentor's session,
+and renders with `renderUntrustedMarkdown`. The marking queue is shared
+rather than per-author (a question answered by ninety students is not one
+person's evening) and ordered oldest-first. The score feeds nothing: no
+XP, no leaderboard, no readiness, no band, fenced by
+`tests/repo/written-posture.test.ts` over the import graph of every
+scoring module.
+
+## Mock interviews (Phase 12h)
+
+A mentor offers a slot; a student takes it; at the hour both open the same
+room, and the interviewer watches the candidate's editor without being able
+to touch it. SPEC §11 calls this "read-only spectate mode", and that is a
+design decision rather than a missing feature — the interviewer's half of
+the room renders the mirror as a `<pre>`, not a disabled editor, because a
+disabled editor is a control somebody eventually enables.
+
+`packages/shared/src/mock-interview.ts` holds the policy with no database
+in it: the five statuses, `MOCK_INTERVIEW_NEXT` (the only legal
+transitions), `canTransitionInterview()`, and the clock —
+`joinOpensAt` / `endsAt` / `isJoinable` (the room opens ten minutes early
+and closes at the end), `mayCancel` (a student may hand a slot back until
+an hour before), `mayMarkNoShow` (not for the first ten minutes: a slow
+lift is not a no-show on somebody's record). Three of the five statuses are
+terminal, including `NO_SHOW`, and `IN_PROGRESS → NO_SHOW` is refused —
+somebody who turned up and worked for twenty minutes did not fail to turn
+up, whatever happened afterwards.
+
+The writes are `apps/web/src/lib/mock/interviews.ts`, one `…As(actor, …)`
+function per transition, each going through `canTransitionInterview()`
+rather than growing its own `if`. Booking is a conditional `updateMany`
+on `status: "OPEN"` and `candidateId: null` — two students pressing Book
+on the same slot is a race Postgres settles, and the loser is told the slot
+is gone rather than overwriting the winner. A student holds at most
+`MOCK_INTERVIEW_LIMITS.concurrentBookings` slots at once, because a slot
+somebody is sitting on is a slot nobody else can take.
+
+The mirror is two routes under `app/api/mock/[interviewId]/`: the candidate
+`POST`s a snapshot every four seconds from their own editor (capped at
+`snapshotChars`, and only while the interview is running), and the
+interviewer holds a `GET` Server-Sent Events stream that re-reads the row
+every two seconds and sends a frame only when something changed. The
+transport copies the invigilation dashboard for the same reason: an indexed
+periodic read costs nothing for one viewer and keeps the candidate's hot
+path — typing — free of it. Permission is re-asked on every tick in
+`mirrorFor()`, so an interview that ends or is called off closes the mirror
+on the next poll rather than at some later disconnect.
+
+Feedback is three ratings and a markdown note, written once when the
+interviewer finishes. It is for the candidate to read and it counts for
+nothing: no XP, no leaderboard, no readiness input, no band.
+
+## The recommender (Phase 12f)
+
+SPEC §11: "rule-based, explainable (no ML — it has neither the data nor an
+evaluation harness to beat a good rule, and it cannot explain itself;
+always render the reason inline, and rotate topics after 3 consecutive
+picks from the same one)".
+
+`recommend()` in `@recx/shared` is a pure function over seven rungs, and it
+returns the REASON with the pick. The sentence is not assembled in the
+component: an explanation built a second time is one that can disagree with
+the decision, and a recommender a student cannot argue with is one they
+learn to ignore. `tests/repo/recommender-posture.test.ts` keeps both ends
+of that — no ML package in any workspace manifest, and `recommend()` called
+from exactly one place.
+
+The order, and why two of the placements are arguments:
+
+1. **FINISH** — an unsolved problem they already started. Cheapest thing
+   they can finish tonight, and already in their head.
+2. **DRIVE** — a problem a company whose drive is inside 21 days has been
+   reported asking (Phase 12e's tags). Above revision because a drive has a
+   date and a revision has a schedule built to tolerate a day.
+3. **REVISE** — a due revision card (Phase 12c).
+4. **WEAK_TOPIC** — the topic with the fewest UNASSISTED solves against the
+   PRODUCT per-topic target. Unassisted because that is what readiness
+   counts, and a recommender pointing at a topic the student "covered" with
+   the editorial open would argue with the score on the next page.
+5. **PLAN**, 6. **DAILY**, 7. **FRESH**.
+
+**Rotation reads what the student DID, not what we suggested.** The spec
+says rotate after three consecutive picks from one topic;
+`loadRecommendExtras` reads the topics of their last three judged
+PROBLEMS — one topic per problem, so five submissions on one array problem
+is one array problem. Same signal where it matters, better where it
+differs: a student who ignored three array suggestions has not done three
+array problems and should not be rotated off arrays for it.
+
+## The interview archive (Phase 12e)
+
+SPEC §11 calls it "the only legal and genuinely REC-specific source of
+company tags and 'asked at' frequency, and therefore load-bearing rather
+than a nicety". Two tables: `InterviewExperience` and the join
+`InterviewExperienceProblem`.
+
+**There is no prose.** One free-text column, `companyName`, so a student
+can name a company nobody has entered; everything else is a closed list or
+a number. An account written in a hurry names interviewers, repeats
+questions under an NDA and says things about a company the college would
+have to answer for — and prose cannot be counted, which is what the
+archive is for. `tests/repo/interview-archive-posture.test.ts` asserts the
+model's field list exactly, so adding a `notes` column is a failing build.
+
+**Attributed in the database, anonymous on the page.** The student-facing
+read never SELECTS a name; `anonymousAuthor()` is built from the batch and
+department it does take, and drops the section because batch + department
++ section is three or four people. Moderators see the author, because a
+row nobody stands behind cannot be followed up.
+
+**"Asked at" frequency is maintained, not computed** (SPEC §4(d)).
+Approving an experience increments `ProblemCompanyTag.frequency` for each
+named problem and flips the tag's `source` to `EXPERIENCE`; reversing an
+approval decrements, and a tag that reaches zero is deleted rather than
+left as a company claiming a problem nobody reported. All of it in the
+same transaction as the decision. The catalogue then labels the track —
+"curated by the placement cell … best guess" or "from N interviews
+students reported here" — which is SPEC §11's own requirement that
+curation be "explicitly labelled as curated".
+
+## Discussion, doubts and moderation (Phase 12d)
+
+Four tables arriving together — `DiscussionPost`, `DoubtThread`,
+`DoubtReply`, `ContentReport` — because SPEC §11 asks for the moderation
+role "simultaneously, not after", and a board nobody can moderate is an
+incident with a date on it.
+
+**Two lists with different rules.** Solutions and tips need a solve to
+read and an UNASSISTED solve to post. Questions need nothing: being stuck
+is the reason to ask. The one thing that keeps those two consistent is
+that only the ASKER and a mentor may reply on a question — otherwise the
+question list becomes the solution list, reachable by exactly the people
+the solve gate keeps out.
+
+**One decider.** `discussionAccess()` in `@recx/shared` is the policy and
+`discussionAllowed()` on the help chokepoint is the only caller; the
+chokepoint now carries `assisted` alongside `solved` for that reason. Every
+action body re-asks it, and `tests/repo/discussion-posture.test.ts` fails
+the build for a write path in `lib/discussion/posts.ts` that neither calls
+the gate nor appears in its allow-list with a reason.
+
+**Hidden, never deleted.** A moderator hides with a reason the author is
+shown, un-hides, and recommends; nothing deletes, and the same fence
+refuses a delete anywhere under `apps/web/src`. The body of a hidden post
+never leaves the server — it is not fetched and filtered, it is not
+fetched. Moderation is college-wide rather than per mentee: `mentor-scope`
+answers "whose student is this" for private data, and a queue narrowed to
+a mentor's own mentees would leave most of the board unmoderated while
+looking staffed.
+
+## Spaced revision (Phase 12c)
+
+A `RevisionCard` per student per problem, written by the progress engine the
+first time they solve it and moved by the same engine afterwards. The ladder
+is five rungs — 1, 3, 7, 21 and 60 days (`REVISION_INTERVALS` in
+`@recx/shared`); a due re-solve climbs one and pays 25 % of the first solve,
+a due attempt that fails drops one and stays due today, and clearing the top
+rung sets `learnedAt` and retires the card.
+
+Three decisions are worth knowing before changing anything here:
+
+* **The ladder moves only when the ledger did.** `applyRevision` advances the
+  card after `insertXpEvent` reports an insert, so a retried finalise can
+  neither pay twice nor climb twice. The idempotency key is the campus DAY,
+  not the rung: a card that lapses has to climb the same rung again, and a
+  rung-keyed row would have been spent the first time — which would have
+  stuck that card forever. A real walk up the ladder found this; the
+  arithmetic looked right on paper.
+* **Three a day is a property of the QUEUE, not of the data.**
+  `REVISION_DAILY_CAP` is applied in `dueQueue()`; the backlog keeps its
+  order and the surfaces state its length.
+* **The migration backfills.** Every problem already solved gets a card,
+  three per student per day, oldest solve first — otherwise the feature is
+  empty for exactly the students it exists for.
+
+## Problem authoring (Phase 4)
+
+**Revisions and review.** A problem's content is a chain of
+`ProblemVersion` revisions. A revision whose `frozenAt` is null is the
+problem's one open draft, and only a DRAFT is editable. The review stages
+are DRAFT → IN_REVIEW → APPROVED → PUBLISHED, then SUPERSEDED or RETIRED.
+They are derived by `reviewStageOf()` (`@recx/shared/authoring`) from the
+unchanged `ProblemStatus` plus `approvedAt`.
+
+**One chokepoint for edits.** Every edit goes through `touchDraft()`
+(`lib/authoring/draft.ts`). It locks the revision and bumps `editSeq`
+(optimistic concurrency for the forms). An edit that changes judging also
+bumps `judgeSeq` and cancels running validation, and only `ValidationRun`
+rows of the current `judgeSeq` count. Statement edits leave validation
+alone.
+
+**Gates.**
+- Approval (`lib/authoring/review.ts`) needs a different admin from the
+  creator, the last editor and the submitter, publishable validation, and
+  content without errors (`versionContentIssues`, which includes the
+  harness stream's declared-comparator rule).
+- Publish (`publishVersion` in `lib/judge/validation.ts`) re-checks all of
+  that plus the approval and RETIRED. In one transaction it freezes the
+  revision with its pinned bundle keys and flips `Problem.liveVersionId`
+  under `Problem.version`. The bundle bytes are written after the commit:
+  drafts never write bundles.
+
+**Bulk import.** Imports (`lib/authoring/import/`) read a zip with yauzl or
+a directory (CLI), one problem directory at a time. Each directory is its
+own transaction with its own `ProblemImportRow`, so one bad entry never
+discards a batch. The upload is a raw `application/zip` route handler that
+spools to disk with a byte cap and imports in `after()`.
+
+**Student view.** A submission keeps showing the revision it was judged
+against (its pinned `problemVersionId`).
+
+Every module that can read hidden tests or reference sources lives under
+the sensitive paths: `lib/authoring/`, `server/queries/admin-`,
+`server/actions/admin-`, `app/admin/` and `app/api/admin/`. See
+docs/AUTHORING.md.
+
+## Super-admin governance (Phase 4)
+
+`/super` is a separate tree with its own layout (`app/super/layout.tsx`,
+`components/super/super-shell.tsx`) and a persistent
+`bg-danger-subtle text-danger` strip: "Super-admin — all actions are
+audited". The layout guards, and every page guards again with
+`requireSuperAdminPage()`; no super page loads Monaco.
+
+| Route | Purpose |
+|---|---|
+| `/super` | privileged requests waiting for me / mine (approve, reject, cancel, break-glass), alerts, chain head, scheduler health |
+| `/super/users` | find accounts; status (≤ 25 directly, more by request), role, XP void, impersonate |
+| `/super/roles` | staff roles and ADMIN scopes (grant / revoke; never deleted) |
+| `/super/settings/branding` | two seeds + radius, previewed and contrast-checked on the server |
+| `/super/settings/policy` | XP rules override, read-only retention schedule, legal hold |
+| `/super/settings/judge` | language toggles, node token rotation (shown once), global rejudge request |
+| `/super/settings/integrations` | mail transport status, Redis, test-data driver, test email |
+| `/super/audit` | the full audit log on indexed filters, per-day chain verification |
+| `/super/impersonate` | read-only, 15-minute view as a user; history |
+| `/super/flags` | the two governance kill switches |
+| `/super/jobs` | queues, backlog, scheduler job status, outbox, running operations |
+| `/super/data` | PII export and submission purge requests; export download (`exports/[id]/route.ts`) |
+
+* **Capabilities.** `lib/auth/capabilities.ts` is the role × capability map
+  as data: the twelve SUPER_ADMIN capabilities (ratings, integrity and
+  calendar declared for Phases 5, 6 and 8), the supporting super-only
+  actions and the staff capabilities. Tests prove each listed action starts
+  with its guard, statically and at runtime.
+* **Privileged operations** (`lib/privileged/`): request → second
+  super-admin approves (or audited break-glass) → executor. Payloads are
+  resolved and hashed at request time; the database enforces the state
+  machine, the two-person rule and the 24-hour window.
+* **Impersonation** (`lib/auth/impersonation.ts`): a pointer on the
+  super-admin's `Session`; `getCurrentUser()` returns the target with
+  `impersonation` set and `requireActionUser()` refuses every mutation.
+* **Audit append lives in `@recx/db`** (`packages/db/src/audit.ts`), so the
+  scheduler audits the governance sweep (expired requests, stuck executions,
+  lapsed impersonations) and failed security email. The scheduler also
+  drains `EmailOutbox` (`smtp | log | disabled`) and records
+  `SchedulerJobStatus` per job.
+* PlatformSetting and PlatformTheme are written only by the four
+  super-admin settings actions (`tests/repo/platform-setting-writes.test.ts`).
+
+## AdminScope and the query-shape fence (Phase 4)
+
+An ADMIN sees students by department and/or batch, through `AdminScope`
+rows that only the governance actions write (grant and revoke, SUPER_ADMIN,
+audited). A null dimension means every value; a grant with both null is the
+whole college. An ADMIN with no active grant sees no student at all: the
+scope fails closed. A SUPER_ADMIN is never scoped. The scope is applied in
+the application, not with Postgres row-level security (spec §7: with one app
+role behind transaction pooling a missing `SET LOCAL` would read as "no
+data", and owner connections bypass it).
+
+Two modules hold the whole mechanism. `lib/auth/scope-where.ts` is pure:
+`buildStudentScope` turns an actor and its grants into a branded
+`StudentScope`; `scopedStudentWhere(scope, extra)` returns
+`{ AND: [{ role: "STUDENT" }, <grants or nothing>, extra] }` for Prisma
+(`where:` on User, `user:` on a relation model) and `scopedStudentSql(scope,
+"u")` the same filter as parameterised SQL for a joined `"User" u`;
+`staffOnlyWhere` is for names of grantors and deciders; `scopeCovers` checks
+a cohort (an announcement's audience, a roster row's target cohort).
+`lib/auth/scope.ts` (server-only) loads the active grants once per request
+and provides the guards every admin page and action starts with —
+`requireAdminScopePage()` and `requireAdminScopeAction()` — plus
+`requireScopedStudent(scope, id)`, which returns a `ScopedStudent` (an
+out-of-scope id and a missing id are the same "not found") whose branded
+`scopedId` is the only key per-student admin queries accept.
+
+`tests/repo/admin-scope.test.ts` is the build-breaking fence. It finds every
+file an ADMIN can reach (the admin pages, components, `lib/admin/**`,
+`server/{actions,queries}/admin-*.ts`, anything importing the scope helpers or
+running an admin role guard, and their `@/server/**` / `@/lib/admin/**`
+imports), computes the student models from `schema.prisma` (every model with
+a `userId` or a User relation, so later models are fenced automatically) and
+fails on: a read, count, aggregate or bulk write of a student model without
+`scopedStudentWhere(` (or a `scopedId` key); raw SQL naming a student table
+without `${scopedStudentSql(`; `$queryRawUnsafe`; a single-row write not keyed
+by a `scopedId`; any read of notes, code drafts, submission sources or the
+audit log; a spread scope filter; a scope or `ScopedStudentId` built outside
+the two scope modules; an admin page or action without its guard (pages that
+read students must use the scoped guard); `@/lib/db` in admin pages and
+components; and any hard delete of a user. The few deliberate exceptions —
+`/admin/judge` fleet aggregates and the roster import's conflict lookup — are
+listed in the test with exact counts and reasons, so a new call in an exempt
+file fails it too. SUPER_ADMIN-only code (`/super`) is outside the fence; its
+scope is the whole college.
+
+## Theming
+
+`packages/design/tokens.css` holds the LMS tokens verbatim. The admin-chosen
+brand (two seeds + radius) is derived once on save (`derive.ts`, server-only)
+into a `PlatformTheme` row; the root layout injects it as a nonce'd
+`<style id="rec-brand">` after the tokens. No client JS, no flash, works with
+JS disabled. `--success/--warning/--danger/--info` are never themeable.
+
+## The Pages Router exception: `/login`
+
+Everything is App Router (`apps/web/src/app`) except one page. `/login` is a
+Pages Router page (`src/pages/login.tsx`, with `_document.tsx` and `_app.tsx`)
+exported with `config.unstable_runtimeJS = false`, so its production HTML
+carries **no JavaScript at all** — no framework, no `<script src>`, no
+`__NEXT_DATA__`; the inline theme script (CSP hash) is the only script. The
+App Router cannot do this: every App Router page ships the React runtime and
+Next client (~100 KB gzip here), which put a student's first visit over the
+90 KB `/login` budget, and sign-in needs none of it. The form is a plain
+`POST` to the route handler `/api/auth/login`, which answers every outcome
+with a `303` (the role's home, or `/login?error=<code>`); failure messages,
+`aria-invalid`, `aria-describedby` and the autofocus target are all
+server-rendered. The page reads the session and the brand through
+`src/lib/pages-server.ts` and `src/lib/db-client.ts` (Next refuses
+`server-only` and `next/headers` in a `pages/` import graph; the database
+client is the same process-wide one `src/lib/db.ts` uses), and `_document`
+injects the brand `<style>` after the global stylesheet, as the root layout
+does. `tests/repo/pages-router.test.ts` keeps `src/pages` to these three
+files, and `pnpm --filter @recx/web size` serves every production build and
+fails if `/login` ever loads a script. Sign-in security: `docs/SECURITY.md`
+§2.
+
+## Local development topology
+
+Windows hosts run `apps/web` natively; Linux-only pieces (isolate, the real
+judge, Postgres/Redis when Docker is unavailable) run in WSL2 Ubuntu 24.04.
+See `docs/RUNBOOK.md` → "Local development".
