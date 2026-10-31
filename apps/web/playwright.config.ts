@@ -111,5 +111,18 @@ export default defineConfig({
       outputDir: "./test-results/contest",
       fullyParallel: false,
     },
+    /**
+     * Phase 12p: the problem kinds of 12k-12n read in a browser as a
+     * student - the debugging counter between keystrokes, the SQL grammar
+     * under 768 px, and a SQL question opened from a running contest's
+     * arena. NOT in any gate: it needs a live stack. Run it by name,
+     * `--project=kinds`.
+     */
+    {
+      name: "kinds",
+      testMatch: /problem-kinds\.spec\.ts$/,
+      outputDir: "./test-results/kinds",
+      fullyParallel: false,
+    },
   ],
 });

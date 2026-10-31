@@ -3766,3 +3766,32 @@ contest participant gets the practice surface, which knows every kind. Two
 `NOT RUN` rows said otherwise for a week, and the cost of a wrong row is
 either somebody rebuilding a surface that exists or somebody trusting a lane
 nobody checked.
+
+## What a browser run is for (Phase 12p, slice 2)
+
+Three `NOT RUN` rows said the same thing in different words: the halves are
+covered apart, nobody has watched them together. Watching them together took
+one Playwright project and found, in order:
+
+**The counter is right, and the rows were wrong about the arena.** The
+debugging bar moves between keystrokes and goes red over budget; the SQL
+workspace under 768 px is CodeMirror with the grammar loaded and the rules as
+prose; a contest's arena is a link to the practice workspace, so a SQL
+question in a contest is the practice surface. None of that needed a fix.
+
+**The catalogue does not say what kind a problem is.** Phase 12k-12n each
+explained their kind carefully on the problem page - the dialect notice, the
+edit budget, the conversation chips, the answer box - and none of them
+touched the list a student picks from. A student cannot tell a query, a
+one-line fix, a conversation or an answer box from an ordinary program until
+they have opened it. That is slice 3, and it is the kind of gap only a
+browser run turns up, because every unit test knows which kind it is testing.
+
+**A live stage can lie, and the console says so.** The first run of this
+slice reported that the counter never moved. It had not: the gate's
+production build had overwritten `.next` under a running dev server, the
+page's own script came back as a 404 with a `text/plain` content type, and
+nothing hydrated - while the server-rendered HTML still looked correct and
+the plain textarea still took typing. A dead page and a broken feature look
+identical in a screenshot. Read the console before believing a live stage,
+and do not run the gate's build while a dev server is up.

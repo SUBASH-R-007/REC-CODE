@@ -23,10 +23,12 @@ export default tseslint.config(
     ignores: [
       "**/node_modules/**",
       "**/.next/**",
-      // A second Next build directory, for running a dev server beside a
+      // Any second Next build directory, for running a dev server beside a
       // production one on the same checkout (RECX_DIST_DIR in
-      // apps/web/next.config.ts). Generated output, like .next itself.
-      "**/.next-dev/**",
+      // apps/web/next.config.ts). Generated output, like .next itself —
+      // and the pattern matches whatever name RECX_DIST_DIR was given,
+      // which `.gitignore` now ignores on the same rule.
+      "**/.next-*/**",
       "**/dist/**",
       "**/coverage/**",
       "apps/web/public/**",
