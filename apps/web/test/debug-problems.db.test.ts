@@ -127,7 +127,16 @@ describe.skipIf(!ENABLED)("debugging problems against recx_test", () => {
   afterAll(async () => {
     if (!db) return;
     try {
-      const ids = (await db.problemVersion.findMany({ where: { problemId }, select: { id: true } })).map((v) => v.id);
+      /**
+       * One case freezes a version on purpose — to pin it into an
+       * assessment — and a frozen version cannot be deleted: the database
+       * refuses every write to it, which is the immutability the platform
+       * rests on. So the UNFROZEN versions go and the frozen one stays
+       * behind in recx_test under this suite's tag, with its starter.
+       */
+      const ids = (
+        await db.problemVersion.findMany({ where: { problemId, frozenAt: null }, select: { id: true } })
+      ).map((v) => v.id);
       await db.starterCode.deleteMany({ where: { problemVersionId: { in: ids } } });
       await db.referenceSolution.deleteMany({ where: { problemVersionId: { in: ids } } });
       await db.$executeRawUnsafe(
@@ -224,6 +233,37 @@ describe.skipIf(!ENABLED)("debugging problems against recx_test", () => {
         expect(row.maxEditedLines).toBeNull();
         // And Phase 12k's own question keeps the author's answer.
         if (over.ioMode === "SQL") expect(row.sqlOrdered).toBe(false);
+      }
+    });
+  });
+
+  describe("not sat in an assessment yet", () => {
+    it("refuses the pin, by trigger", async () => {
+      const v = await version({ maxEditedLines: 2, status: "PUBLISHED" });
+      await db.starterCode.create({ data: { problemVersionId: v.id, language: "cpp20", code: BROKEN } });
+      await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, v.id);
+      const assessment = await db.assessment.create({
+        data: {
+          slug: `${tag}-paper`,
+          title: "A paper",
+          instructions: "Be honest.",
+          status: "DRAFT",
+          proctorMode: "ADVISORY",
+          opensAt: new Date(Date.now() + 86_400_000),
+          closesAt: new Date(Date.now() + 90_000_000),
+          durationSec: 3_600,
+          createdById: actorId,
+        } as never,
+        select: { id: true },
+      });
+      try {
+        await expect(
+          db.assessmentProblem.create({
+            data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
+          }),
+        ).rejects.toThrow(/not sat in an assessment yet/);
+      } finally {
+        await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, assessment.id);
       }
     });
   });

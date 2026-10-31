@@ -302,6 +302,19 @@ would be a different program with a different mistake), and a budget the
 author's OWN model solution does not fit is a question nobody can answer.
 The gate measures the model solution against the starter and says so.
 
+**And not in an assessment (slice 2).** The budget is refused in
+`submitSolution` and `runCode`, before the row. A sitting does not submit
+that way: `submitAttempt` writes one Submission per answered question when
+the time runs out, and refusing one there would throw away a candidate's
+work at the only moment they can do nothing about it. So the PIN is
+refused instead — a trigger on `AssessmentProblem`, a sentence in the
+admin action, an entry in the guard catalogue — which is the answer Phase
+12l reached for interactive problems, for the same reason: say it to the
+person choosing the question, not to the candidate answering it. A contest
+needs no rule at all: its arena sends the student to the ordinary
+workspace — it builds no editor of its own — so the budget is already
+shown and enforced there.
+
 **Found while building it:** `updateDraftJudging` never forwarded
 `sqlOrdered`. Phase 12k asked the author whether the row order is part of
 a SQL answer *"rather than guessing it"*, the form sent the answer, the

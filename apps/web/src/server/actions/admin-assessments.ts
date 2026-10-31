@@ -217,7 +217,9 @@ export async function addAssessmentProblem(
       where: { slug: parsed.problemSlug },
       select: {
         liveVersionId: true,
-        liveVersion: { select: { id: true, revision: true, frozenAt: true, compareMode: true } },
+        liveVersion: {
+          select: { id: true, revision: true, frozenAt: true, compareMode: true, maxEditedLines: true },
+        },
       },
     });
     if (!problem) throw new NotFoundError("No problem with that address.");
@@ -234,6 +236,19 @@ export async function addAssessmentProblem(
     if (problem.liveVersion.compareMode === "INTERACTIVE") {
       throw new ValidationError(
         "An interactive problem is not sat in an assessment yet: it has to run cleanly through two practice contests first. Put it in a contest or leave it in practice.",
+      );
+    }
+
+    /**
+     * Phase 12m. A debugging problem's edit budget is refused before the
+     * row, in the submit and run actions; a sitting submits every answer
+     * at the end and cannot refuse one without throwing away work the
+     * candidate can no longer redo. So the pin is refused instead, here
+     * and in the database (AssessmentProblem_no_debug_budget).
+     */
+    if (problem.liveVersion.maxEditedLines !== null) {
+      throw new ValidationError(
+        "A debugging problem is not sat in an assessment yet: a sitting submits every answer at the end, so it cannot refuse one that changed too many lines. Put it in a contest or leave it in practice.",
       );
     }
 

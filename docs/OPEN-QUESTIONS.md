@@ -3499,3 +3499,33 @@ budget is enforced in `submitSolution` and `runCode`, which the practice
 workspace uses. A contest arena and an exam attempt build their own
 editors and their own submit paths; until those are read with a budget in
 mind, a debugging problem is a practice problem.
+
+## Why a debugging problem is not sat in an assessment (Phase 12m, slice 2)
+
+**The rule is refused where it can be explained.** The edit budget is
+checked in `submitSolution` and `runCode`, before the row, so a student
+reads two numbers and fixes their program. An assessment submits every
+answered question when the sitting ends: the same check there would reject
+a candidate's answer at the moment they can no longer do anything about
+it, which is not a rule being enforced but work being destroyed.
+
+**So the pin is refused instead**, exactly as Phase 12l did for
+interactive problems: a trigger on `AssessmentProblem`, a sentence in the
+admin action, and both names in the guard catalogue so that lifting the
+rule later cannot be quiet.
+
+**A contest needed nothing, today.** Its arena links to
+`/problems/<slug>` — the ordinary workspace — so the budget is shown as
+the student types and refused before the row. The arena builds no editor
+of its own, which is also the answer to the question Phase 12l left open
+about interactive problems in a contest. Worth writing down, though: no
+code path writes a CONTEST-origin submission yet (`finalize.ts` has the
+scoring branch and nothing reaches it), so whoever builds one must send it
+through `submitSolution` rather than writing the row itself — otherwise
+the budget, and SQL's two rules beside it, would go unenforced in exactly
+the sitting that matters most.
+
+**What would lift it:** an exam path that shows the budget while the
+candidate types and refuses an over-budget answer at submit time, rather
+than at the end. Until then the trigger stands, and the catalogue entry
+makes the decision to remove it a recorded one.

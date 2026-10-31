@@ -86,6 +86,7 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_ai_assist_change",
   // 20261101140500_phase12l_assessment_rule
   "recx_refuse_interactive_assessment_problem",
+  "recx_refuse_debug_assessment_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -293,6 +294,22 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_interactive_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101151000_phase12m_assessment_rule
+  {
+    /**
+     * Phase 12m. A debugging problem's edit budget is refused before the
+     * row, in `submitSolution` and `runCode`. An assessment submits every
+     * answer at the end of the sitting and cannot refuse one without
+     * throwing away a candidate's work, so the pin is refused instead.
+     * Lifting this needs an exam path that shows and enforces a budget —
+     * and a line in the gate log, which this entry makes compulsory.
+     */
+    name: "AssessmentProblem_no_debug_budget",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_debug_assessment_problem",
     level: "ROW",
   },
   {
