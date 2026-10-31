@@ -1,5 +1,7 @@
 import Link from "next/link";
 import {
+  ANSWER_LABELS,
+  ANSWER_NOTICES,
   DEBUG_NOTICES,
   FUNCTION_COMPARATOR_DESCRIPTIONS,
   INTERACTIVE_LABELS,
@@ -174,6 +176,30 @@ function DebugNotes({ budget }: { budget: number }) {
   );
 }
 
+/**
+ * How an output-only question is judged (Phase 12n), in full sentences.
+ *
+ * What to submit comes first, because it is the one thing a student could
+ * get wrong without being wrong about the question: this box takes the
+ * ANSWER. Then the three facts that follow from that — nothing runs, there
+ * is one case and they can see all of it, and what the comparison forgives.
+ */
+function AnswerNotes() {
+  const notes = [ANSWER_NOTICES.whatToSubmit, ANSWER_NOTICES.noProgram, ANSWER_NOTICES.oneCase, ANSWER_NOTICES.whitespace];
+  return (
+    <section aria-labelledby="problem-answer-rules">
+      <h2 id="problem-answer-rules" className="font-display text-base font-semibold">
+        How your answer is judged
+      </h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-secondary">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** A SQL sample's expected side: the rows as a table, or the text as it came. */
 function SqlSampleOutput({ text }: { text: string }) {
   const resultSet = readResultSet(text);
@@ -184,10 +210,16 @@ function SqlSampleOutput({ text }: { text: string }) {
 export function ProblemDescription({ problem, statementHtml }: { problem: ProblemWorkspace; statementHtml: string }) {
   const sql = problem.ioMode === "SQL";
   const interactive = problem.compareMode === "INTERACTIVE";
+  /** Phase 12n: the answer itself, so no limits of its own and no expected side. */
+  const answerOnly = problem.ioMode === "OUTPUT_ONLY";
   return (
     <article aria-label="Problem description" className="space-y-6">
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
-        {sql ? (
+        {answerOnly ? (
+          // Nothing is compiled and nothing is run, so a time limit and a
+          // memory figure would describe something that does not happen.
+          <span>No time limit: nothing of yours is run</span>
+        ) : sql ? (
           // A query's limit is the database's statement timeout, and its
           // memory is the server's business (work_mem spills to disk), so
           // neither the C++ time limit nor a memory figure describes it.
@@ -222,6 +254,7 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
 
       {sql && <SqlJudgingNotes ordered={problem.sqlOrdered === true} />}
       {interactive && <InteractiveNotes />}
+      {answerOnly && <AnswerNotes />}
       {problem.maxEditedLines !== null && <DebugNotes budget={problem.maxEditedLines} />}
 
       {problem.constraints.length > 0 && (
@@ -240,13 +273,13 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
       {problem.samples.length > 0 && (
         <section aria-labelledby="problem-samples" className="space-y-4">
           <h2 id="problem-samples" className="font-display text-base font-semibold">
-            Sample tests
+            {answerOnly ? ANSWER_LABELS.data : "Sample tests"}
           </h2>
           {problem.signature && <p className="text-xs text-text-secondary">{functionSampleNote(problem.signature)}</p>}
           {problem.samples.map((sample, k) => (
             <div key={sample.index} className="space-y-2">
-              <h3 className="text-sm font-semibold">Sample {k + 1}</h3>
-              <div className={interactive ? "grid gap-2" : "grid gap-2 xl:grid-cols-2"}>
+              {!answerOnly && <h3 className="text-sm font-semibold">Sample {k + 1}</h3>}
+              <div className={interactive || answerOnly ? "grid gap-2" : "grid gap-2 xl:grid-cols-2"}>
                 {sql ? (
                   <>
                     {/* The dataset the query runs against: the tables, and
@@ -259,6 +292,11 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
                   // conversation, and the case's input is the examiner's
                   // own data rather than anything the program reads.
                   <SampleBlock title={INTERACTIVE_LABELS.data} text={sample.input} />
+                ) : answerOnly ? (
+                  // One block, and it is the question. The expected output
+                  // of an output-only case IS the answer, so the query
+                  // never sends it (`getProblemWorkspace`).
+                  <SampleBlock title={ANSWER_LABELS.data} text={sample.input} />
                 ) : (
                   <>
                     <SampleBlock title="Input" text={labelledLines(sample.input, problem.signature)} />

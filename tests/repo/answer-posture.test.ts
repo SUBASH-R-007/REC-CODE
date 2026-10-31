@@ -18,6 +18,7 @@ import { CODE_EXTENSIONS, findFiles, isTestPath, readRepoFile } from "./support/
 
 const SHARED = "packages/shared/src/answer-problem.ts";
 const WORKER = "apps/judge-worker/src";
+const WORKSPACE = "apps/web/src/components/workspace";
 const webSources = findFiles({ under: ["apps/web/src"], extensions: [...CODE_EXTENSIONS] }).filter((f) => !isTestPath(f));
 
 describe("the comparison belongs to the judge", () => {
@@ -135,6 +136,35 @@ describe("one visible case, and nothing to run", () => {
     expect(content).toContain('export const ANSWER_REFERENCE_LANGUAGE = "answer1"');
     // Validation has to be able to see that language, or nothing publishes.
     expect(readRepoFile("apps/web/src/lib/judge/validation.ts")).toContain("ANSWER_LANGUAGE_KEY");
+  });
+
+  it("the expected answer is withheld where it is read, not where it is rendered", () => {
+    // The one case of an output-only problem is a SAMPLE, because its data
+    // is the question — and on every other kind "sample" means the student
+    // sees the expected output too. Here that would be the answer, so both
+    // reads drop it before it can reach a page.
+    const query = readRepoFile("apps/web/src/server/queries/problems.ts");
+    expect(query).toMatch(/version\.ioMode === "OUTPUT_ONLY" \? "" :/);
+    const finalize = readRepoFile("apps/web/src/lib/judge/finalize.ts");
+    expect(finalize).toMatch(/ioMode === "OUTPUT_ONLY"/);
+    // And the console renders no expected block for one either.
+    const console_ = readRepoFile(`${WORKSPACE}/result-view.tsx`);
+    expect(console_).toContain("!answer &&");
+    expect(console_).toMatch(/view\.ioMode === "OUTPUT_ONLY"/);
+  });
+
+  it("there is no Run button for a question that runs nothing", () => {
+    const workspace = readRepoFile(`${WORKSPACE}/workspace.tsx`);
+    expect(workspace).toContain("{!answerOnly && (");
+    expect(workspace).toContain("isAnswerLanguage(active.key)");
+  });
+
+  it("reach the editor and the Description tab from that one module", () => {
+    expect(readRepoFile(`${WORKSPACE}/answer-note.tsx`)).toContain("ANSWER_NOTICES");
+    const description = readRepoFile(`${WORKSPACE}/problem-description.tsx`);
+    for (const key of ["whatToSubmit", "noProgram", "oneCase", "whitespace"]) {
+      expect(description, `the Description tab must state ANSWER_NOTICES.${key}`).toContain(`ANSWER_NOTICES.${key}`);
+    }
   });
 
   it("the sentences a student reads are defined once", () => {

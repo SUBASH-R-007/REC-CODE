@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LIMITS, SUBMIT_LANGUAGE_KEYS, utf8Length, type SubmitLanguageKey } from "@recx/shared";
+import { LIMITS, isSubmitLanguage, utf8Length, type SubmitLanguageKey } from "@recx/shared";
 
 /**
  * Input schemas for the workspace's Submit and Run actions. Pure (no I/O) so
@@ -34,14 +34,22 @@ export const slugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "That problem link is not valid.");
 
 /**
- * Phase 12k: `sql17` is a language a student submits in, and not a
- * toolchain — see `packages/shared/src/sql-language.ts`. It is accepted
- * here and refused by the submit action for any problem that is not a SQL
- * problem, which is where the version is in hand.
+ * Every key a submission may carry: the toolchains, plus the two that are
+ * not toolchains — `sql17` (Phase 12k) and `answer1` (Phase 12n). Each is
+ * accepted here and paired with the problem's io mode by the submit action,
+ * which is where the version is in hand.
+ *
+ * A refinement rather than `z.enum(SUBMIT_LANGUAGE_KEYS)`: the enum is
+ * built when this module is evaluated, and Next's barrel optimisation can
+ * evaluate this file before the module that defines the list — which is
+ * exactly what happened in the Phase 12n live stage, where every
+ * submission came back as an internal error. A function is called when the
+ * input is parsed, by which time every module is initialised.
  */
-export const languageSchema = z.enum(SUBMIT_LANGUAGE_KEYS as [SubmitLanguageKey, ...SubmitLanguageKey[]], {
-  errorMap: () => ({ message: "Choose a supported language." }),
-});
+export const languageSchema = z
+  .string({ invalid_type_error: "Choose a supported language." })
+  .refine(isSubmitLanguage, { message: "Choose a supported language." })
+  .transform((key) => key as SubmitLanguageKey);
 
 export const sourceSchema = z
   .string({ invalid_type_error: "Your code must be text." })

@@ -6,6 +6,7 @@ import {
   readResultSet,
   sanitizeToolOutput,
   writeResultSet,
+  type IoMode,
   type ReleaseRequest,
   type ResultRequest,
 } from "@recx/shared";
@@ -75,7 +76,16 @@ function sqlExpectedForDisplay(text: string): string {
 }
 
 /** Sample input / expected output of a (frozen) version — read outside any transaction. */
-async function loadSampleTexts(problemVersionId: string, sql = false): Promise<SampleText[]> {
+/**
+ * The sample cases' texts, for the result console.
+ *
+ * `ioMode` decides what "expected" means. A SQL case's expected result set
+ * is clipped for display (Phase 12k). An output-only case's expected
+ * output IS THE ANSWER, so it is withheld entirely (Phase 12n): its case
+ * is a sample because the student must see the DATA, and the console shows
+ * their own answer beside the verdict and nothing else.
+ */
+async function loadSampleTexts(problemVersionId: string, ioMode: IoMode = "STDIN"): Promise<SampleText[]> {
   const samples = await db.testCase.findMany({
     where: { problemVersionId, isSample: true },
     orderBy: { index: "asc" },
@@ -89,9 +99,12 @@ async function loadSampleTexts(problemVersionId: string, sql = false): Promise<S
     samples.map(async (s) => ({
       index: s.index,
       input: await blobText(s.input),
-      expected: sql
-        ? sqlExpectedForDisplay(await blobText(s.output, SQL_EXPECTED_READ_BYTES))
-        : await blobText(s.output),
+      expected:
+        ioMode === "SQL"
+          ? sqlExpectedForDisplay(await blobText(s.output, SQL_EXPECTED_READ_BYTES))
+          : ioMode === "OUTPUT_ONLY"
+            ? ""
+            : await blobText(s.output),
     })),
   );
 }
@@ -143,7 +156,7 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
   // Cheap early exit before any blob reads; the guarded update below is the real check.
   if (!head || head.claimToken !== body.claimToken) return "stale";
 
-  const samples = await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode === "SQL");
+  const samples = await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode);
   const details = buildSubmissionDetails(body.tests, samples);
   // The sample indexes of the VERSION decide which cases may carry the
   // judge's message, so a worker cannot make a hidden case visible.
@@ -292,7 +305,7 @@ export async function finalizeRun(node: JudgeNode, body: ResultRequest): Promise
       ? buildRunResult(body.tests, { kind: "custom" })
       : buildRunResult(body.tests, {
           kind: "samples",
-          samples: await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode === "SQL"),
+          samples: await loadSampleTexts(head.problemVersionId, head.problemVersion.ioMode),
         });
   const judgedAt = new Date();
 

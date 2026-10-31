@@ -159,26 +159,38 @@ export function summarizeValidation(refs: readonly ReferenceState[], ioMode: IoM
   const wrongs = refs.filter((r) => r.runnable && stageOf(r.expectedVerdict) === 2);
 
   /**
-   * The model solution a version cannot publish without.
+   * The model solution a version cannot publish without, and what it is
+   * called for each kind of problem.
    *
-   * For a program that is a C++ one: the time limits every other language
-   * is derived from are measured against it. For a SQL problem (Phase 12k)
-   * it is the reference QUERY — there is no C++ anything, and the query is
-   * what produced the expected results, so it is even more load-bearing
-   * here than a model solution usually is.
+   * For a program it is a C++ one: the time limits every other language is
+   * derived from are measured against it. For a SQL problem (Phase 12k) it
+   * is the reference QUERY, which produced the expected results. For an
+   * output-only problem (Phase 12n) it is the model ANSWER: nothing is
+   * compiled or run, so there is no C++ anything to ask for — and running
+   * the author's own answer is what proves the stored expected output and
+   * the comparator agree.
+   *
+   * The live stage of slice 3 is why this list is a list: the gate's
+   * warning had been lifted for output-only problems but this blocker had
+   * not, so a question whose model answer had just been judged AC could
+   * not be approved for want of a C++ program it will never have.
    */
   const sql = ioMode === "SQL";
-  const required = sql ? [SQL_LANGUAGE_KEY] : CPP_MODEL_LANGUAGES;
+  const answerOnly = ioMode === "OUTPUT_ONLY";
+  const required = sql ? [SQL_LANGUAGE_KEY] : answerOnly ? [ANSWER_LANGUAGE_KEY] : CPP_MODEL_LANGUAGES;
+  const missing = sql
+    ? "No reference query (expected AC) exists."
+    : answerOnly
+      ? "No model answer (expected AC) exists."
+      : "No C++ (cpp17 / cpp20) model solution exists.";
+  const notEnabled = sql
+    ? "The reference query cannot be run: the SQL language is not enabled."
+    : answerOnly
+      ? "The model answer cannot be run: the answer language is not enabled."
+      : "Every C++ model solution is in a language that is not enabled.";
   const requiredModels = refs.filter((r) => stageOf(r.expectedVerdict) === 1 && required.includes(r.language));
-  if (requiredModels.length === 0) {
-    blockers.push(sql ? "No reference query (expected AC) exists." : "No C++ (cpp17 / cpp20) model solution exists.");
-  } else if (!requiredModels.some((r) => r.runnable)) {
-    blockers.push(
-      sql
-        ? "The reference query cannot be run: the SQL language is not enabled."
-        : "Every C++ model solution is in a language that is not enabled.",
-    );
-  }
+  if (requiredModels.length === 0) blockers.push(missing);
+  else if (!requiredModels.some((r) => r.runnable)) blockers.push(notEnabled);
 
   const result = (phase: ValidationPhase, extra: Partial<ValidationSummary> = {}): ValidationSummary => ({
     phase,

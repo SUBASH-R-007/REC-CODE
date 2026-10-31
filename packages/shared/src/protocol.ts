@@ -3,7 +3,6 @@ import { LANGUAGE_KEYS, TOOLCHAIN_ID_PATTERN } from "./languages";
 import { SQL_LIMITS, sqlResultSetSchema } from "./sql-problem";
 // Type-only in the other direction (sql-language imports `type IoMode`), so
 // this is not a runtime cycle.
-import { SUBMIT_LANGUAGE_KEYS } from "./submit-language";
 import { LIMITS } from "./limits";
 import { VERDICTS } from "./verdict";
 import { functionSignatureSchema } from "./harness/signature";
@@ -549,7 +548,18 @@ export const heartbeatRequestSchema = z.object({
    * (Phase 12k). Widening rather than a protocol bump: a v3 worker sends a
    * subset of this set, and the field is stored for display only.
    */
-  languages: z.array(z.enum(SUBMIT_LANGUAGE_KEYS as [string, ...string[]])),
+  /**
+   * What the node reports it can run. Validated as bounded strings rather
+   * than against the key list on purpose: this is a REPORT, not an
+   * authority — the server matches these keys against its own
+   * `LanguageConfig` rows, so a key it does not know simply never matches
+   * a problem. Keeping the list out of this module also keeps `protocol`
+   * free of a dependency on the student-facing language modules, which is
+   * what made a bundler's barrel optimisation able to evaluate this file
+   * before them (Phase 12n found it the hard way: `z.enum` of an
+   * uninitialised list threw on every submission).
+   */
+  languages: z.array(z.string().min(1).max(32)).max(64),
   slots: z.number().int().min(0).max(256),
   /** Score of the 1-second calibration benchmark (higher = faster), refreshed every 6 h. */
   calibrationScore: z.number().nullable(),

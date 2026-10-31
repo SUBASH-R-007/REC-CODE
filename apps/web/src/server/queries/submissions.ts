@@ -65,6 +65,7 @@ const SUBMISSION_SELECT = {
     select: {
       scoringMode: true,
       compareMode: true,
+      ioMode: true,
       functionSignature: true,
       // Index, points and subtask only — never test content.
       testCases: { select: { index: true, points: true, subtaskIndex: true, isSample: true }, orderBy: { index: "asc" } },
@@ -96,6 +97,7 @@ async function submissionViewOf(row: SubmissionRow): Promise<SubmissionStudentVi
     testResults: row.testResults,
     details: row.details,
     compareMode: row.problemVersion.compareMode,
+    ioMode: row.problemVersion.ioMode,
     functionSignature: row.problemVersion.functionSignature,
     scoringMode: row.problemVersion.scoringMode,
     score: row.score,
@@ -195,7 +197,7 @@ export async function getRunView(id: string, viewer: Viewer): Promise<RunStudent
       judgedAt: true,
       expiresAt: true,
       languageConfig: { select: { label: true } },
-      problemVersion: { select: { compareMode: true, functionSignature: true } },
+      problemVersion: { select: { compareMode: true, ioMode: true, functionSignature: true } },
     },
   });
   // Runs live for 24 hours; after that they are gone even before the purge.
@@ -215,6 +217,7 @@ export async function getRunView(id: string, viewer: Viewer): Promise<RunStudent
     customInput: row.customInput,
     result: row.result,
     compareMode: row.problemVersion.compareMode,
+    ioMode: row.problemVersion.ioMode,
     functionSignature: row.problemVersion.functionSignature,
   });
 }

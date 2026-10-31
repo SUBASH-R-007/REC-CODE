@@ -23,6 +23,7 @@ import {
   SQL_REFUSALS,
   VERDICT_LABEL,
   countEditedLines,
+  isAnswerLanguage,
   isSqlLanguage,
   looksLikeMultipleStatements,
   utf8Length,
@@ -42,6 +43,7 @@ import {
   type EditorKind,
   type MobileTab,
 } from "@/components/workspace/layout";
+import { AnswerNote } from "@/components/workspace/answer-note";
 import { DebugNote } from "@/components/workspace/debug-note";
 import { InteractiveNote } from "@/components/workspace/interactive-note";
 import { LanguageVersion } from "@/components/workspace/language-version";
@@ -182,8 +184,17 @@ export function Workspace({
    * gets the SQL behaviour without being told about it.
    */
   const sql = active ? isSqlLanguage(active.key) : false;
-  /** Neither kind of question has an input a student could type. */
-  const noCustomInput = sql || interactive;
+  /**
+   * An output-only question (Phase 12n), read from the ACTIVE language for
+   * the same reason SQL is: such a problem offers `answer1` and nothing
+   * else, and no other problem offers it at all. The editor becomes an
+   * answer box — nothing is compiled, nothing is run, and there is no Run
+   * button, because the one case it would run against is the one the
+   * submission is judged against.
+   */
+  const answerOnly = active ? isAnswerLanguage(active.key) : false;
+  /** None of these kinds of question has an input a student could type. */
+  const noCustomInput = sql || interactive || answerOnly;
   /**
    * The edit budget, counted as they type (Phase 12m). Against the ACTIVE
    * language's starter, because that is the program this editor was opened
@@ -521,21 +532,29 @@ export function Workspace({
             </Button>
             {/* aria-disabled, not disabled, while a request is in flight: a
                 focused button that disables itself drops keyboard focus to
-                <body> (WCAG 2.4.3). run() / submit() ignore presses meanwhile. */}
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(control, busyClass)}
-              onClick={run}
-              aria-disabled={sending !== null || undefined}
-            >
-              {sending === "run" ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : (
-                <Play className="h-4 w-4" aria-hidden />
-              )}
-              {customOn ? "Run custom" : "Run"}
-            </Button>
+                <body> (WCAG 2.4.3). run() / submit() ignore presses meanwhile.
+
+                No Run at all for an output-only question (Phase 12n): the
+                answer IS the submission, and the one case a Run would use
+                is the one the submission is judged against — so the button
+                would spend a student's run quota to tell them the verdict
+                they were about to get. The action refuses it too. */}
+            {!answerOnly && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn(control, busyClass)}
+                onClick={run}
+                aria-disabled={sending !== null || undefined}
+              >
+                {sending === "run" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Play className="h-4 w-4" aria-hidden />
+                )}
+                {customOn ? "Run custom" : "Run"}
+              </Button>
+            )}
             <Button size="sm" className={cn(control, busyClass)} onClick={submit} aria-disabled={sending !== null || undefined}>
               {sending === "submission" ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -549,6 +568,7 @@ export function Workspace({
 
         {sql && <SqlNote />}
         {interactive && <InteractiveNote />}
+        {answerOnly && <AnswerNote />}
         {debugging && <DebugNote budget={editBudget} changed={changed} />}
 
         {drafts.offer && (
@@ -594,6 +614,7 @@ export function Workspace({
             onCustomChange={setCustom}
             customHint={customHint}
             allowCustom={!noCustomInput}
+            answerOnly={answerOnly}
           />
         </div>
 

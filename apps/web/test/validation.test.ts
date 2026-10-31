@@ -96,6 +96,26 @@ describe("publish gate", () => {
     expect(summary.blockers).toContain("No C++ (cpp17 / cpp20) model solution exists.");
   });
 
+  it("asks each kind of problem for its own model solution", () => {
+    /**
+     * The live stage of Phase 12n, slice 3 found this: the content gate's
+     * C++ warning had been lifted for an output-only problem but this
+     * BLOCKER had not, so a question whose model answer had just been
+     * judged AC could not be approved for want of a C++ program it will
+     * never have.
+     */
+    const answer = summarizeValidation([ref("answer1", "AC", run())], "OUTPUT_ONLY");
+    expect(answer.blockers).toEqual([]);
+    expect(answer.publishable).toBe(true);
+
+    const noAnswer = summarizeValidation([ref("cpp20", "AC", run())], "OUTPUT_ONLY");
+    expect(noAnswer.blockers.join(" ")).toContain("No model answer");
+
+    // And the other two kinds still ask for what they asked for.
+    expect(summarizeValidation([ref("sql17", "AC", run())], "SQL").blockers).toEqual([]);
+    expect(summarizeValidation([ref("answer1", "AC", run())], "STDIN").blockers.join(" ")).toContain("No C++");
+  });
+
   it("blocks when the C++ model's language is not enabled", () => {
     const refs = [ref("cpp17", "AC", null, { runnable: false }), ref("py312", "AC", run())];
     const summary = summarizeValidation(refs);

@@ -90,22 +90,34 @@ export function ResultPanel({
   sending,
   stream,
   sampleIndexes,
+  answerOnly = false,
 }: {
   target: JudgeTarget | null;
   sending: "submission" | "run" | null;
   stream: VerdictStreamState & { retry: () => void };
   sampleIndexes: readonly number[];
+  /**
+   * An output-only question (Phase 12n): there is no Run at all, so the
+   * idle console must not describe one. The live stage found this
+   * sentence promising a button the page does not have.
+   */
+  answerOnly?: boolean;
 }) {
   if (sending) {
     return (
       <p className="flex items-center gap-2 text-sm text-text-secondary">
         <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden />
-        {sending === "submission" ? "Submitting your code…" : "Sending your code to run…"}
+        {sending === "submission" ? (answerOnly ? "Submitting your answer…" : "Submitting your code…") : "Sending your code to run…"}
       </p>
     );
   }
   if (!target) {
-    return (
+    return answerOnly ? (
+      <p className="text-sm text-text-secondary">
+        <strong className="font-semibold text-text">Submit</strong> sends your answer to be checked against the
+        expected one. There is nothing to run. The result appears here.
+      </p>
+    ) : (
       <p className="text-sm text-text-secondary">
         <strong className="font-semibold text-text">Run</strong> checks your code against the sample tests (or your
         own input). <strong className="font-semibold text-text">Submit</strong> judges it against every test. Results

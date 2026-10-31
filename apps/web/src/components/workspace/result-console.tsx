@@ -56,6 +56,8 @@ export const ResultConsole = forwardRef<
      * then absent rather than present and ignored.
      */
     allowCustom?: boolean;
+    /** An output-only question (Phase 12n): the idle console must not promise a Run. */
+    answerOnly?: boolean;
   }
 >(function ResultConsole(
   {
@@ -74,6 +76,7 @@ export const ResultConsole = forwardRef<
     onCustomChange,
     customHint,
     allowCustom = true,
+    answerOnly = false,
   },
   headingRef,
 ) {
@@ -168,7 +171,13 @@ export const ResultConsole = forwardRef<
         className="scroll-thin min-h-0 flex-1 overflow-y-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
       >
         {shown === "result" ? (
-          <ResultPanel target={target} sending={sending} stream={stream} sampleIndexes={sampleIndexes} />
+          <ResultPanel
+            target={target}
+            sending={sending}
+            stream={stream}
+            sampleIndexes={sampleIndexes}
+            answerOnly={answerOnly}
+          />
         ) : (
           <div className="space-y-3">
             <label className="flex min-h-(--ws-ctl) items-center gap-2 text-sm font-medium text-text">

@@ -8,6 +8,7 @@ import {
   truncateUtf8,
   verdictSchema,
   type CompareMode,
+  type IoMode,
   type FunctionComparator,
   type ScoringMode,
   type Verdict,
@@ -94,6 +95,13 @@ interface BaseView {
   judgedAt: string | null;
   /** How output is compared — drives the "why was this Wrong Answer?" note. */
   compareMode: CompareMode | null;
+  /**
+   * The pinned version's io mode. OUTPUT_ONLY (Phase 12n) changes what the
+   * console shows: the case's data, the student's own answer, and no
+   * expected output — because for that kind the expected output IS the
+   * answer.
+   */
+  ioMode: IoMode | null;
   /** FUNCTION problems: the pinned version comparator (decides that note instead of compareMode). */
   functionComparator: FunctionComparator | null;
 }
@@ -186,6 +194,8 @@ interface BaseSource {
   samples: SampleCase[];
   /** The pinned version's compare mode (optional for older callers). */
   compareMode?: CompareMode | null;
+  /** The pinned version's io mode (optional for older callers). */
+  ioMode?: IoMode | null;
   /** The pinned version's functionSignature jsonb (FUNCTION problems); only its comparator is read. */
   functionSignature?: unknown;
 }
@@ -317,6 +327,7 @@ function base(source: ViewSource) {
     createdAt: source.createdAt.toISOString(),
     judgedAt: source.judgedAt ? source.judgedAt.toISOString() : null,
     compareMode: source.compareMode ?? null,
+    ioMode: source.ioMode ?? null,
     functionComparator: functionComparatorOf(source.functionSignature),
   };
 }

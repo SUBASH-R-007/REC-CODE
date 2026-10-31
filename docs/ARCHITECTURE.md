@@ -299,6 +299,22 @@ a rounded number, a different order. Two of the gate's usual rules are
 lifted here: the hidden test (a hidden case would be a question nobody can
 read) and the C++ model solution (the model is not a program).
 
+**The student surface (slice 3), and the one leak that mattered.** The
+case of an output-only problem is a SAMPLE, because its data is the
+question — and on every other kind of problem "sample" means the student
+sees the expected output too. Here that output IS THE ANSWER. So it is
+dropped in the two places it is READ (`getProblemWorkspace` and
+`loadSampleTexts`) rather than hidden where it is rendered: a page can only
+leak what it was given. The console then shows two blocks, the data and
+**Your answer**, with no expected block and no time or memory — nothing of
+the student's ran.
+
+The rest of the surface follows from "no program": the editor is a
+plaintext answer box, the language picker offers `answer1` alone, there is
+no Run button at all (the action refuses one too), the idle console says
+*"There is nothing to run"* instead of describing a Run, and the
+Description tab states the four rules of an answer.
+
 **Two gaps closed on the way.** The import package's `solutions[].language`
 was `LANGUAGE_KEYS`, so no package could ever have named a SQL problem's
 reference query — and the admin form's language list was the same, so

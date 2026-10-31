@@ -444,15 +444,23 @@ const readWorkspaceContent: (key: string, versionId: string) => Promise<Workspac
       maxEditedLines: version.maxEditedLines,
       timeLimitMs: version.timeLimitMs,
       memoryLimitKb: version.memoryLimitKb,
+      /**
+       * Phase 12n. An output-only problem's one case IS a sample, because
+       * its data is the question — and its expected output IS THE ANSWER,
+       * so it is withheld here, in the query, rather than anywhere the
+       * student could be served it by accident. `isSample` means "the
+       * student may see this case" everywhere else on the platform; for
+       * this one kind it means the input only.
+       */
       samples: version.testCases.map((t) => ({
         index: t.index,
         input: t.input.inline ?? "",
-        output: t.output.inline ?? "",
+        output: version.ioMode === "OUTPUT_ONLY" ? "" : (t.output.inline ?? ""),
       })),
       starters: version.starterCodes.map((s) => ({ language: s.language, code: s.code })),
     };
   },
-  ["problem-workspace", "v4"],
+  ["problem-workspace", "v5"],
 );
 
 /**

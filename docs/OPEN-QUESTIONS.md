@@ -3614,3 +3614,37 @@ language enum was the toolchain list. The same was true of the admin
 form's language select, which is why Phase 12k's SQL problems were
 published through a server action rather than the UI. Both lists now carry
 `sql17` and `answer1`.
+
+## The student's side of an output-only problem (Phase 12n, slice 3)
+
+**The expected answer is withheld where it is read.** The one case is a
+sample, because the student must see the data; on every other kind of
+problem that also means seeing the expected output, and here the expected
+output is the answer. Both reads drop it — the workspace query and the
+submission's sample texts — so no page, log or payload can leak what it
+was never given. Hiding it in the renderer would have left it one
+refactor away from the screen.
+
+**No Run, said three times.** The button is absent, the action refuses a
+run with a sentence, and the idle console says there is nothing to run.
+The last of those was found by the live stage, promising a Run the page
+did not have — the kind of sentence that survives because nobody reads the
+empty state twice.
+
+**No time, no memory.** Not "0 ms", which reads as a measurement. The
+per-case metrics and the summary line both leave them out, because nothing
+of the student's ran.
+
+**One stale cache, two real improvements.** Two action failures and a 500
+during the live stage came from Next's `optimizePackageImports` cache
+holding the old location of a moved module; a fresh `.next` cleared them.
+The changes made while diagnosing are kept because they are right either
+way: a schema that validates a language with a function cannot depend on
+module-init order, and `protocol` no longer imports the student-facing
+language list for a field that is a node's own report.
+
+**Still not done: an output-only problem in a contest or an assessment.**
+The practice workspace is the only surface that knows this kind. The
+contest arena links to it, so a contest would work — but it has not been
+run — and an exam attempt builds its own editor, which would show a
+student a code box for a question that wants an answer.

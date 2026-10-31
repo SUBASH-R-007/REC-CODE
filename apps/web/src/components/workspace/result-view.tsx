@@ -1,6 +1,7 @@
 import { VerdictBadge } from "@recx/design";
 import {
   FUNCTION_COMPARATOR_DESCRIPTIONS,
+  ANSWER_LABELS,
   INTERACTIVE_LABELS,
   INTERACTIVE_NOTICES,
   readResultSet,
@@ -108,14 +109,22 @@ function TestRow({
   points,
   rows,
   talk,
+  answer,
 }: {
   test: TestView;
   points?: TestPointsView | undefined;
   rows?: boolean;
   /** An interactive case: the blocks are the examiner's data and the conversation. */
   talk?: boolean;
+  /**
+   * An output-only case (Phase 12n): the blocks are the question's data
+   * and the student's own answer. There is no expected block, because the
+   * expected output IS the answer — and no time or memory, because
+   * nothing of theirs ran.
+   */
+  answer?: boolean;
 }) {
-  const metrics = (
+  const metrics = answer ? null : (
     <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-xs text-text-secondary tabular-nums">
       {points && <PointsLabel points={points} />}
       <span>{formatTimeMs(test.ms)}</span>
@@ -153,6 +162,8 @@ function TestRow({
               <OutputBlock title="Dataset" text={sample.input} />
             ) : talk ? (
               <OutputBlock title={INTERACTIVE_LABELS.data} text={sample.input} />
+            ) : answer ? (
+              <OutputBlock title={ANSWER_LABELS.data} text={sample.input} />
             ) : (
               <OutputBlock title="Input" text={sample.input} />
             ))}
@@ -160,7 +171,11 @@ function TestRow({
               examiner decides as it goes, and the stored blob is empty.
               A block headed "Expected output" with nothing in it would be
               a question a student could not answer. */}
+          {/* An output-only case's expected output is THE ANSWER, so there
+              is no expected block for one — and the query never sends the
+              text either (`loadSampleTexts`). */}
           {!talk &&
+            !answer &&
             sample.expected !== null &&
             (rows ? (
               <SqlBlock title="Expected rows" text={sample.expected} />
@@ -172,6 +187,8 @@ function TestRow({
               <SqlBlock title="Your rows" text={sample.stdout} />
             ) : talk ? (
               <OutputBlock title={INTERACTIVE_LABELS.transcript} text={sample.stdout} />
+            ) : answer ? (
+              <OutputBlock title={ANSWER_LABELS.answer} text={sample.stdout} />
             ) : (
               <OutputBlock title="Your output" text={sample.stdout} />
             ))}
@@ -218,14 +235,20 @@ export function ResultSummary({ view }: { view: StudentView }) {
         {view.scoring && <ScoreLine scoring={view.scoring} />}
         <p className="text-sm text-text-secondary tabular-nums">
           Passed <span className="font-semibold text-text">{view.passed}</span> of {view.total} tests
-          <span className="mx-1.5 text-muted" aria-hidden>
-            ·
-          </span>
-          <span className="font-mono text-xs">{formatTimeMs(view.maxTimeMs)}</span>
-          <span className="mx-1.5 text-muted" aria-hidden>
-            ·
-          </span>
-          <span className="font-mono text-xs">{formatMemoryKb(view.maxMemoryKb)}</span>
+          {/* An output-only submission ran nothing, so "0 ms · 0 KB" would
+              be two measurements of something that did not happen. */}
+          {view.ioMode !== "OUTPUT_ONLY" && (
+            <>
+              <span className="mx-1.5 text-muted" aria-hidden>
+                ·
+              </span>
+              <span className="font-mono text-xs">{formatTimeMs(view.maxTimeMs)}</span>
+              <span className="mx-1.5 text-muted" aria-hidden>
+                ·
+              </span>
+              <span className="font-mono text-xs">{formatMemoryKb(view.maxMemoryKb)}</span>
+            </>
+          )}
         </p>
       </div>
     );
@@ -262,17 +285,19 @@ function TestList({
   label,
   rows,
   talk,
+  answer,
 }: {
   tests: TestView[];
   points?: ReadonlyMap<number, TestPointsView>;
   label: string;
   rows?: boolean;
   talk?: boolean;
+  answer?: boolean;
 }) {
   return (
     <ul className="divide-y divide-border rounded-xl border border-border" aria-label={label}>
       {tests.map((t) => (
-        <TestRow key={t.i} test={t} points={points?.get(t.i)} rows={rows} talk={talk} />
+        <TestRow key={t.i} test={t} points={points?.get(t.i)} rows={rows} talk={talk} answer={answer} />
       ))}
     </ul>
   );
@@ -289,12 +314,14 @@ function SubtaskResults({
   headingLevel,
   rows,
   talk,
+  answer,
 }: {
   view: SubmissionStudentView;
   scoring: ScoreView;
   headingLevel: 3 | 4;
   rows?: boolean;
   talk?: boolean;
+  answer?: boolean;
 }) {
   const Heading = headingLevel === 3 ? "h3" : "h4";
   const byIndex = new Map(view.tests.map((t) => [t.i, t]));
@@ -325,7 +352,7 @@ function SubtaskResults({
             {tests.length > 0 ? (
               <ul className="divide-y divide-border" aria-label={`${subtaskLabel(st.index)} tests`}>
                 {tests.map((t) => (
-                  <TestRow key={t.i} test={t} rows={rows} talk={talk} />
+                  <TestRow key={t.i} test={t} rows={rows} talk={talk} answer={answer} />
                 ))}
               </ul>
             ) : (
@@ -338,7 +365,9 @@ function SubtaskResults({
           </section>
         );
       })}
-      {others.length > 0 && <TestList tests={others} label="Other test results" rows={rows} talk={talk} />}
+      {others.length > 0 && (
+        <TestList tests={others} label="Other test results" rows={rows} talk={talk} answer={answer} />
+      )}
     </div>
   );
 }
@@ -353,13 +382,19 @@ export function TestResults({ view, headingLevel = 3 }: { view: StudentView; hea
   // INTERACTIVE is the other compare mode whose case has no expected
   // output: what a student reads is the conversation (Phase 12l).
   const talk = view.compareMode === "INTERACTIVE";
+  // OUTPUT_ONLY is the third kind whose case is not three streams of text
+  // (Phase 12n): the question's data and the student's own answer, with no
+  // expected block — the expected output IS the answer.
+  const answer = view.ioMode === "OUTPUT_ONLY";
   if (view.kind === "submission" && scoring?.mode === "SUBTASK" && view.verdict !== "CE") {
-    return <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} rows={rows} talk={talk} />;
+    return (
+      <SubtaskResults view={view} scoring={scoring} headingLevel={headingLevel} rows={rows} talk={talk} answer={answer} />
+    );
   }
   if (view.tests.length === 0) return null;
   if (scoring?.mode === "PER_TEST") {
     const points = new Map(scoring.testPoints.map((p) => [p.i, p]));
-    return <TestList tests={view.tests} points={points} label="Test results" rows={rows} talk={talk} />;
+    return <TestList tests={view.tests} points={points} label="Test results" rows={rows} talk={talk} answer={answer} />;
   }
-  return <TestList tests={view.tests} label="Test results" rows={rows} talk={talk} />;
+  return <TestList tests={view.tests} label="Test results" rows={rows} talk={talk} answer={answer} />;
 }
