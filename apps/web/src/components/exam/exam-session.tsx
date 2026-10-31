@@ -53,7 +53,22 @@ export interface ExamQuestionView {
   readonly points: number;
   readonly samples: ReadonlyArray<{ readonly input: string; readonly output: string }>;
   readonly starter: string;
-  readonly language: string;
+  /**
+   * THE TOOLCHAIN KEY — `cpp20`, `c17` — which is what every exam route
+   * takes, because each validates against the keys of LANGUAGE_CATALOG.
+   *
+   * It used to be one field called `language` carrying
+   * `LANGUAGE_CATALOG[key].editorLanguage` instead, which is the editor's
+   * highlighting mode (`"cpp"`). Two different things under one name, and
+   * the wrong one reached the server: every snapshot, every run and every
+   * SUBMIT from a sitting was refused as "Malformed", so a candidate could
+   * not save and could not hand in — and the editor was the only part of
+   * the chain the value was right for, so nothing looked broken until a
+   * request was made. Reported from a live sitting (Phase 12r.2).
+   */
+  readonly languageKey: string;
+  /** The editor's highlighting mode. Never sent to a route. */
+  readonly editorLanguage: string;
 }
 
 export function ExamSession({
@@ -221,7 +236,7 @@ export function ExamSession({
       const id = questionIdRef.current;
       const source = sourcesRef.current[id];
       if (!id || source === undefined) return;
-      const language = questions.find((candidate) => candidate.questionId === id)?.language ?? "cpp20";
+      const language = questions.find((candidate) => candidate.questionId === id)?.languageKey ?? "cpp20";
 
       // WRITE AHEAD FIRST. If the network call below fails, the work is
       // already safe and the pill can say so honestly.
@@ -313,7 +328,7 @@ export function ExamSession({
     const id = questionIdRef.current;
     const source = sourcesRef.current[id];
     if (!id || source === undefined || source.trim() === "") return;
-    const language = questions.find((candidate) => candidate.questionId === id)?.language ?? "cpp20";
+    const language = questions.find((candidate) => candidate.questionId === id)?.languageKey ?? "cpp20";
     setRunning(true);
     setConsoleOpen(true);
     try {
@@ -627,7 +642,7 @@ export function ExamSession({
     // in one pass and the attempt closes last (lib/exam/submit.ts).
     const answers = questions.map((q) => ({
       questionId: q.questionId,
-      language: q.language,
+      language: q.languageKey,
       source: sourcesRef.current[q.questionId] ?? "",
     }));
     setSave({ kind: "saving" });

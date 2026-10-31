@@ -91,6 +91,7 @@ export function ResultPanel({
   stream,
   sampleIndexes,
   answerOnly = false,
+  examPaper = false,
 }: {
   target: JudgeTarget | null;
   sending: "submission" | "run" | null;
@@ -102,6 +103,15 @@ export function ResultPanel({
    * sentence promising a button the page does not have.
    */
   answerOnly?: boolean;
+  /**
+   * A sitting (Phase 12r.2). Run exists, but there is no custom input to
+   * offer and Submit hands in the WHOLE PAPER rather than this question —
+   * both of which the practice sentence gets wrong, and the second is the
+   * one a candidate must not misread. Reported from a live sitting, where
+   * the console promised "or your own input" beside an editor that has
+   * none.
+   */
+  examPaper?: boolean;
 }) {
   if (sending) {
     return (
@@ -112,6 +122,15 @@ export function ResultPanel({
     );
   }
   if (!target) {
+    if (examPaper) {
+      return (
+        <p className="text-sm text-text-secondary">
+          <strong className="font-semibold text-text">Run samples</strong> checks this answer against the sample
+          tests shown with the question. <strong className="font-semibold text-text">Submit</strong> hands in the
+          whole paper and ends the sitting. Results appear here.
+        </p>
+      );
+    }
     return answerOnly ? (
       <p className="text-sm text-text-secondary">
         <strong className="font-semibold text-text">Submit</strong> sends your answer to be checked against the

@@ -85,6 +85,7 @@ export function ExamConsole({
             sending={sending ? "run" : null}
             stream={stream}
             sampleIndexes={sampleIndexes}
+            examPaper
           />
         </div>
       ) : null}

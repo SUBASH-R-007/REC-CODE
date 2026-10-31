@@ -76,7 +76,12 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
         output: test.output.inline ?? "",
       })),
       starter: starters.get(defaultLanguage) ?? "",
-      language: LANGUAGE_CATALOG[defaultLanguage].editorLanguage,
+      // Both, and named for what they are: the key the routes validate
+      // against, and the editor's highlighting mode. Handing the client only
+      // the second one under the name `language` is what stopped every
+      // sitting saving, running and submitting (Phase 12r.2).
+      languageKey: defaultLanguage,
+      editorLanguage: LANGUAGE_CATALOG[defaultLanguage].editorLanguage,
     });
   }
   return { questions, missing };

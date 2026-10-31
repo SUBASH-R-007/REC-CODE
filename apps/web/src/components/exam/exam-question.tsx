@@ -99,7 +99,7 @@ export function ExamQuestion({
             onInsertion={onInsertion}
             // The reason this is pinned: see the module comment.
             forceKind="codemirror"
-            language={question.language}
+            language={question.editorLanguage}
             label={`Code editor for question ${position}`}
             describedBy={noteId}
             prefs={{ ...prefs, keymap: "DEFAULT" }}
