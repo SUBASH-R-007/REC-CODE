@@ -17,6 +17,7 @@ import { ExamClock } from "@/components/exam/exam-clock";
 import { FocusOverlay } from "@/components/exam/focus-overlay";
 import { MonitoredChip } from "@/components/exam/monitored-chip";
 import { QuestionPalette } from "@/components/exam/question-palette";
+import { ExamConsole } from "@/components/exam/exam-console";
 import { SaveStatePill, type SaveState } from "@/components/exam/save-state-pill";
 import { ExamQuestion } from "@/components/exam/exam-question";
 import type { EditorPrefs } from "@/components/editor/editor-types";
@@ -203,6 +204,17 @@ export function ExamSession({
     };
   }, [attemptId, revoked]);
 
+  /**
+   * Running the samples (Phase 12q.5). The run id is what the console
+   * streams; `running` is the gap between asking and having one, which is
+   * the only moment the button has to lock itself against a second click
+   * — after that the route's own in-flight budget refuses one.
+   */
+  const [runId, setRunId] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
   // ── Snapshots and the write-ahead store ────────────────────────────────
   const persist = useCallback(
     async (trigger: "TICK" | "RUN" | "SUBMIT" | "PASTE") => {
@@ -235,7 +247,46 @@ export function ExamSession({
           setRevoked(body.revokeReason ?? "submitted");
           return;
         }
-        if (!response.ok) throw new Error(String(response.status));
+        /**
+         * The route answers, and its answer is read (Phase 12q.5).
+         *
+         * Two things used to be dropped here. A 200 was rendered as
+         * "Saved" whatever the body said — but the route replies
+         * `{ stored: false, reason }` for a file over the size limit and
+         * for a sitting that has spent its snapshot budget, and "Saved"
+         * when nothing was saved is the one thing the pill must never
+         * say. And any other non-200 became "check your connection",
+         * which sends a candidate to look at their wifi while the real
+         * reason sits unread in the response.
+         */
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          setSave({
+            kind: "refused",
+            message:
+              body.error ??
+              (response.status >= 500
+                ? "the server could not store it. Keep working; copy your code to be safe."
+                : `the server refused it (${response.status}).`),
+          });
+          return;
+        }
+        const body = (await response.json().catch(() => ({}))) as {
+          stored?: boolean;
+          reason?: "unchanged" | "too_large" | "capped" | null;
+        };
+        if (body.stored === false && body.reason !== "unchanged") {
+          // `unchanged` is not a failure: the server already holds this
+          // exact text, which is what "Saved" means. The other two are.
+          setSave({
+            kind: "refused",
+            message:
+              body.reason === "too_large"
+                ? "this answer is too large to store. Shorten it, and copy your code to be safe."
+                : "this sitting has reached its snapshot limit. Copy your code to be safe.",
+          });
+          return;
+        }
         await markSynced(attemptId, id, source);
         dirty.current = false;
         lastSavedAt.current = Date.now();
@@ -248,6 +299,60 @@ export function ExamSession({
     },
     [attemptId, atMs, questions],
   );
+
+  /**
+   * Run this answer against the question's samples.
+   *
+   * The route snapshots with `trigger: "RUN"` before it queues anything —
+   * the trigger the snapshot API has accepted since Phase 6c and that
+   * nothing ever sent, because until now there was no Run to send it from.
+   * So the timeline a reviewer reads shows what was in the editor when it
+   * was run, and the work is stored before the judge is involved.
+   */
+  const runSamples = useCallback(async () => {
+    const id = questionIdRef.current;
+    const source = sourcesRef.current[id];
+    if (!id || source === undefined || source.trim() === "") return;
+    const language = questions.find((candidate) => candidate.questionId === id)?.language ?? "cpp20";
+    setRunning(true);
+    setConsoleOpen(true);
+    try {
+      const response = await fetch(`/api/exam/${attemptId}/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ questionId: id, language, source, atMs: atMs() }),
+      });
+      if (response.status === 409) {
+        const body = (await response.json().catch(() => ({}))) as { revokeReason?: string };
+        if (body.revokeReason) {
+          setRevoked(body.revokeReason);
+          return;
+        }
+      }
+      const body = (await response.json().catch(() => ({}))) as { runId?: string; error?: string };
+      if (!response.ok || !body.runId) {
+        // The route's own sentence, not a guess: it refuses for reasons a
+        // candidate can act on (a run already going, no samples, the
+        // wrong language), and inventing one would send them looking in
+        // the wrong place.
+        setRunError(body.error ?? "That run could not be started.");
+        return;
+      }
+      setRunError(null);
+      setRunId(body.runId);
+      // A run IS a save, as far as the pill is concerned: the route wrote
+      // the snapshot before it queued anything.
+      await markSynced(attemptId, id, source);
+      dirty.current = false;
+      lastSavedAt.current = Date.now();
+      setSave({ kind: "saved", secondsAgo: 0 });
+    } catch {
+      setRunError("That run could not be started. Check your connection.");
+    } finally {
+      setRunning(false);
+    }
+  }, [attemptId, atMs, questions]);
 
   // The 30-second tick while dirty, and the "Saved · Ns ago" counter.
   useEffect(() => {
@@ -592,6 +697,17 @@ export function ExamSession({
         />
       </div>
 
+      {question.samples.length > 0 ? (
+        <ExamConsole
+          runId={runId}
+          sending={running}
+          sampleCount={question.samples.length}
+          open={consoleOpen}
+          onToggle={() => setConsoleOpen((was) => !was)}
+          error={runError}
+        />
+      ) : null}
+
       <ExamBottomBar
         canGoPrevious={current > 0}
         onPrevious={() => goTo(current - 1)}
@@ -607,6 +723,8 @@ export function ExamSession({
           void persist("TICK");
           goTo(Math.min(current + 1, questions.length - 1));
         }}
+        onRun={question.samples.length > 0 ? () => void runSamples() : undefined}
+        running={running}
         onSubmit={() => void submit()}
         answered={counts.answered}
         total={counts.total}

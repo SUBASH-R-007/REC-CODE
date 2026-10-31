@@ -187,6 +187,28 @@ const SOLUTION: Readonly<Record<string, string>> = {
   ].join("\n"),
 };
 
+/**
+ * Choose the language the answer is written in, when the problem offers a
+ * choice (Phase 12q.5).
+ *
+ * Found by the judged run below: `typeSolution` types text and nothing
+ * else, so a C++ answer went into a workspace still set to Python and came
+ * back CE — `main.py`, line 4, `int main() {`, invalid syntax. The verdict
+ * was right and the test was wrong, and it had cost ten minutes of judging
+ * to find out. The debugging question passed only by luck: its picker
+ * holds the languages its broken program exists in, and that was C++.
+ *
+ * An output-only question has no choice to make (the answer language is
+ * the only one), so the picker may be absent; that is not a failure.
+ */
+async function chooseLanguage(page: import("@playwright/test").Page, key: string): Promise<void> {
+  const picker = page.locator("select[id$='-language']").first();
+  if (!(await picker.count())) return;
+  const options = await picker.locator("option").evaluateAll((nodes) => nodes.map((n) => (n as HTMLOptionElement).value));
+  if (!options.includes(key)) return;
+  await picker.selectOption(key);
+}
+
 /** Type a whole answer into the editor, whichever editor it is. */
 async function typeSolution(page: import("@playwright/test").Page, source: string): Promise<void> {
   const editor = page.locator("[data-editor-root]").first();
@@ -577,6 +599,9 @@ test.describe("the problem kinds, in a browser", () => {
       }
       expect(source, `no model answer for ${kind}`).toBeTruthy();
 
+      // The language first: every model answer here but the answer file is
+      // C++, and a C++ program typed into a Python workspace is a CE.
+      if (kind !== "answer") await chooseLanguage(student, "cpp20");
       await typeSolution(student, source!);
       await student.getByRole("button", { name: "Submit" }).click();
       await expect(

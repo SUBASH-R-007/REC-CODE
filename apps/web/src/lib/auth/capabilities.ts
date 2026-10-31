@@ -629,6 +629,10 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       "app/api/exam/[attemptId]/hb/route.ts#POST",
       "app/api/exam/[attemptId]/events/route.ts#POST",
       "app/api/exam/[attemptId]/snapshot/route.ts#POST",
+      // Phase 12q.5. Running the samples during a sitting: the candidate's
+      // own route, guarded by the same attempt guard as the snapshot, and
+      // the run reads back through the owner-scoped /api/runs/[id].
+      "app/api/exam/[attemptId]/run/route.ts#POST",
       "app/api/exam/[attemptId]/submit/route.ts#POST",
     ],
   },

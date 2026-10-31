@@ -1,7 +1,8 @@
 import "server-only";
 import { cache } from "react";
-import { LANGUAGE_CATALOG, isLanguageKey, type AttemptLayout } from "@recx/shared";
+import { LANGUAGE_CATALOG, type AttemptLayout } from "@recx/shared";
 import { db } from "@/lib/db";
+import { examPaperLanguage } from "@/lib/exam/language";
 import { renderMarkdown } from "@/lib/markdown";
 import type { ExamQuestionView } from "@/components/exam/exam-session";
 
@@ -50,12 +51,8 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
   // One language for the whole exam surface in 6c: the candidate's editor
   // language per question arrives with the submit path, and the starter code
   // is keyed by language, so the first enabled language is the default.
-  const configs = await db.languageConfig.findMany({
-    where: { enabled: true, isCurrent: true },
-    select: { key: true },
-    orderBy: { key: "asc" },
-  });
-  const defaultLanguage = configs.map((c) => c.key).find(isLanguageKey) ?? "cpp20";
+  // Derived in lib/exam/language.ts, because the Run route has to agree.
+  const defaultLanguage = await examPaperLanguage();
 
   const questions: ExamQuestionView[] = [];
   const missing: string[] = [];

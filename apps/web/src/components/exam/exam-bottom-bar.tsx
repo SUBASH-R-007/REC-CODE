@@ -25,6 +25,8 @@ export function ExamBottomBar({
   onMarkAndNext,
   onClear,
   onSaveAndNext,
+  onRun,
+  running,
   onSubmit,
   answered,
   total,
@@ -36,6 +38,9 @@ export function ExamBottomBar({
   readonly onMarkAndNext: () => void;
   readonly onClear: () => void;
   readonly onSaveAndNext: () => void;
+  /** Run the samples (Phase 12q.5). Absent on a question with none. */
+  readonly onRun?: () => void;
+  readonly running?: boolean;
   readonly onSubmit?: () => void;
   readonly answered: number;
   readonly total: number;
@@ -78,6 +83,23 @@ export function ExamBottomBar({
           {action.label}
         </button>
       ))}
+
+      {/**
+        * Run the samples (Phase 12q.5). Beside the navigation rather than
+        * next to Submit: it is something a candidate does many times while
+        * working, and Submit is something they do once, at the end. Putting
+        * them together is how a mis-click ends a sitting.
+        */}
+      {onRun ? (
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={running}
+          className="rounded-md border border-primary/40 bg-primary-subtle px-3 py-1.5 text-sm font-medium text-text disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {running ? "Running…" : "Run samples"}
+        </button>
+      ) : null}
 
       <p className="ml-auto text-xs tabular-nums text-text-secondary">
         {answered} of {total} answered

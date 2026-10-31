@@ -13,8 +13,19 @@ import { AlertTriangle, Cloud, CloudOff, Loader2 } from "lucide-react";
  * The "Copy my code" button is the part that matters most and is easiest to
  * leave out. Everything else about this component is reassurance; that button
  * is the candidate's last resort when the network has gone and the clock has
- * not. It is rendered ONLY in the failed state, where it is the honest thing
- * to offer.
+ * not. It is rendered in the two states where the work is NOT on the server
+ * — `failed` and `refused` — because those are the states where it is the
+ * honest thing to offer.
+ *
+ * `refused` is the fifth state, added in Phase 12q.5. The four above all
+ * blame the network, and the snapshot route has three answers that are
+ * nothing to do with it: a file over the size limit, a sitting that has
+ * spent its snapshot budget, and a question that is not part of this paper.
+ * The route has always returned them — `{ stored: false, reason }` — and the
+ * client used to render a 200 as "Saved" whatever the body said, which is
+ * the one thing this component's own rules forbid, and a non-200 as "check
+ * your connection", which sends a candidate to look at their wifi while the
+ * real reason sits in the response. So a refusal now says what it was.
  *
  * Each state carries a colour, an icon AND text, so none of them is
  * distinguishable only by colour. The live region is polite, not assertive:
@@ -26,7 +37,9 @@ export type SaveState =
   | { readonly kind: "saved"; readonly secondsAgo: number }
   | { readonly kind: "saving" }
   | { readonly kind: "offline"; readonly retryInSeconds: number }
-  | { readonly kind: "failed" };
+  | { readonly kind: "failed" }
+  /** The server answered, and the answer was no. `message` is why. */
+  | { readonly kind: "refused"; readonly message: string };
 
 export function SaveStatePill({
   state,
@@ -66,6 +79,13 @@ export function SaveStatePill({
           tone: "border-danger/40 bg-danger-subtle text-danger",
           spin: false,
         };
+      case "refused":
+        return {
+          text: `Not saved — ${state.message}`,
+          Icon: AlertTriangle,
+          tone: "border-danger/40 bg-danger-subtle text-danger",
+          spin: false,
+        };
     }
   })();
 
@@ -80,7 +100,7 @@ export function SaveStatePill({
           {view.text}
         </span>
       </span>
-      {state.kind === "failed" && onCopyCode ? (
+      {(state.kind === "failed" || state.kind === "refused") && onCopyCode ? (
         <button
           type="button"
           onClick={onCopyCode}

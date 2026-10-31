@@ -47,6 +47,22 @@ export const LIMITS = deepFreeze({
     stderrBytes: 8 * 1024,
     ttlHours: 24,
   },
+  /**
+   * Running the samples during a sitting (Phase 12q.5).
+   *
+   * A sitting pays no practice caps — refusing a candidate's work because
+   * they had a busy afternoon would be indefensible — but a run still costs
+   * a judge slot, and a sitting is a few hundred candidates at once. The
+   * RUN lane already holds only two reserved slots per node, so the fleet
+   * throttles itself; these two bound what one candidate can add to the
+   * queue, not what the fleet will serve.
+   *
+   * `inFlightPerAttempt` is the one that matters: with it, the worst case
+   * is one queued run per candidate rather than as many as they can click.
+   * `perQuestion` is a backstop against a stuck loop, set high enough that
+   * nobody working normally will meet it.
+   */
+  examRun: { inFlightPerAttempt: 1, perQuestion: 40 },
   /** SubmissionTestDetail truncation (visible cases only). */
   detail: { perTestBytes: 4 * 1024, perSubmissionBytes: 32 * 1024, retentionDays: 30 },
   /** Samples get a truncated diff; hidden tests get no diff at all. */
