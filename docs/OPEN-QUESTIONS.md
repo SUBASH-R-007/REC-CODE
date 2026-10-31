@@ -1236,6 +1236,35 @@ Each is the narrower reading, implemented as described.
   is to seed a zero-score standing row for every registration at the start,
   which makes a no-show a last place rather than an absence.
 
+- **A contest is never actually submitted to, and that is not a bug in the
+  scoring — it is a missing step above it** (found 2026-10-31, Phase 12q.1).
+  Everything from `ContestProblemAttempt` downwards is built and tested:
+  `applyContestSubmission`, `scoreParticipant`, `rankStandings`,
+  `virtualWindow`, the freeze, `releaseContestRating`. What does not exist
+  is the step that tells a submission which contest it belongs to.
+  `submitSolution` writes `origin: "PRACTICE"`, `lane: "PRACTICE"`
+  unconditionally, and the arena links to `/problems/<slug>` with no contest
+  context, so `finalize.ts`'s CONTEST branch never fires. This workstation
+  held 7 contests, 10 contest problems and 5 registrations with 0
+  `ContestStanding` rows.
+  The questions a slice has to answer, and they are decisions rather than
+  code:
+  - **How does the arena carry the contest?** A query parameter on the
+    practice workspace is the smallest change, but a parameter a student can
+    type is a parameter a student can forge — the server has to re-derive
+    "is this student registered, is this problem in that contest, is the
+    window open" from the row, never trust the link.
+  - **What is a practice submission made during a contest window?** The same
+    problem is reachable from the catalogue throughout. Scoring it would
+    mean the catalogue is a side door into the contest; not scoring it means
+    a student can lose a correct answer to the wrong page.
+  - **Which lane and which caps?** The CONTEST lane exists and nodes
+    advertise it; the submit caps are currently practice caps.
+  - **What happens to a submission in flight when the window closes?**
+  Until it is decided, a contest is a reading surface with a board that
+  cannot move, and `apps/web/e2e/problem-kinds.spec.ts` carries the
+  `test.fixme` that will go green when it is wired.
+
 ## Phase 6b — the attempt engine
 
 - **The auto-submit sweeper also finalises DISCONNECTED sittings, not only
