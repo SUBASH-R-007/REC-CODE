@@ -3648,3 +3648,23 @@ The practice workspace is the only surface that knows this kind. The
 contest arena links to it, so a contest would work — but it has not been
 run — and an exam attempt builds its own editor, which would show a
 student a code box for a question that wants an answer.
+
+## Why an output-only problem is not sat in an assessment (Phase 12n, slice 4)
+
+**One surface knows this kind.** The practice workspace offers the answer
+language alone, shows the case's data without its expected answer, removes
+the Run button and says so in three places. An exam attempt builds its own
+editor and `submitAttempt` writes every answer with ONE language config —
+the first question's. A candidate would meet a code box for a question
+that wants an answer, and the submission would carry the wrong language.
+
+**So the pin is refused, not the candidate's answer.** Said to the person
+choosing the question, in a sentence, before the sitting exists. The third
+rule of this shape: interactive problems (12l), debugging problems (12m),
+and now this one — and each is lifted the same way, with an exam path that
+knows the kind, one DROP TRIGGER and a line in the gate log that the guard
+catalogue makes compulsory.
+
+**A contest is already fine.** Its arena links to `/problems/<slug>`, so
+every one of those surfaces is the practice one. Not yet RUN with an
+output-only problem, which is recorded as such.

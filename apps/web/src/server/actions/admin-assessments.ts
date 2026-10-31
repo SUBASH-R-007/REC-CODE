@@ -218,7 +218,7 @@ export async function addAssessmentProblem(
       select: {
         liveVersionId: true,
         liveVersion: {
-          select: { id: true, revision: true, frozenAt: true, compareMode: true, maxEditedLines: true },
+          select: { id: true, revision: true, frozenAt: true, compareMode: true, ioMode: true, maxEditedLines: true },
         },
       },
     });
@@ -249,6 +249,19 @@ export async function addAssessmentProblem(
     if (problem.liveVersion.maxEditedLines !== null) {
       throw new ValidationError(
         "A debugging problem is not sat in an assessment yet: a sitting submits every answer at the end, so it cannot refuse one that changed too many lines. Put it in a contest or leave it in practice.",
+      );
+    }
+
+    /**
+     * Phase 12n. The practice workspace is the only surface that knows an
+     * output-only problem: the answer box, the one language, the data
+     * without the expected answer, no Run. A sitting builds its own editor
+     * and submits every answer in one language, so the pin is refused here
+     * and in the database (AssessmentProblem_no_output_only).
+     */
+    if (problem.liveVersion.ioMode === "OUTPUT_ONLY") {
+      throw new ValidationError(
+        "An output-only problem is not sat in an assessment yet: a sitting gives every question the same code editor, and this one wants the answer itself. Put it in a contest or leave it in practice.",
       );
     }
 

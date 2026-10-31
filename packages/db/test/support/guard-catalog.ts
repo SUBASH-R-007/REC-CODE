@@ -87,6 +87,7 @@ export const GUARD_FUNCTIONS = [
   // 20261101140500_phase12l_assessment_rule
   "recx_refuse_interactive_assessment_problem",
   "recx_refuse_debug_assessment_problem",
+  "recx_refuse_output_only_assessment_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -310,6 +311,22 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_debug_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101161000_phase12n_assessment_rule
+  {
+    /**
+     * Phase 12n. The practice workspace is the only surface that knows an
+     * output-only problem — an exam attempt builds its own editor and
+     * submits every answer in one language, so a candidate would get a
+     * code box for a question that wants an answer. Lifting this needs an
+     * exam path that knows the kind, and a line in the gate log that this
+     * entry makes compulsory.
+     */
+    name: "AssessmentProblem_no_output_only",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_output_only_assessment_problem",
     level: "ROW",
   },
   {

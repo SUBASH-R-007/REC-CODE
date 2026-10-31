@@ -179,3 +179,27 @@ describe("one visible case, and nothing to run", () => {
     }
   });
 });
+
+describe("not sat in an assessment yet, and not quietly", () => {
+  it("a trigger refuses the pin, because a sitting has one editor for every question", () => {
+    const migration = readRepoFile(
+      "packages/db/prisma/migrations/20261101161000_phase12n_assessment_rule/migration.sql",
+    );
+    expect(migration).toContain("AssessmentProblem_no_output_only");
+    expect(migration).toContain("not sat in an assessment yet");
+    expect(migration).toMatch(/CREATE TRIGGER[\s\S]*ON "public"\."AssessmentProblem"/);
+    // A contest links to the ordinary workspace, so it needs no rule.
+    expect(migration).not.toMatch(/ON "public"\."ContestProblem"/);
+  });
+
+  it("the action says so in a sentence first", () => {
+    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
+    expect(action).toContain("An output-only problem is not sat in an assessment yet");
+  });
+
+  it("the trigger and its function are catalogued, so lifting the rule fails the build", () => {
+    const catalog = readRepoFile("packages/db/test/support/guard-catalog.ts");
+    expect(catalog).toContain("AssessmentProblem_no_output_only");
+    expect(catalog).toContain("recx_refuse_output_only_assessment_problem");
+  });
+});

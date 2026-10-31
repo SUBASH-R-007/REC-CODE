@@ -241,6 +241,48 @@ describe.skipIf(!ENABLED)("output-only problems against recx_test", () => {
     });
   });
 
+  describe("not sat in an assessment yet", () => {
+    it("refuses the pin, by trigger", async () => {
+      const v = await version({ status: "PUBLISHED" });
+      await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, v.id);
+      const user = await db.user.create({
+        data: {
+          collegeId: `${tag}-b`,
+          email: `${tag}-b@rec-code.example`,
+          firstName: "Paper",
+          lastName: "Maker",
+          handle: `${tag}-b`,
+          role: "ADMIN",
+        },
+        select: { id: true },
+      });
+      const assessment = await db.assessment.create({
+        data: {
+          slug: `${tag}-paper`,
+          title: "A paper",
+          instructions: "Be honest.",
+          status: "DRAFT",
+          proctorMode: "ADVISORY",
+          opensAt: new Date(Date.now() + 86_400_000),
+          closesAt: new Date(Date.now() + 90_000_000),
+          durationSec: 3_600,
+          createdById: user.id,
+        } as never,
+        select: { id: true },
+      });
+      try {
+        await expect(
+          db.assessmentProblem.create({
+            data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
+          }),
+        ).rejects.toThrow(/not sat in an assessment yet/);
+      } finally {
+        await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, assessment.id);
+        await db.user.deleteMany({ where: { id: user.id } });
+      }
+    });
+  });
+
   describe("the publish gate", () => {
     it("asks for one visible case with an expected answer, and the model answer", async () => {
       const v = await version();

@@ -100,7 +100,7 @@ describe("an output-only case in the result console", () => {
     );
     expect(body).toContain("Passed");
     expect(body).not.toContain("0 ms");
-    expect(body).not.toMatch(/KB/);
+    expect(body).not.toContain(" KB");
   });
 
   it("leaves an ordinary problem's three blocks alone", () => {

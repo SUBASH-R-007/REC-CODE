@@ -315,6 +315,18 @@ no Run button at all (the action refuses one too), the idle console says
 *"There is nothing to run"* instead of describing a Run, and the
 Description tab states the four rules of an answer.
 
+**And not in an assessment (slice 4).** The practice workspace is the only
+surface that knows this kind — the answer box, the one language, the data
+without the expected answer, no Run. An exam attempt builds its own editor
+and `submitAttempt` uses ONE language for every question in the sitting, so
+an output-only question there would show a candidate a code box for a
+question that wants an answer and submit it as whatever language the first
+question used. So the PIN is refused: a trigger on `AssessmentProblem`, a
+sentence in the admin action, an entry in the guard catalogue. The third
+rule of this shape after interactive problems (12l) and debugging ones
+(12m), and lifted the same way. A contest needs no rule, because its arena
+links to the ordinary workspace.
+
 **Two gaps closed on the way.** The import package's `solutions[].language`
 was `LANGUAGE_KEYS`, so no package could ever have named a SQL problem's
 reference query — and the admin form's language list was the same, so
