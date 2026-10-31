@@ -23,6 +23,7 @@ export const LANGUAGE_KEYS = [
   "go123",
   "kotlin20",
   "rust180",
+  "cs8",
 ] as const;
 
 export type LanguageKey = (typeof LANGUAGE_KEYS)[number];
@@ -61,6 +62,7 @@ const gcc = "gcc-13.2.0";
 const cpython = "cpython-3.12.6";
 const temurin = "temurin-21.0.4+7";
 const rust = "rust-1.80.0";
+const dotnet = "dotnet-10.0.403";
 
 function tc(id: string, ...rest: string[]) {
   return [TOOLCHAIN_ROOT, id, ...rest].join("/");
@@ -363,6 +365,61 @@ export const LANGUAGE_CATALOG: Readonly<Record<LanguageKey, LanguageRuntime>> = 
     fallbackMultiplier: 1.0,
     fallbackExtraMs: 0,
     editorLanguage: "rust",
+    enabledByDefault: false,
+  },
+  /**
+   * C# (Phase 12o), SPEC §11's "cs8".
+   *
+   * The KEY is the language version SPEC asked for, and the compiler pins
+   * it: `-langversion:8.0`, in the response file the installer writes. The
+   * RUNTIME is the current LTS (.NET 10) rather than .NET 8, which leaves
+   * support on 2026-11-10 — a judge host should not ship a runtime that
+   * stops getting security fixes in a month. C# 12 would be a new key and
+   * a new directory, never an in-place change to this one.
+   *
+   * `bin/recx-cs-build` is the compile step for the reason Go has
+   * `recx-go-build`: the project system cannot run in a box. It calls
+   * `dotnet exec …/Roslyn/bincore/csc.dll` with the install-time response
+   * file (every framework reference assembly, resolved once on the host)
+   * and then writes `main.runtimeconfig.json`, which is what makes the
+   * produced `main.dll` a runnable framework-dependent app. MSBuild and
+   * NuGet are never invoked: both want a writable home, a lock file and a
+   * network, and a submission is one file.
+   *
+   * The environment is the rest of that story. `DOTNET_CLI_HOME` and
+   * `TMPDIR` point at /box because the runtime writes nothing anywhere
+   * else; globalization is invariant because the box has no ICU data; and
+   * telemetry is off because a judge box has no network to send it to.
+   */
+  cs8: {
+    key: "cs8",
+    label: "C# 8 (.NET 10.0.403)",
+    toolchainId: dotnet,
+    version: "10.0.403",
+    extraToolchainIds: [],
+    sourceFile: "main.cs",
+    compile: { argv: [tc(dotnet, "bin/recx-cs-build")], slow: true },
+    run: { argv: [tc(dotnet, "dotnet"), "main.dll"] },
+    env: {
+      PATH: basePath(dotnet),
+      DOTNET_ROOT: tc(dotnet),
+      DOTNET_CLI_HOME: "/box",
+      TMPDIR: "/box",
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1",
+      DOTNET_NOLOGO: "1",
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1",
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1",
+      // A sandbox with no double-mapped memory cannot do W^X JIT pages.
+      DOTNET_EnableWriteXorExecute: "0",
+      // No diagnostic IPC server: there is nothing in a box to attach with,
+      // and it would otherwise open a socket under TMPDIR, which is /box.
+      DOTNET_EnableDiagnostics: "0",
+    },
+    ...managedLimits,
+    // SPEC §7's table: "C# 2.0+300ms".
+    fallbackMultiplier: 2.0,
+    fallbackExtraMs: 300,
+    editorLanguage: "csharp",
     enabledByDefault: false,
   },
 };

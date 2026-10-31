@@ -428,12 +428,13 @@ judged with.
 | JavaScript | `node-22.11.0` (npm/npx/corepack removed) | nodejs.org tarball + `SHASUMS256.txt` (`install-node.sh`) | off |
 | Go 1.23 | `go-1.23.2` + prebuilt standard library + `bin/recx-go-build` | go.dev tarball + go.dev's published sha256 (`install-go.sh`) | off |
 | Rust 1.80 | `rust-1.80.0` (rustc + std only: no cargo, rustup, clippy or rustfmt); links through `gcc-13.2.0` | static.rust-lang.org tarball + its published `.sha256` (`install-rust.sh`) | off |
+| C# 8 | `dotnet-10.0.403` (.NET 10 LTS runtime, C# LANGUAGE version pinned to 8.0; `bin/recx-cs-build` calls `csc.dll` directly, no MSBuild or NuGet) | builds.dotnet.microsoft.com tarball + the sha512 Microsoft's release metadata publishes, re-checked at install time (`install-dotnet.sh`) | off |
 | (checkers) | `testlib-0.9.41/testlib.h` | github.com/MikeMirzayanov/testlib tag 0.9.41 = commit `68f9f300b6ab…`, file sha256 pinned (`install-testlib.sh`) | testlibId `testlib-0.9.41` |
 
 Since Phase 4 the FUNCTION-mode harness covers C++ (cpp17, cpp20), Python
 (py312, pypy310) and Java (java21) — §7 "FUNCTION problems". Java ships its
 harness but stays off by default (enabling it also needs Java model solutions
-for the STDIN seeds). C, JavaScript, Go, Kotlin and Rust have no FUNCTION
+for the STDIN seeds). C, JavaScript, Go, Kotlin, Rust and C# have no FUNCTION
 harness; they stay off by default even though their toolchains ship, and a
 FUNCTION problem never offers them.
 
@@ -448,6 +449,27 @@ installed: it would want a writable `CARGO_HOME` and a network, and a judge
 submission is a single file. `install-rust.sh` runs the catalog's own compile
 argv at install time and refuses to finish unless the result is static and
 prints the expected line.
+
+**C# (Phase 12o): the key is the LANGUAGE, the directory is the RUNTIME.**
+SPEC §11 asks for `cs8`, so the compiler is pinned to `-langversion:8.0` and a
+submission means in 2029 what it meant in 2026. The runtime underneath is .NET
+10, the current LTS, because .NET 8 leaves support on 2026-11-10 and a judge
+host should not ship a runtime that stops getting security fixes; C# 12 would
+be a NEW key and a NEW directory, never an in-place change to this one. The
+compile step is `bin/recx-cs-build`, written by the installer, for the same
+reason Go has `recx-go-build`: it runs `dotnet exec …/Roslyn/bincore/csc.dll`
+with a response file that already names every framework reference assembly
+(resolved once, on the host) and then writes `main.runtimeconfig.json`, which
+is what makes the produced `main.dll` runnable. MSBuild and NuGet are never
+invoked — both want a writable home, a lock file and a network, and a
+submission is one file. The environment finishes the story: `DOTNET_CLI_HOME`
+and `TMPDIR` are `/box` because that is the only writable place,
+`DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1` because the box has no ICU data,
+`DOTNET_EnableWriteXorExecute=0` because W^X JIT pages need a double mapping
+the sandbox does not grant, `DOTNET_EnableDiagnostics=0` because there is
+nothing in a box to attach a debugger with and the diagnostic server would
+open a socket under `TMPDIR`, and telemetry is off because there is no
+network to send it to.
 
 `infra/judge/toolchains/verify-toolchains.sh` compiles and runs a hello-world
 for every catalog language **inside isolate**, with the catalog's exact argv

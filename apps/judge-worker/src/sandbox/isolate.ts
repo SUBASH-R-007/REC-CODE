@@ -46,7 +46,17 @@ import {
 /** Bound into every box. The synthetic /etc and the toolchains are added per call. */
 const FIXED_DIR_RULES = ["--dir=box=./box:rw", "--dir=/usr", "--dir=/lib", "--dir=/lib64:maybe", "--dir=/bin"] as const;
 
-const ENV_KEY = /^[A-Z_][A-Z0-9_]{0,63}$/;
+/**
+ * An environment variable name: it must START uppercase (or `_`), so a
+ * lower-case shadow of a real variable — `path` beside `PATH` — is refused,
+ * but the rest may be mixed case, because .NET spells its own runtime knobs
+ * that way (`DOTNET_EnableWriteXorExecute`, `DOTNET_EnableDiagnostics`) and
+ * `getenv` on Linux is case-sensitive, so there is no upper-case spelling of
+ * them to use instead. Case was never the safety property here: the value is
+ * checked for control characters, `LD_*` is refused outright, and the
+ * sandbox's own variables cannot be overridden at all.
+ */
+const ENV_KEY = /^[A-Z_][A-Za-z0-9_]{0,63}$/;
 /** Set by the sandbox itself; a language cannot override them (published on /judge). */
 const FORCED_ENV = SANDBOX_FORCED_ENV;
 

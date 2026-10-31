@@ -186,6 +186,18 @@ describe("runArgv — JVM flags", () => {
   });
 });
 
+describe("buildIsolateArgv — environment names", () => {
+  it("carries a .NET runtime knob, which is spelled in mixed case", () => {
+    // getenv on Linux is case-sensitive and the runtime's own name for this
+    // is DOTNET_EnableWriteXorExecute, so there is no upper-case spelling to
+    // use instead. cs8's catalogue entry sets it, and the first real
+    // verification run failed here: the guard allowed upper case only.
+    const argv = buildIsolateArgv(optionsFor(LANGUAGE_CATALOG.cs8, "run"));
+    expect(argv).toContain("--env=DOTNET_EnableWriteXorExecute=0");
+    expect(argv).toContain("--env=DOTNET_EnableDiagnostics=0");
+  });
+});
+
 describe("buildIsolateArgv — rejects what it must not run", () => {
   const base = optionsFor(LANGUAGE_CATALOG.cpp20, "run");
   const cases: [string, Partial<Extract<IsolateArgvOptions, { action: "run" }>>][] = [
@@ -197,6 +209,8 @@ describe("buildIsolateArgv — rejects what it must not run", () => {
     ["a box program with a path", { argv: ["./sub/main"] }],
     ["LD_PRELOAD", { env: { PATH: "/usr/bin", LD_PRELOAD: "/box/x.so" } }],
     ["a lower-case env key", { env: { PATH: "/usr/bin", path: "/x" } }],
+    ["an env key with a space", { env: { PATH: "/usr/bin", "A B": "/x" } }],
+    ["an env key with an equals sign", { env: { PATH: "/usr/bin", "A=B": "/x" } }],
     ["no PATH", { env: { HOME: "/box" } }],
     ["an env value with a newline", { env: { PATH: "/usr/bin\n--share-net" } }],
     ["a redirect with a slash", { stdout: "../escape.txt" }],

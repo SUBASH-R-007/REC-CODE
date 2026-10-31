@@ -253,6 +253,45 @@ the cluster must refuse — run at boot and every six hours, reported in
 every heartbeat. Calibration is the one that has no meaning here yet and is
 sent as null.
 
+## C#, the eleventh toolchain (Phase 12o)
+
+SPEC §11 asked for `cs8`, and that key is a promise about the LANGUAGE, not
+about the runtime underneath it. The compiler is pinned with
+`-langversion:8.0`, so a C# submission means in 2029 what it meant in 2026;
+the runtime is .NET 10, the current LTS, because .NET 8 leaves support on
+2026-11-10 and a judge host should not ship a runtime that stops getting
+security fixes in a month. C# 12 would be a NEW key and a NEW directory, the
+same rule every other toolchain follows.
+
+**No MSBuild, no NuGet, no project.** The compile step is
+`bin/recx-cs-build`, written by the installer, for the reason Go has
+`recx-go-build`: the project system wants a writable home, a lock file and a
+network, and a submission is one file. The script runs `dotnet exec
+…/Roslyn/bincore/csc.dll` with a response file the installer already filled
+with every framework reference assembly — resolved once, on the host, because
+a box has no network to resolve them from — and then writes
+`main.runtimeconfig.json`, which is what turns the produced `main.dll` into a
+runnable framework-dependent app.
+
+**The environment is the rest of the story.** `DOTNET_CLI_HOME` and `TMPDIR`
+are `/box` because that is the only writable place; globalization is
+invariant because the box has no ICU data; the diagnostic IPC server is off
+because there is nothing in a box to attach with and it would otherwise open
+a socket under `TMPDIR`; W^X JIT pages are off because they need a double
+mapping the sandbox does not grant; telemetry is off because there is no
+network to send it to.
+
+**What the real box changed.** `buildIsolateArgv` refused to run cs8 at all:
+its environment-name guard allowed upper case only, and the runtime's own
+knobs are spelled `DOTNET_EnableWriteXorExecute` and
+`DOTNET_EnableDiagnostics` — `getenv` on Linux is case-sensitive, so there is
+no upper-case spelling to use instead. The guard now requires only that a
+name START with an upper-case letter or `_`, which still refuses a lower-case
+shadow of a real variable (`path` beside `PATH`) while letting a vendor spell
+its own knobs; case was never the safety property, and the value is still
+checked for control characters, `LD_*` is still refused outright, and the
+sandbox's own variables still cannot be overridden.
+
 ## Rust, the tenth toolchain (Phase 12o)
 
 SPEC §11: "rust180 and cs8". This is the first of the two, and what makes

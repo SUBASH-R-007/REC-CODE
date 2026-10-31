@@ -87,7 +87,8 @@ const MEMORY_KB = shared.LIMITS.memory.defaultKb;
 // catalog environment change before making it. Reported loudly as NOT the catalog.
 const extraEnv = new Map<string, Record<string, string>>();
 for (const item of (process.env.RECX_VERIFY_EXTRA_ENV ?? "").split(/\s+/).filter(Boolean)) {
-  const m = /^([a-z0-9]+):([A-Z_][A-Z0-9_]*)=(.*)$/.exec(item);
+  // Mixed case after the first character: .NET's knobs are spelled that way.
+  const m = /^([a-z0-9]+):([A-Z_][A-Za-z0-9_]*)=(.*)$/.exec(item);
   if (!m) throw new Error(`RECX_VERIFY_EXTRA_ENV item ${JSON.stringify(item)} is not lang:NAME=value`);
   extraEnv.set(m[1]!, { ...extraEnv.get(m[1]!), [m[2]!]: m[3]! });
 }
@@ -249,6 +250,17 @@ fn main() {
     let a: i64 = it.next().expect("a").parse().expect("a");
     let b: i64 = it.next().expect("b").parse().expect("b");
     println!("Hello, {}! {}", name, a + b);
+}
+SRC
+cat > "$work/src/cs8" <<'SRC'
+using System;
+
+class Program {
+    static void Main() {
+        var parts = Console.In.ReadToEnd().Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+        long a = long.Parse(parts[1]), b = long.Parse(parts[2]);
+        Console.WriteLine($"Hello, {parts[0]}! {a + b}");
+    }
 }
 SRC
 cat > "$work/src/checker" <<'SRC'

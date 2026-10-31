@@ -3695,3 +3695,42 @@ a temporary directory for every compile — the catalogue sets `TMPDIR=/box`.
 And `+crt-static` produces a static-PIE binary, which `file` names
 differently; the installer's own check had to learn that, because a check
 that refuses a correct install is worse than no check.
+
+## A language key names the language, not the runtime (Phase 12o, slice 2)
+
+**Why `cs8` runs on .NET 10.** SPEC §11 asked for `cs8`, which is a C#
+LANGUAGE version, and the compiler pins it: `-langversion:8.0`, in the
+response file the installer writes, with `tests/repo/toolchain-pins.test.ts`
+failing if that flag ever leaves. The runtime underneath is the current LTS,
+because .NET 8 leaves support on 2026-11-10 and a judge host should not ship
+a runtime that stops getting security fixes. The alternative — .NET 8, so
+that the directory name and the key agree — buys nothing a student can see
+and costs the host its security updates. A future C# 12 is a new key and a
+new directory, which is the rule for every toolchain here.
+
+**csc, not the project system.** `dotnet build` wants a writable home, a lock
+file and a network, and a judge submission is one file. `bin/recx-cs-build`
+calls `csc.dll` with a response file resolved once on the host and writes the
+`runtimeconfig.json` the host needs, which is the same shape as Go's
+`recx-go-build`.
+
+**Upper case was never the safety property.** The sandbox's
+environment-name guard allowed `[A-Z_][A-Z0-9_]*`, and the first real
+verification run of cs8 failed on it: the .NET runtime's own knobs are
+`DOTNET_EnableWriteXorExecute` and `DOTNET_EnableDiagnostics`, and `getenv`
+on Linux is case-sensitive, so there is no upper-case spelling of them. The
+guard now asks only that a name START upper-case or `_`, which still refuses
+the thing it was written for — a lower-case shadow of a real variable, `path`
+beside `PATH` — while letting a vendor spell its own knobs. What actually
+keeps a box safe is unchanged: values are refused if they carry control
+characters, `LD_*` is refused outright, and the sandbox's own variables
+cannot be overridden by a language at all.
+
+**A half-finished install must not look finished.** The installer stopped
+part-way on its first real run (the reference assemblies are one directory
+deeper than it looked), and what it left behind had a working `dotnet` in it
+and nothing to compile with — which the "already installed" check believed.
+The marker is now the script the compile step actually calls, written last,
+an unfinished tree is cleared before a retry, and a failed probe removes the
+install rather than leaving a broken one in place. A check that can be
+satisfied by a failure is worse than no check.

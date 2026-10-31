@@ -9,13 +9,13 @@
 # Built from GPG-verified sources: gcc (C17, C++17, C++20) + its precompiled
 # <bits/stdc++.h>, cpython (+ numpy). Installed from checksum-verified vendor
 # releases: temurin (Java 21, and the JVM for Kotlin), kotlin, pypy, node, go,
-# rust (which links through gcc), and the testlib checker library. Then:
-# verify-toolchains.sh.
+# rust (which links through gcc), the .NET SDK (C#), and the testlib checker
+# library. Then: verify-toolchains.sh.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 
 # Order matters: gcc-pch needs gcc; kotlin needs temurin; rust links through gcc.
-STEPS=(cpython gcc gcc-pch temurin kotlin pypy node go rust testlib)
+STEPS=(cpython gcc gcc-pch temurin kotlin pypy node go rust dotnet testlib)
 declare -A SCRIPT=(
   [cpython]=build-cpython.sh
   [gcc]=build-gcc.sh
@@ -26,6 +26,7 @@ declare -A SCRIPT=(
   [node]=install-node.sh
   [go]=install-go.sh
   [rust]=install-rust.sh
+  [dotnet]=install-dotnet.sh
   [testlib]=install-testlib.sh
 )
 
