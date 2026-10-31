@@ -302,6 +302,17 @@ would be a different program with a different mistake), and a budget the
 author's OWN model solution does not fit is a question nobody can answer.
 The gate measures the model solution against the starter and says so.
 
+**The student surface (slice 3).** Two numbers over the editor: the
+budget, and the count as it stands. The count is the only thing on that bar
+a student can change and the only one that can refuse their submission, so
+it is beside the budget and turns red when it is over — and it comes from
+the same `countEditedLines` the action refuses on, against the same
+starter, so the bar cannot promise what the server will not honour. The
+Description tab says in sentences what the counter cannot: what does not
+count (blank lines, indentation), why there is a budget at all, and why
+the language picker is shorter than usual. Reset is relabelled *"Reset to
+the broken program"*, because that is what it does here.
+
 **And not in an assessment (slice 2).** The budget is refused in
 `submitSolution` and `runCode`, before the row. A sitting does not submit
 that way: `submitAttempt` writes one Submission per answered question when

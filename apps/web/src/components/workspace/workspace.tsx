@@ -18,9 +18,11 @@ import {
 } from "lucide-react";
 import { Button, Dialog, EmptyState, Select, cn, useToast } from "@recx/design";
 import {
+  DEBUG_NOTICES,
   SQL_LIMITS,
   SQL_REFUSALS,
   VERDICT_LABEL,
+  countEditedLines,
   isSqlLanguage,
   looksLikeMultipleStatements,
   utf8Length,
@@ -40,6 +42,7 @@ import {
   type EditorKind,
   type MobileTab,
 } from "@/components/workspace/layout";
+import { DebugNote } from "@/components/workspace/debug-note";
 import { InteractiveNote } from "@/components/workspace/interactive-note";
 import { LanguageVersion } from "@/components/workspace/language-version";
 import { SqlNote } from "@/components/workspace/sql-note";
@@ -110,6 +113,7 @@ export function Workspace({
   submissionCount,
   judgeLink = true,
   interactive = false,
+  editBudget = null,
   editorPrefs,
 }: {
   problemId: string;
@@ -135,6 +139,13 @@ export function Workspace({
   submissionCount: number;
   /** Footer language links to /judge in a new tab; the arena and attempt surfaces pass false. */
   judgeLink?: boolean;
+  /**
+   * A DEBUGGING problem (Phase 12m): the most lines a student may change in
+   * the program they were given, or null for every other problem. The
+   * starter of the active language is the program, so the count beside the
+   * budget needs nothing else passed in.
+   */
+  editBudget?: number | null;
   /**
    * An interactive problem (Phase 12l): the answer is a conversation with
    * the author's program, so there is no custom input to type and the
@@ -173,6 +184,17 @@ export function Workspace({
   const sql = active ? isSqlLanguage(active.key) : false;
   /** Neither kind of question has an input a student could type. */
   const noCustomInput = sql || interactive;
+  /**
+   * The edit budget, counted as they type (Phase 12m). Against the ACTIVE
+   * language's starter, because that is the program this editor was opened
+   * with — and the submit action measures the same pair, so the bar can
+   * never promise what the server will refuse.
+   */
+  const changed = useMemo(
+    () => (editBudget === null || !active ? 0 : countEditedLines(active.starter, source)),
+    [editBudget, active, source],
+  );
+  const debugging = editBudget !== null && active !== undefined;
   const [resetOpen, setResetOpen] = useState(false);
   const status = saveStatus(drafts.sync);
 
@@ -472,7 +494,7 @@ export function Workspace({
             variant="ghost"
             size="sm"
             className={cn(control, "px-2!")}
-            aria-label="Reset to starter code"
+            aria-label={debugging ? "Reset to the broken program" : "Reset to starter code"}
             onClick={() => setResetOpen(true)}
           >
             <RotateCcw className="h-4 w-4" aria-hidden />
@@ -527,6 +549,7 @@ export function Workspace({
 
         {sql && <SqlNote />}
         {interactive && <InteractiveNote />}
+        {debugging && <DebugNote budget={editBudget} changed={changed} />}
 
         {drafts.offer && (
           <RestoreBar offer={drafts.offer} onRestore={drafts.applyOffer} onDismiss={drafts.dismissOffer} />
@@ -708,8 +731,14 @@ export function Workspace({
         {announcement}
       </p>
 
-      <Dialog open={resetOpen} onClose={() => setResetOpen(false)} title="Reset to starter code?" size="sm">
+      <Dialog
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        title={debugging ? "Reset to the broken program?" : "Reset to starter code?"}
+        size="sm"
+      >
         <p className="text-sm text-text-secondary">
+          {debugging && <>{DEBUG_NOTICES.reset} </>}
           This replaces your {active ? shortName(active.label) : ""} code for this problem with the starter code. You can
           undo it from the bar above the editor until you leave the page.
         </p>

@@ -163,6 +163,24 @@ describe("the sentences a student reads", () => {
     expect(shared).toContain("export const DEBUG_LABELS");
   });
 
+  it("reach the editor and the Description tab from that one module", () => {
+    expect(readRepoFile(`${WORKSPACE}/debug-note.tsx`)).toContain("DEBUG_NOTICES");
+    const description = readRepoFile(`${WORKSPACE}/problem-description.tsx`);
+    for (const key of ["counted", "why", "languages", "reset"]) {
+      expect(description, `the Description tab must state DEBUG_NOTICES.${key}`).toContain(`DEBUG_NOTICES.${key}`);
+    }
+    expect(description).toContain("debugRuleSentence");
+  });
+
+  it("count the same lines in the editor as the server refuses on", () => {
+    // The bar and the action both call countEditedLines, against the
+    // ACTIVE language's starter: a bar that measured something else would
+    // promise what the server will not honour.
+    const workspace = readRepoFile(`${WORKSPACE}/workspace.tsx`);
+    expect(workspace).toContain("countEditedLines(active.starter, source)");
+    expect(workspace).toContain("<DebugNote");
+  });
+
   it("are never retyped into a component", () => {
     for (const file of [...webSources, ...findFiles({ under: [WORKSPACE], extensions: [".tsx"] })]) {
       const source = readRepoFile(file);

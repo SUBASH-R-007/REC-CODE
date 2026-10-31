@@ -124,6 +124,7 @@ export default async function ProblemPage({ params }: Params) {
         slug={problem.slug}
         languages={problem.languages}
         interactive={problem.compareMode === "INTERACTIVE"}
+        editBudget={problem.maxEditedLines}
         initialLanguage={initialLanguage}
         serverDrafts={drafts}
         sampleIndexes={problem.samples.map((s) => s.index)}

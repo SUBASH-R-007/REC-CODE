@@ -1,10 +1,12 @@
 import Link from "next/link";
 import {
+  DEBUG_NOTICES,
   FUNCTION_COMPARATOR_DESCRIPTIONS,
   INTERACTIVE_LABELS,
   INTERACTIVE_NOTICES,
   SQL_LIMITS,
   SQL_NOTICES,
+  debugRuleSentence,
   readResultSet,
   type FunctionSignature,
 } from "@recx/shared";
@@ -148,6 +150,30 @@ function InteractiveNotes() {
   );
 }
 
+/**
+ * How a debugging question is judged (Phase 12m), in full sentences.
+ *
+ * The rule first, with the number in it, then the two things a student
+ * cannot work out by reading the counter: what does not count (blank lines
+ * and indentation), and why there is a budget at all. The languages
+ * sentence explains a picker that is shorter than usual.
+ */
+function DebugNotes({ budget }: { budget: number }) {
+  const notes = [debugRuleSentence(budget), DEBUG_NOTICES.counted, DEBUG_NOTICES.why, DEBUG_NOTICES.languages, DEBUG_NOTICES.reset];
+  return (
+    <section aria-labelledby="problem-debug-rules">
+      <h2 id="problem-debug-rules" className="font-display text-base font-semibold">
+        How your fix is judged
+      </h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-text-secondary">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** A SQL sample's expected side: the rows as a table, or the text as it came. */
 function SqlSampleOutput({ text }: { text: string }) {
   const resultSet = readResultSet(text);
@@ -196,6 +222,7 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
 
       {sql && <SqlJudgingNotes ordered={problem.sqlOrdered === true} />}
       {interactive && <InteractiveNotes />}
+      {problem.maxEditedLines !== null && <DebugNotes budget={problem.maxEditedLines} />}
 
       {problem.constraints.length > 0 && (
         <section aria-labelledby="problem-constraints">

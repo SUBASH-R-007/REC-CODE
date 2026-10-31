@@ -3529,3 +3529,32 @@ the sitting that matters most.
 candidate types and refuses an over-budget answer at submit time, rather
 than at the end. Until then the trigger stands, and the catalogue entry
 makes the decision to remove it a recorded one.
+
+## The student's side of a debugging problem (Phase 12m, slice 3)
+
+**The count is on the screen, or the budget is a trap.** A rule that is
+only enforced at submit time is a rule a student meets as a rejection. So
+the bar over the editor shows the budget and the lines changed so far, from
+the same function the action refuses on, against the same starter: the two
+cannot disagree, which is the only reason the number is worth showing.
+
+**Red, not disabled.** Over budget the counter turns red and the Submit
+button still works — and the action refuses it with both numbers. A button
+that disables itself tells a student nothing about why, and the one thing
+they need is the number.
+
+**Reset says what it does.** On a debugging question the starter is the
+broken program, so the control that restores it is labelled for that, in
+the toolbar and in the dialog. A student who has lost their way needs the
+original back, and nothing else here gives it to them.
+
+**The picker is short on purpose.** Only the languages the broken program
+is written in. The Description tab says why, because a student who knows
+the platform offers nine languages will otherwise read a two-language
+picker as a fault.
+
+**Still not watched: the number changing as somebody types.** The counter
+is rendered and asserted at, below and over the budget, and the fence
+proves the bar and the server share one count — but no browser has been
+driven through a keystroke-by-keystroke edit. The same gap as the
+narrow-screen SQL grammar left open in Phase 12k.

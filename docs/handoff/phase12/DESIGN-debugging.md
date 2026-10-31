@@ -36,10 +36,11 @@ this problem have an edit budget?".
 
 `StarterCode` is per (version, language) and the workspace already opens
 it. A debugging problem is therefore a problem whose starter is
-deliberately wrong — and the publish gate requires a starter for every
-language the problem can be answered in, because a language with no
-starter would be a language with no bug to find and an empty editor with
-a budget of two lines.
+deliberately wrong — and it is OFFERED in exactly the languages that have
+one, in the picker and at the submit boundary alike, because a language
+with no starter would be an empty editor with a two-line budget. (Written
+as built: the gate asks for at least one starter rather than one per
+enabled language, since the author's starters are what decide the list.)
 
 ### 2.3 The count is of CHANGED LINES, and the student sees the same number
 
