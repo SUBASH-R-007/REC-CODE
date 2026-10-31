@@ -17,10 +17,12 @@ import {
   type CompareMode,
   type IoMode,
   type JobKind,
+  type JudgeLane,
   type LanguageKey,
 } from "@recx/shared";
 import { functionSignatureSchema, supportsFunctionMode, validateFunctionInput, type FunctionSignature } from "@recx/shared/harness";
 import { requireActionUser } from "@/lib/auth/guards";
+import { findLiveContestEntry } from "@/lib/contests/entry";
 import { db } from "@/lib/db";
 import { NotFoundError, RateLimitError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
 import {
@@ -81,7 +83,7 @@ interface JudgeTarget {
  * languages a given problem accepts is decided below, against the version:
  * a SQL problem takes SQL and nothing else, and no other problem takes SQL.
  */
-async function loadTarget(slug: string, language: string): Promise<JudgeTarget> {
+async function loadTarget(slug: string, language: string, pinnedVersionId?: string): Promise<JudgeTarget> {
   const problem = await db.problem.findUnique({
     where: { slug },
     select: {
@@ -95,7 +97,22 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
   if (!problem || problem.status !== "PUBLISHED" || !problem.liveVersion) {
     throw new NotFoundError("That problem is not available.");
   }
-  const sqlProblem = problem.liveVersion.ioMode === "SQL";
+  /**
+   * A contest pins a version, and that is the one answered — a problem
+   * republished mid-contest must not change the question, the same rule as
+   * a sitting (`lib/exam/submit.ts`). `problemId` is in the `where` so a
+   * version id from anywhere else cannot drag another problem's tests in.
+   */
+  let version = problem.liveVersion;
+  if (pinnedVersionId && pinnedVersionId !== problem.liveVersion.id) {
+    const pinned = await db.problemVersion.findFirst({
+      where: { id: pinnedVersionId, problemId: problem.id },
+      select: { id: true, ioMode: true, compareMode: true, functionSignature: true, maxEditedLines: true },
+    });
+    if (!pinned) throw new NotFoundError("That problem is not available.");
+    version = pinned;
+  }
+  const sqlProblem = version.ioMode === "SQL";
   if (sqlProblem !== isSqlLanguage(language)) {
     throw new ValidationError(
       sqlProblem
@@ -109,7 +126,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
    * problem accepts one — a text answer judged as a program would be a CE
    * nobody could explain.
    */
-  const answerProblem = problem.liveVersion.ioMode === "OUTPUT_ONLY";
+  const answerProblem = version.ioMode === "OUTPUT_ONLY";
   if (answerProblem !== isAnswerLanguage(language)) {
     throw new ValidationError(
       answerProblem
@@ -117,7 +134,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
         : "An answer file is only for an output-only problem; choose a programming language.",
     );
   }
-  if (problem.liveVersion.ioMode === "FUNCTION" && !supportsFunctionMode(language as LanguageKey)) {
+  if (version.ioMode === "FUNCTION" && !supportsFunctionMode(language as LanguageKey)) {
     throw new ValidationError("This problem is not available in that language yet.");
   }
 
@@ -128,7 +145,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
   });
   if (!config) throw new ValidationError("That language is not available right now. Choose another one.");
 
-  const versionId = problem.liveVersion.id;
+  const versionId = version.id;
   /**
    * Phase 12m. A debugging problem is offered in the languages its broken
    * program is written in and no others — the workspace builds its picker
@@ -137,7 +154,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
    * the target so the budget is measured against the program the student
    * was actually given.
    */
-  const editBudget = problem.liveVersion.maxEditedLines;
+  const editBudget = version.maxEditedLines;
   let starter: string | null = null;
   if (editBudget !== null) {
     const row = await db.starterCode.findUnique({
@@ -152,7 +169,7 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     db.testCase.count({ where: { problemVersionId: versionId, isSample: true } }),
   ]);
   const parsedSig =
-    problem.liveVersion.ioMode === "FUNCTION" ? functionSignatureSchema.safeParse(problem.liveVersion.functionSignature) : null;
+    version.ioMode === "FUNCTION" ? functionSignatureSchema.safeParse(version.functionSignature) : null;
   const signature = parsedSig?.success ? parsedSig.data : null;
   return {
     problemId: problem.id,
@@ -160,12 +177,26 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
     languageConfigId: config.id,
     sampleCount,
     totalCases,
-    ioMode: problem.liveVersion.ioMode,
-    compareMode: problem.liveVersion.compareMode,
+    ioMode: version.ioMode,
+    compareMode: version.compareMode,
     signature,
     editBudget,
     starter,
   };
+}
+
+/**
+ * The problem's id from its address, before anything else is read.
+ *
+ * The contest entry is looked up by problem rather than by version — a
+ * contest pins one version and the catalogue serves another, and a student
+ * answering problem B during a contest that holds problem B is answering
+ * the contest's B whichever page they came from.
+ */
+async function problemIdOf(slug: string): Promise<string> {
+  const row = await db.problem.findUnique({ where: { slug }, select: { id: true, status: true } });
+  if (!row || row.status !== "PUBLISHED") throw new NotFoundError("That problem is not available.");
+  return row.id;
 }
 
 /**
@@ -200,8 +231,8 @@ function refuseBadSql(source: string): void {
  * Enqueue after commit; mark DISPATCHED only if the job reached Redis and
  * the row is still PENDING (a fast worker may already have claimed it).
  */
-async function dispatch(kind: UserJobKind, id: string) {
-  const queued = await enqueueJudge(kind, id, kind === "submission" ? "PRACTICE" : "RUN");
+async function dispatch(kind: UserJobKind, id: string, lane: JudgeLane) {
+  const queued = await enqueueJudge(kind, id, lane);
   if (!queued) return;
   const where = { id, judgeState: "PENDING" as const };
   const data = { judgeState: "DISPATCHED" as const };
@@ -222,7 +253,16 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
   return runAction(async () => {
     const user = await requireActionUser();
     const parsed = submitSolutionSchema.parse(input);
-    const target = await loadTarget(parsed.slug, parsed.language);
+    /**
+     * Which contest, if any, this submission belongs to (Phase 12q.3). It
+     * is derived from the rows rather than passed by the page, so the
+     * arena's button, the catalogue and a bookmark all count the same way
+     * and there is nothing for a student to forge. Read before the target
+     * because it decides which VERSION is answered.
+     */
+    const problemId = await problemIdOf(parsed.slug);
+    const entry = await findLiveContestEntry(db, { userId: user.id, problemId, now: new Date() });
+    const target = await loadTarget(parsed.slug, parsed.language, entry?.problemVersionId);
     if (target.totalCases === 0) throw new ValidationError("This problem has no tests yet.");
     if (target.ioMode === "SQL") refuseBadSql(parsed.source);
     refuseOverBudget(target, parsed.source);
@@ -234,7 +274,9 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userLockKey("submission", user.id)}))`;
       const now = new Date();
       const caps = await loadCaps(tx, user.id, now);
-      const decision = evaluateSubmitCaps(caps, await loadSubmitUsage(tx, user.id, now));
+      const decision = evaluateSubmitCaps(caps, await loadSubmitUsage(tx, user.id, now), {
+        practice: entry === null,
+      });
       if (!decision.ok) throw new RateLimitError(decision.message);
       const row = await tx.submission.create({
         data: {
@@ -243,8 +285,9 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
           problemVersionId: target.versionId,
           languageConfigId: target.languageConfigId,
           language: parsed.language,
-          origin: "PRACTICE",
-          lane: "PRACTICE",
+          origin: entry ? "CONTEST" : "PRACTICE",
+          lane: entry ? "CONTEST" : "PRACTICE",
+          contestId: entry?.contestId ?? null,
           status: "QUEUED",
           judgeState: "PENDING",
           totalCases: target.totalCases,
@@ -257,7 +300,7 @@ export async function submitSolution(input: SubmitSolutionInput): Promise<Action
       return row.id;
     });
 
-    await dispatch("submission", id);
+    await dispatch("submission", id, entry ? "CONTEST" : "PRACTICE");
     await touchLastActive(user.id);
     return { id };
   }, "submitSolution");
@@ -325,7 +368,7 @@ export async function runCode(input: RunCodeInput): Promise<ActionResult<{ id: s
       return row.id;
     });
 
-    await dispatch("run", id);
+    await dispatch("run", id, "RUN");
     await touchLastActive(user.id);
     return { id };
   }, "runCode");

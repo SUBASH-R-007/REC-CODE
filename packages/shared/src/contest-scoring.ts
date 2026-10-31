@@ -187,6 +187,25 @@ export function minutesFromStart(window: ContestWindow, at: Date): number {
   return Math.floor((at.getTime() - window.startsAt.getTime()) / 60_000);
 }
 
+/**
+ * Is `at` inside the window: at or after the start, strictly before the
+ * end. Half-open on purpose — the instant the clock runs out belongs to
+ * the next thing, and a contest that ends at 10:00 does not accept a
+ * submission stamped 10:00:00.000.
+ *
+ * This is asked in two places that must never disagree: the submit action,
+ * deciding whether a submission belongs to a contest at all, and
+ * `applyContestSubmission`, deciding whether to score it. They are minutes
+ * apart in time (a submission is judged after it is made) but they ask
+ * about the SAME instant — when it was submitted — so one of them answering
+ * differently would either score a submission the student was never told
+ * counted, or take one that was accepted and quietly drop it.
+ */
+export function isWithinWindow(window: ContestWindow, at: Date): boolean {
+  const t = at.getTime();
+  return t >= window.startsAt.getTime() && t < window.endsAt.getTime();
+}
+
 // ── Virtual contests ─────────────────────────────────────────────────────
 
 /**

@@ -6,6 +6,7 @@ import {
   freezeStartsAt,
   ICPC_PENALTY_MINUTES,
   isFrozen,
+  isWithinWindow,
   minutesFromStart,
   rankStandings,
   scoreParticipant,
@@ -279,5 +280,44 @@ describe("virtual contests replay the original clock", () => {
     const v = virtualWindow(live, at("2026-12-20T06:30:00Z"));
     expect(isFrozen(v, at("2026-12-20T08:00:00Z"))).toBe(true);
     expect(isFrozen(v, at("2026-12-20T07:59:00Z"))).toBe(false);
+  });
+});
+
+/**
+ * The predicate two places have to agree on (Phase 12q.3): the submit
+ * action, deciding whether a submission belongs to a contest at all, and
+ * `applyContestSubmission`, deciding whether to score it. They run minutes
+ * apart but ask about the same instant — when the submission was made — so
+ * a disagreement either scores something the student was never told
+ * counted, or accepts something and quietly drops it.
+ */
+describe("isWithinWindow", () => {
+  const w = window_("2026-11-01T10:00:00Z", "2026-11-01T12:00:00Z", 0);
+
+  it("includes the opening instant", () => {
+    expect(isWithinWindow(w, at("2026-11-01T10:00:00Z"))).toBe(true);
+  });
+
+  it("excludes the closing instant: the clock running out belongs to no one", () => {
+    expect(isWithinWindow(w, at("2026-11-01T12:00:00Z"))).toBe(false);
+    expect(isWithinWindow(w, at("2026-11-01T11:59:59.999Z"))).toBe(true);
+  });
+
+  it("excludes before the start, however close", () => {
+    expect(isWithinWindow(w, at("2026-11-01T09:59:59.999Z"))).toBe(false);
+  });
+
+  it("follows a virtual run onto its own clock", () => {
+    const v = virtualWindow(w, at("2026-12-20T06:30:00Z"));
+    // The same wall-clock instant that was inside the live window is now
+    // outside, and the replayed one is inside.
+    expect(isWithinWindow(v, at("2026-11-01T11:00:00Z"))).toBe(false);
+    expect(isWithinWindow(v, at("2026-12-20T07:30:00Z"))).toBe(true);
+  });
+
+  it("agrees with minutesFromStart on what counts as minute zero", () => {
+    const start = at("2026-11-01T10:00:00Z");
+    expect(isWithinWindow(w, start)).toBe(true);
+    expect(minutesFromStart(w, start)).toBe(0);
   });
 });

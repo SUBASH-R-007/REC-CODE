@@ -166,6 +166,13 @@ export type AddContestProblemInput = z.input<typeof addProblemSchema>;
  * stored by id — never as a pointer. A later revision of the problem does
  * not change what this contest asks, which is the whole point of §4a, and
  * the ContestProblem_frozen_version trigger refuses an unfrozen one.
+ *
+ * A SQL problem is refused, and the sentence is said here rather than left
+ * to the trigger (Phase 12q.3): since a contest submission goes to the
+ * CONTEST lane, and that lane is served only by nodes with fresh
+ * calibration, which the SQL engine has none of, a SQL question in a
+ * running contest would queue a submission no node could ever claim — a
+ * student watching a spinner for ever. Put it in practice instead.
  */
 export async function addContestProblem(
   input: AddContestProblemInput,
@@ -188,12 +195,18 @@ export async function addContestProblem(
       select: {
         id: true,
         liveVersionId: true,
-        liveVersion: { select: { id: true, revision: true, frozenAt: true } },
+        liveVersion: { select: { id: true, revision: true, frozenAt: true, ioMode: true } },
       },
     });
     if (!problem) throw new NotFoundError("No problem with that address.");
     if (!problem.liveVersion || problem.liveVersion.frozenAt === null) {
       throw new ValidationError("That problem is not published yet, so there is no frozen revision to pin.");
+    }
+    if (problem.liveVersion.ioMode === "SQL") {
+      throw new ValidationError(
+        "A SQL problem is not set in a contest yet: a contest answer is judged on the contest lane, which only a " +
+          "calibrated node may serve, and the SQL engine has no calibration benchmark. Put it in practice instead.",
+      );
     }
 
     try {

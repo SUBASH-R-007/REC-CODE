@@ -127,15 +127,19 @@ const INTERACTIVE = { kind: "interactive" as const, bar: /a conversation/, envVa
 const ANSWER = { kind: "answer" as const, bar: /your answer, not a program/, envVar: "E2E_ANSWER_PROBLEM" };
 
 /** Every kind a contest can hold, with the bar it must show when opened. */
-const IN_A_CONTEST = [SQL, DEBUGGING, INTERACTIVE, ANSWER];
-
 /**
- * The kinds a contest could score. SQL is not one of them: a SQL node
- * carries a lane restriction that keeps it off ASSESSMENT and CONTEST,
- * because a query's limit is the database's own statement_timeout and
- * there is no calibration benchmark for it yet.
+ * The kinds a contest may hold — which is every kind except SQL.
+ *
+ * SQL was in this list until Phase 12q.3, when a contest became something
+ * a student actually submits to. A contest answer is judged on the CONTEST
+ * lane, that lane is served only by a node with fresh calibration, and the
+ * SQL engine has none — a query's limit is the database's own
+ * statement_timeout and there is no benchmark for it yet. So a SQL
+ * question in a running contest would queue a submission no node in the
+ * fleet could claim, and `ContestProblem_no_sql` refuses the pin instead.
  */
-const JUDGED_IN_A_CONTEST = [DEBUGGING, INTERACTIVE, ANSWER];
+const IN_A_CONTEST = [DEBUGGING, INTERACTIVE, ANSWER];
+const JUDGED_IN_A_CONTEST = IN_A_CONTEST;
 
 /**
  * A correct answer for each kind, for the judged run below.
@@ -440,10 +444,12 @@ test.describe("the problem kinds, in a browser", () => {
       await shot(student, testInfo, `contest-${kind}.png`);
     }
 
-    // And the SQL one in particular offers the query language, no compiler.
-    const sql = kinds.find((k) => k.kind === "sql");
-    if (sql) {
-      await openPage(student, `/problems/${sql.slug}`);
+    // A SQL question cannot be in a contest at all since 12q.3, so the
+    // query workspace is walked from practice instead — which is where a
+    // SQL problem now lives, and the narrow-screen test above opens it.
+    const sqlSlug = await slugOfKind(student, SQL).catch(() => null);
+    if (sqlSlug) {
+      await openPage(student, `/problems/${sqlSlug}`);
       const picker = student.getByLabel(/Language/i).first();
       if (await picker.count()) {
         await expect(picker).toContainText(/PostgreSQL 17|SQL/i);
@@ -453,33 +459,25 @@ test.describe("the problem kinds, in a browser", () => {
 
     expect(ACCOUNTS.student.identifier.length, "the student account is the seeded one").toBeGreaterThan(0);
   });
-  test.fixme("a contest judges every kind, and the standings move", async ({ browser }, testInfo) => {
+  test("a contest judges every kind, and the standings move", async ({ browser }, testInfo) => {
     test.skip(!process.env.E2E_JUDGE, "needs a judge node attached to the stack: E2E_JUDGE=1");
     test.setTimeout(30 * 60_000);
 
     /**
-     * FIXME, and the reason is not this test (Phase 12q.1): **nothing in
-     * the application ever creates a CONTEST submission.** `submitSolution`
-     * writes `origin: "PRACTICE"`, `lane: "PRACTICE"` unconditionally, and
-     * the arena's only route to answering a problem is a plain link to
-     * `/problems/<slug>` carrying no contest context. So `finalize.ts`'s
-     * `owner.origin === "CONTEST"` branch never fires, `applyContestSubmission`
-     * is never reached from the app, and `ContestStanding` stays empty —
-     * on this workstation, 7 contests, 10 contest problems and 5
-     * registrations had produced 0 standings rows and 0 submissions of any
-     * origin but PRACTICE.
+     * The half slice 4 could not settle, and slice 12q.1 found out why:
+     * nothing in the application ever created a CONTEST submission.
+     * `submitSolution` wrote `origin: "PRACTICE"` for everything, so
+     * `finalize.ts`'s CONTEST branch never fired, Phase 5's scoring was
+     * never reached and `ContestStanding` was empty by construction. This
+     * test was written as if answering a contest problem scored it, and
+     * its closing assertion was weak enough (`row.or(table)`) to have
+     * gone green against that empty board.
      *
-     * This test was written in 12p.5 as if answering a contest problem
-     * scored it, and its standings assertion was weak enough
-     * (`row.or(table)`) to have passed while proving nothing. It is left
-     * here, whole and marked, because it is the test the wiring needs: it
-     * will start failing honestly on the standings assertion below, which
-     * now requires this student's own row and a score.
-     *
-     * SQL is deliberately out of the judged list: `sql-dev-1` carries a
-     * lane restriction that keeps it off ASSESSMENT and CONTEST (no
-     * calibration benchmark for a query), and docs/OPEN-QUESTIONS.md
-     * already says nobody should place a SQL problem in a contest yet.
+     * Phase 12q.3 wires it: a submission on a contest's problem, by a
+     * registered student, inside the window, is origin CONTEST on the
+     * CONTEST lane, judged against the version the contest pinned. So the
+     * test runs now, and its standings assertion asks for this student's
+     * own row with a score on it.
      */
     const staff = await contextAs(browser, "admin");
     const admin = await staff.newPage();

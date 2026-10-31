@@ -90,6 +90,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_output_only_assessment_problem",
   // 20261101170000_phase12p_sql_assessment_rule
   "recx_refuse_sql_assessment_problem",
+  // 20261101180000_phase12q_sql_contest_rule
+  "recx_refuse_sql_contest_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -346,6 +348,26 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_sql_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101180000_phase12q_sql_contest_rule
+  {
+    /**
+     * Phase 12q. The fifth rule of this shape, and the one its own
+     * predecessor argued against: 12p's migration said a contest needed no
+     * SQL rule because its arena only links to the practice workspace. It
+     * did — while a contest was never actually submitted to. Slice 3 wires
+     * contest submissions, and CONTEST is a sensitive lane that only a
+     * freshly calibrated node may serve, which the SQL engine can never be
+     * until it has a benchmark. A SQL question in a running contest would
+     * therefore queue a submission no node in the fleet may claim. Lifted
+     * by a SQL calibration benchmark, then one DROP TRIGGER and a line in
+     * the gate log that this entry makes compulsory.
+     */
+    name: "ContestProblem_no_sql",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "ContestProblem",
+    fn: "recx_refuse_sql_contest_problem",
     level: "ROW",
   },
   {

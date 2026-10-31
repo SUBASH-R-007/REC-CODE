@@ -1236,34 +1236,57 @@ Each is the narrower reading, implemented as described.
   is to seed a zero-score standing row for every registration at the start,
   which makes a no-show a last place rather than an absence.
 
-- **A contest is never actually submitted to, and that is not a bug in the
-  scoring — it is a missing step above it** (found 2026-10-31, Phase 12q.1).
-  Everything from `ContestProblemAttempt` downwards is built and tested:
+- **A contest is never actually submitted to** (found 2026-10-31, Phase
+  12q.1; **fixed in 12q.3 the same day**). Everything from
+  `ContestProblemAttempt` downwards was built and tested in Phase 5 —
   `applyContestSubmission`, `scoreParticipant`, `rankStandings`,
-  `virtualWindow`, the freeze, `releaseContestRating`. What does not exist
-  is the step that tells a submission which contest it belongs to.
-  `submitSolution` writes `origin: "PRACTICE"`, `lane: "PRACTICE"`
-  unconditionally, and the arena links to `/problems/<slug>` with no contest
-  context, so `finalize.ts`'s CONTEST branch never fires. This workstation
-  held 7 contests, 10 contest problems and 5 registrations with 0
-  `ContestStanding` rows.
-  The questions a slice has to answer, and they are decisions rather than
-  code:
-  - **How does the arena carry the contest?** A query parameter on the
-    practice workspace is the smallest change, but a parameter a student can
-    type is a parameter a student can forge — the server has to re-derive
-    "is this student registered, is this problem in that contest, is the
-    window open" from the row, never trust the link.
-  - **What is a practice submission made during a contest window?** The same
-    problem is reachable from the catalogue throughout. Scoring it would
-    mean the catalogue is a side door into the contest; not scoring it means
-    a student can lose a correct answer to the wrong page.
-  - **Which lane and which caps?** The CONTEST lane exists and nodes
-    advertise it; the submit caps are currently practice caps.
-  - **What happens to a submission in flight when the window closes?**
-  Until it is decided, a contest is a reading surface with a board that
-  cannot move, and `apps/web/e2e/problem-kinds.spec.ts` carries the
-  `test.fixme` that will go green when it is wired.
+  `virtualWindow`, the freeze, `releaseContestRating` — and none of it ever
+  ran. `submitSolution` wrote `origin: "PRACTICE"`, `lane: "PRACTICE"`
+  unconditionally, and the arena linked to `/problems/<slug>` with no
+  contest context, so `finalize.ts`'s CONTEST branch never fired. This
+  workstation held 7 contests, 10 contest problems and 5 registrations with
+  0 `ContestStanding` rows and 84 submissions, every one of them
+  PRACTICE/PRACTICE.
+
+  The four questions it raised, and what 12q.3 decided:
+  - **How does the arena carry the contest?** It does not: the entry is
+    DERIVED from the rows (`lib/contests/entry.ts`), never passed. A
+    `?contest=` would be a claim the student types, and the server would
+    have to re-check every part of it anyway — registered, is this problem
+    in that contest, is the window open — so the parameter would add a
+    forgery surface and nothing else. Nothing to forge, and the arena's
+    button, the catalogue and a bookmark all count the same way.
+  - **What is a practice submission made during a contest window?** The
+    same thing as any other: it counts. That is what the arena already
+    promised in so many words, and it is the only rule a student can
+    predict — the alternative is losing a correct answer by opening the
+    problem from the wrong page. The workspace says so, next to Submit,
+    with the board's letter and the clock (`CountsForContestChip`).
+  - **Which lane and which caps?** The CONTEST lane, which the allocator
+    serves before practice and only from nodes whose calibration and
+    self-check are fresh. The in-flight and CPU caps still apply, because
+    those protect the fleet and a contest is when the fleet is busiest; the
+    practice-per-day allowance does not, because it counts practice, and
+    refusing a contest answer to a student who revised hard that morning
+    would be indefensible for the same reason a sitting pays no practice
+    caps at all.
+  - **What becomes of a submission in flight when the window closes?** It
+    is scored. `applyContestSubmission` always judged on `submittedAt`, not
+    on when the verdict arrived — "judged after the clock ran out is fine;
+    SUBMITTED outside it is not" — so this needed no decision, only the
+    shared `isWithinWindow` predicate so the submit action and the scorer
+    cannot drift apart on which instant counts.
+
+  It also forced a fifth rule of a shape this codebase had four times: a
+  SQL problem is not set in a contest (`ContestProblem_no_sql`). The
+  migration that pinned SQL out of assessments said a contest needed no
+  such rule *because* its arena only linked to the practice workspace.
+  That was true while a contest was never submitted to. Now a contest
+  answer goes to the CONTEST lane, that lane is served only by a
+  calibrated node, and the SQL engine has no calibration benchmark — so a
+  SQL question in a running contest would queue a submission no node in
+  the fleet could claim. Lifted by a SQL calibration benchmark, which is
+  the same thing that would let a SQL node serve the sensitive lanes.
 
 ## Phase 6b — the attempt engine
 

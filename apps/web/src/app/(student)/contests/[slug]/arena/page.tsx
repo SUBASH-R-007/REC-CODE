@@ -111,8 +111,9 @@ export default async function ArenaPage({
                 </Link>
               </p>
               <p className="mt-3 text-xs text-text-secondary">
-                The workspace is the same editor you practise in. Submissions you make while this contest is running
-                count towards it.
+                The workspace is the same editor you practise in. While this contest is running, your submissions on
+                its problems count towards it wherever you open them from, and are judged against the revision the
+                contest pinned.
               </p>
             </section>
           ) : (

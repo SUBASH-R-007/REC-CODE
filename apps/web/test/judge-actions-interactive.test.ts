@@ -31,6 +31,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/auth/guards", () => ({ requireActionUser: h.user }));
+/**
+ * A submission belongs to a contest only when the rows say so (Phase
+ * 12q.3). These files are about the kind of problem, not the contest, so
+ * the resolver is stubbed to "no contest" — which is also the common case.
+ */
+vi.mock("@/lib/contests/entry", () => ({ findLiveContestEntry: vi.fn(async () => null) }));
 vi.mock("@/lib/judge/queue", () => ({ enqueueJudge: vi.fn(async () => true) }));
 
 const { submitSolution, runCode } = await import("@/server/actions/judge");

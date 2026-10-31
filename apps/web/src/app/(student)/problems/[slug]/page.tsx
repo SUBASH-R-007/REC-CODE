@@ -12,6 +12,8 @@ import { LANGUAGE_COOKIE } from "@/lib/drafts/keys";
 import { pickInitialLanguage } from "@/lib/drafts/merge";
 import { loadServerDrafts } from "@/lib/drafts/server";
 import { slugSchema } from "@/lib/judge/submit-schema";
+import { CountsForContestChip } from "@/components/contests/counts-for-chip";
+import { findLiveContestEntry } from "@/lib/contests/entry";
 import { getProblemWorkspace } from "@/server/queries/problems";
 import { HISTORY_LIMIT, recentSubmissions } from "@/server/queries/submissions";
 import { ActivityTracker } from "@/components/help/activity-tracker";
@@ -64,13 +66,21 @@ export default async function ProblemPage({ params }: Params) {
   if (!problem) notFound();
 
   const key = { userId: user.id, problemId: problem.id };
-  const [history, serverDrafts, bookmark, progress, cookieStore, aiRuntime] = await Promise.all([
+  const [history, serverDrafts, bookmark, progress, cookieStore, aiRuntime, contestEntry] = await Promise.all([
     recentSubmissions(user.id, problem.id),
     loadServerDrafts(user.id, problem.id),
     db.bookmark.findUnique({ where: { userId_problemId: key }, select: { problemId: true } }),
     db.userProblemStatus.findUnique({ where: { userId_problemId: key }, select: { status: true } }),
     cookies(),
     getAiRuntime(),
+    /**
+     * Whether a submission made here and now counts for a contest
+     * (Phase 12q.3). The submit action asks the same question again, from
+     * the rows, at the moment of submitting — this one is only what the
+     * student is told, and a page can be left open until the clock runs
+     * out, so the chip is a heads-up and never the authority.
+     */
+    findLiveContestEntry(db, { userId: user.id, problemId: problem.id, now: new Date() }),
   ]);
   // Whether the Assistant tab exists at all. The setting read is cache()d
   // per request, so asking here and again inside the panel is one query.
@@ -106,6 +116,7 @@ export default async function ProblemPage({ params }: Params) {
         </h1>
         <DifficultyBadge difficulty={problem.difficulty} />
         <SolveStatus status={solve} />
+        {contestEntry ? <CountsForContestChip entry={contestEntry} /> : null}
       </div>
       <BookmarkButton
         problemId={problem.id}

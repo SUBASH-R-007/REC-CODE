@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   applyJudgedSubmission,
+  isWithinWindow,
   minutesFromStart,
   rankStandings,
   scoreParticipant,
@@ -54,8 +55,12 @@ export type ContestApplyOutcome =
  * The window this submission is scored against: the contest's own, or the
  * student's replayed clock for a virtual run (SPEC §5 — a virtual contest
  * replays against the original clock).
+ *
+ * Exported because the submit action has to ask the same question before a
+ * submission is written (`lib/contests/entry.ts`): a student told their
+ * answer counts towards a contest, and then not scored, has lost it.
  */
-function windowFor(
+export function contestWindowFor(
   contest: { startsAt: Date; endsAt: Date; freezeMinutes: number },
   virtualStartsAt: Date | null,
 ): ContestWindow {
@@ -96,12 +101,10 @@ export async function applyContestSubmission(
   const entry = live ?? virtual;
   if (!entry) return { applied: false, reason: "not-registered" };
 
-  const window = windowFor(contest, entry.virtualStartsAt ?? null);
-  const submittedMs = input.submittedAt.getTime();
-  if (submittedMs < window.startsAt.getTime() || submittedMs >= window.endsAt.getTime()) {
-    // Judged after the clock ran out is fine; SUBMITTED outside it is not.
-    return { applied: false, reason: "outside-window" };
-  }
+  const window = contestWindowFor(contest, entry.virtualStartsAt ?? null);
+  // Judged after the clock ran out is fine; SUBMITTED outside it is not.
+  // The same predicate the submit action used, so the two cannot disagree.
+  if (!isWithinWindow(window, input.submittedAt)) return { applied: false, reason: "outside-window" };
 
   const key = { contestId: contest.id, userId: input.userId, contestProblemId: problem.id };
   const existing = await tx.contestProblemAttempt.findUnique({

@@ -164,11 +164,25 @@ function inMinutes(from: Date, to: Date): string {
 }
 
 /**
+ * What this submission is for. A contest submission is still a submission
+ * — it costs a judge slot and CPU like any other — but the practice
+ * allowance is not its allowance: it counts practice (`loadSubmitUsage`
+ * filters on `origin: "PRACTICE"`), and refusing a student's contest
+ * answer because they revised hard that morning would be indefensible for
+ * the same reason a sitting pays no practice caps at all
+ * (`lib/exam/submit.ts`). The in-flight and CPU caps still apply: those
+ * protect the fleet, and a contest is exactly when the fleet is busiest.
+ */
+export interface SubmitKind {
+  readonly practice: boolean;
+}
+
+/**
  * Submit. Lasting limits are reported before the momentary in-flight one,
  * so a student is not told to wait for a judgement only to be refused again.
  */
-export function evaluateSubmitCaps(caps: JudgeCaps, usage: SubmitUsage): CapDecision {
-  if (usage.practiceToday >= caps.practicePerDay) {
+export function evaluateSubmitCaps(caps: JudgeCaps, usage: SubmitUsage, kind: SubmitKind = { practice: true }): CapDecision {
+  if (kind.practice && usage.practiceToday >= caps.practicePerDay) {
     const n = caps.practicePerDay;
     return {
       ok: false,
