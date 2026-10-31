@@ -22,6 +22,7 @@ export * from "./sql-problem";
 export * from "./sql-language";
 export * from "./debug-problem";
 export * from "./answer-problem";
+export * from "./problem-kind";
 export * from "./submit-language";
 export * from "./proctor";
 export * from "./accommodation";

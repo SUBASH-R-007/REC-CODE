@@ -76,6 +76,32 @@ whose only gap is that nobody watched them:
 Findings get fixed in the slice that found them, as every live stage in this
 phase has done.
 
+## Slice 3, which slice 2 found
+
+**The catalogue never said what kind a problem is.** Phases 12k to 12n each
+explained their kind carefully ON the problem page — the dialect bar, the
+edit budget, the conversation chips, the answer box — and none of them
+touched the list a student picks from. `catalog-table.tsx` has columns for
+Status, Code, Title, Topics, Difficulty and Acceptance. So a query, a
+one-line fix, a conversation and an answer box all looked like an ordinary
+program until you opened one.
+
+The fix is one derived word. `problemKind()` in `@recx/shared` reads the
+three fields the version's own CHECKs already tie the kind to — `ioMode`,
+`compareMode`, `maxEditedLines` — and nothing is stored, because a column
+beside those constraints would be a second truth that drifts. The catalogue
+query joins the live version for them, and a chip sits beside the title
+rather than in a column of its own, so it survives the narrow-screen reflow.
+
+Two rules pull against each other and both are tested: every kind that is
+not an ordinary program is named, and an ordinary program is NOT — a chip
+on every row is a chip nobody reads.
+
+**No kind filter.** Naming the kind on a row is a fact a student needs
+while scanning; a facet is a different feature, with a query parameter, a
+form control, a URL state and a count beside each option. It can be added
+on top of this, and it should not be smuggled in beneath it.
+
 ## What this phase does not do
 
 - It does not teach the exam attempt engine a language per question. That is

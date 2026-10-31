@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DifficultyBadge, SolveStatus } from "@recx/design";
 import { BookmarkButton } from "@/components/problems/bookmark-button";
+import { ProblemKindChip } from "@/components/problems/kind-chip";
 import { TopicChips } from "@/components/problems/topic-chips";
 import { acceptancePercent } from "@/components/problems/catalog-filters";
 import type { CatalogRow } from "@/server/queries/problems";
@@ -11,6 +12,10 @@ import type { CatalogRow } from "@/server/queries/problems";
  * only client island. Narrow screens drop the code, topic and acceptance
  * columns and show the solve status under the title instead, so the table
  * reflows to 320 px.
+ *
+ * The kind chip (Phase 12p) sits beside the title rather than in a column
+ * of its own, so it survives that reflow: on a phone the thing a student
+ * most needs to know about a row is that it is not an ordinary program.
  */
 export function CatalogTable({ rows, caption }: { rows: readonly CatalogRow[]; caption: string }) {
   return (
@@ -57,12 +62,15 @@ export function CatalogTable({ rows, caption }: { rows: readonly CatalogRow[]; c
                   {p.displayCode}
                 </td>
                 <td className="px-4 py-2 sm:px-3">
-                  <Link
-                    href={`/problems/${p.slug}`}
-                    className="inline-flex min-h-8 items-center font-medium text-text hover:text-primary hover:underline focus-visible:text-primary"
-                  >
-                    {p.title}
-                  </Link>
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <Link
+                      href={`/problems/${p.slug}`}
+                      className="inline-flex min-h-8 items-center font-medium text-text hover:text-primary hover:underline focus-visible:text-primary"
+                    >
+                      {p.title}
+                    </Link>
+                    <ProblemKindChip kind={p.kind} />
+                  </span>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 sm:hidden">
                     <span className="font-mono text-xs text-text-secondary">{p.displayCode}</span>
                     <SolveStatus status={p.solve} className="text-xs" />

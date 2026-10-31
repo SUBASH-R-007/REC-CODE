@@ -137,3 +137,28 @@ describe("not sat in an assessment yet, and not quietly (Phase 12p)", () => {
     }
   });
 });
+describe("the catalogue names the kind, in the shared words (Phase 12p)", () => {
+  it("derives the kind rather than storing it", () => {
+    // A stored column would be a second truth beside the version's own
+    // CHECKs, and the two would drift the first time a kind changed.
+    const shared = readRepoFile("packages/shared/src/problem-kind.ts");
+    expect(shared).toContain("export function problemKind");
+    expect(shared).toContain("export const PROBLEM_KIND_LABEL");
+    expect(readRepoFile("packages/db/prisma/schema.prisma")).not.toContain("ProblemKind");
+  });
+
+  it("takes every word from @recx/shared, never retyped into a component", () => {
+    const chip = readRepoFile("apps/web/src/components/problems/kind-chip.tsx");
+    expect(chip).toContain("PROBLEM_KIND_LABEL");
+    expect(chip).toContain("PROBLEM_KIND_HINT");
+    for (const word of ["Conversation", "Debugging", "Answer only"]) {
+      expect(chip, `${word} belongs in PROBLEM_KIND_LABEL, not in the chip`).not.toContain(`"${word}"`);
+    }
+  });
+
+  it("asks the query for the kind, so a listing cannot forget it", () => {
+    const query = readRepoFile("apps/web/src/server/queries/problems.ts");
+    expect(query).toContain("problemKind(");
+    expect(query).toMatch(/LEFT JOIN "ProblemVersion" v ON v\.id = p\."liveVersionId"/);
+  });
+});

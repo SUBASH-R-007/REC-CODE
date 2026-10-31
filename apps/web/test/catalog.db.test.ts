@@ -223,6 +223,44 @@ describe.skipIf(!ENABLED)("catalogue query against recx_test", () => {
     expect(beyond.total).toBe(COUNT);
   });
 
+  it("says what KIND each problem is, read from the live version", async () => {
+    /**
+     * Phase 12p. Until this, the catalogue named the status, the code, the
+     * title, the topics, the difficulty and the acceptance rate, and
+     * nothing about the kind — so a query, a one-line fix, a conversation
+     * and an answer box all looked like an ordinary program from the
+     * outside. The kind is derived from the live version, never stored.
+     */
+    const liveOf = async (problemId: string) => {
+      const row = await m.db.problem.findUniqueOrThrow({
+        where: { id: problemId },
+        select: { liveVersionId: true },
+      });
+      return row.liveVersionId!;
+    };
+    const debugging = await liveOf(p[20]!);
+    const sql = await liveOf(p[21]!);
+    await m.db.problemVersion.update({ where: { id: debugging }, data: { maxEditedLines: 2 } });
+    await m.db.problemVersion.update({
+      where: { id: sql },
+      data: { ioMode: "SQL", compareMode: "ROWS", sqlDialect: "postgres17", sqlOrdered: false },
+    });
+    try {
+      const rows = new Map((await list()).rows.map((r) => [r.displayCode, r.kind]));
+      expect(rows.get(code(20))).toBe("debugging");
+      expect(rows.get(code(21))).toBe("sql");
+      // And everything else is still an ordinary program, which gets no chip.
+      expect(rows.get(code(0))).toBe("program");
+      expect(rows.get(code(19))).toBe("program");
+    } finally {
+      await m.db.problemVersion.update({ where: { id: debugging }, data: { maxEditedLines: null } });
+      await m.db.problemVersion.update({
+        where: { id: sql },
+        data: { ioMode: "STDIN", compareMode: "TOKEN", sqlDialect: null, sqlOrdered: null },
+      });
+    }
+  });
+
   it("searches titles word by word, in any order, case-insensitively", async () => {
     const beta = await list({ q: `BETA ${tag}` });
     expect(beta.total).toBe(11); // 0, 5, 10, …, 50

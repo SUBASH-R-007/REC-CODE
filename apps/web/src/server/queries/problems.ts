@@ -13,11 +13,13 @@ import {
   isAnswerLanguage,
   isSqlLanguage,
   isTopic,
+  problemKind,
   submitEditorLanguage,
   type FunctionSignature,
   type CompareMode,
   type IoMode,
   type LanguageKey,
+  type ProblemKind,
   type SqlDialect,
   type SubmitLanguageKey,
   type Topic,
@@ -49,6 +51,12 @@ export interface CatalogRow {
   solve: SolveState;
   /** Topic tags in taxonomy order. */
   topics: Topic[];
+  /**
+   * What kind of question it is (Phase 12p), derived from the live
+   * version. A student should not have to open a problem to find out that
+   * it wants a query, a one-line fix, a conversation or an answer.
+   */
+  kind: ProblemKind;
   /** ProblemStat counters (0 when the problem has no stat row yet). */
   submissions: number;
   accepted: number;
@@ -143,6 +151,9 @@ interface CatalogSqlRow {
   accepted: number | null;
   bookmarked: boolean;
   topics: string[] | null;
+  ioMode: IoMode;
+  compareMode: CompareMode;
+  maxEditedLines: number | null;
   total: bigint;
 }
 
@@ -153,9 +164,13 @@ async function catalogRows(userId: string, q: CatalogQuery, page: number): Promi
       ups.status::text AS progress,
       s.submissions, s.accepted,
       (b."userId" IS NOT NULL) AS bookmarked,
+      v."ioMode"::text AS "ioMode", v."compareMode"::text AS "compareMode", v."maxEditedLines",
       (SELECT array_agg(t.topic::text ORDER BY t.topic) FROM "ProblemTag" t WHERE t."problemId" = p.id) AS topics,
       count(*) OVER () AS total
     FROM "Problem" p
+    -- The live version, for the kind. catalogWhere already requires a
+    -- liveVersionId, so this join adds a column rather than a condition.
+    LEFT JOIN "ProblemVersion" v ON v.id = p."liveVersionId"
     LEFT JOIN "ProblemStat" s ON s."problemId" = p.id
     LEFT JOIN "UserProblemStatus" ups ON ups."problemId" = p.id AND ups."userId" = ${userId}
     LEFT JOIN "Bookmark" b ON b."problemId" = p.id AND b."userId" = ${userId}
@@ -182,6 +197,7 @@ function toCatalogRow(r: CatalogSqlRow): CatalogRow {
     difficulty: r.difficulty,
     solve: r.progress === "SOLVED" ? "solved" : r.progress === "ATTEMPTED" ? "attempted" : null,
     topics: (r.topics ?? []).filter(isTopic),
+    kind: problemKind({ ioMode: r.ioMode, compareMode: r.compareMode, maxEditedLines: r.maxEditedLines }),
     submissions: r.submissions ?? 0,
     accepted: r.accepted ?? 0,
     bookmarked: r.bookmarked,
