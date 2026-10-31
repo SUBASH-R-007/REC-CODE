@@ -21,6 +21,8 @@ export * from "./interactive";
 export * from "./sql-problem";
 export * from "./sql-language";
 export * from "./debug-problem";
+export * from "./answer-problem";
+export * from "./submit-language";
 export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";

@@ -44,6 +44,11 @@ export function buildJob(
     checkerSource?: string;
     /** A testlib interactor's source: sets compareMode INTERACTIVE and spec.interactor (Phase 12l). */
     interactorSource?: string;
+    /**
+     * An OUTPUT_ONLY job (Phase 12n): the submission is the answer, so the
+     * spec carries no language runtime at all. `source` is the answer.
+     */
+    answer?: boolean;
     testlibId?: string;
   } & Partial<Omit<JudgeJobSpec, "language" | "source" | "tests">>,
 ): BuiltJob {
@@ -53,6 +58,7 @@ export function buildJob(
     cases = [],
     checkerSource,
     interactorSource,
+    answer = false,
     testlibId = "testlib-0.9.41",
     ...rest
   } = options;
@@ -95,9 +101,9 @@ export function buildJob(
     lane: "PRACTICE",
     claimToken: `claim-token-${counter}-0123456789abcdef`,
     attempt: 1,
-    language: LANGUAGE_CATALOG[language],
+    language: answer ? null : LANGUAGE_CATALOG[language],
     source,
-    ioMode: "STDIN",
+    ioMode: answer ? "OUTPUT_ONLY" : "STDIN",
     functionSignature: null,
     compareMode: interactor ? "INTERACTIVE" : checker ? "CHECKER" : "TOKEN",
     floatEpsilon: null,

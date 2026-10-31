@@ -253,6 +253,50 @@ the cluster must refuse — run at boot and every six hours, reported in
 every heartbeat. Calibration is the one that has no meaning here yet and is
 sent as null.
 
+## Output-only problems (Phase 12n)
+
+SPEC §11's other half, and the one that changes what a submission IS: the
+student is handed one hard instance and submits **the answer**, not a
+program.
+
+**A fourth `IoMode`.** `IoMode` already answers "how does the answer reach
+the judge?" — a program on stdin, a function, a query — so an answer file
+is a fourth value rather than a flag beside them, and every exhaustive
+switch stopped compiling until it had been thought about. Two migrations,
+because PostgreSQL will not let a new enum value be used in the
+transaction that adds it; the CHECKs come in the second, exactly as Phase
+12k split its SQL checks.
+
+**`answer1`: the second language that is not a toolchain.** A submission
+points at a `LanguageConfig`, which is what kept SQL inside the pipeline
+with no change to `Submission` at all, and the same holds here: no argv,
+no toolchain, nothing to compile. An output-only problem offers `answer1`
+and nothing else, and no other problem offers it — one line in the
+workspace query and the same line in the submit action.
+
+**The fleet still judges it — protocol 6.** A text comparison needs no
+sandbox, so it would be easy to do in the web process. We do not: a
+CHECKER answer-problem runs the AUTHOR's program, and author code may only
+ever run in a box. Keeping the kind in the fleet also means its verdicts
+come with a node, a lane, a rejudge path and a metrics row like every
+other verdict. So the job goes to an isolate node with no program at all:
+`JudgeJobSpec.language` is now nullable, null exactly when `ioMode` is
+OUTPUT_ONLY, and the worker's answer path compares the submitted text (or
+hands it to the checker) without creating a run box. A v5 worker cannot
+parse such a spec, which is the honest outcome — 426, drain, upgrade.
+
+**One case, and it is visible.** A submission carries one answer, so an
+output-only problem has exactly one case, and its data is the question.
+Both are the publish gate's rules and the spec builder's; no CHECK could
+hold either, because they span tables and blobs.
+
+**Found by the real-isolate run, before any student saw it:** the first
+spec builder forced ICPC scoring "because one case is one case". ICPC has
+no partial credit, so a checker that had just worked out 3 of 10 correct
+values came back **WA**. An output-only problem's scoring mode is the
+author's, PER_TEST is what makes a checker's part marks mean anything, and
+SUBTASK is refused — one case is not a table of subtasks.
+
 ## Debugging problems (Phase 12m)
 
 SPEC §11: *"debugging and output-only problem kinds"*. The first of the

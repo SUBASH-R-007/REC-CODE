@@ -3,7 +3,7 @@ import { LANGUAGE_KEYS, TOOLCHAIN_ID_PATTERN } from "./languages";
 import { SQL_LIMITS, sqlResultSetSchema } from "./sql-problem";
 // Type-only in the other direction (sql-language imports `type IoMode`), so
 // this is not a runtime cycle.
-import { SUBMIT_LANGUAGE_KEYS } from "./sql-language";
+import { SUBMIT_LANGUAGE_KEYS } from "./submit-language";
 import { LIMITS } from "./limits";
 import { VERDICTS } from "./verdict";
 import { functionSignatureSchema } from "./harness/signature";
@@ -32,8 +32,19 @@ import { functionSignatureSchema } from "./harness/signature";
  * (separate queues), but the version still moves: a v3 worker predates the
  * union, and the honest thing for a worker that cannot parse what the
  * server might send is to drain rather than guess.
+ *
+ * 5 (Phase 12l): interactive problems. A spec may carry an `interactor`,
+ * which a v4 worker would ignore — and a job whose verdict comes from a
+ * program that never ran is the worst thing this protocol could allow.
+ *
+ * 6 (Phase 12n): output-only problems. `language` is now NULLABLE, and
+ * null exactly when `ioMode` is OUTPUT_ONLY: the submission is the answer
+ * itself, so there is no program, no compile and no run — and inventing a
+ * runtime that never runs would mislead the first person to read a spec.
+ * A v5 worker would fail to parse such a spec, which is the honest
+ * outcome: it drains and upgrades.
  */
-export const JUDGE_PROTOCOL_VERSION = 5;
+export const JUDGE_PROTOCOL_VERSION = 6;
 
 export const JUDGE_HEADERS = {
   protocol: "x-recx-judge-protocol",
@@ -138,8 +149,15 @@ export type ScoringMode = (typeof SCORING_MODES)[number];
  * `SQL` is a problem answered with one statement against a dataset rather
  * than with a program (Phase 12k). `engineForIoMode()` in `sql-language.ts`
  * is the one place that turns this into which engine judges it.
+ *
+ * `OUTPUT_ONLY` is a problem answered with the ANSWER (Phase 12n): one
+ * case, no program, and the student's submitted text compared with the
+ * expected output — or judged by the author's checker. It is judged by the
+ * ISOLATE fleet like every other program problem, because a CHECKER
+ * answer-problem runs the author's program and that may only ever happen
+ * in a box.
  */
-export const IO_MODES = ["STDIN", "FUNCTION", "SQL"] as const;
+export const IO_MODES = ["STDIN", "FUNCTION", "SQL", "OUTPUT_ONLY"] as const;
 export type IoMode = (typeof IO_MODES)[number];
 
 /** Infrastructure retries only: attempts 3, exponential from 2s. */
@@ -269,7 +287,16 @@ export type CheckerSpec = z.infer<typeof checkerSpecSchema>;
 export const interactorSpecSchema = checkerSpecSchema;
 export type InteractorSpec = z.infer<typeof interactorSpecSchema>;
 
-export const judgeJobSpecSchema = z.object({
+/**
+ * The isolate spec's fields, without the cross-field rule below.
+ *
+ * Exported only because `anyJobSpecSchema` is a DISCRIMINATED union, and
+ * zod can discriminate plain objects only: a refined schema is a
+ * `ZodEffects` and cannot carry the `engine` discriminator. The rule it is
+ * missing is checked where it decides something — in `buildJudgeJobSpec`,
+ * which builds the spec, and in the worker, which parses it.
+ */
+export const judgeJobSpecObject = z.object({
   protocolVersion: z.literal(JUDGE_PROTOCOL_VERSION),
   /** Protocol 4: which engine this spec is for. */
   engine: z.literal("isolate").default("isolate"),
@@ -278,7 +305,12 @@ export const judgeJobSpecSchema = z.object({
   lane: z.enum(JUDGE_LANES),
   claimToken: z.string().min(16),
   attempt: z.number().int().min(1),
-  language: languageRuntimeSchema,
+  /**
+   * The program's runtime — null exactly for an OUTPUT_ONLY job
+   * (protocol 6), which has no program to compile or run. The refinement
+   * below holds both halves of that.
+   */
+  language: languageRuntimeSchema.nullable(),
   source: z.string().max(LIMITS.source.ceilingBytes),
   ioMode: z.enum(IO_MODES),
   functionSignature: functionSignatureSchema.nullable(),
@@ -302,6 +334,27 @@ export const judgeJobSpecSchema = z.object({
    */
   inlineBlobs: z.record(sha256, z.string().max(LIMITS.customRun.stdinBytes)).default({}),
 });
+
+export const judgeJobSpecSchema = judgeJobSpecObject
+  /**
+   * Phase 12n. An output-only job is the one isolate job with no program:
+   * its `source` is the student's ANSWER, its single case is compared (or
+   * checked) against the expected output, and nothing is compiled or run.
+   * Both halves are asserted, because a spec with a runtime that never
+   * runs and a spec with no runtime for a job that needs one are each a
+   * job no node could judge correctly.
+   */
+  .superRefine((spec, ctx) => {
+    const answerOnly = spec.ioMode === "OUTPUT_ONLY";
+    if (answerOnly === (spec.language === null)) return;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["language"],
+      message: answerOnly
+        ? "An output-only job has no program, so it carries no language runtime."
+        : "A job that runs a program needs its language runtime.",
+    });
+  });
 export type JudgeJobSpec = z.infer<typeof judgeJobSpecSchema>;
 
 // ── The SQL engine's spec (protocol 4) ──────────────────────────────────
@@ -370,7 +423,7 @@ export type SqlJobSpec = z.infer<typeof sqlJobSpecSchema>;
  * parse the other engine's spec would eventually try to run it.
  */
 export const anyJobSpecSchema = z.discriminatedUnion("engine", [
-  judgeJobSpecSchema.extend({ engine: z.literal("isolate") }),
+  judgeJobSpecObject.extend({ engine: z.literal("isolate") }),
   sqlJobSpecSchema,
 ]);
 export type AnyJobSpec = z.infer<typeof anyJobSpecSchema>;

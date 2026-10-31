@@ -204,7 +204,7 @@ describe.skipIf(!enabled)("Phase 2 judging on real isolate", () => {
     if (result) {
       expect(resultRequestSchema.safeParse(result).success).toBe(true);
       console.log(
-        `[judging] ${job.spec.kind} ${job.spec.language.key} ${job.spec.compareMode}/${job.spec.scoringMode}: ${result.verdict}` +
+        `[judging] ${job.spec.kind} ${job.spec.language?.key} ${job.spec.compareMode}/${job.spec.scoringMode}: ${result.verdict}` +
           ` score=${result.score}/${result.maxScore} tests=${result.tests.map((t) => t.v).join(",")}` +
           ` compile=${result.compile ? `${result.compile.ok ? "ok" : "CE"} ${result.compile.timeMs}ms cached=${result.compile.cached}` : "none"}` +
           ` cpu=${result.cpuMs}ms wall=${Date.now() - started}ms`,

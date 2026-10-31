@@ -1,27 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
-  LANGUAGE_KEYS,
   SQL_DISPLAY_ROWS,
-  SQL_EDITOR_LANGUAGE,
-  SQL_LANGUAGE_KEY,
-  SQL_LANGUAGE_LABEL,
   SQL_LIMITS,
-  SQL_STARTER_CODE,
-  SUBMIT_LANGUAGE_KEYS,
   clipResultSet,
   describeResultSet,
   displayCell,
-  isSubmitLanguage,
   readResultSet,
-  submitEditorLanguage,
-  submitLanguageLabel,
   writeResultSet,
   type SqlResultSet,
 } from "../src/index";
 
 /**
- * Showing a result set to a student, and the one list of languages a
- * submission may carry (Phase 12k, slice 4).
+ * Showing a result set to a student (Phase 12k, slice 4). The list of
+ * languages a submission may carry moved to `submit-language.test.ts` when
+ * Phase 12n added the third one that is not a toolchain.
  */
 
 const rs = (rows: Array<Array<string | null>>): SqlResultSet => ({ columns: ["id", "name"], rows });
@@ -98,32 +90,5 @@ describe("describeResultSet and displayCell", () => {
     expect(displayCell(null)).toBe("NULL");
     expect(displayCell("")).toBe("");
     expect(displayCell("NULL")).toBe("NULL");
-  });
-});
-
-describe("the languages a submission may carry", () => {
-  it("is every toolchain plus SQL, and nothing else", () => {
-    expect(SUBMIT_LANGUAGE_KEYS).toEqual([...LANGUAGE_KEYS, SQL_LANGUAGE_KEY]);
-    expect(SUBMIT_LANGUAGE_KEYS).toHaveLength(LANGUAGE_KEYS.length + 1);
-    for (const key of SUBMIT_LANGUAGE_KEYS) expect(isSubmitLanguage(key)).toBe(true);
-    for (const bad of ["", "sql", "SQL17", "mysql8", null, 7]) expect(isSubmitLanguage(bad)).toBe(false);
-  });
-
-  it("labels SQL as its dialect and every toolchain from the catalogue", () => {
-    expect(submitLanguageLabel(SQL_LANGUAGE_KEY)).toBe(SQL_LANGUAGE_LABEL);
-    expect(submitLanguageLabel("cpp20")).toContain("C++20");
-    // A row whose LanguageConfig is long gone still renders.
-    expect(submitLanguageLabel("rust180")).toBe("rust180");
-  });
-
-  it("gives SQL an editor grammar, and an unknown key plaintext", () => {
-    expect(submitEditorLanguage(SQL_LANGUAGE_KEY)).toBe(SQL_EDITOR_LANGUAGE);
-    expect(submitEditorLanguage("py312")).toBe("python");
-    expect(submitEditorLanguage("rust180")).toBe("plaintext");
-  });
-
-  it("opens a SQL editor with a comment and nothing else", () => {
-    expect(SQL_STARTER_CODE.trim().startsWith("--")).toBe(true);
-    expect(SQL_STARTER_CODE).not.toMatch(/select/i);
   });
 });

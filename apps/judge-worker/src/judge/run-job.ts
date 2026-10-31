@@ -24,11 +24,12 @@ import { InfraError, PermanentJudgeError, errorMessage } from "../errors";
 import type { Logger } from "../logger";
 import type { CapturedOutput, Sandbox } from "../sandbox/types";
 import { aggregate, compileErrorOutcome } from "./aggregate";
+import { runAnswerJob } from "./answer";
 import { CheckerRunner, checkerMessage, prepareChecker } from "./checker";
 import { InteractiveRunner, interpretInteractive, prepareInteractor } from "./interactive";
 import { compareOutputs } from "./compare";
 import { compileLimits, outputLimitBytes, runArgv, runLimits } from "./limits";
-import { executeTests, planJob, type JudgePlan, type TestOutcome } from "./plan";
+import { executeTests, planJob, requireRuntime, type JudgePlan, type TestOutcome } from "./plan";
 import { classifyCompile, classifyRun } from "./verdict";
 
 /**
@@ -141,7 +142,7 @@ function prepareProgram(spec: JudgeJobSpec): { source: string; build: HarnessBui
   if (spec.ioMode !== "FUNCTION") return { source: spec.source, build: null };
   if (!spec.functionSignature) throw new PermanentJudgeError("FUNCTION-mode job without a function signature");
   try {
-    const build = buildHarness(spec.language.key, spec.functionSignature, spec.source);
+    const build = buildHarness(requireRuntime(spec).key, spec.functionSignature, spec.source);
     return { source: build.source, build };
   } catch (error) {
     if (error instanceof HarnessUnsupportedError) throw new PermanentJudgeError(error.message);
@@ -177,9 +178,17 @@ function captureText(output: CapturedOutput): string {
 type Diagnostics = (raw: string, maxBytes: number) => string;
 
 export async function runJob(spec: JudgeJobSpec, ctx: RunJobContext): Promise<JudgeOutcome> {
+  /**
+   * Phase 12n. An output-only job is the one job with no program: no
+   * compile, no run box, and the student's submitted text compared (or
+   * checked) against the expected answer. It leaves here before anything
+   * reads a runtime, because it has none.
+   */
+  if (spec.ioMode === "OUTPUT_ONLY") return runAnswerJob(spec, ctx);
+
   const plan = planJob(spec);
   const program = prepareProgram(spec);
-  const language = spec.language;
+  const language = requireRuntime(spec);
 
   /**
    * Student-facing tool output: drop the /box/ prefix (so "/box/main.cpp:1"
@@ -264,7 +273,7 @@ async function runInteractiveTest(
   ctx: RunJobContext,
 ): Promise<TestOutcome> {
   const { sandbox } = ctx;
-  const language = spec.language;
+  const language = requireRuntime(spec);
   const visible = test.isSample || test.output === null;
 
   await sandbox.init("run");
@@ -345,7 +354,7 @@ async function compileProgram(
   diagnostics: Diagnostics,
   ctx: RunJobContext,
 ): Promise<Compiled> {
-  const language = spec.language;
+  const language = requireRuntime(spec);
   const compileStep = language.compile;
   if (!compileStep) throw new InfraError("compileProgram called for a language without a compile step");
   const { sandbox } = ctx;
@@ -476,7 +485,7 @@ async function runTest(
   ctx: RunJobContext,
 ): Promise<TestOutcome> {
   const { sandbox } = ctx;
-  const language = spec.language;
+  const language = requireRuntime(spec);
   const visible = test.isSample || test.output === null;
   const toolchainIds = [language.toolchainId, ...language.extraToolchainIds];
 

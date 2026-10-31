@@ -86,14 +86,14 @@ describe("non-null is the kind", () => {
   it("there is no ProblemKind enum, and no DEBUGGING io mode", () => {
     const schema = readRepoFile("packages/db/prisma/schema.prisma");
     expect(schema).not.toMatch(/enum ProblemKind/);
-    // The io modes are still the three Phase 12k left: a debugging problem
-    // is an ordinary STDIN or FUNCTION problem with a rule, not a fourth.
+    // A debugging problem is an ordinary STDIN or FUNCTION problem with a
+    // rule, so no io mode names it. (Phase 12n added OUTPUT_ONLY, which
+    // IS a different way for an answer to reach the judge — the test is
+    // that nothing here is about debugging, not that the list never grows.)
     const ioMode = /enum IoMode \{([\s\S]*?)\}/.exec(schema)?.[1] ?? "";
-    expect(ioMode.replace(/\/\/.*/g, "").trim().split(/\s+/).filter(Boolean)).toEqual([
-      "STDIN",
-      "FUNCTION",
-      "SQL",
-    ]);
+    const values = ioMode.replace(/\/\/.*/g, "").trim().split(/\s+/).filter(Boolean);
+    expect(values).toContain("STDIN");
+    expect(values.some((v) => /DEBUG|REPAIR|FIX/i.test(v))).toBe(false);
     expect(schema).toContain("maxEditedLines");
   });
 

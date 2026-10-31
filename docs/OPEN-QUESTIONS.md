@@ -3558,3 +3558,36 @@ is rendered and asserted at, below and over the budget, and the fence
 proves the bar and the server share one count — but no browser has been
 driven through a keystroke-by-keystroke edit. The same gap as the
 narrow-screen SQL grammar left open in Phase 12k.
+
+## A submission that is the answer (Phase 12n, slice 1)
+
+**Why the judge fleet and not the web process.** Comparing two pieces of
+text needs no sandbox, and a verdict decided in the web process would have
+been fifty lines. It would also have been a second pipeline: no node, no
+lane, no rejudge, no metrics row — and, the moment a problem wanted
+partial credit, the author's checker running in the process that holds
+`DATABASE_URL`. The answer path is in the worker for that one reason.
+
+**Why `language` is nullable rather than a pretend runtime.** A spec
+carrying a C++ runtime that never compiles anything would mislead the
+first person to read one, and `assertRuntimeKnown` would have had to be
+taught to skip it anyway. Null is the fact. `requireRuntime()` is the one
+place that turns it back into a program's runtime, and it throws for the
+job that has none.
+
+**One case, and visible.** The answer is one answer, so the question is
+one instance; and the student cannot answer data they cannot see. A hidden
+case on one of these would be a second question nobody could read, so the
+gate refuses it — and so does the spec builder, because a version that
+reached a node in that state would have been judged against something the
+student never had.
+
+**The scoring mode is the author's, and it decides more than it looks.**
+ICPC has no partial credit: a checker's PARTIAL becomes WA. The real
+isolate run found this in the first builder, which forced ICPC. A
+best-effort answer-problem is scored PER_TEST, and SUBTASK is refused
+because one case is not a table of subtasks.
+
+**Still to come in this phase:** the authoring side (slice 2) and the
+student's answer box (slice 3). Until then an output-only version can be
+built only by hand, which is why nothing is published yet.

@@ -626,7 +626,7 @@ describe.skipIf(!ENABLED)("judge protocol v2 against recx_test", () => {
       const spec = await claim(node, "validation", runId);
       expect(spec.timeLimitMs).toBe(LIMITS.cpuTime.ceilingMs);
       expect(spec.stopOnFirstFailure).toBe(false);
-      const ms = spec.language.key === "cpp20" ? [20, 120, 80] : [60, 700, 300];
+      const ms = spec.language?.key === "cpp20" ? [20, 120, 80] : [60, 700, 300];
       expect(
         await m.finalize.finalizeValidation(await nodeRow(node), result("validation", runId, spec.claimToken, node, "AC", allAc(ms))),
       ).toBe("ok");

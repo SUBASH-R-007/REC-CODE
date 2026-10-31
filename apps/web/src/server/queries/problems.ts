@@ -3,11 +3,14 @@ import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { Prisma, type Difficulty } from "@recx/db";
 import {
+  ANSWER_LANGUAGE_KEY,
+  ANSWER_STARTER_CODE,
   LANGUAGE_CATALOG,
   SQL_LANGUAGE_KEY,
   SQL_STARTER_CODE,
   functionSignatureSchema,
   isLanguageKey,
+  isAnswerLanguage,
   isSqlLanguage,
   isTopic,
   submitEditorLanguage,
@@ -488,6 +491,13 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
    */
   const sql = content.ioMode === "SQL";
   /**
+   * Phase 12n: an output-only problem is answered in `answer1` and nothing
+   * else, and no other problem accepts one. Same shape as the SQL pairing
+   * above it, and the submit action refuses the other combinations, so
+   * nothing offered here is a locked door.
+   */
+  const answerOnly = content.ioMode === "OUTPUT_ONLY";
+  /**
    * Phase 12m: a debugging problem is offered in the languages its broken
    * program is written in and no others. Each language would be a
    * different program with a different mistake, so an author writes the
@@ -500,7 +510,19 @@ export const getProblemWorkspace = cache(async (slug: string): Promise<ProblemWo
   const languages: WorkspaceLanguage[] = [];
   const functionUnavailable: ProblemWorkspace["functionUnavailable"] = [];
   for (const config of configs) {
-    if (sql !== isSqlLanguage(config.key)) continue;
+    const kind = isSqlLanguage(config.key) ? "sql" : isAnswerLanguage(config.key) ? "answer" : "program";
+    if (kind !== (sql ? "sql" : answerOnly ? "answer" : "program")) continue;
+    if (kind === "answer") {
+      languages.push({
+        key: ANSWER_LANGUAGE_KEY,
+        label: config.label,
+        version: config.version,
+        editorLanguage: submitEditorLanguage(config.key),
+        // An empty box: a comment here would be a line to delete first.
+        starter: starters.get(ANSWER_LANGUAGE_KEY) ?? ANSWER_STARTER_CODE,
+      });
+      continue;
+    }
     if (sql) {
       languages.push({
         key: SQL_LANGUAGE_KEY,

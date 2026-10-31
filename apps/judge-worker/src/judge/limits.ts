@@ -8,6 +8,7 @@ import {
   type LanguageRuntime,
   type TestSpec,
 } from "@recx/shared";
+import { requireRuntime } from "./plan";
 import type { SandboxLimits } from "../sandbox/types";
 
 /**
@@ -24,8 +25,8 @@ export function runLimits(spec: Pick<JudgeJobSpec, "timeLimitMs" | "memoryLimitK
     wallSec: wallTimeSecFor(spec.timeLimitMs),
     memoryKb,
     stackKb: Math.min(memoryKb, LIMITS.stack.ceilingKb),
-    processes: Math.min(spec.language.processes, LIMITS.processes.ceiling),
-    openFiles: Math.min(spec.language.openFiles, LIMITS.openFiles.ceiling),
+    processes: Math.min(requireRuntime(spec).processes, LIMITS.processes.ceiling),
+    openFiles: Math.min(requireRuntime(spec).openFiles, LIMITS.openFiles.ceiling),
     fsizeKb: LIMITS.outputFile.defaultKb,
   };
 }
@@ -37,8 +38,9 @@ export function runLimits(spec: Pick<JudgeJobSpec, "timeLimitMs" | "memoryLimitK
  * here comes from the student; the flags are published on /judge.
  */
 export function runArgv(spec: Pick<JudgeJobSpec, "language" | "memoryLimitKb">): string[] {
-  const argv = spec.language.run.argv;
-  if (!JVM_LANGUAGE_KEYS.includes(spec.language.key)) return [...argv];
+  const language = requireRuntime(spec);
+  const argv = language.run.argv;
+  if (!JVM_LANGUAGE_KEYS.includes(language.key)) return [...argv];
   const memoryKb = Math.min(spec.memoryLimitKb, LIMITS.memory.ceilingKb);
   return [argv[0]!, ...jvmRunFlags(memoryKb), ...argv.slice(1)];
 }

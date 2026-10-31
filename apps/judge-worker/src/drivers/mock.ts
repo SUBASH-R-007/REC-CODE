@@ -74,10 +74,22 @@ export class MockJudgeDriver implements JudgeDriver {
   }
 
   async judge(spec: JudgeJobSpec, io: JudgeIO): Promise<JudgeOutcome> {
-    this.write(`\n${MOCK_BANNER}\n   job: ${spec.kind} ${spec.id} (${spec.language.key})\n\n`);
+    this.write(`\n${MOCK_BANNER}\n   job: ${spec.kind} ${spec.id} (${spec.language?.key ?? spec.ioMode})\n\n`);
     io.logger.warn({ kind: spec.kind, id: spec.id }, "MOCK JUDGE — NO CODE IS EXECUTED — VERDICTS ARE FAKE");
 
     const plan = planJob(spec);
+    /**
+     * Phase 12n. The mock judge fabricates a verdict from a marker in the
+     * source — and an output-only submission IS the source, so the marker
+     * would be the student's own answer and a fabricated AC would be
+     * indistinguishable from a real one. Refused, like an interactive job.
+     */
+    if (spec.ioMode === "OUTPUT_ONLY") {
+      throw new PermanentJudgeError(
+        "the mock judge cannot judge an output-only problem: the submission is the answer itself, so there is nothing " +
+          "to fabricate a verdict from. Use a Linux node with real isolate.",
+      );
+    }
     if (plan.compareMode === "INTERACTIVE") {
       throw new PermanentJudgeError(
         "the mock judge cannot judge an interactive problem: its verdict is a conversation with the author's interactor, " +
@@ -87,7 +99,7 @@ export class MockJudgeDriver implements JudgeDriver {
     const marker = parseMockMarker(spec.source);
     if (marker?.kind === "IE") throw new InfraError("RECX_MOCK:IE — simulated infrastructure failure (mock judge)");
 
-    if (spec.language.compile) io.progress({ type: "state", state: "COMPILING" });
+    if (spec.language?.compile) io.progress({ type: "state", state: "COMPILING" });
     if (marker?.kind === "CE") {
       return compileErrorOutcome(
         spec,
@@ -101,7 +113,7 @@ export class MockJudgeDriver implements JudgeDriver {
         plan.subtasks,
       );
     }
-    const compile = spec.language.compile ? { ok: true, output: "", timeMs: 0, cached: false, resourceExceeded: false } : null;
+    const compile = spec.language?.compile ? { ok: true, output: "", timeMs: 0, cached: false, resourceExceeded: false } : null;
 
     io.progress({ type: "state", state: "RUNNING" });
     const executed = await executeTests(

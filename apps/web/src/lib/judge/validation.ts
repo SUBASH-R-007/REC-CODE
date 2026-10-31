@@ -277,6 +277,15 @@ export function deriveLanguageLimits(input: {
     const seen = worst.get(m.language);
     if (!seen || m.measuredMs > seen.measuredMs) worst.set(m.language, m);
   }
+  /**
+   * Phase 12n. An output-only problem runs nothing, so there is no
+   * per-language limit to measure or store: the answer is compared, and
+   * the only program involved is the author's checker, which has its own
+   * box limits. An empty list is the honest answer, and it is also what
+   * keeps the publish path from writing a C++ time limit for a question
+   * that has no C++.
+   */
+  if (input.ioMode === "OUTPUT_ONLY") return [];
   const sql = input.ioMode === "SQL";
   return [...input.languages]
     .filter((lang) => isSqlLanguage(lang.key) === sql)

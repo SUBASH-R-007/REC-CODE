@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import {
+  ANSWER_REFUSALS,
   DEBUG_REFUSALS,
   INTERACTIVE_REFUSALS,
   LIMITS,
@@ -9,6 +10,7 @@ import {
   SQL_REFUSALS,
   countEditedLines,
   debugOverBudget,
+  isAnswerLanguage,
   isSqlLanguage,
   looksLikeMultipleStatements,
   utf8Length,
@@ -99,6 +101,20 @@ async function loadTarget(slug: string, language: string): Promise<JudgeTarget> 
       sqlProblem
         ? "That problem is answered with a SQL query."
         : "SQL is only for a SQL problem; choose a programming language.",
+    );
+  }
+  /**
+   * Phase 12n: the same pairing, for the language that is not a language.
+   * An output-only problem's submission is the ANSWER, and no other
+   * problem accepts one — a text answer judged as a program would be a CE
+   * nobody could explain.
+   */
+  const answerProblem = problem.liveVersion.ioMode === "OUTPUT_ONLY";
+  if (answerProblem !== isAnswerLanguage(language)) {
+    throw new ValidationError(
+      answerProblem
+        ? "That problem asks for the answer itself, not a program."
+        : "An answer file is only for an output-only problem; choose a programming language.",
     );
   }
   if (problem.liveVersion.ioMode === "FUNCTION" && !supportsFunctionMode(language as LanguageKey)) {
@@ -268,6 +284,13 @@ export async function runCode(input: RunCodeInput): Promise<ActionResult<{ id: s
       if (parsed.customInput !== null) throw new ValidationError(INTERACTIVE_REFUSALS.customInput);
       if (target.sampleCount === 0) throw new ValidationError(INTERACTIVE_REFUSALS.noSampleCase);
     }
+    /**
+     * Phase 12n. There is nothing to run: the answer IS the submission, and
+     * the one case it would run against is the one it is judged against.
+     * A Run here would spend a student's quota to tell them the verdict
+     * they were about to get anyway.
+     */
+    if (target.ioMode === "OUTPUT_ONLY") throw new ValidationError(ANSWER_REFUSALS.noRun);
     if (parsed.customInput === null && target.sampleCount === 0) {
       throw new ValidationError("This problem has no sample tests. Run it with custom input instead.");
     }

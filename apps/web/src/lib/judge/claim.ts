@@ -20,6 +20,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { verdictReached } from "@/lib/metrics";
 import { redis } from "@/lib/redis";
+import { buildAnswerJobSpec } from "@/lib/judge/answer-job-spec";
 import { buildSqlJobSpec } from "@/lib/judge/sql-job-spec";
 import { buildJudgeJobSpec, JobSpecError, type JobSpecChecker, type JobSpecInput } from "./job-spec";
 import { isSensitiveLane } from "./lanes";
@@ -419,8 +420,16 @@ export async function claimJob(node: JudgeNode, request: ClaimRequest): Promise<
 
   try {
     const input = await loadSpecInput(kind, id, token, attempt, node);
+    /**
+     * Three kinds of spec, one claim. The engine decides the first split
+     * (Phase 12k); the second is Phase 12n's output-only job, which an
+     * isolate node judges with no program at all — so it is the same
+     * engine and a different builder.
+     */
     const spec =
-      engineForIoMode(input.version.ioMode) === "postgres"
+      input.version.ioMode === "OUTPUT_ONLY"
+        ? buildAnswerJobSpec(input)
+        : engineForIoMode(input.version.ioMode) === "postgres"
         ? buildSqlJobSpec({
             kind: input.kind,
             id: input.id,

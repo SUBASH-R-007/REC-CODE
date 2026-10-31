@@ -105,6 +105,19 @@ const CATALOG_TOOLCHAINS: ReadonlySet<string> = new Set(
   LANGUAGE_KEYS.flatMap((key) => [LANGUAGE_CATALOG[key].toolchainId, ...LANGUAGE_CATALOG[key].extraToolchainIds]),
 );
 
+/**
+ * The job's language runtime (Phase 12n).
+ *
+ * Every job that runs a program has one; an output-only job has none and
+ * leaves `runJob` before anything asks. A null here is therefore a spec
+ * that should not exist, which is a permanent failure rather than a
+ * retryable one.
+ */
+export function requireRuntime(spec: { language: LanguageRuntime | null; ioMode?: JudgeJobSpec["ioMode"] }): LanguageRuntime {
+  if (!spec.language) throw new PermanentJudgeError(`a ${spec.ioMode ?? "program"} job needs its language runtime`);
+  return spec.language;
+}
+
 /** A checker's testlib directory: /opt/toolchains/testlib-<version>. */
 const TESTLIB_ID = /^testlib-[0-9][0-9A-Za-z.+_-]*$/;
 
@@ -116,7 +129,19 @@ export function roundPoints(value: number): number {
 const testWeight = (points: number | null | undefined) => points ?? 1;
 
 export function planJob(spec: JudgeJobSpec): JudgePlan {
-  assertRuntimeKnown(spec.language);
+  /**
+   * Phase 12n. An output-only job has no program, so it has no runtime to
+   * validate — the protocol says `language` is null exactly for one of
+   * these, and a spec that disagrees never parses. Every other job must
+   * have one this judge could actually run.
+   */
+  if (spec.ioMode === "OUTPUT_ONLY") {
+    if (spec.language !== null) throw new PermanentJudgeError("an output-only job carries no language runtime");
+  } else if (spec.language === null) {
+    throw new PermanentJudgeError(`a ${spec.ioMode} job needs its language runtime`);
+  } else {
+    assertRuntimeKnown(spec.language);
+  }
   const indexes = new Set<number>();
   for (const t of spec.tests) {
     if (indexes.has(t.index)) throw new PermanentJudgeError(`job spec lists test ${t.index} twice`);

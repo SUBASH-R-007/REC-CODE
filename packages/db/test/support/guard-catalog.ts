@@ -1154,6 +1154,16 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProblemVersion_debug_budget_kind", "ProblemVersion"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261101150000_phase12m_debug_budget" })),
+  ...(
+    [
+      // Phase 12n. What an output-only version is NOT: it has no program
+      // (no signature, no starter to repair), it is not a query (no
+      // dialect, no result-set comparison) and it is not a conversation
+      // (no interactor). That it has exactly one case, and that the case
+      // is visible, span tables — so they are the publish gate's rules.
+      ["ProblemVersion_output_only_fields", "ProblemVersion"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101160500_phase12n_output_only_checks" })),
 ];
 
 /**

@@ -52,7 +52,7 @@ describe("buildJudgeJobSpec — submissions", () => {
     expect(judgeJobSpecSchema.safeParse(spec).success).toBe(true);
     expect(spec.kind).toBe("submission");
     expect(spec.lane).toBe("PRACTICE");
-    expect(spec.language.key).toBe("cpp20");
+    expect(spec.language?.key).toBe("cpp20");
     expect(spec.ioMode).toBe("FUNCTION");
     expect(spec.functionSignature?.methodName).toBe("twoSum");
     expect(spec.stopOnFirstFailure).toBe(true);

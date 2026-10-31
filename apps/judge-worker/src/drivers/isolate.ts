@@ -55,7 +55,9 @@ export function resolveExecutable(command: string, searchPath = process.env.PATH
  */
 export function assertJudgeable(spec: JudgeJobSpec, exists: (p: string) => boolean = existsSync): void {
   const plan = planJob(spec);
-  assertToolchainsPresent(spec.language, exists);
+  // An output-only job has no runtime, so there are no toolchains to find
+  // (the checker's own are checked below, as for any other checker job).
+  if (spec.language) assertToolchainsPresent(spec.language, exists);
   if (plan.checker && spec.tests.some((t) => t.output !== null)) assertCheckerToolchainsPresent(plan.checker, exists);
 }
 

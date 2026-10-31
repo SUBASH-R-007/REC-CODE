@@ -55,6 +55,11 @@ enum IoMode {
   /// Phase 12k. One SQL statement against a dataset, judged by the postgres
   /// engine (apps/sql-judge) rather than by an isolate box.
   SQL
+  /// Phase 12n. The submission IS the answer: one visible case, no program,
+  /// and the student's text compared with the expected output (or judged by
+  /// the author's checker). Judged by the isolate fleet, because a CHECKER
+  /// answer-problem runs the author's program and that only happens in a box.
+  OUTPUT_ONLY
 }
 
 /// Phase 12k. The only dialect SQL problems are judged in, stated rather

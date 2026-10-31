@@ -72,6 +72,10 @@ import {
   LANGUAGE_KEYS,
   SQL_LANGUAGE_KEY,
   SQL_LANGUAGE_LABEL,
+  ANSWER_LANGUAGE_KEY,
+  ANSWER_LANGUAGE_LABEL,
+  ANSWER_RUNTIME,
+  ANSWER_TOOLCHAIN_ID,
   SQL_RUNTIME,
   SQL_TOOLCHAIN_ID,
   TESTLIB_ID,
@@ -379,8 +383,31 @@ async function seedLanguages(db: Db) {
     update: sqlFields,
   });
 
+  /**
+   * The answer file (Phase 12n) is the second language a student submits in
+   * that is not a toolchain: an output-only problem's submission is the
+   * ANSWER, so there is nothing to compile and nothing to run. The row
+   * exists for the same reason the SQL one does — a submission points at a
+   * LanguageConfig — which is what let both kinds join the pipeline with no
+   * change to `Submission` at all.
+   */
+  const answerFields = {
+    label: ANSWER_LANGUAGE_LABEL,
+    version: "1",
+    runtime: toJson(ANSWER_RUNTIME),
+    enabled: true,
+    isCurrent: true,
+  };
+  await db.languageConfig.upsert({
+    where: { key_toolchainId: { key: ANSWER_LANGUAGE_KEY, toolchainId: ANSWER_TOOLCHAIN_ID } },
+    create: { key: ANSWER_LANGUAGE_KEY, toolchainId: ANSWER_TOOLCHAIN_ID, ...answerFields },
+    update: answerFields,
+  });
+
   const enabled = LANGUAGE_KEYS.filter((k) => LANGUAGE_CATALOG[k].enabledByDefault);
-  log(`language configs: ${LANGUAGE_KEYS.length} + sql (enabled: ${enabled.join(", ")}, ${SQL_LANGUAGE_KEY})`);
+  log(
+    `language configs: ${LANGUAGE_KEYS.length} + sql + answer (enabled: ${enabled.join(", ")}, ${SQL_LANGUAGE_KEY}, ${ANSWER_LANGUAGE_KEY})`,
+  );
 }
 
 // ── Theme ────────────────────────────────────────────────────────────────

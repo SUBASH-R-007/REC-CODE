@@ -167,6 +167,6 @@ describe("JVM run flags on the job path", () => {
     );
     expect(outcome.verdict).toBe("AC");
     const run = sandbox.execs.find((e) => e.role === "run")!;
-    expect(run.argv.slice(0, 3)).toEqual([job.spec.language.run.argv[0], "-Xmx89m", "-Xss128m"]);
+    expect(run.argv.slice(0, 3)).toEqual([job.spec.language?.run.argv[0], "-Xmx89m", "-Xss128m"]);
   });
 });

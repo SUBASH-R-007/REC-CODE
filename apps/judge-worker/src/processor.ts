@@ -114,7 +114,7 @@ export async function processJob(data: unknown, deps: ProcessorDeps, options: Pr
       return { outcome: "refused", reason: claim.reason };
     }
     const spec = claim;
-    const log = deps.logger.child({ kind: spec.kind, id: spec.id, attempt: spec.attempt, lang: spec.language.key, slot });
+    const log = deps.logger.child({ kind: spec.kind, id: spec.id, attempt: spec.attempt, lang: spec.language?.key ?? spec.ioMode, slot });
     const startedAt = Date.now();
 
     let outcome: JudgeOutcome;

@@ -395,7 +395,7 @@ describe("runJob — refuses, permanently, what no node can judge faithfully", (
 
   it("a runtime whose toolchain the catalog does not know → PermanentJudgeError", async () => {
     const job = buildJob({ cases: ADDER_CASES });
-    const spec = { ...job.spec, language: { ...job.spec.language, toolchainId: "gcc-14.9.9" } };
+    const spec = { ...job.spec, language: { ...job.spec.language!, toolchainId: "gcc-14.9.9" } };
     const sandbox = new FakeSandbox(() => ({}));
     await expect(
       runJob(spec, { sandbox, blobs: { get: async () => Buffer.alloc(0) }, progress: () => {}, logger: silentLogger() }),
