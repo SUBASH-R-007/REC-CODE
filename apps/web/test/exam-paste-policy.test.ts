@@ -53,6 +53,33 @@ describe("the paste policy", () => {
     }
   });
 
+  it("refuses BEFORE the editor sees the event, or it does not refuse at all", () => {
+    /**
+     * Phase 12t, found by `e2e/exam-journey.spec.ts`: the notice appeared
+     * and the text landed anyway. Monaco and CodeMirror each handle `paste`
+     * on their own hidden textarea and insert the text themselves, and a
+     * `document` listener in the bubble phase runs after the editor's — so
+     * `preventDefault` was being called on an event whose work was already
+     * done. A refusal in name only is worse than no refusal, because an
+     * invigilator turned it on believing it did something.
+     */
+    const s = SESSION();
+    expect(s, "the paste listener must be in the capture phase").toContain(
+      'document.addEventListener("paste", onPaste, true)',
+    );
+    expect(s, "and removed from the same phase, or it is never removed").toContain(
+      'document.removeEventListener("paste", onPaste, true)',
+    );
+    // stopPropagation is the half that keeps the editor's handler from
+    // running; preventDefault alone only stops the browser's insertion.
+    const handler = s.slice(s.indexOf("const onPaste ="), s.indexOf("const onContextMenu ="));
+    expect(handler).toContain("event.stopPropagation();");
+    // Copy and cut stay in the bubble phase and are not stopped: nothing
+    // about them is refused.
+    expect(s).toContain('document.addEventListener("copy", onCopy);');
+    expect(s).not.toContain('document.addEventListener("copy", onCopy, true)');
+  });
+
   it("still records the paste, so the signal is not silenced", () => {
     // SPEC's substantive objection: a block that hides the attempt is
     // worse than no block. The refusal path falls through to the same

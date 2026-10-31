@@ -147,6 +147,8 @@ export function ExamSession({
   const [clock, setClock] = useState({ msRemaining: initialMsRemaining, at: now() });
   const [status, setStatus] = useState(initialStatus);
   const [revoked, setRevoked] = useState<string | null>(null);
+  /** Phase 12t: this page handed the paper in, as opposed to being refused. */
+  const [handedIn, setHandedIn] = useState(false);
   const [save, setSave] = useState<SaveState>({ kind: "saved", secondsAgo: 0 });
   const [overlay, setOverlay] = useState<{ heading: string; body: string; pending: boolean } | null>(null);
 
@@ -665,7 +667,25 @@ export function ExamSession({
       const insideEditor =
         target instanceof Element ? target.closest("[data-editor-root]") !== null : false;
       if (refuseOutsidePaste && insideEditor && !copiedTexts.current.has(text)) {
+        /**
+         * Both of these, and the second one is why this listener is
+         * registered in the CAPTURE phase (Phase 12t).
+         *
+         * `preventDefault` alone stops the browser's own insertion, and
+         * that was not enough: Monaco and CodeMirror each handle `paste` on
+         * their own hidden textarea and insert the text themselves. A
+         * listener on `document` in the bubble phase runs AFTER the
+         * editor's, so the refusal notice appeared and the text landed
+         * anyway — a refusal in name only, which is worse than no refusal
+         * because an invigilator chose it believing it did something.
+         * Capture runs this first; `stopPropagation` then keeps the
+         * editor's own handler from ever seeing the event.
+         *
+         * Only on the refusal path. An allowed paste is not touched at all,
+         * so the editor handles it exactly as it always did.
+         */
         event.preventDefault();
+        event.stopPropagation();
         setPasteRefusedAt(Date.now());
       }
       void sha256Hex(text).then((hash) => {
@@ -694,12 +714,14 @@ export function ExamSession({
 
     document.addEventListener("copy", onCopy);
     document.addEventListener("cut", onCut);
-    document.addEventListener("paste", onPaste);
+    // Capture, so a refusal lands before the editor's own paste handler;
+    // see the comment on the refusal above.
+    document.addEventListener("paste", onPaste, true);
     document.addEventListener("contextmenu", onContextMenu);
     return () => {
       document.removeEventListener("copy", onCopy);
       document.removeEventListener("cut", onCut);
-      document.removeEventListener("paste", onPaste);
+      document.removeEventListener("paste", onPaste, true);
       document.removeEventListener("contextmenu", onContextMenu);
     };
   }, [record, atMs, persist, revoked, refuseOutsidePaste]);
@@ -866,6 +888,7 @@ export function ExamSession({
       }
       if (!response.ok) throw new Error(String(response.status));
       setStatus("SUBMITTED");
+      setHandedIn(true);
       setRevoked("submitted");
     } catch {
       // The sitting is NOT closed, so the candidate can try again — and
@@ -879,7 +902,26 @@ export function ExamSession({
     void navigator.clipboard?.writeText(text).catch(() => undefined);
   }, []);
 
-  if (!question) {
+  /**
+   * A paper with nothing on it (Phase 6c), and the day that guard ate a
+   * sitting (Phase 12t).
+   *
+   * It used to read `if (!question)`, which was exactly right when a paper
+   * held coding questions and nothing else: no current question meant no
+   * questions. Phase 12r merged multiple-choice questions into the same
+   * palette, and from that moment `question` was undefined whenever the
+   * CURRENT item was a multiple-choice question — so the first time a
+   * candidate clicked one, the whole sitting was replaced by "This paper
+   * has no questions. Tell your invigilator.": no palette, no clock, no
+   * editor, no way back, mid-exam. On an all-multiple-choice paper it fired
+   * on the first render.
+   *
+   * The condition is now the thing it was always meant to say. Found by the
+   * exam journey (`e2e/exam-journey.spec.ts`), on its first run, which is
+   * the fifth place this blind spot has been found and the first one that
+   * cost a candidate their whole screen.
+   */
+  if (items.length === 0) {
     return (
       <main className="p-8">
         <p className="text-sm text-text-secondary">This paper has no questions. Tell your invigilator.</p>
@@ -990,6 +1032,7 @@ export function ExamSession({
         total={counts.total}
         status={status}
         revoked={revoked}
+        handedIn={handedIn}
       />
 
       <FocusOverlay

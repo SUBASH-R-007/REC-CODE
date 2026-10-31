@@ -49,12 +49,20 @@ export function ReadinessCheck({
   durationMinutes,
   questionCount,
   proctorNote,
+  needsDevice,
   sitInPopup = false,
 }: {
   readonly slug: string;
   readonly durationMinutes: number;
   readonly questionCount: number;
   readonly proctorNote: string | null;
+  /**
+   * Phase 12t. True only for the modes SPEC §5 binds to a device
+   * (REMOTE_MONITORED, LAB_SUPERVISED). On every other paper the device
+   * step has nothing to check and says so, instead of asking the candidate
+   * to prove something about a machine that was never enrolled.
+   */
+  readonly needsDevice: boolean;
   /** Phase 12s. Open the sitting in its own window rather than this tab. */
   readonly sitInPopup?: boolean;
 }) {
@@ -204,7 +212,7 @@ export function ReadinessCheck({
           find out their key is not working while an invigilator still has
           time to enrol the machine or issue a loaner.
         */}
-        <DeviceCheck slug={slug} onVerified={() => pass("device")} />
+        <DeviceCheck slug={slug} required={needsDevice} onVerified={() => pass("device")} />
       </ol>
 
       {/* The consent moment. */}

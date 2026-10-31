@@ -112,6 +112,19 @@ export default defineConfig({
       fullyParallel: false,
     },
     /**
+     * Phase 12t: a candidate sits a mixed paper, from authoring to handed
+     * in. The exam surface had no browser test at all, and every defect of
+     * 12q-12s lived there. NOT in any gate: it needs a live stack, and the
+     * Run step needs a judge. Run it by name, `--project=exam`, with
+     * `E2E_JUDGE=1` for Run.
+     */
+    {
+      name: "exam",
+      testMatch: /exam-journey\.spec\.ts$/,
+      outputDir: "./test-results/exam",
+      fullyParallel: false,
+    },
+    /**
      * Phase 12p: the problem kinds of 12k-12n read in a browser as a
      * student - the debugging counter between keystrokes, the SQL grammar
      * under 768 px, and a SQL question opened from a running contest's

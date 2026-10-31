@@ -32,6 +32,7 @@ export function ExamBottomBar({
   total,
   status,
   revoked,
+  handedIn = false,
 }: {
   readonly canGoPrevious: boolean;
   readonly onPrevious: () => void;
@@ -47,6 +48,8 @@ export function ExamBottomBar({
   readonly total: number;
   readonly status: string;
   readonly revoked: string | null;
+  /** True when THIS page handed the paper in, rather than being refused. */
+  readonly handedIn?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const over = revoked !== null;
@@ -59,8 +62,19 @@ export function ExamBottomBar({
   };
 
   if (over) {
-    const message =
-      ATTEMPT_REVOKE_MESSAGES[revoked as AttemptRevokeReason] ?? "This sitting has ended.";
+    /**
+     * What a candidate reads the moment their paper is in (Phase 12t).
+     *
+     * `ATTEMPT_REVOKE_MESSAGES.submitted` is "This attempt has already been
+     * submitted." — which is the right sentence for a REQUEST arriving
+     * against a finished sitting, and the wrong one for the person who just
+     * pressed Submit: "already" reads as though something had gone wrong,
+     * at the one moment a candidate most needs to be told plainly that they
+     * are done. Same reason the pill and the console say what they say.
+     */
+    const message = handedIn
+      ? "Handed in. Your answers are saved — you can close this window."
+      : ATTEMPT_REVOKE_MESSAGES[revoked as AttemptRevokeReason] ?? "This sitting has ended.";
     return (
       <footer className="flex min-h-14 shrink-0 items-center gap-3 border-t border-border bg-elevated px-4 py-3">
         <p role="status" aria-live="assertive" className="text-sm font-medium text-text">

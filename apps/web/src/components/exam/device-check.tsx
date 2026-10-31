@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { Check, X } from "lucide-react";
 
@@ -21,13 +21,50 @@ import { Check, X } from "lucide-react";
  */
 export function DeviceCheck({
   slug,
+  required,
   onVerified,
 }: {
   readonly slug: string;
+  /**
+   * Whether this paper is device-bound at all (Phase 12t).
+   *
+   * It used to find out only when the candidate pressed the button — so on
+   * a paper that needs no device, every candidate read "this assessment is
+   * bound to a device your department enrolled for you", which was not
+   * true, and could not start until they pressed a button about it. The
+   * readiness page knows the proctor mode, `requiresDeviceAssertion` is a
+   * pure function of it, and this step is a gate on the Start button: the
+   * cost of the old shape was a candidate doubting their setup in the
+   * minute before an exam.
+   *
+   * It decides the UI only. The server still refuses `needs_device` at
+   * start if an assertion was required and is missing, so a page that lied
+   * about this would buy nothing.
+   */
+  readonly required: boolean;
   readonly onVerified: (required: boolean) => void;
 }) {
-  const [state, setState] = useState<"idle" | "busy" | "verified" | "not_required">("idle");
+  const [state, setState] = useState<"idle" | "busy" | "verified" | "not_required">(
+    required ? "idle" : "not_required",
+  );
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Reported ONCE, so the readiness gate opens without the candidate having
+   * to answer a question about a machine nobody enrolled.
+   *
+   * The ref is load-bearing, not caution: `onVerified` is an inline arrow
+   * in the parent, so it is a new function on every render, and the state it
+   * sets is a new object — without the guard this effect would call it
+   * again on the render it caused, for ever. The first draft did exactly
+   * that.
+   */
+  const reported = useRef(false);
+  useEffect(() => {
+    if (required || reported.current) return;
+    reported.current = true;
+    onVerified(false);
+  }, [required, onVerified]);
 
   const verify = useCallback(async () => {
     setError(null);

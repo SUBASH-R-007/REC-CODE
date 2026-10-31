@@ -1,4 +1,4 @@
-import { paperQuestionCount } from "@recx/shared";
+import { isFinished, paperQuestionCount, requiresDeviceAssertion, type AttemptStatus } from "@recx/shared";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
@@ -47,6 +47,8 @@ export default async function ReadinessPage({
       durationSec: true,
       proctorMode: true,
       sitInPopup: true,
+      id: true,
+      maxAttempts: true,
       affectsPlacementEligibility: true,
       _count: { select: { problems: true, mcqs: true } },
     },
@@ -71,8 +73,31 @@ export default async function ReadinessPage({
         ? "This assessment runs in Safe Exam Browser. Start it from the kiosk build, not from an ordinary browser."
         : null;
 
-  const refusal =
-    refused && refused in START_REFUSAL_MESSAGES ? START_REFUSAL_MESSAGES[refused as StartRefusal] : null;
+  /**
+   * Whether there is anything left to start (Phase 12t).
+   *
+   * A candidate who had handed their paper in was still shown the whole
+   * readiness form: four checks and a consent box, and only after doing all
+   * of them did pressing Start tell them they had already finished. Found
+   * by the exam journey, whose last step could not press a button that the
+   * checks had not yet enabled. The server still decides — this is the same
+   * question asked early enough to be useful, and the honest answer to
+   * somebody re-opening the link is a sentence, not a form.
+   */
+  const latest = await db.assessmentAttempt.findFirst({
+    where: { assessmentId: assessment.id, userId: user.id },
+    orderBy: { attemptNumber: "desc" },
+    select: { status: true, attemptNumber: true },
+  });
+  const spent = latest?.attemptNumber ?? 0;
+  const over =
+    latest !== null && isFinished(latest.status as AttemptStatus) && spent >= assessment.maxAttempts;
+
+  const refusal = over
+    ? START_REFUSAL_MESSAGES[spent === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left"]
+    : refused && refused in START_REFUSAL_MESSAGES
+      ? START_REFUSAL_MESSAGES[refused as StartRefusal]
+      : null;
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -104,22 +129,42 @@ export default async function ReadinessPage({
         ) : null}
       </div>
 
-      <ReadinessCheck
-        slug={slug}
-        durationMinutes={minutes}
-        /**
-         * Both kinds (Phase 12s). Counting only the coding questions told a
-         * candidate with multiple-choice questions on their paper the wrong
-         * number before they started — the fourth place that mistake was
-         * made, which is why the rule is `paperQuestionCount` now.
-         */
-        questionCount={paperQuestionCount({
-          problems: { length: assessment._count.problems },
-          mcqs: { length: assessment._count.mcqs },
-        })}
-        proctorNote={proctorNote}
-        sitInPopup={assessment.sitInPopup}
-      />
+      {over ? (
+        <div className="px-6 pb-10">
+          <p className="text-sm text-text-secondary">
+            Nothing more to do here. Your result appears on your assessment list when it is published.
+          </p>
+        </div>
+      ) : (
+        <ReadinessCheck
+          slug={slug}
+          durationMinutes={minutes}
+          /**
+           * Both kinds (Phase 12s). Counting only the coding questions told a
+           * candidate with multiple-choice questions on their paper the wrong
+           * number before they started — the fourth place that mistake was
+           * made, which is why the rule is `paperQuestionCount` now.
+           */
+          questionCount={paperQuestionCount({
+            problems: { length: assessment._count.problems },
+            mcqs: { length: assessment._count.mcqs },
+          })}
+          proctorNote={proctorNote}
+          /**
+           * Whether this paper needs a registered device at all (Phase 12t).
+           *
+           * The device step used to find that out only when the candidate
+           * pressed "Check my device" — so on a paper that needs no device,
+           * every candidate was shown a paragraph saying their assessment was
+           * bound to a machine their department enrolled (it is not), and the
+           * Start button stayed disabled until they pressed a button about
+           * it. Found by the exam journey, which could not get past it. The
+           * mode is on this page already; the server still decides at start.
+           */
+          needsDevice={requiresDeviceAssertion(assessment.proctorMode)}
+          sitInPopup={assessment.sitInPopup}
+        />
+      )}
     </div>
   );
 }
