@@ -27,6 +27,63 @@ the number of slots, so every question below reduces to "how many slots".
 "Judged jobs" counts submissions **and** Run-button executions — Runs are
 judged on the same slots.
 
+## 2b. How much memory a judge host needs
+
+Memory follows from the slot, the same way throughput does. Every box lives
+on a RAM-backed tmpfs (`infra/judge/install-isolate.sh` mounts `box_root`
+as `tmpfs`, so teardown is `rm -rf` on RAM and nothing a submission writes
+reaches disk), and tmpfs pages are charged to the owning box's memory
+cgroup — so scratch space sits *inside* each box's limit rather than adding
+to it. The installer sizes that mount at `slots x 3 x 256 MB`, a ceiling,
+not a reservation.
+
+**The ceilings, per slot** (`packages/shared/src/limits.ts`):
+
+| Box | Memory limit | Scratch | Note |
+|---|---|---|---|
+| run | 256 MB default, **1 GB** per-problem ceiling | 256 MB (ceiling 512 MB) | `stack.equalsMemoryLimit`, so the stack is inside this number |
+| compile | **1 GB** | 256 MB | |
+| checker | **512 MB** | 256 MB | the interactor runs here on `INTERACTIVE` problems |
+
+A slot works one job at a time and its stages are sequential — compile,
+then the tests, then the checker — so the three ceilings do not add up. The
+concurrent peak is whichever stage is running:
+
+| Stage | Peak for one slot |
+|---|---|
+| compile | 1 GB |
+| run, default limits | 256 MB |
+| run + checker together (`INTERACTIVE`) | 768 MB |
+| run at the raised ceiling + checker | **1.5 GB** — the worst case the limits permit |
+
+**Plan at 2 GB per slot, plus 4 GB for the host** — the OS, the worker
+process, and page cache for the toolchains and the blob cache. That never
+meets the 1.5 GB ceiling, and it works out at **~2 GB per core**, since a
+production slot owns one physical core.
+
+| Host | Slots (§2) | Plan | Workable for ordinary program problems |
+|---|---|---|---|
+| 4-core | ~2 | 8 GB | 8 GB |
+| 8-core | ~5 | **16 GB** | 8 GB |
+| 16-core | ~11 | **32 GB** | 16 GB |
+| 32-core | ~23 | **64 GB** | 16–32 GB |
+
+The right order is cores first: a slot is pinned to one physical core, and
+`RECX_SLOTS` is capped at 100 with `RECX_BOX_BASE + RECX_SLOTS <= 100`
+(`apps/judge-worker/src/config.ts`), so cores bind before memory does.
+Choose the core count, read the slots off §2, then size RAM at 2 GB x slots
++ 4 GB. RAM beyond that buys no extra concurrency.
+
+**What a slot actually uses is far less.** §6.1 measured run memory of
+~0.5 MB for C and C++, 1.4 MB for Go through `bin/recx-go-build`, 8–10 MB
+for Node, 18–27 MB for Java, 22 MB for Kotlin, 34 MB for Python and 19–68
+MB for PyPy. The heaviest figure on that page is 280 MB for a cold `go
+build`, which is one reason Go compiles through `bin/recx-go-build`
+instead. So the 2 GB is headroom against a problem that raises its own
+limit and against an `INTERACTIVE` pair, not a working set. Resident memory
+per slot on a pinned production host, and `cs8`, are still to measure
+(§6.3).
+
 ## 3. Worked figures
 
 **One 8-core host ≈ 700–1,000 students in an active contest.** Five slots
@@ -238,6 +295,9 @@ slots of 1,000–1,200, or provision ~21 slots) stands until then.
 * Slots an 8-core production host sustains, pinned, before calibration drifts.
 * Queue wait at the p95 under a synthetic 5,000-student burst on a
   production-shaped fleet.
+* Resident memory per slot on a pinned production host, against the 2 GB
+  planning figure in §2b.
+* `cs8` compile and run cost, which §6.1 predates.
 * The web app's concurrent SSE ceiling per instance.
 
 ---
