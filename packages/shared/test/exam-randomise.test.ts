@@ -301,3 +301,52 @@ describe("parseAttemptLayout, on the version boundary", () => {
     expect(parseAttemptLayout(JSON.parse(JSON.stringify(v1)))).toEqual(v1);
   });
 });
+
+/**
+ * The language, frozen with the paper (Phase 12r.4).
+ *
+ * It used to be derived per request as "the first enabled language", so an
+ * administrator enabling a toolchain whose key sorts earlier while someone
+ * was part way through moved that candidate's whole paper to it — the
+ * starter code in the editor, the language the submission is created with
+ * and the language the Run route accepts all follow from it, so their
+ * editor would hold C++ while the server had decided the paper was C.
+ */
+describe("the language a layout freezes", () => {
+  it("is carried on v1 and on v2 alike", () => {
+    expect(resolveLayout({ questions: questions(2), seed: 1, language: "cpp20" })).toMatchObject({
+      v: 1,
+      language: "cpp20",
+    });
+    expect(resolveLayout({ questions: questions(2), seed: 1, mcqs: mcqs(1), language: "cpp20" })).toMatchObject({
+      v: 2,
+      language: "cpp20",
+    });
+  });
+
+  it("is absent when none was given, so an old attempt still parses", () => {
+    const layout = resolveLayout({ questions: questions(2), seed: 1 });
+    expect(layout.language).toBeUndefined();
+    expect(parseAttemptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("round-trips through the parser", () => {
+    const layout = resolveLayout({ questions: questions(2), seed: 3, language: "py312" });
+    expect(parseAttemptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("refuses a malformed one rather than serving a paper in no language", () => {
+    const good = resolveLayout({ questions: questions(1), seed: 3, language: "cpp20" });
+    for (const bad of [{ ...good, language: "" }, { ...good, language: 7 }, { ...good, language: null }]) {
+      expect(() => parseAttemptLayout(bad), JSON.stringify(bad)).toThrow(/malformed language/);
+    }
+  });
+
+  it("does not disturb the questions or the mcqs", () => {
+    // Adding it must not change what anybody was asked.
+    const without = resolveLayout({ questions: questions(5), seed: 77, mcqs: mcqs(2) });
+    const with_ = resolveLayout({ questions: questions(5), seed: 77, mcqs: mcqs(2), language: "cpp20" });
+    expect(with_.questions).toEqual(without.questions);
+    expect(with_.mcqs).toEqual(without.mcqs);
+  });
+});

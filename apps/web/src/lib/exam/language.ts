@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isLanguageKey, type LanguageKey } from "@recx/shared";
+import { isLanguageKey, type AttemptLayout, type LanguageKey } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -19,12 +19,12 @@ import { db } from "@/lib/db";
  *
  * So it lives here, once, and both ask it.
  *
- * It is a per-request value, not a per-attempt one: the language is not
- * written into the layout, so a paper sat today and resumed after an
- * administrator enables a new toolchain can change language underneath the
- * candidate. That is a real hole and not this slice's to close — closing
- * it means putting the language in the layout where the frozen versions
- * already live (docs/OPEN-QUESTIONS.md, Phase 6c).
+ * Phase 12r.4 closed the hole this used to carry. The language is now
+ * frozen into the attempt's layout at start, where the frozen version ids
+ * already live, so `languageOfSitting` below is what the exam surfaces
+ * ask; this function is the derivation behind it, used when a paper is
+ * first laid out and as the fallback for attempts begun before the field
+ * existed.
  */
 export async function examPaperLanguage(): Promise<LanguageKey> {
   const configs = await db.languageConfig.findMany({
@@ -33,4 +33,19 @@ export async function examPaperLanguage(): Promise<LanguageKey> {
     orderBy: { key: "asc" },
   });
   return configs.map((c) => c.key).find(isLanguageKey) ?? "cpp20";
+}
+
+/**
+ * The language ONE SITTING is answered in.
+ *
+ * The frozen value from the layout, or the derivation above for an attempt
+ * begun before the field existed. Every exam surface asks this rather than
+ * deriving its own: the editor's starter code, the submission's language
+ * and the Run route's validation all have to agree, and they agree because
+ * they read the same frozen string.
+ */
+export async function languageOfSitting(layout: Pick<AttemptLayout, "language">): Promise<LanguageKey> {
+  const frozen = layout.language;
+  if (frozen !== undefined && isLanguageKey(frozen)) return frozen;
+  return examPaperLanguage();
 }

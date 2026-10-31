@@ -6,7 +6,7 @@ import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
-import { examPaperLanguage } from "@/lib/exam/language";
+import { languageOfSitting } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import { enqueueJudge } from "@/lib/judge/queue";
@@ -107,7 +107,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
   if (!question) return json({ error: "That question is not part of this assessment." }, 404);
   // The paper fixes one language, derived in one place so the page and this
   // route cannot hand out different answers.
-  const paperLanguage = await examPaperLanguage();
+  const paperLanguage = await languageOfSitting(layout);
   if (body.data.language !== paperLanguage) {
     return json({ error: "That is not the language this paper is answered in." }, 400);
   }

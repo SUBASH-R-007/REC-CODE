@@ -127,6 +127,28 @@ export interface AttemptLayout {
   readonly questions: readonly LayoutQuestion[];
   /** Present only on v2, and only when the paper holds MCQs. */
   readonly mcqs?: readonly LayoutMcq[];
+  /**
+   * The toolchain key this paper is answered in, frozen with everything
+   * else (Phase 12r.4).
+   *
+   * It used to be derived per request as "the first enabled language",
+   * which meant a sitting could change language underneath the candidate:
+   * an administrator enabling a toolchain whose key sorts earlier, while
+   * someone was part way through, would move the whole paper to it. The
+   * starter code in the editor, the language the submission is created
+   * with and the language the Run route accepts all follow from it, so
+   * the candidate's editor would be holding C++ while the server had
+   * decided the paper was C.
+   *
+   * A layout is the write-once record of what a candidate was asked, and
+   * the language they were asked in belongs in it for the same reason the
+   * frozen version ids do.
+   *
+   * Optional because attempts started before this field existed do not
+   * carry it; readers fall back to deriving it, which is what they did
+   * for all of those attempts anyway.
+   */
+  readonly language?: string;
 }
 
 /** One multiple-choice question on a candidate's paper (Phase 12r). */
@@ -178,6 +200,8 @@ export function resolveLayout(args: {
   readonly randomiseOrder?: boolean;
   /** The paper's MCQs (Phase 12r). Absent or empty keeps the layout at v1. */
   readonly mcqs?: readonly AssessmentMcqInput[];
+  /** The toolchain key the paper is answered in (Phase 12r.4). */
+  readonly language?: string;
 }): AttemptLayout {
   const ordered = [...args.questions].sort((a, b) => a.position - b.position);
   const random = xoshiro128ss(args.seed);
@@ -206,9 +230,14 @@ export function resolveLayout(args: {
       v: 2,
       questions: codingQuestions(sequence, args.seed),
       mcqs,
+      ...(args.language === undefined ? {} : { language: args.language }),
     };
   }
-  return { v: 1, questions: codingQuestions(sequence, args.seed) };
+  return {
+    v: 1,
+    questions: codingQuestions(sequence, args.seed),
+    ...(args.language === undefined ? {} : { language: args.language }),
+  };
 }
 
 /**
@@ -246,6 +275,9 @@ export function parseAttemptLayout(value: unknown): AttemptLayout {
   }
   if (layout.v === 2 && (!Array.isArray(layout.mcqs) || layout.mcqs.length === 0)) {
     throw new Error("stored attempt layout is v2 but carries no mcqs");
+  }
+  if (layout.language !== undefined && (typeof layout.language !== "string" || layout.language.length === 0)) {
+    throw new Error("stored attempt layout has a malformed language");
   }
   if (layout.mcqs !== undefined) {
     if (!Array.isArray(layout.mcqs)) throw new Error("stored attempt layout has malformed mcqs");

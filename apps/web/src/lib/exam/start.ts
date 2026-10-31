@@ -16,6 +16,7 @@ import {
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
+import { examPaperLanguage } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
 import { hashUserAgent, requestIpHash } from "@/lib/ip";
@@ -267,6 +268,9 @@ export async function startOrResumeAttempt(args: {
   const layout = resolveLayout({
     questions: assessment.problems,
     seed,
+    // Frozen with the paper (Phase 12r.4), so enabling a toolchain while
+    // somebody is sitting cannot move their paper to it.
+    language: await examPaperLanguage(),
     mcqs: assessment.mcqs.map((mcq) => ({
       id: mcq.id,
       position: mcq.position,

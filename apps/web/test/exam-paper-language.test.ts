@@ -32,12 +32,25 @@ const CATALOGUE_KEYS = Object.keys(LANGUAGE_CATALOG);
 
 describe("the language a sitting sends to its routes", () => {
   it("is a catalogue key, which is what every exam route validates against", async () => {
-    const { examPaperLanguage } = await import("@/lib/exam/language");
-    // The function the paper and the Run route both ask (12q.5).
-    expect(typeof examPaperLanguage).toBe("function");
-    // Its fallback has to be a real key, or a deployment with no enabled
+    const mod = await import("@/lib/exam/language");
+    // One derivation, and one reader the exam surfaces ask (12q.5, 12r.4).
+    expect(typeof mod.examPaperLanguage).toBe("function");
+    expect(typeof mod.languageOfSitting).toBe("function");
+    // The fallback has to be a real key, or a deployment with no enabled
     // language would hand out one nothing accepts.
     expect(CATALOGUE_KEYS).toContain("cpp20");
+  });
+
+  it("is read from the sitting's own layout, not derived per request", () => {
+    /**
+     * Phase 12r.4. Deriving it per request meant an administrator enabling
+     * a toolchain whose key sorts earlier, while somebody was part way
+     * through, moved that candidate's whole paper to it.
+     */
+    expect(read("src/lib/exam/language.ts")).toContain("export async function languageOfSitting");
+    for (const rel of ["src/server/queries/exam.ts", "src/app/api/exam/[attemptId]/run/route.ts"]) {
+      expect(read(rel), rel).toContain("languageOfSitting(layout)");
+    }
   });
 
   it("is named for what it is: the paper emits a key AND an editor mode", () => {
