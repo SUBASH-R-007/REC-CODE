@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
 import { flagAttemptIfNeeded } from "@/lib/integrity/flag";
 import { deriveSnapshotJumps } from "@/lib/exam/snapshot-jump";
+import { markAttemptMcqs } from "@/lib/exam/mcq";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import type { AttemptGuardOk } from "@/lib/exam/attempt";
 
@@ -58,11 +59,51 @@ export async function submitAttempt(
   const { attempt, now } = guard;
   const byQuestion = new Map(answers.map((answer) => [answer.questionId, answer]));
 
+  /**
+   * The multiple-choice half, marked first (Phase 12r).
+   *
+   * Above the branch below, not inside it. A paper that is ALL
+   * multiple-choice sends no coding answers at all, so it takes the
+   * "nothing to submit" path — and marking the MCQs only on the other path
+   * meant the one kind of paper where the MCQs are the whole thing was the
+   * one where nothing recorded them. Found by sitting one.
+   *
+   * It needs no judge, so there is nothing to wait for, and it runs before
+   * the status moves because once the attempt is SUBMITTED the guard
+   * refuses everything from that client. Behind a catch because it must
+   * never cost a candidate their submission: the marks are recomputed on
+   * read anyway, so a failure here loses a note in an audit row, not an
+   * answer.
+   */
+  let mcqTotals;
+  try {
+    const totals = await markAttemptMcqs({ attemptId: attempt.id, layout });
+    if (totals.marks.length > 0) {
+      mcqTotals = {
+        correct: totals.correct,
+        wrong: totals.wrong,
+        blank: totals.blank,
+        corrupt: totals.corrupt,
+        points: totals.points,
+        maxPoints: totals.maxPoints,
+      };
+      if (totals.corrupt > 0) {
+        // Somebody's marks are at stake and this is not a candidate's
+        // mistake; it should be looked at rather than averaged away.
+        console.error(`[exam] attempt ${attempt.id}: ${totals.corrupt} multiple-choice answer(s) could not be mapped`);
+      }
+    }
+  } catch (error) {
+    console.error(`[exam] attempt ${attempt.id}: marking the multiple-choice half failed`, error);
+  }
+
   const language = answers[0]?.language;
   if (language === undefined) {
-    // Nothing to submit at all: still finalise, so the sitting closes.
+    // No code to judge — an all-multiple-choice paper, or a blank one.
+    // Still finalise, so the sitting closes, and still record what the
+    // questions came to.
     const moved = await finalise(attempt.id, now);
-    if (moved) await record(attempt.id, attempt.userId, [], answers.length, now);
+    if (moved) await record(attempt.id, attempt.userId, [], answers.length, now, mcqTotals);
     return { submitted: moved, submissionIds: [], blank: layout.questions.length };
   }
 
@@ -132,7 +173,7 @@ export async function submitAttempt(
   // ── 3. The status, last ────────────────────────────────────────────────
   const moved = await finalise(attempt.id, now);
   if (!moved) return { submitted: false, submissionIds, blank, reason: "already_finished" };
-  await record(attempt.id, attempt.userId, submissionIds, blank, now);
+  await record(attempt.id, attempt.userId, submissionIds, blank, now, mcqTotals);
 
   /**
    * Phase 11b: derive SNAPSHOT_JUMP, now that the final solution exists.
@@ -218,6 +259,14 @@ async function record(
   submissionIds: readonly string[],
   blank: number,
   now: Date,
+  /**
+   * What the multiple-choice half came to (Phase 12r). In the audit row
+   * rather than on the attempt: it is not a score, it is a note of what
+   * was marked at the moment the candidate handed in, so a result queried
+   * months later can be held against what the sitting said at the time.
+   * The marking itself is recomputed on read from rows that cannot drift.
+   */
+  mcq?: { correct: number; wrong: number; blank: number; corrupt: number; points: number; maxPoints: number },
 ): Promise<void> {
   await audit({
     actorId: userId,
@@ -230,6 +279,7 @@ async function record(
       at: now.toISOString(),
       submissions: submissionIds.length,
       blank,
+      ...(mcq ? { mcq } : {}),
     },
   });
 }

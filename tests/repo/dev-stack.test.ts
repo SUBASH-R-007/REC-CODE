@@ -25,12 +25,28 @@ import { abs, findFiles, readRepoFile } from "./support/repo";
  *      when asked. `scripts/dev/stack-up.ps1` holds it open, and the
  *      runbook has to point at it or nobody will run it.
  *
- * These are assertions about documentation and examples because that is
- * where the mistake lives. Nothing here touches the running stack.
+ * These began as assertions about documentation and examples, because that
+ * is where the mistake was found first. Phase 12r.3 found it somewhere
+ * else: two of the opt-in database tests had the by-name form as their
+ * default connection string while forty-nine others used the loopback
+ * address, so on a host whose IPv6 loopback is unserved exactly those two
+ * failed with "Can't reach database server" — which reads like a dead
+ * database rather than a resolution order, and cost a gate run to tell
+ * apart. The rule was already written down and already fenced; the fence
+ * just did not look where the mistake recurred. It does now.
+ *
+ * Nothing here touches the running stack.
  */
 
 /** Files a developer copies into place, or runs commands out of, verbatim. */
 const COPIED = [".env.example", "apps/web/.env.example", "docs/RUNBOOK.md"] as const;
+
+/**
+ * The address this file forbids, assembled rather than written, so the
+ * fence does not match itself — the same trick `forbidden-words.test.ts`
+ * uses for the phrases it bans.
+ */
+const BY_NAME = new RegExp("@" + "localhost" + ":5433");
 
 const STACK_SCRIPT = "scripts/dev/stack-up.ps1";
 
@@ -39,10 +55,30 @@ describe("the development database address", () => {
     const offenders = readRepoFile(rel)
       .split("\n")
       .map((line, index) => ({ line, at: index + 1 }))
-      .filter(({ line }) => /@localhost:5433/.test(line));
+      .filter(({ line }) => BY_NAME.test(line));
     expect(
       offenders.map(({ at, line }) => `${rel}:${at}: ${line.trim()}`),
       "Windows resolves localhost to ::1, which WSL2 does not serve: use 127.0.0.1 (docs/RUNBOOK.md §1.1)",
+    ).toEqual([]);
+  });
+
+  it("is the IPv4 loopback in every test's fallback too, never the host name", () => {
+    /**
+     * Where it recurred. A test that names the host instead of the
+     * loopback passes on one machine and fails on the next for a reason
+     * that looks nothing like its cause.
+     */
+    const offenders = findFiles({ extensions: [".ts"] })
+      .filter((rel) => rel.includes("test"))
+      .flatMap((rel) =>
+        readRepoFile(rel)
+          .split("\n")
+          .map((line, index) => ({ rel, line, at: index + 1 }))
+          .filter(({ line }) => BY_NAME.test(line) && line.includes("??")),
+      );
+    expect(
+      offenders.map(({ rel, at, line }) => `${rel}:${at}: ${line.trim()}`),
+      "Windows resolves the host name to ::1, which WSL2 does not serve: use 127.0.0.1 (docs/RUNBOOK.md §1.1)",
     ).toEqual([]);
   });
 

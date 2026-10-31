@@ -6,7 +6,9 @@ import { requirePageRole } from "@/lib/auth/guards";
 import { formatCampusDateTime } from "@/lib/help/copy";
 import { getAssessmentDetail } from "@/server/queries/admin-assessments";
 import {
+  AddMcqForm,
   AddQuestionForm,
+  RemoveMcqButton,
   RemoveQuestionButton,
   ScheduleHallForm,
   StatusButtons,
@@ -36,7 +38,13 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
 
   const draft = assessment.status === "DRAFT";
   const needsAllowlist = assessment.proctorMode === "LAB_SUPERVISED";
-  const nextPosition = (assessment.problems.at(-1)?.position ?? 0) + 1;
+  /**
+   * The next free number in the palette, which is ONE list across both
+   * kinds (Phase 12r): suggesting a number a coding question already holds
+   * would mean the author's first attempt is always refused.
+   */
+  const nextPosition =
+    Math.max(0, ...assessment.problems.map((p) => p.position), ...assessment.mcqs.map((m) => m.position)) + 1;
 
   return (
     <div className="max-w-4xl">
@@ -146,6 +154,59 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
         {draft ? (
           <div className="mt-5 border-t border-border pt-5">
             <AddQuestionForm assessmentId={assessment.id} nextPosition={nextPosition} />
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="mb-6 p-5">
+        <CardHeader title={`Multiple-choice questions (${assessment.mcqs.length})`} />
+        <p className="mt-1 text-xs text-text-secondary">
+          Marked without a judge: one mark for the right option, nothing for a wrong one, and nothing taken off. Each
+          candidate sees the options in their own order, so &ldquo;the third one&rdquo; is no use to a neighbour.
+        </p>
+        {assessment.mcqs.length === 0 ? (
+          <div className="mt-4">
+            <EmptyState title="No multiple-choice questions" description="A paper may be all code, all questions, or a mix." />
+          </div>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-border bg-elevated text-xs uppercase tracking-wide text-text-secondary">
+                <tr>
+                  <th className={TD}>#</th>
+                  <th className={TD}>Question</th>
+                  <th className={TD}>Answer</th>
+                  <th className={TD}>Marks</th>
+                  {draft ? <th className={TD} /> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {assessment.mcqs.map((m) => (
+                  <tr key={m.id} className="border-b border-border last:border-0">
+                    <td className={`${TD} tabular-nums`}>{m.position}</td>
+                    <td className={TD}>
+                      <span className="block max-w-prose">{m.stem}</span>
+                      <span className="mt-1 block text-xs text-text-secondary">{m.options.length} options</span>
+                    </td>
+                    {/* The author needs to see which one they marked right;
+                        this page is staff-only and the candidate's view has
+                        no field for it at all. */}
+                    <td className={TD}>{m.options[m.correctIndex] ?? "—"}</td>
+                    <td className={`${TD} tabular-nums`}>{m.points}</td>
+                    {draft ? (
+                      <td className={TD}>
+                        <RemoveMcqButton assessmentMcqId={m.id} />
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {draft ? (
+          <div className="mt-5 border-t border-border pt-5">
+            <AddMcqForm assessmentId={assessment.id} nextPosition={nextPosition} />
           </div>
         ) : null}
       </Card>

@@ -36,7 +36,8 @@ export function ExamBottomBar({
   readonly canGoPrevious: boolean;
   readonly onPrevious: () => void;
   readonly onMarkAndNext: () => void;
-  readonly onClear: () => void;
+  /** An editor's action. Absent on a multiple-choice question (Phase 12r). */
+  readonly onClear?: () => void;
   readonly onSaveAndNext: () => void;
   /** Run the samples (Phase 12q.5). Absent on a question with none. */
   readonly onRun?: () => void;
@@ -53,7 +54,7 @@ export function ExamBottomBar({
   const handlers: Readonly<Record<string, () => void>> = {
     previous: onPrevious,
     markAndNext: onMarkAndNext,
-    clear: onClear,
+    clear: onClear ?? (() => undefined),
     saveAndNext: onSaveAndNext,
   };
 
@@ -72,7 +73,7 @@ export function ExamBottomBar({
 
   return (
     <footer className="flex h-14 shrink-0 items-center gap-2 border-t border-border bg-elevated px-4">
-      {EXAM_BOTTOM_BAR_ACTIONS.map((action) => (
+      {EXAM_BOTTOM_BAR_ACTIONS.filter((action) => action.id !== "clear" || onClear !== undefined).map((action) => (
         <button
           key={action.id}
           type="button"

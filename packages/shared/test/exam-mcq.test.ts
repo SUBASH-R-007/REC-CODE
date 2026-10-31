@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { markMcq, markMcqs, storedIndexOf, type McqMarkingInput } from "../src/exam-mcq";
+import { markMcq, markMcqs, paperQuestionCount, storedIndexOf, type McqMarkingInput } from "../src/exam-mcq";
 
 /**
  * Marking the multiple-choice half of a paper (Phase 12r).
@@ -118,5 +118,36 @@ describe("markMcqs", () => {
     ]);
     expect(totals.points).toBe(11);
     expect(totals.maxPoints).toBe(11);
+  });
+});
+
+/**
+ * How many questions a paper asks (Phase 12r).
+ *
+ * Trivial arithmetic, and it has its own test because the same mistake was
+ * made three times in one slice — publishing, starting and submitting each
+ * counted the coding questions alone, so an all-multiple-choice paper
+ * could not be published, could not be opened, and when it was finally
+ * sat, nothing recorded what its questions came to. Every one of them read
+ * naturally and none was caught by a type.
+ */
+describe("paperQuestionCount", () => {
+  it("counts both kinds", () => {
+    expect(paperQuestionCount({ problems: { length: 3 }, mcqs: { length: 2 } })).toBe(5);
+  });
+
+  it("is zero only when there is neither", () => {
+    expect(paperQuestionCount({ problems: { length: 0 }, mcqs: { length: 0 } })).toBe(0);
+    expect(paperQuestionCount({})).toBe(0);
+  });
+
+  it("counts an all-multiple-choice paper, which is the case that was broken", () => {
+    expect(paperQuestionCount({ problems: { length: 0 }, mcqs: { length: 4 } })).toBe(4);
+    expect(paperQuestionCount({ mcqs: { length: 1 } })).toBe(1);
+  });
+
+  it("counts an all-code paper, which never was", () => {
+    expect(paperQuestionCount({ problems: { length: 2 } })).toBe(2);
+    expect(paperQuestionCount({ problems: { length: 2 }, mcqs: null })).toBe(2);
   });
 });

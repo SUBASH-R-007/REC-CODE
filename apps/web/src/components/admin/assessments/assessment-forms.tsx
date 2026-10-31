@@ -4,10 +4,12 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, ListPlus, Play, Plus, Trash2 } from "lucide-react";
 import { ASSESSMENT_PROCTOR_MODES, FOCUS_LIMIT_ACTIONS } from "@recx/shared";
-import { Button, Field, Input, useToast } from "@recx/design";
+import { Button, Field, Input, Textarea, useToast } from "@recx/design";
 import {
+  addAssessmentMcq,
   addAssessmentProblem,
   createAssessment,
+  removeAssessmentMcq,
   removeAssessmentProblem,
   scheduleExamSession,
   setAssessmentStatus,
@@ -238,6 +240,108 @@ export function AddQuestionForm({ assessmentId, nextPosition }: { assessmentId: 
       </Button>
       {error ? <p role="alert" className="w-full text-sm text-danger">{error}</p> : null}
     </form>
+  );
+}
+
+/**
+ * Add a multiple-choice question to a draft paper (Phase 12r).
+ *
+ * The options are a textarea, one per line, because that is how somebody
+ * writes four options — a repeating set of fields for a thing with no
+ * fixed count is a form nobody enjoys, and the aptitude importer already
+ * takes them this way. Blank lines are dropped by the action, so a
+ * trailing newline is not an error message.
+ *
+ * The answer is a NUMBER an author counts off the list they just typed,
+ * which is 1-based for exactly that reason; the action converts it once at
+ * the boundary. Asking for the answer's text instead would mean matching
+ * strings, and a typo would then be a question with no right answer.
+ */
+export function AddMcqForm({ assessmentId, nextPosition }: { assessmentId: string; nextPosition: number }) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <form
+      className="space-y-3"
+      action={(data) =>
+        start(async () => {
+          setError(null);
+          const result = await addAssessmentMcq({
+            assessmentId,
+            position: String(data.get("mcqPosition") ?? ""),
+            points: String(data.get("mcqPoints") ?? "1"),
+            stem: String(data.get("stem") ?? ""),
+            options: String(data.get("options") ?? ""),
+            answer: String(data.get("answer") ?? "1"),
+          });
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+          toast(`Question ${result.data.position} added with ${result.data.options} options.`, "success");
+          router.refresh();
+        })
+      }
+    >
+      <Field label="Question" htmlFor="stem">
+        <Textarea id="stem" name="stem" rows={3} required placeholder="Which of these is a stable sort?" />
+      </Field>
+      <Field label="Options, one per line" htmlFor="options">
+        <Textarea
+          id="options"
+          name="options"
+          rows={4}
+          required
+          spellCheck={false}
+          placeholder={["Quicksort", "Merge sort", "Heapsort"].join(String.fromCharCode(10))}
+        />
+      </Field>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Position" htmlFor="mcqPosition" className="w-24">
+          <Input id="mcqPosition" name="mcqPosition" inputMode="numeric" defaultValue={String(nextPosition)} required />
+        </Field>
+        <Field label="Answer (line number)" htmlFor="answer" className="w-40">
+          <Input id="answer" name="answer" inputMode="numeric" defaultValue="1" required />
+        </Field>
+        <Field label="Marks" htmlFor="mcqPoints" className="w-24">
+          <Input id="mcqPoints" name="mcqPoints" inputMode="numeric" defaultValue="1" />
+        </Field>
+        <Button type="submit" loading={pending}>
+          {!pending && <ListPlus className="h-4 w-4" aria-hidden />}
+          Add question
+        </Button>
+      </div>
+      {error ? (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+export function RemoveMcqButton({ assessmentMcqId }: { assessmentMcqId: string }) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      loading={pending}
+      onClick={() =>
+        start(async () => {
+          const result = await removeAssessmentMcq({ assessmentMcqId });
+          toast(result.ok ? `Question ${result.data.position} removed.` : result.error, result.ok ? "success" : "error");
+          router.refresh();
+        })
+      }
+    >
+      Remove
+    </Button>
   );
 }
 

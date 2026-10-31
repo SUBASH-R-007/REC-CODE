@@ -9,6 +9,7 @@ import {
   FOCUS_LIMIT_ACTIONS,
   LAB_NEEDS_ALLOWLIST_MESSAGE,
   PLACEMENT_REQUIRES_LAB_MESSAGE,
+  paperQuestionCount,
   parseCidr,
   mayAffectPlacement,
   requiresCidrAllowlist,
@@ -213,6 +214,18 @@ export async function addAssessmentProblem(
       throw new ValidationError("A published assessment's question set is fixed. Create another assessment instead.");
     }
 
+    // The mirror of the check in addAssessmentMcq: one numbered list, and
+    // the author hears about it in words rather than as a reference code.
+    const clash = await db.assessmentMcq.findFirst({
+      where: { assessmentId: assessment.id, position: parsed.position },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new ValidationError(
+        `Position ${parsed.position} is already a multiple-choice question on this paper. A candidate sees one numbered list, so pick another number.`,
+      );
+    }
+
     const problem = await db.problem.findUnique({
       where: { slug: parsed.problemSlug },
       select: {
@@ -312,6 +325,139 @@ export async function addAssessmentProblem(
 
 const removeProblemSchema = z.object({ assessmentProblemId: idSchema });
 export type RemoveAssessmentProblemInput = z.input<typeof removeProblemSchema>;
+
+/**
+ * The multiple-choice half of a paper (Phase 12r).
+ *
+ * `options` arrives as the author typed them, one per line, because that is
+ * how somebody writes four options: a repeating set of fields for a thing
+ * with no fixed count is a form nobody enjoys, and a textarea is what the
+ * aptitude importer already takes. Blank lines are dropped rather than
+ * refused — a trailing newline is not a mistake worth a red message.
+ *
+ * `correctIndex` is 1-based in the form and 0-based in the row, because an
+ * author counting options on a screen starts at one and every CHECK and
+ * every comparison downstream starts at zero. Converted here, once, at the
+ * boundary.
+ */
+const addMcqSchema = z.object({
+  assessmentId: idSchema,
+  position: intFromInput({ min: ASSESSMENT_LIMITS.position.min, max: ASSESSMENT_LIMITS.position.max, label: "The position" }),
+  points: intFromInput({ min: 1, max: 10_000, label: "Points" }),
+  stem: z.string().trim().min(1, "Write the question.").max(4_000, "That question is too long."),
+  options: z.string().max(4_000, "Those options are too long."),
+  /** 1-based, as the author sees them. */
+  answer: intFromInput({ min: 1, max: 8, label: "The answer" }),
+});
+export type AddAssessmentMcqInput = z.input<typeof addMcqSchema>;
+
+const removeMcqSchema = z.object({ assessmentMcqId: idSchema });
+export type RemoveAssessmentMcqInput = z.input<typeof removeMcqSchema>;
+
+export async function addAssessmentMcq(
+  input: AddAssessmentMcqInput,
+): Promise<ActionResult<{ id: string; position: number; options: number }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = addMcqSchema.parse(input);
+
+    const assessment = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: { id: true, status: true },
+    });
+    if (!assessment) throw new NotFoundError("That assessment was not found.");
+    if (assessment.status !== "DRAFT") {
+      throw new ValidationError("A published assessment's question set is fixed. Create another assessment instead.");
+    }
+
+    const options = parsed.options
+      .split(/\r?\n/)
+      .map((option) => option.trim())
+      .filter((option) => option.length > 0);
+    if (options.length < 2) throw new ValidationError("Give at least two options, one per line. One option is not a choice.");
+    if (options.length > 8) throw new ValidationError("Eight options is the most a question can have.");
+    if (new Set(options).size !== options.length) {
+      // Not a database rule, but a question with the same option twice has
+      // two right answers or none, and the author is the only person who
+      // can still fix it.
+      throw new ValidationError("Two of those options are identical.");
+    }
+    if (parsed.answer > options.length) {
+      throw new ValidationError(`There are only ${options.length} options, so the answer cannot be number ${parsed.answer}.`);
+    }
+
+    /**
+     * The palette is one numbered list, said here so an author reads a
+     * sentence. `AssessmentMcq_position_free` refuses it too and is the
+     * backstop — but a trigger raised inside `runAction` becomes
+     * "Something went wrong, quote reference …", which tells whoever is
+     * building the paper nothing they can act on.
+     */
+    const clash = await db.assessmentProblem.findFirst({
+      where: { assessmentId: assessment.id, position: parsed.position },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new ValidationError(
+        `Position ${parsed.position} is already a coding question on this paper. A candidate sees one numbered list, so pick another number.`,
+      );
+    }
+
+    const row = await db.assessmentMcq.create({
+      data: {
+        assessmentId: assessment.id,
+        position: parsed.position,
+        stem: parsed.stem,
+        options,
+        // 1-based in the form, 0-based in the row.
+        correctIndex: parsed.answer - 1,
+        points: parsed.points,
+      },
+      select: { id: true, position: true },
+    });
+    await audit({
+      actorId: actor.id,
+      action: "assessment.mcq_added",
+      entityType: "Assessment",
+      entityId: assessment.id,
+      sensitivity: "SENSITIVE",
+      // Never the answer: an audit row is read by more people than a paper is.
+      metadata: { position: String(row.position), options: String(options.length) },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath(`/admin/assessments/${assessment.id}`);
+    return { id: row.id, position: row.position, options: options.length };
+  }, "addAssessmentMcq");
+}
+
+export async function removeAssessmentMcq(
+  input: RemoveAssessmentMcqInput,
+): Promise<ActionResult<{ position: number }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = removeMcqSchema.parse(input);
+    const row = await db.assessmentMcq.findUnique({
+      where: { id: parsed.assessmentMcqId },
+      select: { id: true, position: true, assessment: { select: { id: true, status: true } } },
+    });
+    if (!row) throw new NotFoundError("That question was not found.");
+    if (row.assessment.status !== "DRAFT") {
+      throw new ValidationError("A published assessment's question set is fixed.");
+    }
+    await db.assessmentMcq.delete({ where: { id: row.id } });
+    await audit({
+      actorId: actor.id,
+      action: "assessment.mcq_removed",
+      entityType: "Assessment",
+      entityId: row.assessment.id,
+      sensitivity: "SENSITIVE",
+      metadata: { position: String(row.position) },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath(`/admin/assessments/${row.assessment.id}`);
+    return { position: row.position };
+  }, "removeAssessmentMcq");
+}
 
 export async function removeAssessmentProblem(
   input: RemoveAssessmentProblemInput,
@@ -455,7 +601,7 @@ export async function setAssessmentStatus(
         slug: true,
         status: true,
         proctorMode: true,
-        _count: { select: { problems: true, sessions: true } },
+        _count: { select: { problems: true, mcqs: true, sessions: true } },
       },
     });
     if (!assessment) throw new NotFoundError("That assessment was not found.");
@@ -463,7 +609,8 @@ export async function setAssessmentStatus(
       throw new ValidationError(`An assessment cannot go from ${assessment.status} to ${parsed.to}.`);
     }
     if (parsed.to === "PUBLISHED") {
-      if (assessment._count.problems === 0) {
+      // Either kind counts; see paperQuestionCount.
+      if (paperQuestionCount({ problems: { length: assessment._count.problems }, mcqs: { length: assessment._count.mcqs } }) === 0) {
         throw new ValidationError("Add at least one question before publishing: an empty paper is not a test.");
       }
       if (requiresCidrAllowlist(assessment.proctorMode) && assessment._count.sessions === 0) {

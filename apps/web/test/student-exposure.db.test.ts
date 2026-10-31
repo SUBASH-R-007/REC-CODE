@@ -1026,6 +1026,40 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ),
       status: [200],
     },
+    "api/exam/[attemptId]/run/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.attempt}/run`, {
+            method: "POST",
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            json: { questionId: ids.assessmentProblem, language: "cpp20", source: "int main(){}", atMs: 1000 },
+          }),
+        () => params({ attemptId: ids.attempt }),
+      ),
+      /**
+       * Phase 12q.5. The fixture's question has no SAMPLE cases, so the
+       * route answers 409 rather than queueing — which is the answer the
+       * canary wants anyway: what matters here is that nothing in the body
+       * carries a hidden test, and a refusal that names no test is the
+       * strongest form of that.
+       */
+      status: [200, 409],
+    },
+    "api/exam/[attemptId]/mcq/route.ts#POST": {
+      call: call(
+        () =>
+          studentRequest(`/api/exam/${ids.attempt}/mcq`, {
+            method: "POST",
+            headers: { "x-attempt-token": ATTEMPT_TOKEN },
+            json: { mcqId: "not-on-this-paper", chosenIndex: 0 },
+          }),
+        () => params({ attemptId: ids.attempt }),
+      ),
+      // Phase 12r. 404: the fixture's paper holds no multiple-choice
+      // question, and a candidate cannot answer one that is not on it. The
+      // body must carry no answer key either way.
+      status: [404],
+    },
     "api/admin/invigilate/[sessionId]/live/route.ts#GET": {
       call: call(
         () => studentRequest(`/api/admin/invigilate/${ids.examSession}/live`),

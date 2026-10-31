@@ -24,13 +24,36 @@ import type { ExamQuestionView } from "@/components/exam/exam-session";
 
 export interface ExamPaper {
   readonly questions: ExamQuestionView[];
+  /** The multiple-choice half, in the paper's own order (Phase 12r). */
+  readonly mcqs: ExamMcqView[];
   /** Questions in the layout whose version could not be read. */
   readonly missing: string[];
 }
 
+/**
+ * One MCQ, as a candidate's browser is allowed to see it (Phase 12r).
+ *
+ * `correctIndex` is deliberately absent, and not merely unused: it is
+ * never selected on this path. An answer key that reaches the client is an
+ * answer key, whatever the component does with it — and a sitting is
+ * exactly where somebody will read the page source.
+ *
+ * `options` is in THIS candidate's order, taken from their layout, so the
+ * index they click is the index the save route stores and the marker maps
+ * back. The author's order is never sent.
+ */
+export interface ExamMcqView {
+  readonly mcqId: string;
+  readonly position: number;
+  readonly points: number;
+  readonly stemHtml: string;
+  readonly options: readonly string[];
+}
+
 export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPaper> => {
+  const mcqs = await examMcqViews(layout);
   const versionIds = layout.questions.map((question) => question.problemVersionId);
-  if (versionIds.length === 0) return { questions: [], missing: [] };
+  if (versionIds.length === 0) return { questions: [], mcqs, missing: [] };
 
   const versions = await db.problemVersion.findMany({
     where: { id: { in: versionIds } },
@@ -84,5 +107,42 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
       editorLanguage: LANGUAGE_CATALOG[defaultLanguage].editorLanguage,
     });
   }
-  return { questions, missing };
+  return { questions, mcqs, missing };
 });
+
+/**
+ * The paper's MCQs, each one's options re-ordered into the sequence this
+ * candidate's layout recorded.
+ *
+ * An option order in the layout that no longer matches the stored options —
+ * an author having edited the question after a sitting began, which the
+ * draft rules are meant to prevent — drops that question rather than
+ * showing a candidate a shuffle with a hole in it. It is reported through
+ * `missing` for the same reason a missing coding question is.
+ */
+async function examMcqViews(layout: AttemptLayout): Promise<ExamMcqView[]> {
+  const laid = layout.mcqs ?? [];
+  if (laid.length === 0) return [];
+  const rows = await db.assessmentMcq.findMany({
+    where: { id: { in: laid.map((m) => m.mcqId) } },
+    // No correctIndex. See ExamMcqView.
+    select: { id: true, stem: true, options: true },
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const views: ExamMcqView[] = [];
+  for (const mcq of laid) {
+    const row = byId.get(mcq.mcqId);
+    if (!row) continue;
+    const options = mcq.optionOrder.map((i) => row.options[i]);
+    if (options.some((option) => option === undefined)) continue;
+    views.push({
+      mcqId: mcq.mcqId,
+      position: mcq.sourcePosition,
+      points: mcq.points,
+      // The same sanitising pipeline the statements go through.
+      stemHtml: renderMarkdown(row.stem),
+      options: options as string[],
+    });
+  }
+  return views;
+}

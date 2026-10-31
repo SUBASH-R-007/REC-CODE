@@ -73,6 +73,19 @@ export interface AssessmentDetail extends AssessmentRow {
     title: string;
     revision: number;
   }>;
+  /**
+   * The multiple-choice half (Phase 12r). `correctIndex` is here and not
+   * on the candidate's view: an author has to be able to see which option
+   * they marked right, and this page is behind requireActionRole.
+   */
+  mcqs: Array<{
+    id: string;
+    position: number;
+    points: number;
+    stem: string;
+    options: string[];
+    correctIndex: number;
+  }>;
   sessions: Array<{
     id: string;
     label: string;
@@ -117,6 +130,10 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
             select: { revision: true, title: true, problem: { select: { slug: true, displayCode: true } } },
           },
         },
+      },
+      mcqs: {
+        orderBy: { position: "asc" },
+        select: { id: true, position: true, points: true, stem: true, options: true, correctIndex: true },
       },
       sessions: {
         orderBy: { startsAt: "asc" },
@@ -163,6 +180,14 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       displayCode: p.problemVersion.problem.displayCode,
       title: p.problemVersion.title,
       revision: p.problemVersion.revision,
+    })),
+    mcqs: row.mcqs.map((m) => ({
+      id: m.id,
+      position: m.position,
+      points: m.points,
+      stem: m.stem,
+      options: m.options,
+      correctIndex: m.correctIndex,
     })),
     sessions: row.sessions.map((s) => ({
       id: s.id,

@@ -245,4 +245,120 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
     const back = await actions.setAssessmentStatus({ assessmentId: id, to: "OPEN" });
     expect(back.ok).toBe(false);
   }, 180_000);
+  /**
+   * The multiple-choice half of a paper (Phase 12r), as an author meets it.
+   *
+   * The database holds the rules that must never be broken; these are the
+   * ones only the form can catch, and each is a question a cohort would
+   * otherwise sit: two identical options (two right answers, or none), an
+   * answer numbered past the end of the list, and a one-per-line textarea
+   * that has to cope with the trailing newline everybody leaves.
+   */
+  describe("multiple-choice questions", () => {
+    const mcq = (over: Record<string, unknown> = {}) => ({
+      assessmentId: "",
+      position: 50,
+      points: 2,
+      stem: "Which of these is a stable sort?",
+      options: "Quicksort\nMerge sort\nHeapsort",
+      answer: 2,
+      ...over,
+    });
+
+    async function draft(): Promise<string> {
+      const made = await actions.createAssessment(base({ proctorMode: "ADVISORY" }));
+      expect(made.ok, made.ok ? "" : made.error).toBe(true);
+      return made.ok ? made.data.id : "";
+    }
+
+    it("adds one, and stores the answer 0-based", async () => {
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId }));
+      expect(added.ok, added.ok ? "" : added.error).toBe(true);
+      if (!added.ok) return;
+      expect(added.data.options).toBe(3);
+      const row = await db.assessmentMcq.findUniqueOrThrow({
+        where: { id: added.data.id },
+        select: { options: true, correctIndex: true, position: true, points: true },
+      });
+      // The author typed "2" for the second option; the row holds 1.
+      expect(row.correctIndex).toBe(1);
+      expect(row.options).toEqual(["Quicksort", "Merge sort", "Heapsort"]);
+      expect(row).toMatchObject({ position: 50, points: 2 });
+    }, 60_000);
+
+    it("drops blank lines rather than refusing a trailing newline", async () => {
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(
+        mcq({ assessmentId, options: "Yes\n\nNo\n", answer: 2 }),
+      );
+      expect(added.ok, added.ok ? "" : added.error).toBe(true);
+      if (!added.ok) return;
+      const row = await db.assessmentMcq.findUniqueOrThrow({
+        where: { id: added.data.id },
+        select: { options: true, correctIndex: true },
+      });
+      expect(row.options).toEqual(["Yes", "No"]);
+      expect(row.correctIndex).toBe(1);
+    }, 60_000);
+
+    it("refuses one option: that is not a choice", async () => {
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId, options: "Only this", answer: 1 }));
+      expect(added.ok).toBe(false);
+      if (!added.ok) expect(added.error).toMatch(/at least two options/i);
+    }, 60_000);
+
+    it("refuses two identical options, which the database cannot see", async () => {
+      // A question with the same option twice has two right answers or
+      // none, and the author is the only person who can still fix it.
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId, options: "Yes\nYes\nNo", answer: 1 }));
+      expect(added.ok).toBe(false);
+      if (!added.ok) expect(added.error).toMatch(/identical/i);
+    }, 60_000);
+
+    it("refuses an answer numbered past the end of the list", async () => {
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId, answer: 4 }));
+      expect(added.ok).toBe(false);
+      if (!added.ok) expect(added.error).toMatch(/only 3 options/i);
+    }, 60_000);
+
+    it("refuses a position a coding question already holds, in the author's words", async () => {
+      const assessmentId = await draft();
+      const pinned = await actions.addAssessmentProblem({
+        assessmentId,
+        problemSlug: publishedProblemSlug,
+        position: 7,
+        points: 10,
+      });
+      expect(pinned.ok, pinned.ok ? "" : pinned.error).toBe(true);
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId, position: 7 }));
+      expect(added.ok).toBe(false);
+      // The trigger's sentence, which only survives because it raises
+      // check_violation rather than unique_violation.
+      if (!added.ok) expect(added.error).toMatch(/one numbered list|already a coding question/i);
+    }, 90_000);
+
+    it("removes one while the paper is a draft, and refuses once published", async () => {
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentMcq(mcq({ assessmentId, position: 60 }));
+      expect(added.ok, added.ok ? "" : added.error).toBe(true);
+      if (!added.ok) return;
+      const gone = await actions.removeAssessmentMcq({ assessmentMcqId: added.data.id });
+      expect(gone.ok, gone.ok ? "" : gone.error).toBe(true);
+      expect(await db.assessmentMcq.count({ where: { id: added.data.id } })).toBe(0);
+
+      // And once the paper is published, the question set is fixed.
+      const kept = await actions.addAssessmentMcq(mcq({ assessmentId, position: 61 }));
+      expect(kept.ok).toBe(true);
+      await actions.addAssessmentProblem({ assessmentId, problemSlug: publishedProblemSlug, position: 62, points: 10 });
+      const published = await actions.setAssessmentStatus({ assessmentId, to: "PUBLISHED" });
+      expect(published.ok, published.ok ? "" : published.error).toBe(true);
+      const late = await actions.addAssessmentMcq(mcq({ assessmentId, position: 63 }));
+      expect(late.ok).toBe(false);
+      if (!late.ok) expect(late.error).toMatch(/question set is fixed/i);
+    }, 120_000);
+  });
 });

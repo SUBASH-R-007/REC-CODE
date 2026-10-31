@@ -7,6 +7,7 @@ import {
   computeExpiresAt,
   isFinished,
   requiresDeviceAssertion,
+  paperQuestionCount,
   resolveLayout,
   type AccommodationKind,
   type AttemptLayout,
@@ -163,6 +164,14 @@ export async function startOrResumeAttempt(args: {
       audienceSection: true,
       seedSecret: true,
       problems: { select: { id: true, problemVersionId: true, position: true, points: true } },
+      /**
+       * The paper's MCQs (Phase 12r). `options` comes back only to be
+       * counted: the layout records the order THIS candidate will see them
+       * in, and the text is fetched when the paper is rendered. The
+       * correct index is not selected at all, here or anywhere a
+       * candidate's request can reach.
+       */
+      mcqs: { select: { id: true, position: true, points: true, options: true } },
     },
   });
   if (!assessment) return refuse("not_found");
@@ -203,7 +212,8 @@ export async function startOrResumeAttempt(args: {
   // ── A new sitting ──────────────────────────────────────────────────────
   if (assessment.status !== "OPEN") return refuse("not_open");
   if (now < assessment.opensAt || now >= assessment.closesAt) return refuse("not_open");
-  if (assessment.problems.length === 0) return refuse("not_open");
+  // Nothing to sit at all. Either kind counts; see paperQuestionCount.
+  if (paperQuestionCount(assessment) === 0) return refuse("not_open");
 
   const used = existing?.attemptNumber ?? 0;
   if (existing && isFinished(existing.status as AttemptStatus) && used >= assessment.maxAttempts) {
@@ -254,7 +264,16 @@ export async function startOrResumeAttempt(args: {
     userId: args.userId,
     attemptNumber,
   });
-  const layout = resolveLayout({ questions: assessment.problems, seed });
+  const layout = resolveLayout({
+    questions: assessment.problems,
+    seed,
+    mcqs: assessment.mcqs.map((mcq) => ({
+      id: mcq.id,
+      position: mcq.position,
+      points: mcq.points,
+      optionCount: mcq.options.length,
+    })),
+  });
 
   const row = await db.assessmentAttempt.create({
     data: {

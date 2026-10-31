@@ -101,3 +101,29 @@ export function markMcqs(inputs: readonly McqMarkingInput[]): McqTotals {
     corrupt: count("corrupt"),
   };
 }
+
+/**
+ * How many questions a paper actually asks (Phase 12r).
+ *
+ * Stated once, because getting it wrong is invisible and was got wrong
+ * three times in one slice. A paper may be all code, all multiple-choice,
+ * or a mix, and only none of each is an empty paper — but three separate
+ * places counted the coding questions alone:
+ *
+ *   - publishing refused an all-multiple-choice paper as "an empty paper
+ *     is not a test";
+ *   - `startAttempt` refused it as `not_open`, which is the refusal whose
+ *     message gives a candidate the least to go on;
+ *   - and `submitAttempt` took its "nothing to submit" path, so the one
+ *     kind of paper where the questions ARE the paper was the one where
+ *     nothing recorded what they came to.
+ *
+ * Each read naturally and none of them was found by a type. So the rule
+ * lives here, and the three call sites ask it.
+ */
+export function paperQuestionCount(paper: {
+  readonly problems?: { readonly length: number } | null;
+  readonly mcqs?: { readonly length: number } | null;
+}): number {
+  return (paper.problems?.length ?? 0) + (paper.mcqs?.length ?? 0);
+}

@@ -18,6 +18,8 @@ import { FocusOverlay } from "@/components/exam/focus-overlay";
 import { MonitoredChip } from "@/components/exam/monitored-chip";
 import { QuestionPalette } from "@/components/exam/question-palette";
 import { ExamConsole } from "@/components/exam/exam-console";
+import { ExamMcq } from "@/components/exam/exam-mcq";
+import type { ExamMcqView } from "@/server/queries/exam";
 import { SaveStatePill, type SaveState } from "@/components/exam/save-state-pill";
 import { ExamQuestion } from "@/components/exam/exam-question";
 import type { EditorPrefs } from "@/components/editor/editor-types";
@@ -78,11 +80,17 @@ export function ExamSession({
   initialStatus,
   candidate,
   labSupervised,
+  mcqs,
+  initialChoices,
   initialSources,
   editorPrefs,
 }: {
   readonly attemptId: string;
   readonly questions: readonly ExamQuestionView[];
+  /** The multiple-choice half of the paper (Phase 12r). */
+  readonly mcqs: readonly ExamMcqView[];
+  /** Answers already recorded for this attempt, by mcqId. */
+  readonly initialChoices: Readonly<Record<string, number>>;
   readonly initialMsRemaining: number;
   readonly initialStatus: string;
   readonly candidate: { readonly name: string; readonly section: string | null };
@@ -104,8 +112,10 @@ export function ExamSession({
   });
   const [marked, setMarked] = useState<Record<string, boolean>>({});
   const [visited, setVisited] = useState<Record<string, boolean>>(() =>
-    questions.length > 0 ? { [questions[0]!.questionId]: true } : {},
+    questions.length > 0 ? { [questions[0]!.questionId]: true } : mcqs.length > 0 ? { [mcqs[0]!.mcqId]: true } : {},
   );
+  /** What this candidate has picked, by mcqId, in the order they were shown. */
+  const [choices, setChoices] = useState<Record<string, number>>(() => ({ ...initialChoices }));
 
   const [clock, setClock] = useState({ msRemaining: initialMsRemaining, at: now() });
   const [status, setStatus] = useState(initialStatus);
@@ -113,8 +123,28 @@ export function ExamSession({
   const [save, setSave] = useState<SaveState>({ kind: "saved", secondsAgo: 0 });
   const [overlay, setOverlay] = useState<{ heading: string; body: string; pending: boolean } | null>(null);
 
-  const question = questions[current];
+  /**
+   * The palette, as ONE numbered list of mixed items (Phase 12r).
+   *
+   * Programs first, in the order the layout shuffled them, then the
+   * multiple-choice questions in the paper's own order. NOT interleaved by
+   * authored position, which looks tidier and would quietly undo the thing
+   * the layout exists for: the coding questions' order is randomised per
+   * candidate, and sorting the merged list by the author's numbering would
+   * put them back exactly as written.
+   */
+  const items = useMemo(
+    () => [
+      ...questions.map((q) => ({ kind: "code" as const, question: q })),
+      ...mcqs.map((m) => ({ kind: "mcq" as const, mcq: m })),
+    ],
+    [questions, mcqs],
+  );
+  const item = items[current];
+  const question = item?.kind === "code" ? item.question : undefined;
   const questionId = question?.questionId ?? "";
+  /** The id a palette entry is keyed by, whichever kind it is. */
+  const keyOf = (entry: (typeof items)[number]) => (entry.kind === "code" ? entry.question.questionId : entry.mcq.mcqId);
 
   // ── Refs for things the loops read without re-subscribing ──────────────
   const queue = useRef<TelemetryQueue | null>(null);
@@ -369,6 +399,46 @@ export function ExamSession({
     }
   }, [attemptId, atMs, questions]);
 
+  /**
+   * Record one multiple-choice answer (Phase 12r).
+   *
+   * Written through at once rather than on Save and next: ticking a box is
+   * the whole of answering an MCQ, and a candidate who picks an option and
+   * then loses the network should not also lose the pick. The pill reports
+   * it like any other save, because to a candidate it is one.
+   */
+  const choose = useCallback(
+    async (mcqId: string, index: number) => {
+      setChoices((picked) => ({ ...picked, [mcqId]: index }));
+      setSave({ kind: "saving" });
+      try {
+        const response = await fetch(`/api/exam/${attemptId}/mcq`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ mcqId, chosenIndex: index }),
+        });
+        if (response.status === 409) {
+          const body = (await response.json().catch(() => ({}))) as { revokeReason?: string };
+          if (body.revokeReason) {
+            setRevoked(body.revokeReason);
+            return;
+          }
+        }
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          setSave({ kind: "refused", message: body.error ?? `the server refused it (${response.status}).` });
+          return;
+        }
+        lastSavedAt.current = Date.now();
+        setSave({ kind: "saved", secondsAgo: 0 });
+      } catch {
+        setSave(navigator.onLine ? { kind: "failed" } : { kind: "offline", retryInSeconds: 10 });
+      }
+    },
+    [attemptId],
+  );
+
   // The 30-second tick while dirty, and the "Saved · Ns ago" counter.
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -613,26 +683,37 @@ export function ExamSession({
   // ── Navigation ─────────────────────────────────────────────────────────
   const goTo = useCallback(
     (index: number) => {
-      const target = questions[index];
+      const target = items[index];
       if (!target) return;
       // A question change saves immediately (SPEC §5), before the editor's
       // text is replaced by the next question's.
       if (dirty.current) void persist("TICK");
       setCurrent(index);
-      setVisited((seen) => ({ ...seen, [target.questionId]: true }));
+      setVisited((seen) => ({ ...seen, [keyOf(target)]: true }));
     },
-    [questions, persist],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyOf is pure over `items`.
+    [items, persist],
   );
 
   const progress = useMemo<QuestionProgress[]>(
     () =>
-      questions.map((q) => ({
-        visited: visited[q.questionId] === true,
-        // Answered means "there is work here": anything beyond the starter.
-        answered: (sources[q.questionId] ?? "").trim() !== (q.starter ?? "").trim(),
-        marked: marked[q.questionId] === true,
-      })),
-    [questions, visited, sources, marked],
+      items.map((entry) =>
+        entry.kind === "code"
+          ? {
+              visited: visited[entry.question.questionId] === true,
+              // Answered means "there is work here": anything beyond the starter.
+              answered: (sources[entry.question.questionId] ?? "").trim() !== (entry.question.starter ?? "").trim(),
+              marked: marked[entry.question.questionId] === true,
+            }
+          : {
+              visited: visited[entry.mcq.mcqId] === true,
+              // For an MCQ there is no "beyond the starter": an option is
+              // picked or it is not.
+              answered: choices[entry.mcq.mcqId] !== undefined,
+              marked: marked[entry.mcq.mcqId] === true,
+            },
+      ),
+    [items, visited, sources, marked, choices],
   );
 
   const counts = paletteCounts(progress);
@@ -690,7 +771,7 @@ export function ExamSession({
           {candidate.section ? <p className="truncate text-xs text-text-secondary">{candidate.section}</p> : null}
         </div>
         <p className="ml-2 text-sm tabular-nums text-text-secondary">
-          Question {current + 1} of {questions.length}
+          Question {current + 1} of {items.length}
         </p>
         <div className="ml-auto flex items-center gap-3">
           <ExamClock serverMsRemaining={clock.msRemaining} receivedAtMs={clock.at} />
@@ -701,18 +782,28 @@ export function ExamSession({
 
       <div className="flex min-h-0 flex-1">
         <QuestionPalette progress={progress} current={current} onSelect={goTo} />
-        <ExamQuestion
-          question={question}
-          source={sources[question.questionId] ?? ""}
-          onSourceChange={onSourceChange}
-          onInsertion={onInsertion}
-          position={current + 1}
-          total={questions.length}
-          prefs={editorPrefs}
-        />
+        {item?.kind === "mcq" ? (
+          <ExamMcq
+            mcq={item.mcq}
+            chosen={choices[item.mcq.mcqId] ?? null}
+            onChoose={(index) => void choose(item.mcq.mcqId, index)}
+            position={current + 1}
+            total={items.length}
+          />
+        ) : question ? (
+          <ExamQuestion
+            question={question}
+            source={sources[question.questionId] ?? ""}
+            onSourceChange={onSourceChange}
+            onInsertion={onInsertion}
+            position={current + 1}
+            total={items.length}
+            prefs={editorPrefs}
+          />
+        ) : null}
       </div>
 
-      {question.samples.length > 0 ? (
+      {item?.kind === "code" && question && question.samples.length > 0 ? (
         <ExamConsole
           runId={runId}
           sending={running}
@@ -727,18 +818,30 @@ export function ExamSession({
         canGoPrevious={current > 0}
         onPrevious={() => goTo(current - 1)}
         onMarkAndNext={() => {
-          setMarked((flags) => ({ ...flags, [question.questionId]: true }));
-          goTo(Math.min(current + 1, questions.length - 1));
+          if (item) setMarked((flags) => ({ ...flags, [keyOf(item)]: true }));
+          goTo(Math.min(current + 1, items.length - 1));
         }}
-        onClear={() => {
-          setSources((previous) => ({ ...previous, [question.questionId]: question.starter }));
-          dirty.current = true;
-        }}
+        /**
+         * Clear belongs to an editor. An MCQ has nothing to clear — and
+         * deliberately offers no "unpick": a blank and a wrong answer
+         * score the same, and an endpoint that removes recorded work is a
+         * bigger risk than the convenience is worth.
+         */
+        onClear={
+          question
+            ? () => {
+                setSources((previous) => ({ ...previous, [question.questionId]: question.starter }));
+                dirty.current = true;
+              }
+            : undefined
+        }
         onSaveAndNext={() => {
-          void persist("TICK");
-          goTo(Math.min(current + 1, questions.length - 1));
+          // An MCQ was already written through when it was picked, so Save
+          // and next is just "next" for one.
+          if (item?.kind === "code") void persist("TICK");
+          goTo(Math.min(current + 1, items.length - 1));
         }}
-        onRun={question.samples.length > 0 ? () => void runSamples() : undefined}
+        onRun={item?.kind === "code" && question && question.samples.length > 0 ? () => void runSamples() : undefined}
         running={running}
         onSubmit={() => void submit()}
         answered={counts.answered}

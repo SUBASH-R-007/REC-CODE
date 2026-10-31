@@ -89,10 +89,28 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
     if (last?.verified) recovered[questionId] = last.source;
   }
 
+  /**
+   * The multiple-choice answers already recorded (Phase 12r), so a sitting
+   * resumed in another tab or after a reload shows what was picked. They
+   * live on the server from the moment they are picked, which is why there
+   * is no write-ahead store for them the way there is for source.
+   */
+  const choices: Record<string, number> = {};
+  if (paper.mcqs.length > 0) {
+    for (const answer of await db.assessmentMcqAnswer.findMany({
+      where: { attemptId: attempt.id },
+      select: { mcqId: true, chosenIndex: true },
+    })) {
+      choices[answer.mcqId] = answer.chosenIndex;
+    }
+  }
+
   return (
     <ExamSession
       attemptId={attempt.id}
       questions={paper.questions}
+      mcqs={paper.mcqs}
+      initialChoices={choices}
       initialMsRemaining={msRemaining({
         expiresAt: attempt.expiresAt,
         pausedMs: attempt.pausedMs,

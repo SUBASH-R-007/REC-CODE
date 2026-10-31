@@ -461,6 +461,9 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "admin-assessments#createAssessment",
       "admin-assessments#addAssessmentProblem",
       "admin-assessments#removeAssessmentProblem",
+      // Phase 12r: the multiple-choice half of a paper, same authority.
+      "admin-assessments#addAssessmentMcq",
+      "admin-assessments#removeAssessmentMcq",
       "admin-assessments#scheduleExamSession",
       "admin-assessments#setAssessmentStatus",
     ],
@@ -633,6 +636,9 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       // own route, guarded by the same attempt guard as the snapshot, and
       // the run reads back through the owner-scoped /api/runs/[id].
       "app/api/exam/[attemptId]/run/route.ts#POST",
+      // Phase 12r. One multiple-choice answer: the candidate's own route,
+      // the same attempt guard, and no judge in the path at all.
+      "app/api/exam/[attemptId]/mcq/route.ts#POST",
       "app/api/exam/[attemptId]/submit/route.ts#POST",
     ],
   },
