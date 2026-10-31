@@ -1,4 +1,4 @@
-# Handoff: where REC Code stands (2026-10-19)
+# Handoff: where REC Code stands (2026-10-31)
 
 These are coordinator working notes, committed so a cloud session can continue
 the build. They are not product documentation. `phase4/` is kept even though
@@ -29,6 +29,32 @@ that review has happened or been dropped.
 | 8 Inactivity as a policy engine | Gated 2026-10-19 (`docs/RUNBOOK.md` §3) |
 | 9 Placement readiness | Gated 2026-10-20 — both platforms, 8,466 tests, nothing skipped (`docs/RUNBOOK.md` §3) |
 | 10 Ops, observability, performance, hardening | **Closing** — 10a–10f done (`docs/handoff/phase10/DESIGN.md`); see `docs/RUNBOOK.md` §3 for the drills, and §2.12–2.13 for the alerts and the backup/deploy procedures |
+| 11 Sign-in, the proctoring audit, initial passwords | Gated 2026-10-28/29 — 11a–11f, each with its own `docs/RUNBOOK.md` §3 rows |
+| 12 SPEC §11's deferred list | **12a–12o gated 2026-10-29 … 2026-10-31** (see below); `12g` core-CS MCQ is the one item NOT built, and deliberately |
+
+**Phase 12 is SPEC §6's "deferred — do not half-build these" list, taken one
+item at a time.** Each letter has its own slices and its own gate rows in
+`docs/RUNBOOK.md` §3: 12a assessments, 12b the AI helper, 12c spaced revision,
+12d discussion and shared solutions, 12e the interview archive, 12f the
+recommender, 12g core-CS MCQ, 12h mock interviews, 12i written and
+system-design marking, 12j editor keymaps, 12k SQL problems, 12l interactive
+problems, 12m debugging problems, 12n output-only problems, 12o the rust180
+and cs8 toolchains.
+
+**12g is unbuilt on purpose.** A fourth `AptitudeArea` would mean dropping two
+catalogued CHECKs, and `packages/db/test/frozen-coverage.test.ts` fails the
+build for that by design, with no allowlist. The attempt was reverted whole
+rather than fenced around; `docs/OPEN-QUESTIONS.md` records the shape that
+would let the taxonomy grow and says plainly that approving the one guarded
+drop it needs is a human's decision. Do not route around the fence to ship the
+question bank.
+
+**What is left is verification, not building.** Every other item on SPEC §11's
+list is in the repository and gated. The honest gaps are the `NOT RUN` rows in
+`docs/RUNBOOK.md` §3 — surfaces proved against `recx_test` and in real
+isolate but never seen in a browser, lanes never sat end to end, and the
+`deploy/` topologies never started. Read those rows before calling anything
+finished.
 
 Phase 10's own design document records, per slice, what was built and what was
 deliberately NOT built here — the multi-host topology, pgBackRest offsite and

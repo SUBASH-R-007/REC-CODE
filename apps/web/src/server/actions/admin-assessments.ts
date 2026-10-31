@@ -265,6 +265,20 @@ export async function addAssessmentProblem(
       );
     }
 
+    /**
+     * Phase 12p. The fourth rule of this shape, and the kind that was
+     * missing one: a sitting chooses ONE language for the whole paper and
+     * the exam submit route only accepts a toolchain language, so a SQL
+     * question would be a C++ editor over a problem that wants a query —
+     * and the candidate would discover it mid-sitting. Refused here and in
+     * the database (AssessmentProblem_no_sql).
+     */
+    if (problem.liveVersion.ioMode === "SQL") {
+      throw new ValidationError(
+        "A SQL problem is not sat in an assessment yet: a sitting gives every question the same code editor and submits every answer in one programming language. Put it in a contest or leave it in practice.",
+      );
+    }
+
     try {
       const row = await db.assessmentProblem.create({
         data: {

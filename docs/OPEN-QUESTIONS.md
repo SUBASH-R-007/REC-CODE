@@ -3734,3 +3734,35 @@ The marker is now the script the compile step actually calls, written last,
 an unfinished tree is cleared before a retry, and a failed probe removes the
 install rather than leaving a broken one in place. A check that can be
 satisfied by a failure is worse than no check.
+
+## Four kinds an exam cannot sit, and one engine change that would fix all four (Phase 12p, slice 1)
+
+**The rule.** An interactive, debugging, output-only or SQL problem cannot be
+pinned into an assessment. Each refusal lives in three places - a trigger on
+`AssessmentProblem`, an entry in the guard catalogue, and the sentence an
+admin reads before the constraint fires - and each says the same thing: the
+practice workspace is the only surface that knows this kind.
+
+**Why the same reason four times.** A sitting is not the workspace. It
+chooses ONE language for the whole paper (`loadExamQuestions` takes the first
+enabled toolchain language and falls back to `cpp20`), it builds its own
+editor, and `/api/exam/[attemptId]/submit` validates every answer's language
+against the keys of `LANGUAGE_CATALOG` - which holds the eleven toolchain
+languages and neither `sql17` nor `answer1`. It also submits every answer at
+the end, which is why a debugging budget cannot be refused there without
+destroying work a candidate can no longer redo. So each of the four kinds
+would reach a candidate as a code box over a question that wants something
+else, discovered mid-sitting.
+
+**The one change that lifts all four is an exam engine change.** A language
+per question, through the layout, the snapshot route, the submit route and
+the marking. That is a phase with its own design, not something to smuggle in
+behind whichever kind is being added at the time - which is exactly why this
+slice added a fourth refusal rather than a fifth special case.
+
+**A contest needs none of it.** The arena has no editor: it renders the
+problem list, the clock and the score, and links to `/problems/<slug>`. A
+contest participant gets the practice surface, which knows every kind. Two
+`NOT RUN` rows said otherwise for a week, and the cost of a wrong row is
+either somebody rebuilding a surface that exists or somebody trusting a lane
+nobody checked.

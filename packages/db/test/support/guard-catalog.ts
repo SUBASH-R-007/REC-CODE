@@ -88,6 +88,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_interactive_assessment_problem",
   "recx_refuse_debug_assessment_problem",
   "recx_refuse_output_only_assessment_problem",
+  // 20261101170000_phase12p_sql_assessment_rule
+  "recx_refuse_sql_assessment_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -327,6 +329,23 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_output_only_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101170000_phase12p_sql_assessment_rule
+  {
+    /**
+     * Phase 12p. The fourth rule of this shape, and the last kind that was
+     * missing one: a sitting chooses one language for the whole paper and
+     * the exam submit route only accepts a toolchain language, so a SQL
+     * question in an assessment is a C++ editor over a problem that wants
+     * a query. Lifting this needs an exam path with a language per
+     * question — which would lift all four — and a line in the gate log
+     * that this entry makes compulsory.
+     */
+    name: "AssessmentProblem_no_sql",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_sql_assessment_problem",
     level: "ROW",
   },
   {

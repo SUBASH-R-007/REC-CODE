@@ -99,3 +99,41 @@ describe("the student surface only formats SQL", () => {
     expect(resultView).not.toContain("JSON.parse");
   });
 });
+describe("not sat in an assessment yet, and not quietly (Phase 12p)", () => {
+  it("a trigger refuses the pin, because a sitting has one editor and one language", () => {
+    const migration = readRepoFile(
+      "packages/db/prisma/migrations/20261101170000_phase12p_sql_assessment_rule/migration.sql",
+    );
+    expect(migration).toContain("AssessmentProblem_no_sql");
+    expect(migration).toContain("not sat in an assessment yet");
+    expect(migration).toMatch(/CREATE TRIGGER[\s\S]*ON "public"\."AssessmentProblem"/);
+    // A contest's arena links to the ordinary workspace, so it needs no rule
+    // — the same reason the other three triggers are not on ContestProblem.
+    expect(migration).not.toMatch(/ON "public"\."ContestProblem"/);
+  });
+
+  it("the action says so in a sentence first", () => {
+    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
+    expect(action).toContain("A SQL problem is not sat in an assessment yet");
+  });
+
+  it("the trigger and its function are catalogued, so lifting the rule fails the build", () => {
+    const catalog = readRepoFile("packages/db/test/support/guard-catalog.ts");
+    expect(catalog).toContain("AssessmentProblem_no_sql");
+    expect(catalog).toContain("recx_refuse_sql_assessment_problem");
+  });
+
+  it("every kind the exam engine cannot sit is refused, not just this one", () => {
+    // The four rules read the same on purpose: one sentence per kind, in the
+    // one place a person is choosing the question.
+    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
+    for (const sentence of [
+      "An interactive problem is not sat in an assessment yet",
+      "A debugging problem is not sat in an assessment yet",
+      "An output-only problem is not sat in an assessment yet",
+      "A SQL problem is not sat in an assessment yet",
+    ]) {
+      expect(action, "the four pin refusals are one family").toContain(sentence);
+    }
+  });
+});
