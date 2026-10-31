@@ -2958,6 +2958,8 @@ model Assessment {
   updatedAt                   DateTime         @updatedAt
 
   problems AssessmentProblem[]
+  /// The multiple-choice half of the paper (Phase 12r).
+  mcqs     AssessmentMcq[]
   sessions ExamSession[]
   /// Candidates' sittings.
   attempts AssessmentAttempt[]
@@ -2990,6 +2992,65 @@ model AssessmentProblem {
   @@unique([assessmentId, position])
   @@unique([assessmentId, problemVersionId])
   @@index([problemVersionId])
+}
+
+/// A multiple-choice question on an assessment (Phase 12r).
+///
+/// Assessment-owned, and deliberately NOT a fourth `AptitudeArea`. The
+/// aptitude taxonomy cannot grow: `AptitudePassage_area_topic_check` and
+/// `AptitudeQuestion_area_topic_check` enumerate every (area, topic) pair in
+/// the CHECK body, so a new area means dropping two catalogued guards, and
+/// docs/OPEN-QUESTIONS.md records that the one guarded drop which would fix
+/// that for good is a human's decision. A paper's MCQ is a different thing
+/// anyway: it belongs to the assessment that asks it, not to a practice
+/// taxonomy, and it has no topic, no difficulty curve and no per-question
+/// statistics to keep. So nothing here routes around that fence.
+///
+/// Enforced by the database:
+///   - CHECK AssessmentMcq_options_check: 2 to 8 options, none of them blank;
+///   - CHECK AssessmentMcq_correct_index_check: the answer is one of them;
+///   - CHECK AssessmentMcq_stem_check / _points_check / _position_check;
+///   - TRIGGER AssessmentMcq_position_free: the palette is ONE numbered list,
+///     so a position already taken by an AssessmentProblem is refused (and
+///     the mirror trigger refuses it the other way round).
+model AssessmentMcq {
+  id           String     @id @default(cuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  /// 1-based order in the question palette, shared with AssessmentProblem.
+  position     Int
+  stem         String     @db.Text
+  /// In the order the author wrote them. A candidate is shown a shuffle of
+  /// this, recorded in their layout, and never this order itself.
+  options      String[]
+  /// Index into `options`. Never sent to a candidate's browser.
+  correctIndex Int
+  points       Float      @default(1)
+  /// Shown after the paper closes, if the author wrote one.
+  explanation  String?    @db.Text
+  createdAt    DateTime   @default(now())
+
+  answers AssessmentMcqAnswer[]
+
+  @@unique([assessmentId, position])
+  @@index([assessmentId])
+}
+
+/// What one candidate picked for one MCQ (Phase 12r). Upserted by
+/// `/api/exam/[attemptId]/mcq` as they work; there is no judge in this path.
+model AssessmentMcqAnswer {
+  attemptId   String
+  attempt     AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  mcqId       String
+  mcq         AssessmentMcq     @relation(fields: [mcqId], references: [id], onDelete: Cascade)
+  /// A position in the order THIS candidate was shown, not a stored index:
+  /// the shuffle lives in their layout, and marking maps it back. Storing the
+  /// stored index instead would mean trusting the browser to un-shuffle.
+  chosenIndex Int
+  answeredAt  DateTime          @updatedAt
+
+  @@id([attemptId, mcqId])
+  @@index([mcqId])
 }
 
 /// One sitting of an assessment: a hall, a window, and the network it is
@@ -3136,6 +3197,8 @@ model AssessmentAttempt {
   updatedAt              DateTime            @updatedAt
 
   snapshots AttemptSnapshot[]
+  /// One row per MCQ this candidate answered (Phase 12r).
+  mcqAnswers AssessmentMcqAnswer[]
 
   integrityFlag       IntegrityFlag?
   invigilatorMessages InvigilatorMessage[]

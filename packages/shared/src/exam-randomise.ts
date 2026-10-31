@@ -111,9 +111,38 @@ export interface LayoutQuestion {
  * refuses to change.
  */
 export interface AttemptLayout {
-  /** Schema version, so a later phase can add fields and still read this. */
-  readonly v: 1;
+  /**
+   * Schema version, so a later phase can add fields and still read this.
+   *
+   * v2 (Phase 12r) is v1 plus `mcqs`. It is a new VERSION rather than an
+   * optional field on v1 for one reason: `parseAttemptLayout` ignores keys
+   * it does not know, so a v1 reader handed a layout carrying MCQs would
+   * accept it and silently serve a paper missing those questions — a
+   * candidate sitting an exam short of half its marks, with nothing
+   * anywhere saying so. A v1 reader handed a v2 layout refuses it instead,
+   * which is a visible failure an invigilator can act on. A paper with no
+   * MCQs is still written as v1, so nothing already stored changes.
+   */
+  readonly v: 1 | 2;
   readonly questions: readonly LayoutQuestion[];
+  /** Present only on v2, and only when the paper holds MCQs. */
+  readonly mcqs?: readonly LayoutMcq[];
+}
+
+/** One multiple-choice question on a candidate's paper (Phase 12r). */
+export interface LayoutMcq {
+  /** The AssessmentMcq row. */
+  readonly mcqId: string;
+  /** The assessment's own 1-based position, shared with the coding questions. */
+  readonly sourcePosition: number;
+  readonly points: number;
+  /**
+   * The order this candidate sees the options in, as indexes into the
+   * stored `options`. Shuffling the options is the only randomisation an
+   * MCQ gets, and it is what stops a neighbour's "it's the third one"
+   * being useful. The stored order is never shown.
+   */
+  readonly optionOrder: readonly number[];
 }
 
 export interface AssessmentQuestionInput {
@@ -121,6 +150,15 @@ export interface AssessmentQuestionInput {
   readonly problemVersionId: string;
   readonly position: number;
   readonly points: number;
+}
+
+/** An MCQ of the paper, as the assessment stores it (Phase 12r). */
+export interface AssessmentMcqInput {
+  readonly id: string;
+  readonly position: number;
+  readonly points: number;
+  /** How many options it has; the text is not needed to lay a paper out. */
+  readonly optionCount: number;
 }
 
 /**
@@ -138,30 +176,91 @@ export function resolveLayout(args: {
   readonly seed: number;
   /** False keeps the assessment's own order (an ordered paper, or staff preview). */
   readonly randomiseOrder?: boolean;
+  /** The paper's MCQs (Phase 12r). Absent or empty keeps the layout at v1. */
+  readonly mcqs?: readonly AssessmentMcqInput[];
 }): AttemptLayout {
   const ordered = [...args.questions].sort((a, b) => a.position - b.position);
   const random = xoshiro128ss(args.seed);
   const sequence = args.randomiseOrder === false ? ordered : shuffled(ordered, random);
-  return {
-    v: 1,
-    questions: sequence.map((question) => ({
-      questionId: question.id,
-      problemVersionId: question.problemVersionId,
-      sourcePosition: question.position,
-      points: question.points,
-      // Keyed on the question's own source position, not its shuffled index,
-      // so a candidate's test order for a given problem is stable even if the
-      // order resolution ever changes.
-      seed: questionSeed(args.seed, question.position),
-    })),
-  };
+  /**
+   * The MCQs are laid out from their OWN generator, seeded per question,
+   * rather than from `random` above. Drawing them from the shared stream
+   * would make a coding question's shuffle depend on how many MCQs the
+   * paper happens to hold, so adding one MCQ would silently re-order every
+   * candidate's coding questions — and the seeds are what make a paper
+   * reproducible for an appeal.
+   */
+  const mcqs = [...(args.mcqs ?? [])]
+    .sort((a, b) => a.position - b.position)
+    .map((mcq) => ({
+      mcqId: mcq.id,
+      sourcePosition: mcq.position,
+      points: mcq.points,
+      optionOrder: shuffled(
+        Array.from({ length: mcq.optionCount }, (_, i) => i),
+        xoshiro128ss(questionSeed(args.seed, mcq.position)),
+      ),
+    }));
+  if (mcqs.length > 0) {
+    return {
+      v: 2,
+      questions: codingQuestions(sequence, args.seed),
+      mcqs,
+    };
+  }
+  return { v: 1, questions: codingQuestions(sequence, args.seed) };
+}
+
+/**
+ * One mapping for both layout versions, so a v1 and a v2 paper can never
+ * describe the same coding question differently.
+ */
+function codingQuestions(sequence: readonly AssessmentQuestionInput[], seed: number): LayoutQuestion[] {
+  return sequence.map((question) => ({
+    questionId: question.id,
+    problemVersionId: question.problemVersionId,
+    sourcePosition: question.position,
+    points: question.points,
+    // Keyed on the question's own source position, not its shuffled index,
+    // so a candidate's test order for a given problem is stable even if the
+    // order resolution ever changes.
+    seed: questionSeed(seed, question.position),
+  }));
 }
 
 /** Narrow a stored `layout` jsonb back to a paper. Throws on anything else. */
 export function parseAttemptLayout(value: unknown): AttemptLayout {
   const layout = value as Partial<AttemptLayout> | null;
-  if (!layout || layout.v !== 1 || !Array.isArray(layout.questions)) {
-    throw new Error("stored attempt layout is not a v1 layout");
+  if (!layout || (layout.v !== 1 && layout.v !== 2) || !Array.isArray(layout.questions)) {
+    throw new Error("stored attempt layout is not a v1 or v2 layout");
+  }
+  /**
+   * The version and the MCQs agree, in both directions. A v1 carrying MCQs
+   * was written by something that did not know what it was doing and
+   * serving it would quietly drop them; a v2 carrying none is a version
+   * bump for nothing, which makes the version stop meaning anything. Both
+   * are refused so the one fact the version asserts stays true.
+   */
+  if (layout.v === 1 && layout.mcqs !== undefined) {
+    throw new Error("stored attempt layout is v1 but carries mcqs");
+  }
+  if (layout.v === 2 && (!Array.isArray(layout.mcqs) || layout.mcqs.length === 0)) {
+    throw new Error("stored attempt layout is v2 but carries no mcqs");
+  }
+  if (layout.mcqs !== undefined) {
+    if (!Array.isArray(layout.mcqs)) throw new Error("stored attempt layout has malformed mcqs");
+    for (const mcq of layout.mcqs) {
+      if (
+        typeof mcq?.mcqId !== "string" ||
+        typeof mcq?.sourcePosition !== "number" ||
+        typeof mcq?.points !== "number" ||
+        !Array.isArray(mcq?.optionOrder) ||
+        mcq.optionOrder.length === 0 ||
+        mcq.optionOrder.some((i: unknown) => typeof i !== "number")
+      ) {
+        throw new Error("stored attempt layout has a malformed mcq");
+      }
+    }
   }
   for (const question of layout.questions) {
     if (

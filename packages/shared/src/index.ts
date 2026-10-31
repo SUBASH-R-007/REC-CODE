@@ -33,6 +33,7 @@ export * from "./exam-timer";
 export * from "./exam-palette";
 export * from "./exam-telemetry";
 export * from "./exam-snapshot";
+export * from "./exam-mcq";
 export * from "./exam-randomise";
 export * from "./cidr";
 export * from "./seb";

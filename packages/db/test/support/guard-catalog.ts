@@ -92,6 +92,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_sql_assessment_problem",
   // 20261101180000_phase12q_sql_contest_rule
   "recx_refuse_sql_contest_problem",
+  // 20261101190000_phase12r_assessment_mcq
+  "recx_refuse_clashing_assessment_position",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -368,6 +370,30 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "ContestProblem",
     fn: "recx_refuse_sql_contest_problem",
+    level: "ROW",
+  },
+  // 20261101190000_phase12r_assessment_mcq
+  {
+    /**
+     * Phase 12r. A candidate sees "Question 4 of 9" whether 4 is a program
+     * or a multiple-choice question, so the palette is ONE numbered list
+     * and `position` is unique across both AssessmentProblem and
+     * AssessmentMcq — which no single unique index can say. One function,
+     * two triggers, told apart by TG_TABLE_NAME, so the rule cannot be
+     * enforced on one side and forgotten on the other.
+     */
+    name: "AssessmentMcq_position_free",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentMcq",
+    fn: "recx_refuse_clashing_assessment_position",
+    level: "ROW",
+  },
+  {
+    /** The mirror of AssessmentMcq_position_free; see that entry. */
+    name: "AssessmentProblem_position_free",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_clashing_assessment_position",
     level: "ROW",
   },
   {
