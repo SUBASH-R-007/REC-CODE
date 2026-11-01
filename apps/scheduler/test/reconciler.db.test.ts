@@ -243,12 +243,12 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
 
     // (a) QUEUED rows
     expect((await sub("queued-old")).judgeState).toBe("DISPATCHED");
-    expect(addsFor(q, "queued-old")).toEqual([{ lane: "PRACTICE", data: { kind: "submission", id: id("queued-old") } }]);
+    expect(addsFor(q, "queued-old")).toEqual([{ engine: "isolate", lane: "PRACTICE", data: { kind: "submission", id: id("queued-old") } }]);
 
     expect((await sub("queued-young")).judgeState).toBe("PENDING");
     expect(addsFor(q, "queued-young")).toEqual([]);
 
-    expect(q.removed).toContainEqual({ lane: "CONTEST", id: id("queued-completed") });
+    expect(q.removed).toContainEqual({ engine: "isolate", lane: "CONTEST", id: id("queued-completed") });
     expect(addsFor(q, "queued-completed")).toHaveLength(1);
 
     expect((await sub("queued-waiting")).judgeState).toBe("DISPATCHED");
@@ -289,9 +289,9 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
 
     // Runs: RUN lane, kind "run".
     expect((await runRow("run-queued-old"))?.judgeState).toBe("DISPATCHED");
-    expect(addsFor(q, "run-queued-old")).toEqual([{ lane: "RUN", data: { kind: "run", id: id("run-queued-old") } }]);
+    expect(addsFor(q, "run-queued-old")).toEqual([{ engine: "isolate", lane: "RUN", data: { kind: "run", id: id("run-queued-old") } }]);
     expect(await runRow("run-lease-requeue")).toMatchObject({ status: "QUEUED", judgeState: "DISPATCHED", claimToken: null });
-    expect(addsFor(q, "run-lease-requeue")).toEqual([{ lane: "RUN", data: { kind: "run", id: id("run-lease-requeue") } }]);
+    expect(addsFor(q, "run-lease-requeue")).toEqual([{ engine: "isolate", lane: "RUN", data: { kind: "run", id: id("run-lease-requeue") } }]);
 
     // (d) TTL
     expect(await runRow("run-expired")).toBeNull();
@@ -337,14 +337,14 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
 
     // (a) QUEUED: kind "validation" on the REJUDGE queue.
     expect((await vrun("v-queued-old")).judgeState).toBe("DISPATCHED");
-    expect(addsFor(q, "v-queued-old")).toEqual([{ lane: "REJUDGE", data: { kind: "validation", id: id("v-queued-old") } }]);
+    expect(addsFor(q, "v-queued-old")).toEqual([{ engine: "isolate", lane: "REJUDGE", data: { kind: "validation", id: id("v-queued-old") } }]);
 
     expect((await vrun("v-queued-young")).judgeState).toBe("PENDING");
     expect(addsFor(q, "v-queued-young")).toEqual([]);
 
-    expect(q.removed).toContainEqual({ lane: "REJUDGE", id: id("v-queued-completed") });
+    expect(q.removed).toContainEqual({ engine: "isolate", lane: "REJUDGE", id: id("v-queued-completed") });
     expect(addsFor(q, "v-queued-completed")).toEqual([
-      { lane: "REJUDGE", data: { kind: "validation", id: id("v-queued-completed") } },
+      { engine: "isolate", lane: "REJUDGE", data: { kind: "validation", id: id("v-queued-completed") } },
     ]);
 
     // Attempts exhausted while QUEUED: INTERNAL_ERROR / FAILED / IE, outcome FAILED.
@@ -374,7 +374,7 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
       attemptCount: 1,
     });
     expect(addsFor(q, "v-lease-requeue")).toEqual([
-      { lane: "REJUDGE", data: { kind: "validation", id: id("v-lease-requeue") } },
+      { engine: "isolate", lane: "REJUDGE", data: { kind: "validation", id: id("v-lease-requeue") } },
     ]);
     expect(q.published.filter((p) => p.id === id("v-lease-requeue"))).toEqual([
       { kind: "validation", id: id("v-lease-requeue"), event: { type: "state", state: "QUEUED" } },
@@ -409,7 +409,7 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
       claimedByNodeId: null,
       attemptCount: 2,
     });
-    expect(addsFor(q, "v-dead-node")).toEqual([{ lane: "REJUDGE", data: { kind: "validation", id: id("v-dead-node") } }]);
+    expect(addsFor(q, "v-dead-node")).toEqual([{ engine: "isolate", lane: "REJUDGE", data: { kind: "validation", id: id("v-dead-node") } }]);
 
     // Nothing of this kind ever lands on another lane.
     const ours = q.added.filter((a) => a.data.id.startsWith(`${tag}-v-`));
@@ -435,7 +435,9 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
 
     for (const lane of JUDGE_LANES) {
       for (const name of [`lane-queued-${lane}`, `lane-lease-${lane}`]) {
-        expect(addsFor(q, name)).toEqual([{ lane, data: { kind: "submission", id: id(name) } }]);
+        // Every lane, and the isolate family: these fixtures are ordinary
+        // programs. A SQL job's family is asserted where SQL is set up.
+        expect(addsFor(q, name)).toEqual([{ engine: "isolate", lane, data: { kind: "submission", id: id(name) } }]);
         expect((await sub(name)).judgeState).toBe("DISPATCHED");
       }
     }
@@ -636,7 +638,7 @@ describe.skipIf(!ENABLED)("reconciler against recx_test", () => {
     await runReconcilerTick({ db, queues: q, log });
     expect(addsFor(q, "redis-down")).toHaveLength(1);
     expect(addsFor(q, "redis-down-validation")).toEqual([
-      { lane: "REJUDGE", data: { kind: "validation", id: id("redis-down-validation") } },
+      { engine: "isolate", lane: "REJUDGE", data: { kind: "validation", id: id("redis-down-validation") } },
     ]);
   });
 

@@ -34,11 +34,43 @@ describe.skipIf(!ENABLED)("outbox drain against recx_test", () => {
   let db2: Db;
   let userId = "";
   const subject = (s: string) => `${tag} ${s}`;
+  /** Only this suite writes it, which is what makes the sweep above safe. */
+  const OUTBOX_KIND = "security.test";
 
   beforeAll(async () => {
     if (!new URL(TEST_URL).pathname.endsWith("_test")) throw new Error("Refusing to run against a non-test database");
     db = createPrismaClient({ url: withSingleConnection(TEST_URL), log: [] });
     db2 = createPrismaClient({ url: withSingleConnection(TEST_URL), log: [] });
+
+    /**
+     * Rows left by a run that was interrupted before its teardown.
+     *
+     * The drain is GLOBAL -- it claims up to `batch` due rows across the
+     * whole table -- while every assertion here is about the handful of
+     * rows the test just wrote. So leftovers do not merely clutter: they
+     * crowd this run's rows out of the batch, and the test reads a tick
+     * that never looked at them. Found with 27 PENDING rows in
+     * `recx_test` from a run killed earlier, which turned two lease
+     * assertions red in a way that looked like a defect in the job.
+     *
+     * They are this suite's by `kind`, and this is a test database.
+     */
+    const orphaned = await db.emailOutbox.findMany({
+      where: { kind: OUTBOX_KIND },
+      select: { id: true, toUserId: true },
+    });
+    if (orphaned.length > 0) {
+      await db.auditLog.deleteMany({
+        where: { action: "email.delivery_failed", entityId: { in: orphaned.map((r) => r.id) } },
+      });
+      await db.emailOutbox.deleteMany({ where: { kind: OUTBOX_KIND } });
+      const owners = [...new Set(orphaned.map((r) => r.toUserId).filter((x): x is string => typeof x === "string"))];
+      // Only this suite's own fixture users, and never at the cost of the run.
+      await db.user
+        .deleteMany({ where: { id: { in: owners }, collegeId: { startsWith: "OBX-" } } })
+        .catch(() => undefined);
+    }
+
     const user = await db.user.create({
       data: { collegeId: tag.toUpperCase(), email: `${tag}@example.test`, handle: tag, firstName: "Out", lastName: "Box", role: "SUPER_ADMIN" },
     });
@@ -61,7 +93,7 @@ describe.skipIf(!ENABLED)("outbox drain against recx_test", () => {
 
   const enqueue = (s: string, fields: Record<string, unknown> = {}) =>
     db.emailOutbox.create({
-      data: { kind: "security.test", toUserId: userId, subject: subject(s), bodyText: `body ${tag}`, ...fields },
+      data: { kind: OUTBOX_KIND, toUserId: userId, subject: subject(s), bodyText: `body ${tag}`, ...fields },
     });
 
   it("sends due and lease-expired rows; future and leased rows wait", async () => {
