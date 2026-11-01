@@ -89,10 +89,23 @@ export function SweepReport({ report, at }: { report: InactivitySweepReport | nu
           { label: "Actually cleared", value: report.cleared, hint: "Written. Zero while report-only." },
           { label: "Writes withheld", value: report.reportOnly, hint: "Decisions a report-only policy did not write." },
         ].map((cell) => (
+          /**
+           * The hint lives INSIDE the `<dd>`, not in a `<p>` beside it.
+           *
+           * A `<dl>` may hold `<div>` groups, but a group may hold only
+           * `<dt>` and `<dd>` -- a third element makes the list invalid
+           * and axe reports it as serious (`definition-list`), because a
+           * screen reader walking the list cannot tell what the stray
+           * paragraph belongs to. Found by the axe suite on
+           * `/super/jobs`, in all four viewport and theme combinations,
+           * after the page had been read by eye and looked perfect.
+           */
           <div key={cell.label} className="rounded-lg border border-border px-3 py-2">
             <dt className="text-xs text-text-secondary">{cell.label}</dt>
-            <dd className="font-display text-xl font-semibold tabular-nums">{cell.value}</dd>
-            <p className="text-xs text-muted">{cell.hint}</p>
+            <dd className="text-xs text-muted">
+              <span className="block font-display text-xl font-semibold tabular-nums text-text">{cell.value}</span>
+              {cell.hint}
+            </dd>
           </div>
         ))}
       </dl>
