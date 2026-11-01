@@ -113,9 +113,9 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
       serverNow: outcome.serverNow.toISOString(),
       msRemaining: outcome.msRemaining,
       status: outcome.status,
-      // Phase 6e fills this from the invigilator desk. The field is in the
-      // contract from the first beat so the client never has to change.
-      pendingInvigilatorMessages: [],
+      // Phase 12v fills this at last. 6e built the desk and this stayed
+      // `[]`, so every "Message sent." was a message nobody received.
+      pendingInvigilatorMessages: outcome.messages,
       revokeReason: null,
       nextHeartbeatMs: outcome.nextHeartbeatMs,
     }),

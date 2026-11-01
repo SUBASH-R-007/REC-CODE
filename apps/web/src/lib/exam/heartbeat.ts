@@ -14,6 +14,7 @@ import {
   maxGapSeconds,
   slotOf,
   type ExamHeartbeatRequest,
+  type InvigilatorMessage,
   type PresenceBitmap,
 } from "@recx/shared";
 import { db } from "@/lib/db";
@@ -56,6 +57,12 @@ export interface HeartbeatOutcome {
   readonly nextHeartbeatMs: number;
   /** For the log line, not for the candidate. */
   readonly derived: readonly string[];
+  /**
+   * What the invigilator has said to this candidate and they have not
+   * acknowledged (Phase 12v). The response carried an empty array for five
+   * phases while the desk reported "Message sent."
+   */
+  readonly messages: readonly InvigilatorMessage[];
 }
 
 /**
@@ -217,11 +224,45 @@ export async function applyHeartbeat(
     });
   }
 
+  /**
+   * Acknowledgements first, then what is still outstanding — in that order,
+   * so a candidate who acknowledges on this beat is not handed the same
+   * message back on the same response and asked again (Phase 12v).
+   *
+   * Scoped to THIS attempt, not just to the ids: an id is a cuid a client
+   * sends us, and "acknowledge by id" without the attempt in the WHERE
+   * would let one candidate's client clear another candidate's message. It
+   * is also idempotent — `acknowledgedAt: null` means a replayed beat
+   * writes nothing rather than moving the recorded time.
+   */
+  const acknowledged = body.acknowledgedMessageIds ?? [];
+  if (acknowledged.length > 0) {
+    await db.invigilatorMessage.updateMany({
+      where: { id: { in: acknowledged }, attemptId: attempt.id, acknowledgedAt: null },
+      data: { acknowledgedAt: now },
+    });
+  }
+
+  const pending = await db.invigilatorMessage.findMany({
+    where: { attemptId: attempt.id, acknowledgedAt: null },
+    orderBy: { sentAt: "asc" },
+    // More than a handful on screen is not a conversation, and the desk
+    // already shows the invigilator what is outstanding.
+    take: 5,
+    select: { id: true, body: true, requiresAck: true, sentAt: true },
+  });
+
   return {
     status: reconnected && written.count === 1 ? "IN_PROGRESS" : attempt.status,
     msRemaining: msLeft,
     serverNow: now,
     nextHeartbeatMs: EXAM_HEARTBEAT_INTERVAL_MS,
     derived: derived.map((e) => e.kind),
+    messages: pending.map((message) => ({
+      id: message.id,
+      body: message.body,
+      requiresAck: message.requiresAck,
+      sentAt: message.sentAt.toISOString(),
+    })),
   };
 }

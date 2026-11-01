@@ -10,6 +10,7 @@ import {
   isNoiseFocusLoss,
   paletteCounts,
   type ExamHeartbeatResponse,
+  type InvigilatorMessage,
   type ProctorEventBatchResponse,
   type QuestionProgress,
 } from "@recx/shared";
@@ -151,6 +152,18 @@ export function ExamSession({
   const [handedIn, setHandedIn] = useState(false);
   const [save, setSave] = useState<SaveState>({ kind: "saved", secondsAgo: 0 });
   const [overlay, setOverlay] = useState<{ heading: string; body: string; pending: boolean } | null>(null);
+  /**
+   * What the invigilator has said, and not had acknowledged (Phase 12v).
+   *
+   * Derived from the heartbeat on every beat rather than accumulated here,
+   * so the server stays the record of what is outstanding. `acknowledged`
+   * holds the ids this client has answered but not yet seen the server
+   * drop, which is what keeps the same message from being shown again on
+   * the next beat before the acknowledgement has landed — and what keeps it
+   * coming back if the beat carrying it never arrived.
+   */
+  const [message, setMessage] = useState<InvigilatorMessage | null>(null);
+  const acknowledged = useRef<Set<string>>(new Set());
 
   /**
    * The palette, as ONE numbered list of mixed items (Phase 12r).
@@ -259,6 +272,12 @@ export function ExamSession({
             clientSeq: queue.current?.nextSeq() ?? 0,
             clientNowMs: Date.now(),
             visible: document.visibilityState === "visible",
+            // Resent on every beat until the server stops calling them
+            // pending: the write is idempotent, and an acknowledgement
+            // that was lost with its beat must not be lost for good.
+            ...(acknowledged.current.size > 0
+              ? { acknowledgedMessageIds: [...acknowledged.current].slice(0, 20) }
+              : {}),
           }),
         });
         if (cancelled) return;
@@ -267,6 +286,14 @@ export function ExamSession({
         setClock({ msRemaining: body.msRemaining, at: now() });
         setStatus(body.status);
         if (body.revokeReason) setRevoked(body.revokeReason);
+
+        // The server has taken these: they are no longer outstanding, so
+        // there is nothing left to resend.
+        const pending = body.pendingInvigilatorMessages;
+        for (const id of [...acknowledged.current]) {
+          if (!pending.some((candidate) => candidate.id === id)) acknowledged.current.delete(id);
+        }
+        setMessage(pending.find((candidate) => !acknowledged.current.has(candidate.id)) ?? null);
       } catch {
         // A dropped beat is a dropped beat; the next one is ten seconds away
         // and the server is the one counting. The save pill reports the
@@ -897,6 +924,19 @@ export function ExamSession({
     }
   }, [attemptId, questions]);
 
+  /**
+   * Acknowledge the invigilator's message (Phase 12v).
+   *
+   * Taken off the screen at once — the candidate has read it and said so,
+   * and making them wait for a round trip in the middle of an exam would be
+   * the wrong trade. The id goes into the set the next beat carries, and
+   * the server records the time.
+   */
+  const acknowledgeMessage = useCallback((id: string) => {
+    acknowledged.current.add(id);
+    setMessage(null);
+  }, []);
+
   const copyMyCode = useCallback(() => {
     const text = sourcesRef.current[questionIdRef.current] ?? "";
     void navigator.clipboard?.writeText(text).catch(() => undefined);
@@ -1045,6 +1085,23 @@ export function ExamSession({
           // Re-entering fullscreen is the candidate's own action; a
           // programmatic request without a user gesture would be refused.
           void document.documentElement.requestFullscreen?.().catch(() => undefined);
+        }}
+      />
+      {/*
+        The invigilator's own words, in the same dialog and for the same
+        reason (Phase 12v): it is the one message in a sitting that must not
+        be missable, and the desk told the invigilator the candidate "must
+        acknowledge it before continuing". Only shown when the focus warning
+        is not, because two modal dialogs at once is nobody's design.
+      */}
+      <FocusOverlay
+        open={message !== null && overlay === null && revoked === null}
+        heading="A message from your invigilator"
+        body={message?.body ?? ""}
+        pending={false}
+        actionLabel="I have read this"
+        onDismiss={() => {
+          if (message) acknowledgeMessage(message.id);
         }}
       />
     </div>

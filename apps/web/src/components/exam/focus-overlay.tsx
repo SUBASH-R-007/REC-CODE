@@ -34,6 +34,8 @@ export function FocusOverlay({
   body,
   pending,
   onDismiss,
+  actionLabel = "Return to the exam",
+  pendingLabel = "Recording…",
 }: {
   readonly open: boolean;
   readonly heading: string;
@@ -42,6 +44,15 @@ export function FocusOverlay({
   /** True while the ProctorEvent is still in flight. */
   readonly pending: boolean;
   readonly onDismiss: () => void;
+  /**
+   * Phase 12v. An invigilator's message uses this same dialog — opaque,
+   * focus-trapped, Escape refused — because the desk promises the candidate
+   * "must acknowledge it before continuing", and because a message from the
+   * person standing in the room is the one thing in a sitting that must not
+   * be missable. Only the words on the button differ.
+   */
+  readonly actionLabel?: string;
+  readonly pendingLabel?: string;
 }) {
   const button = useRef<HTMLButtonElement>(null);
   const container = useRef<HTMLDivElement>(null);
@@ -96,7 +107,7 @@ export function FocusOverlay({
           className="mt-6 w-full rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           {/* Says why it is waiting, rather than looking broken. */}
-          {pending ? "Recording…" : "Return to the exam"}
+          {pending ? pendingLabel : actionLabel}
         </button>
       </div>
     </div>

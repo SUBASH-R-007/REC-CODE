@@ -112,6 +112,18 @@ export default defineConfig({
       fullyParallel: false,
     },
     /**
+     * Phase 12v: the invigilator's desk acting on a live sitting, and the
+     * candidate's own page reacting over the heartbeat — the thing no unit
+     * test can be. NOT in any gate: it needs a live stack. Run it by name,
+     * `--project=invigilate`.
+     */
+    {
+      name: "invigilate",
+      testMatch: /invigilate-journey\.spec\.ts$/,
+      outputDir: "./test-results/invigilate",
+      fullyParallel: false,
+    },
+    /**
      * Phase 12u: the axe gate over the exam surface — the readiness page,
      * the sitting on both kinds of question, the console and the ended
      * state. `a11y` scans 64 pages and none of them is the screen a

@@ -124,6 +124,19 @@ export const examHeartbeatRequestSchema = z
     clientNowMs: z.number().int().optional(),
     /** Is the exam tab the foreground tab right now? A hint for the dashboard. */
     visible: z.boolean().optional(),
+    /**
+     * Invigilator messages this candidate has just acknowledged (Phase 12v).
+     *
+     * On the heartbeat rather than a route of its own, because the
+     * heartbeat is already the channel the messages arrive on and an
+     * acknowledgement that travels any other way can be lost while the one
+     * that matters — the beat — is still getting through. Bounded: a
+     * client with more than a few outstanding is a client that has stopped
+     * showing them, which is a different problem.
+     *
+     * Optional, so a client built before this field simply never sends it.
+     */
+    acknowledgedMessageIds: z.array(z.string().min(1).max(64)).max(20).optional(),
   })
   .strict();
 export type ExamHeartbeatRequest = z.infer<typeof examHeartbeatRequestSchema>;
@@ -151,7 +164,15 @@ export const examHeartbeatResponseSchema = z
      * stale number against an attempt that is already over.
      */
     status: z.string(),
-    /** Empty until Phase 6e builds the invigilator desk. */
+    /**
+     * What the invigilator has said to this candidate and they have not
+     * acknowledged yet (Phase 12v).
+     *
+     * The field was in the contract from the first beat, with the comment
+     * "Empty until Phase 6e builds the invigilator desk" — 6e built the
+     * desk, and this stayed an empty array for five phases. The desk said
+     * "Message sent." and the candidate was never told anything.
+     */
     pendingInvigilatorMessages: z.array(invigilatorMessageSchema),
     revokeReason: z.enum(ATTEMPT_REVOKE_REASONS).nullable(),
     /** When to beat again. Lets the server slow clients down under load. */

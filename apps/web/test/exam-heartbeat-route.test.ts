@@ -89,6 +89,10 @@ beforeEach(() => {
     serverNow: NOW,
     nextHeartbeatMs: EXAM_HEARTBEAT_INTERVAL_MS,
     derived: [],
+    // Phase 12v: the applier reports what the invigilator has said and the
+    // candidate has not acknowledged. It used to be hard-coded `[]` in the
+    // route, which is why nothing was ever delivered.
+    messages: [],
   });
 });
 
@@ -129,12 +133,52 @@ describe("POST /api/exam/[attemptId]/hb", () => {
     expect(h.guard).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null }));
   });
 
-  it("carries the invigilator message channel in the contract from the first beat", async () => {
-    // Phase 6e fills it. The field exists now so the exam client never has to
-    // change shape later.
+  it("delivers what the invigilator said, which it did not for five phases", async () => {
+    /**
+     * The field was in the contract from the first beat with the comment
+     * "Empty until Phase 6e builds the invigilator desk". 6e built the
+     * desk — `messageCandidate`, "they must acknowledge it before
+     * continuing", an unacknowledged count on the hall page — and the route
+     * went on answering with a hard-coded `[]`. Every "Message sent." was a
+     * message nobody received (Phase 12v).
+     */
+    const sent = {
+      id: "msg_1",
+      body: "Please raise your hand.",
+      requiresAck: true,
+      sentAt: NOW.toISOString(),
+    };
+    h.applyHeartbeat.mockResolvedValue({
+      status: "IN_PROGRESS",
+      msRemaining: 1_200_000,
+      serverNow: NOW,
+      nextHeartbeatMs: EXAM_HEARTBEAT_INTERVAL_MS,
+      derived: [],
+      messages: [sent],
+    });
     const body = (await (await post({ clientSeq: 1 })).json()) as Record<string, unknown>;
-    expect(body).toHaveProperty("pendingInvigilatorMessages");
-    expect(body.pendingInvigilatorMessages).toEqual([]);
+    expect(body.pendingInvigilatorMessages).toEqual([sent]);
+  });
+
+  it("passes the candidate's acknowledgements to the applier", async () => {
+    // On the heartbeat rather than a route of its own, because the
+    // heartbeat is the channel the messages arrive on.
+    await post({ clientSeq: 1, acknowledgedMessageIds: ["msg_1", "msg_2"] });
+    expect(h.applyHeartbeat).toHaveBeenCalledWith(
+      expect.anything(),
+      { clientSeq: 1, acknowledgedMessageIds: ["msg_1", "msg_2"] },
+      expect.anything(),
+    );
+  });
+
+  it("refuses a beat carrying an unbounded pile of acknowledgements", async () => {
+    // A client with twenty-odd outstanding is a client that has stopped
+    // showing them, which is a different problem from a slow network.
+    const response = await post({
+      clientSeq: 1,
+      acknowledgedMessageIds: Array.from({ length: 21 }, (_, i) => `msg_${i}`),
+    });
+    expect(response.status).toBe(400);
   });
 
   it("passes the client's own clock through for drift logging", async () => {

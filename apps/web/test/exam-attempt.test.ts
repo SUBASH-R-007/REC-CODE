@@ -35,6 +35,9 @@ const h = vi.hoisted(() => ({
   audit: vi.fn(),
   presented: "raw-attempt-token" as string | null,
   clearAttemptCookie: vi.fn(),
+  /** Phase 12v: the invigilator messages a beat delivers and acknowledges. */
+  messageUpdateMany: vi.fn(),
+  messageFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -42,6 +45,7 @@ vi.mock("@/lib/db", () => ({
     assessmentAttempt: { findUnique: h.findUnique, updateMany: h.updateMany },
     session: { findUnique: h.sessionFind },
     proctorEvent: { createMany: h.createMany },
+    invigilatorMessage: { updateMany: h.messageUpdateMany, findMany: h.messageFindMany },
   },
 }));
 vi.mock("@/lib/audit", () => ({ audit: h.audit }));
@@ -109,6 +113,8 @@ beforeEach(() => {
   h.updateMany.mockResolvedValue({ count: 1 });
   h.createMany.mockResolvedValue({ count: 1 });
   h.autoSubmitExpired.mockResolvedValue([]);
+  h.messageUpdateMany.mockResolvedValue({ count: 0 });
+  h.messageFindMany.mockResolvedValue([]);
   vi.useFakeTimers();
   // Ten minutes into the sitting.
   vi.setSystemTime(new Date(STARTED.getTime() + 600_000));
@@ -507,6 +513,39 @@ describe("applyHeartbeat", () => {
     h.updateMany.mockResolvedValue({ count: 0 });
     await beat({ attempt: attemptRow({ lastHeartbeatAt: new Date(Date.now() - 600_000) }) });
     expect(h.createMany).not.toHaveBeenCalled();
+  });
+
+  it("asks for nothing and writes nothing about messages on an ordinary beat", async () => {
+    await beat();
+    /**
+     * Phase 12v. The acknowledgement write is conditional on the client
+     * having sent ids: a beat that acknowledges nothing must not issue an
+     * UPDATE, because the heartbeat runs every ten seconds for every
+     * candidate in the hall and that is the one place a stray write costs
+     * real money.
+     */
+    expect(h.messageUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges only within this attempt, and only what is still outstanding", async () => {
+    await beat({ body: { clientSeq: 2, acknowledgedMessageIds: ["msg_1"] } });
+    expect(h.messageUpdateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["msg_1"] }, attemptId: ATTEMPT, acknowledgedAt: null },
+      data: { acknowledgedAt: expect.any(Date) },
+    });
+    // Scoped to the attempt, because the ids are cuids a client sends us;
+    // and `acknowledgedAt: null` keeps a replayed beat from moving the
+    // recorded time.
+  });
+
+  it("reads what is outstanding for THIS attempt, oldest first", async () => {
+    await beat();
+    expect(h.messageFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { attemptId: ATTEMPT, acknowledgedAt: null },
+        orderBy: { sentAt: "asc" },
+      }),
+    );
   });
 
   it("records every server event as SERVER-sourced with no client sequence", async () => {
