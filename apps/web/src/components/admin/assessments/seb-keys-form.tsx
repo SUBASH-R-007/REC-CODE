@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Field, Input } from "@recx/design";
 import { setSebKeys } from "@/server/actions/admin-assessments";
+import { setCollegeSebKeys } from "@/server/actions/super-settings";
 
 /**
  * The Safe Exam Browser keys for a hall, or for the college (Phase 12z).
@@ -21,13 +22,24 @@ import { setSebKeys } from "@/server/actions/admin-assessments";
  * reads; printing it back into an input invites a half-edit, and showing
  * "set" or "not set" is the only thing a person actually needs to know.
  */
+/**
+ * Which keys these are (Phase 13d).
+ *
+ * A hall's pair is written by a STAFF action on the paper's page; the
+ * college-wide default is written by a SUPER_ADMIN action on the
+ * integrations page, because `PlatformSetting` is the super-admin's
+ * table. Same form, same copy, two authorities -- which is the one thing
+ * about them a person has to understand.
+ */
+export type SebKeyScope = { readonly kind: "hall"; readonly examSessionId: string } | { readonly kind: "college" };
+
 export function SebKeysForm({
-  examSessionId,
+  scope,
   label,
   configKeySet,
   browserExamKeySet,
 }: {
-  examSessionId: string;
+  scope: SebKeyScope;
   label: string;
   configKeySet: boolean;
   browserExamKeySet: boolean;
@@ -38,13 +50,16 @@ export function SebKeysForm({
   const [browserExamKey, setBrowserExamKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  const id = examSessionId;
+  const id = scope.kind === "hall" ? scope.examSessionId : "college";
 
   const save = () => {
     setError(null);
     setDone(null);
     start(async () => {
-      const result = await setSebKeys({ examSessionId, configKey, browserExamKey });
+      const result =
+        scope.kind === "hall"
+          ? await setSebKeys({ examSessionId: scope.examSessionId, configKey, browserExamKey })
+          : await setCollegeSebKeys({ configKey, browserExamKey });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -54,7 +69,9 @@ export function SebKeysForm({
       setDone(
         result.data.configKey || result.data.browserExamKey
           ? "Saved. Candidates in Safe Exam Browser are verified against this from the next request."
-          : "Cleared. This scope now has no keys, so a kiosk paper here refuses every candidate until one is set.",
+          : scope.kind === "hall"
+            ? "Cleared. This hall now falls back to the college-wide pair, and refuses every candidate if there is none."
+            : "Cleared. A hall with no keys of its own now refuses every candidate until one is set.",
       );
       router.refresh();
     });

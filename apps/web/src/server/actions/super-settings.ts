@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@recx/db";
-import { RETENTION_SETTING_KEY, retentionSettingSchema } from "@recx/shared";
+import { RETENTION_SETTING_KEY, parseSebKey, retentionSettingSchema, sebSettingKey } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -75,4 +75,80 @@ export async function setLegalHold(input: SetLegalHoldInput): Promise<ActionResu
     revalidatePath("/super");
     return { legalHold: parsed.enabled };
   }, "setLegalHold");
+}
+
+const collegeSebSchema = z
+  .object({
+    configKey: z.string().max(200),
+    browserExamKey: z.string().max(200),
+  })
+  .strict();
+export type SetCollegeSebKeysInput = z.input<typeof collegeSebSchema>;
+
+/**
+ * The college-wide Safe Exam Browser pair (Phase 13d).
+ *
+ * A kiosk paper verifies `sha256(url + key)` on every request against the
+ * keys for the hall a candidate is sitting in; `sebKeysFor` falls back to
+ * this pair when a hall has none of its own. Phase 12z gave the halls a
+ * screen and recorded that this one had none: the setting was read and
+ * nothing in the product ever wrote it, so a department that wanted one
+ * default for every hall needed a hand-written SQL statement.
+ *
+ * **Here and not on the assessment page**, which is the fence doing its
+ * job. `PlatformSetting` is the super-admin's table -- capability
+ * `settings.write`, five allowlisted action files -- and
+ * `tests/repo/platform-setting-writes.test.ts` refused the first draft of
+ * the hall keys for writing it from a STAFF action. A hall's key belongs
+ * to whoever runs the hall; a college-wide default belongs to whoever
+ * runs the college.
+ *
+ * Audited at SECURITY, recording WHETHER each key was set and never
+ * which: an audit row carrying the key would be a second copy of it in a
+ * table more people can read.
+ */
+export async function setCollegeSebKeys(
+  input: SetCollegeSebKeysInput,
+): Promise<ActionResult<{ configKey: boolean; browserExamKey: boolean }>> {
+  return runAction(async () => {
+    const actor = await requireSuperAdmin();
+    const parsed = collegeSebSchema.parse(input);
+
+    const config = parseSebKey(parsed.configKey);
+    const browser = parseSebKey(parsed.browserExamKey);
+    if (!config.ok || !browser.ok) {
+      throw new ValidationError(
+        "A key is the hex digest Safe Exam Browser shows in its Config Tool — 64 characters of 0-9 and a-f. Copy it exactly, or leave the box empty to clear it.",
+      );
+    }
+
+    const key = sebSettingKey(null);
+    const value = {
+      ...(config.key === null ? {} : { configKey: config.key }),
+      ...(browser.key === null ? {} : { browserExamKey: browser.key }),
+    } as Prisma.InputJsonObject;
+    await db.platformSetting.upsert({
+      where: { key },
+      create: { key, value, updatedById: actor.id },
+      update: { value, updatedById: actor.id },
+    });
+
+    await audit({
+      actorId: actor.id,
+      action: "settings.seb_keys_changed",
+      entityType: "PlatformSetting",
+      entityId: key,
+      sensitivity: "SECURITY",
+      metadata: {
+        scope: "college",
+        // Whether, never which.
+        configKeySet: config.key !== null,
+        browserExamKeySet: browser.key !== null,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath("/super/settings/integrations");
+    return { configKey: config.key !== null, browserExamKey: browser.key !== null };
+  }, "setCollegeSebKeys");
 }

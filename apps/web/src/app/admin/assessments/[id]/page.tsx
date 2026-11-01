@@ -382,7 +382,7 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
             {assessment.sessions.map((session) => (
               <SebKeysForm
                 key={session.id}
-                examSessionId={session.id}
+                scope={{ kind: "hall", examSessionId: session.id }}
                 label={`${session.label}${session.room ? ` · ${session.room}` : ""}`}
                 configKeySet={session.sebKeys.configKey}
                 browserExamKeySet={session.sebKeys.browserExamKey}

@@ -124,6 +124,9 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
     actions: [
       "xp-settings#updateXpRules",
       "super-settings#setLegalHold",
+      // Phase 13d: the college-wide Safe Exam Browser pair, which a hall
+      // with no keys of its own falls back to.
+      "super-settings#setCollegeSebKeys",
       "super-flags#setFeatureFlag",
       "super-branding#saveBrandTheme",
       // Phase 8b. The inactivity thresholds are settings, not constants —

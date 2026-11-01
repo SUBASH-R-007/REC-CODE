@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardBody, CardHeader } from "@recx/design";
+import { sebSettingKey } from "@recx/shared";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { redis } from "@/lib/redis";
 import { loadMailHealth } from "@/server/queries/super-dashboard";
+import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 import { TestEmailButton } from "@/components/super/test-email-button";
 import { formatIst, Notice, PageHeader } from "@/components/super/ui";
 
@@ -39,12 +41,19 @@ function Status({ ok, label }: { ok: boolean; label: string }) {
  */
 export default async function SuperIntegrationsPage() {
   await requireSuperAdminPage();
-  const [mail, outbox, lastSent, redisOk] = await Promise.all([
+  const [mail, outbox, lastSent, redisOk, sebRow] = await Promise.all([
     loadMailHealth(),
     db.schedulerJobStatus.findUnique({ where: { job: "outbox" }, select: { lastStartedAt: true, lastOk: true } }),
     db.emailOutbox.findFirst({ where: { status: "SENT" }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
     redisReachable(),
+    db.platformSetting.findUnique({ where: { key: sebSettingKey(null) }, select: { value: true } }),
   ]);
+  // Booleans, never the keys themselves.
+  const sebValue = sebRow?.value as { configKey?: unknown; browserExamKey?: unknown } | null | undefined;
+  const collegeSeb = {
+    configKey: typeof sebValue?.configKey === "string" && sebValue.configKey !== "",
+    browserExamKey: typeof sebValue?.browserExamKey === "string" && sebValue.browserExamKey !== "",
+  };
   const transport = mail.transport ?? "unknown (the outbox job has not run)";
 
   return (
@@ -85,6 +94,40 @@ export default async function SuperIntegrationsPage() {
             </div>
           </dl>
           <TestEmailButton />
+        </CardBody>
+      </Card>
+      {/**
+        * Safe Exam Browser's college-wide pair (Phase 13d).
+        *
+        * On this page because SEB is a third-party tool this platform
+        * integrates with, and in `super-settings.ts` because
+        * `PlatformSetting` is the super-admin's table: a hall's own keys
+        * belong to whoever runs the hall, and the default every hall
+        * falls back to belongs to whoever runs the college.
+        *
+        * The state is read as BOOLEANS and the keys never leave the
+        * server: "set" or "not set" is the only thing a person needs,
+        * and a 64-character digest on a page is a copy of it in every
+        * proxy log between here and the browser.
+        */}
+      <Card>
+        <CardHeader
+          title="Safe Exam Browser"
+          subtitle="The keys a kiosk paper is verified against when its hall has none of its own."
+        />
+        <CardBody className="space-y-3 text-sm">
+          <p className="text-text-secondary">
+            A paper set to kiosk mode checks <span className="font-mono">sha256(url + key)</span> on every request. A
+            hall with its own pair -- set on the assessment, by whoever runs it -- always wins; this is what the rest
+            fall back to. With neither, a kiosk paper refuses every candidate, which is the correct failure direction
+            and a bad surprise ten minutes before an exam.
+          </p>
+          <SebKeysForm
+            scope={{ kind: "college" }}
+            label="College-wide default"
+            configKeySet={collegeSeb.configKey}
+            browserExamKeySet={collegeSeb.browserExamKey}
+          />
         </CardBody>
       </Card>
       <Card>
