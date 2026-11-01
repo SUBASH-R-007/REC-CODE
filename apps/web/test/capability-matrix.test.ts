@@ -280,6 +280,15 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
     }),
     { params: Promise.resolve({ attemptId: "att_1" }) },
   ],
+  // Phase 12y.4. A GET that streams the marks as a CSV: scoped to the
+  // reader's own students and audited before a byte is written, so the
+  // matrix exercises it like any other staff route.
+  "app/api/admin/assessments/[id]/results/route.ts#GET": () => [
+    new Request("http://localhost:3100/api/admin/assessments/a_1/results", {
+      headers: { host: "localhost:3100" },
+    }),
+    { params: Promise.resolve({ id: "a_1" }) },
+  ],
   "app/api/admin/invigilate/[sessionId]/live/route.ts#GET": () => [
     new Request("http://localhost:3100/api/admin/invigilate/sess_1/live", {
       headers: { host: "localhost:3100" },

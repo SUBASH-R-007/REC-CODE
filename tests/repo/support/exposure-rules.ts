@@ -321,7 +321,18 @@ export function exportedFunctionBodies(source: string, fileName = "route.ts"): M
   return out;
 }
 
-const STAFF_GUARD_CALL = /\b(?:requireSuperAdmin\s*\(\s*\)|requireActionRole\s*\(([^)]*)\))/g;
+/**
+ * The guards that admit staff and nobody else.
+ *
+ * `requireAdminScopeAction` is in the list because that is what it is:
+ * `lib/auth/scope.ts` defines it as `requireActionRole("ADMIN",
+ * "SUPER_ADMIN")` plus the caller's own student scope, so a route using it
+ * is strictly better fenced than one calling the bare role guard — it
+ * cannot then read a student outside its grant. Leaving it out made this
+ * rule reject the safer of the two spellings, which is how it was found
+ * (`/api/admin/assessments/[id]/results`, Phase 12y.4).
+ */
+const STAFF_GUARD_CALL = /\b(?:requireSuperAdmin\s*\(\s*\)|requireAdminScopeAction\s*\(\s*\)|requireActionRole\s*\(([^)]*)\))/g;
 const BODY_READ = /\b(?:request|req)\s*\.\s*(?:json|formData|text|arrayBuffer|blob|body)\b|\bspoolRequestBody\s*\(/;
 const DB_ACCESS = /\b(?:db|tx)\s*\.\s*[A-Za-z$]/;
 
@@ -333,7 +344,7 @@ export function staffGuardBeforeBody(functionText: string): boolean {
   const { code } = lexSource(functionText);
   let guardAt = -1;
   for (const m of code.matchAll(STAFF_GUARD_CALL)) {
-    if (m[0].startsWith("requireSuperAdmin")) {
+    if (m[0].startsWith("requireSuperAdmin") || m[0].startsWith("requireAdminScopeAction")) {
       guardAt = m.index;
       break;
     }

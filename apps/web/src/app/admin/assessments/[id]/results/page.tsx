@@ -53,6 +53,21 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
           Out of <strong>{formatMarks(results.maxPoints)}</strong> marks · {assessment.slug}
         </p>
         <p className="text-sm text-muted">{describeScope(scope)}</p>
+        {results.rows.length > 0 ? (
+          <p>
+            {/* A plain link, not a form: a GET that streams a file needs no
+                client island, and the route audits every download. */}
+            <a
+              href={`/api/admin/assessments/${id}/results`}
+              className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              Export as CSV
+            </a>{" "}
+            <span className="text-xs text-muted">
+              Your students only, and every download is recorded.
+            </span>
+          </p>
+        ) : null}
       </header>
 
       {isEmptyScope(scope) ? (
@@ -122,6 +137,7 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                       <th scope="col" className={TD}>Marks</th>
                       <th scope="col" className={TD}>%</th>
                       <th scope="col" className={TD}>Of which code</th>
+                      <th scope="col" className={TD}>Watched</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -163,6 +179,26 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                             <span className="block text-muted">
                               MCQ {row.result.mcq.correct}/{row.result.mcq.marks.length} right
                             </span>
+                          ) : null}
+                        </td>
+                        <td className={`${TD} text-xs`}>
+                          {/* Counts, never a verdict: SPEC §5 keeps bands and
+                              scores on the integrity review, where a human
+                              decides with the reasoning beside them. */}
+                          <Link
+                            href={`/admin/assessments/${id}/results/${row.attemptId}`}
+                            className="text-primary underline-offset-2 hover:underline"
+                          >
+                            {row.watched.focusLosses} tab · {row.watched.fullscreenExits} screen ·{" "}
+                            {row.watched.pastes} paste
+                          </Link>
+                          {row.watched.longestGapSeconds >= 45 ? (
+                            <span className="block text-warning">
+                              gap {Math.round(row.watched.longestGapSeconds / 60)} min
+                            </span>
+                          ) : null}
+                          {row.layoutUnreadable ? (
+                            <span className="block text-danger">stored paper unreadable</span>
                           ) : null}
                         </td>
                       </tr>

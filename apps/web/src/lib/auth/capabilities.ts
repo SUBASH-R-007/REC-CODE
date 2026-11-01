@@ -483,7 +483,13 @@ export const STAFF_CAPABILITIES = deepFreeze([
       // scoped to the reader's own students like every staff read of a
       // candidate.
       "app/admin/assessments/[id]/results/page.tsx",
+      // Phase 12y.4: everything recorded about one sitting. Signals, never
+      // a band — the verdict lives on /admin/integrity.
+      "app/admin/assessments/[id]/results/[attemptId]/page.tsx",
     ],
+    // The marks as a CSV, scoped to the reader's own students and audited
+    // on every download (Phase 12y.4).
+    routes: ["app/api/admin/assessments/[id]/results/route.ts#GET"],
   },
   {
     key: "announcements.manage",

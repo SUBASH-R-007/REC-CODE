@@ -399,6 +399,9 @@ describe("detector self-tests", () => {
     it.each([
       ["guard first", 'const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");\nconst body = await request.formData();'],
       ["super guard", "await requireSuperAdmin();\nawait db.user.findMany();"],
+      // Phase 12y.4: the scoped admin guard is a staff guard — it IS
+      // requireActionRole("ADMIN","SUPER_ADMIN") plus the caller's scope.
+      ["scoped admin guard", "const { scope } = await requireAdminScopeAction();\nawait db.user.findMany();"],
     ])("accepts %s", (_n, body) => expect(staffGuardBeforeBody(`{ ${body} }`)).toBe(true));
 
     it.each([
@@ -407,6 +410,7 @@ describe("detector self-tests", () => {
       ["db first", 'await db.problem.findMany();\nawait requireActionRole("ADMIN");'],
       ["student-admitting guard", 'await requireActionRole("ADMIN", "STUDENT");\nawait request.json();'],
       ["no guard", "await request.json();"],
+      ["scoped admin guard after the read", "await request.json();\nawait requireAdminScopeAction();"],
       ["guard only in a comment", '// await requireActionRole("ADMIN");\nawait request.json();'],
     ])("rejects %s", (_n, body) => expect(staffGuardBeforeBody(`{ ${body} }`)).toBe(false));
   });

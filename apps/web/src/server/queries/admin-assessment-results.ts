@@ -1,9 +1,11 @@
 import "server-only";
 import {
+  PROCTOR_EVENT_LABELS,
   parseAttemptLayout,
   scoreAttempt,
   type AttemptResult,
   type CodingMarkingInput,
+  type ProctorEventKind,
   type Verdict,
 } from "@recx/shared";
 import { scopedStudentWhere, type StudentScope } from "@/lib/auth/scope";
@@ -49,6 +51,22 @@ export interface AttemptResultRow {
   readonly result: AttemptResult | null;
   /** The stored paper would not parse, so the choice half is unmarked and a person must look. */
   readonly layoutUnreadable: boolean;
+  /**
+   * What was watched during the sitting (Phase 12y.4).
+   *
+   * Counts, never a verdict and never a band. SPEC §5 is explicit that no
+   * signal penalises by itself, and these are on a RESULTS page beside a
+   * mark — so what belongs here is the facts an examiner can act on ("left
+   * full screen nine times") and not a number that reads like part of the
+   * score. The band, the points and the review live on
+   * `/admin/integrity`, where a human decides.
+   */
+  readonly watched: {
+    readonly focusLosses: number;
+    readonly fullscreenExits: number;
+    readonly pastes: number;
+    readonly longestGapSeconds: number;
+  };
 }
 
 export interface QuestionStat {
@@ -122,6 +140,10 @@ export async function getAssessmentResults(
         submittedAt: true,
         seatLabel: true,
         layout: true,
+        blurEventCount: true,
+        fullscreenExitCount: true,
+        pasteEventCount: true,
+        maxHeartbeatGapSeconds: true,
         user: {
           select: { collegeId: true, firstName: true, lastName: true, batchYear: true, departmentCode: true },
         },
@@ -204,6 +226,12 @@ export async function getAssessmentResults(
       seatLabel: attempt.seatLabel,
       result: scored?.result ?? null,
       layoutUnreadable: scored?.layoutUnreadable ?? false,
+      watched: {
+        focusLosses: attempt.blurEventCount,
+        fullscreenExits: attempt.fullscreenExitCount,
+        pastes: attempt.pasteEventCount,
+        longestGapSeconds: attempt.maxHeartbeatGapSeconds,
+      },
     });
   }
 
@@ -396,5 +424,145 @@ function empty(): AssessmentResults {
     needsAttention: 0,
     averagePercent: null,
     medianPercent: null,
+  };
+}
+
+/** One stored signal, as the audit shows it. */
+export interface AuditEventRow {
+  readonly kind: string;
+  readonly label: string;
+  readonly severity: string;
+  readonly source: string;
+  /** Milliseconds into the sitting, which is how a reviewer places it. */
+  readonly atMs: number;
+  readonly durationMs: number | null;
+  /** Bytes, for a paste. Never the text: PROCTORING §5 forbids capturing it. */
+  readonly size: number | null;
+  readonly occurredAt: Date;
+}
+
+export interface AttemptAudit {
+  readonly attemptId: string;
+  readonly collegeId: string;
+  readonly name: string;
+  readonly assessmentId: string;
+  readonly assessmentTitle: string;
+  readonly status: string;
+  readonly startedAt: Date;
+  readonly submittedAt: Date | null;
+  readonly hall: string | null;
+  readonly seatLabel: string | null;
+  readonly proctorMode: string;
+  readonly watched: {
+    readonly focusLosses: number;
+    readonly fullscreenExits: number;
+    readonly pastes: number;
+    readonly longestGapSeconds: number;
+  };
+  /** Every kind that fired, with how many times. The shape of the sitting. */
+  readonly byKind: ReadonlyArray<{ readonly kind: string; readonly label: string; readonly count: number }>;
+  readonly events: readonly AuditEventRow[];
+  /** True when the list below is the cap rather than everything stored. */
+  readonly truncated: boolean;
+}
+
+/** At most this many events on one page; a noisy sitting can store thousands. */
+export const AUDIT_EVENT_LIMIT = 500;
+
+/**
+ * Everything recorded about one sitting (Phase 12y.4).
+ *
+ * The counters on the results table are a summary; this is the record they
+ * are a summary OF, which is what makes a disputed sitting answerable. SPEC
+ * §5 asks for a decision to be explainable months later, and until now the
+ * only screen that showed any of it was the integrity flag page — which
+ * exists only for sittings that were flagged. A candidate who left full
+ * screen nine times and was never flagged left no trace anybody could read.
+ *
+ * What is NOT here, deliberately: the band, the points and the integrity
+ * score. They are on `/admin/integrity`, where a human reaches a verdict
+ * with the reasoning beside it. Beside a mark they would be read as part of
+ * the mark, which is the misreading SPEC §5 exists to prevent. Nor is any
+ * pasted TEXT: the product stores a paste's size and a hash, never its
+ * content (`docs/PROCTORING.md` §5), so there is none to show.
+ */
+export async function getAttemptAudit(scope: StudentScope, attemptId: string): Promise<AttemptAudit | null> {
+  const attempt = await db.assessmentAttempt.findFirst({
+    where: { id: attemptId, user: scopedStudentWhere(scope) },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      submittedAt: true,
+      seatLabel: true,
+      proctorMode: true,
+      blurEventCount: true,
+      fullscreenExitCount: true,
+      pasteEventCount: true,
+      maxHeartbeatGapSeconds: true,
+      user: { select: { collegeId: true, firstName: true, lastName: true } },
+      examSession: { select: { label: true } },
+      assessment: { select: { id: true, title: true } },
+    },
+  });
+  if (!attempt) return null;
+
+  const [grouped, events] = await Promise.all([
+    db.proctorEvent.groupBy({
+      by: ["kind"],
+      where: { attemptId: attempt.id },
+      _count: { _all: true },
+    }),
+    db.proctorEvent.findMany({
+      where: { attemptId: attempt.id },
+      orderBy: [{ atMs: "asc" }, { occurredAt: "asc" }],
+      take: AUDIT_EVENT_LIMIT + 1,
+      select: {
+        kind: true,
+        severity: true,
+        source: true,
+        atMs: true,
+        durationMs: true,
+        size: true,
+        occurredAt: true,
+      },
+    }),
+  ]);
+
+  const label = (kind: string) => PROCTOR_EVENT_LABELS[kind as ProctorEventKind] ?? kind;
+  const truncated = events.length > AUDIT_EVENT_LIMIT;
+
+  return {
+    attemptId: attempt.id,
+    collegeId: attempt.user.collegeId,
+    name: `${attempt.user.firstName} ${attempt.user.lastName}`.trim(),
+    assessmentId: attempt.assessment.id,
+    assessmentTitle: attempt.assessment.title,
+    status: attempt.status,
+    startedAt: attempt.startedAt,
+    submittedAt: attempt.submittedAt,
+    hall: attempt.examSession?.label ?? null,
+    seatLabel: attempt.seatLabel,
+    proctorMode: attempt.proctorMode,
+    watched: {
+      focusLosses: attempt.blurEventCount,
+      fullscreenExits: attempt.fullscreenExitCount,
+      pastes: attempt.pasteEventCount,
+      longestGapSeconds: attempt.maxHeartbeatGapSeconds,
+    },
+    byKind: grouped
+      .map((row) => ({ kind: row.kind, label: label(row.kind), count: row._count._all }))
+      .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
+    events: events.slice(0, AUDIT_EVENT_LIMIT).map((event) => ({
+      kind: event.kind,
+      label: label(event.kind),
+      severity: event.severity,
+      source: event.source,
+      atMs: event.atMs,
+      durationMs: event.durationMs,
+      size: event.size,
+      occurredAt: event.occurredAt,
+    })),
+    truncated,
   };
 }
