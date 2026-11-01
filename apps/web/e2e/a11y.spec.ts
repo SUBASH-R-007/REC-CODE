@@ -239,6 +239,9 @@ const TARGETS: readonly Target[] = [
   // dialog, and the one page where a wrong label would hide what turning it
   // on actually does.
   { path: "/super/settings/ai", as: "admin", gating: true },
+  // Phase 13d. Status cards plus the college-wide Safe Exam Browser pair,
+  // which is the one editable thing on the page.
+  { path: "/super/settings/integrations", as: "admin", gating: true },
   { path: "/super/audit", as: "admin", gating: true },
   { path: "/super/impersonate", as: "admin", gating: true },
   { path: "/super/flags", as: "admin", gating: true },

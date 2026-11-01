@@ -59,6 +59,12 @@ export interface AuthoredPaper {
   readonly title: string;
   readonly stem: string;
   readonly questionCount: number;
+  /**
+   * The row's id, read off the URL after the draft is created: the staff
+   * pages for a paper are all `/admin/assessments/<id>/...`, and a spec
+   * that wants to look at them cannot guess it.
+   */
+  readonly id: string;
 }
 
 /**
@@ -99,6 +105,9 @@ export async function authorPaper(admin: Page, options: PaperOptions): Promise<A
 
   await expect(admin.getByRole("heading", { name: title, level: 1 })).toBeVisible({ timeout: 60_000 });
   await expect(admin.getByText("DRAFT").first()).toBeVisible();
+  // Creating lands on the paper's own page, which is where the id is.
+  const id = new URL(admin.url()).pathname.split("/").filter(Boolean).pop() ?? "";
+  expect(id, "the draft's id, from the URL after creating it").not.toBe("");
 
   if (coding) {
     await admin.getByRole("textbox", { name: "Problem address" }).fill(SEEDED_PROBLEM_SLUG);
@@ -155,7 +164,7 @@ export async function authorPaper(admin: Page, options: PaperOptions): Promise<A
   await admin.getByRole("button", { name: /Open it for candidates/ }).click();
   await expect(admin.getByText("OPEN").first()).toBeVisible({ timeout: 60_000 });
 
-  return { slug, title, stem, questionCount: coding ? 2 : 1 };
+  return { slug, title, stem, questionCount: coding ? 2 : 1, id };
 }
 
 /**

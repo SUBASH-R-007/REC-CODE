@@ -32,6 +32,11 @@ import { authorPaper, goToQuestion, RIGHT_OPTION, walkReadinessChecks } from "./
  * ones `a11y.spec.ts` gates on, because a second definition of "accessible"
  * would be worse than none.
  *
+ * Phase 13e extends it past the sitting: the staff pages for the same
+ * paper and the result the candidate reads. Those four are unreachable
+ * from a path list for the same reason the sitting is — they need a
+ * paper that exists — so they had never been scanned either.
+ *
  * NOT in any gate: it needs a live stack. `--project=exam-a11y`, and
  * `E2E_AXE_DETAILS=1` to print the offending markup.
  */
@@ -140,6 +145,69 @@ for (const viewport of VIEWPORTS) {
         });
         await settle(candidate);
         findings.push(...(await scan(candidate, "handed-in")));
+
+        /**
+         * ── The staff side of the same paper, and the candidate's own
+         * result (Phase 13e) ──
+         *
+         * Four pages that no axe run had ever seen, because none of them
+         * can be reached from a list of paths: they all live under
+         * `/admin/assessments/<id>`, and the id only exists once a paper
+         * has been authored. `a11y.spec.ts` scans the assessment LIST and
+         * the create form and stops there — so the paper's own page (its
+         * languages, its questions, its halls, its exam-browser keys),
+         * the results table, one candidate's recorded sitting and the
+         * result that candidate reads were all unscanned.
+         *
+         * A SECOND staff context, at this run's viewport and theme: the
+         * authoring context above is deliberately left at the default
+         * size, because filling a long admin form at 375 px is a test
+         * about forms and this is a test about markup.
+         */
+        const scanContext = await contextAs(browser, "admin", {
+          viewport: { width: viewport.width, height: viewport.height },
+          isMobile: viewport.mobile,
+          hasTouch: viewport.mobile,
+          colorScheme: theme,
+        });
+        const staff = await scanContext.newPage();
+        await presetTheme(staff, theme);
+
+        await openPage(staff, `/admin/assessments/${paper.id}`);
+        await expect(staff.getByRole("heading", { name: paper.title, level: 1 })).toBeVisible({ timeout: 60_000 });
+        await settle(staff);
+        findings.push(...(await scan(staff, "admin-paper")));
+
+        await openPage(staff, `/admin/assessments/${paper.id}/results`);
+        await expect(staff.getByRole("heading", { name: "Results", level: 1 })).toBeVisible({ timeout: 60_000 });
+        await settle(staff);
+        findings.push(...(await scan(staff, "admin-results")));
+
+        // One candidate's sitting: the signals, the timeline and the
+        // export link. The row's "watched" cell is the way in.
+        const attemptLink = staff.locator(`a[href*="/results/"]`).first();
+        if (await attemptLink.count()) {
+          await attemptLink.click();
+          await settle(staff);
+          findings.push(...(await scan(staff, "admin-attempt")));
+          await staff.goBack();
+          await settle(staff);
+        }
+
+        // Releasing, and the page once it is released.
+        const release = staff.getByRole("button", { name: /Release the results/ });
+        if (await release.count()) {
+          await release.first().click();
+          await expect(staff.getByText(/Released/i).first()).toBeVisible({ timeout: 60_000 });
+          await settle(staff);
+          findings.push(...(await scan(staff, "admin-results-released")));
+
+          // ── What the candidate reads ──
+          await openPage(candidate, `/assessments/${paper.slug}/result`);
+          await expect(candidate.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 60_000 });
+          await settle(candidate);
+          findings.push(...(await scan(candidate, "student-result")));
+        }
 
         await record(testInfo, label, findings, candidate.url());
         expectNoGatingViolations(findings, label);
