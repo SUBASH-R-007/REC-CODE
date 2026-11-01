@@ -1,10 +1,13 @@
 import "server-only";
 import {
   PROCTOR_EVENT_LABELS,
+  normalisePaperLanguages,
+  paperLanguageViews,
   parseAttemptLayout,
   scoreAttempt,
   type AttemptResult,
   type CodingMarkingInput,
+  type PaperLanguageView,
   type ProctorEventKind,
   type Verdict,
 } from "@recx/shared";
@@ -51,6 +54,15 @@ export interface AttemptResultRow {
   readonly result: AttemptResult | null;
   /** The stored paper would not parse, so the choice half is unmarked and a person must look. */
   readonly layoutUnreadable: boolean;
+  /**
+   * Which languages this candidate answered the programs in (Phase 13a),
+   * with their labels resolved, in the catalog's order.
+   *
+   * Reported because a paper may now accept several and a candidate picks
+   * per question, so "what did they write it in" is no longer a property
+   * of the paper. Empty for a sitting with no coding answer yet.
+   */
+  readonly languages: PaperLanguageView[];
   /**
    * What was watched during the sitting (Phase 12y.4).
    *
@@ -187,6 +199,8 @@ export async function getAssessmentResults(
             score: true,
             maxScore: true,
             status: true,
+            // Phase 13a: which language this answer was written in.
+            language: true,
           },
         });
   const byAttempt = new Map<string, SubmissionRow[]>();
@@ -226,6 +240,14 @@ export async function getAssessmentResults(
       seatLabel: attempt.seatLabel,
       result: scored?.result ?? null,
       layoutUnreadable: scored?.layoutUnreadable ?? false,
+      /**
+       * From the MARKS rather than from the submissions again, so the
+       * languages listed are the ones that actually count towards this
+       * result -- one per question, newest submission per question.
+       */
+      languages: paperLanguageViews(
+        normalisePaperLanguages((scored?.result.coding.marks ?? []).map((mark) => mark.language)),
+      ),
       watched: {
         focusLosses: attempt.blurEventCount,
         fullscreenExits: attempt.fullscreenExitCount,
@@ -261,6 +283,8 @@ interface SubmissionRow {
   readonly score: number | null;
   readonly maxScore: number | null;
   readonly status: string;
+  /** The toolchain it was judged with (Phase 13a). */
+  readonly language: string;
 }
 
 interface AttemptAnswers {
@@ -339,6 +363,7 @@ function resultOf(
               score: submission.score,
               maxScore: submission.maxScore,
               terminal: submission.status === "DONE" || submission.status === "INTERNAL_ERROR",
+              language: submission.language,
             },
     };
   });

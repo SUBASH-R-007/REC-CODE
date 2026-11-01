@@ -167,3 +167,48 @@ describe("marks as a department writes them", () => {
     expect(formatMarks(0)).toBe("0");
   });
 });
+
+describe("the language a mark carries (Phase 13a)", () => {
+  /**
+   * Reported because a paper may now be answered in several, and "what was
+   * this answered in" is a question the result has to be able to answer:
+   * an examiner looking at a wrong answer in a language the paper was not
+   * taught in is looking at something else entirely.
+   */
+  it("comes from the submission, whatever the outcome", () => {
+    for (const verdict of ["AC", "WA", "IE", "PARTIAL"] as const) {
+      const mark = markCoding({
+        questionId: "q1",
+        points: 10,
+        submission: { verdict, score: 1, maxScore: 2, terminal: true, language: "py312" },
+      });
+      expect(mark.language, verdict).toBe("py312");
+    }
+  });
+
+  it("is null for a question the candidate left blank", () => {
+    // There is nothing to have written in a language.
+    expect(markCoding({ questionId: "q1", points: 10, submission: null }).language).toBeNull();
+  });
+
+  it("is null when the submission does not say, rather than guessed at", () => {
+    // A row written before this field existed. Reporting the paper's
+    // default would be inventing a fact about somebody's answer.
+    expect(
+      markCoding({
+        questionId: "q1",
+        points: 10,
+        submission: { verdict: "AC", score: null, maxScore: null, terminal: true },
+      }).language,
+    ).toBeNull();
+  });
+
+  it("survives a question still being judged", () => {
+    const mark = markCoding({
+      questionId: "q1",
+      points: 10,
+      submission: { verdict: null, score: null, maxScore: null, terminal: false, language: "cpp20" },
+    });
+    expect(mark).toMatchObject({ outcome: "pending", language: "cpp20" });
+  });
+});

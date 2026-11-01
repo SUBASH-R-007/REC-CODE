@@ -331,6 +331,49 @@ describe.skipIf(!ENABLED)("a paper answered in two languages, against recx_test"
     expect(new Set(snapshots.map((s) => s.language))).toEqual(new Set(["cpp20", "py312"]));
   });
 
+  it("reports what each answer was written in, to staff and to the candidate", async () => {
+    /**
+     * Phase 13a.3. A mark with no language beside it cannot be read once a
+     * paper accepts several: an examiner looking at a wrong answer in a
+     * language the paper was not taught in is looking at something else
+     * entirely, and a candidate reading their own result chose the
+     * language themselves.
+     */
+    const guard = await sitting();
+    await submitModule.submitAttempt(guard, layout() as never, [
+      { questionId: questionIds[0]!, language: "cpp20", source: "int main(){return 0;}\n" },
+      { questionId: questionIds[1]!, language: "py312", source: "print(3)\n" },
+    ]);
+
+    const results = await import("@/server/queries/admin-assessment-results");
+    const scopeWhere = await import("@/lib/auth/scope-where");
+    const wholeCollege = scopeWhere.buildStudentScope({ id: staffId, role: "SUPER_ADMIN" }, []);
+    const read = await results.getAssessmentResults(wholeCollege, assessmentId);
+    const row = read.rows.find((r) => r.attemptId === guard.attempt.id);
+    expect(row).toBeDefined();
+    // Both, with their labels resolved on the server and in catalog order.
+    expect(row!.languages.map((language) => language.key)).toEqual(["cpp20", "py312"]);
+    expect(row!.languages[0]!.shortLabel).toBe("C++20");
+
+    // And the candidate's own result, once staff release it.
+    await db.assessment.update({
+      where: { id: assessmentId },
+      data: { resultsPublishedAt: new Date(), resultsPublishedById: staffId },
+    });
+    const mine = await import("@/server/queries/my-assessment-result");
+    const own = await mine.myAssessmentResult({ userId, slug: tag });
+    expect(own).not.toBeNull();
+    const languages = own!.questions.filter((q) => q.kind === "coding").map((q) => q.language);
+    expect(languages).toContain("C++20 (GCC 13.2.0)");
+    expect(languages.some((label) => label?.startsWith("Python 3.12"))).toBe(true);
+
+    // Put it back, so the other tests see an unreleased paper.
+    await db.assessment.update({
+      where: { id: assessmentId },
+      data: { resultsPublishedAt: null, resultsPublishedById: null },
+    });
+  });
+
   it("refuses a language the paper does not accept, and leaves the sitting open", async () => {
     const guard = await sitting();
     const result = await submitModule.submitAttempt(guard, layout() as never, [

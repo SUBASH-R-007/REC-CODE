@@ -110,6 +110,9 @@ export default async function MyAssessmentResultPage({ params }: { params: Promi
                       {question.totalCases > 0
                         ? ` · ${question.passedCases} of ${question.totalCases} tests passed`
                         : ""}
+                      {/* What they wrote it in (Phase 13a), which they chose
+                          and which the judge compiled it with. */}
+                      {question.language ? ` · ${question.language}` : ""}
                     </p>
                   </div>
                   <p className="tabular-nums text-sm">

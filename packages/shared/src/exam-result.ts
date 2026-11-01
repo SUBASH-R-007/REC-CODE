@@ -66,6 +66,19 @@ export interface CodingMarkingInput {
     readonly maxScore: number | null;
     /** False while the row is QUEUED or JUDGING. */
     readonly terminal: boolean;
+    /**
+     * The toolchain key it was judged with (Phase 13a), carried through to
+     * the mark.
+     *
+     * It was not worth reporting while a paper had one language that
+     * nobody chose. Now that a candidate picks per question, "what was
+     * this answered in" is a question the result has to be able to
+     * answer: a department comparing two candidates, and a candidate
+     * reading their own marks, both need it, and an examiner looking at a
+     * wrong answer in a language the paper was not taught in is looking at
+     * something else entirely.
+     */
+    readonly language?: string | null;
   } | null;
 }
 
@@ -75,6 +88,11 @@ export interface CodingMark {
   readonly verdict: Verdict | null;
   readonly points: number;
   readonly maxPoints: number;
+  /**
+   * What it was answered in (Phase 13a), or null for a blank question --
+   * which has no language because there is nothing to have written one in.
+   */
+  readonly language: string | null;
 }
 
 export interface CodingTotals {
@@ -94,10 +112,11 @@ const REJECTED: readonly Verdict[] = ["WA", "TLE", "MLE", "RE", "CE", "OLE", "SK
 
 export function markCoding(input: CodingMarkingInput): CodingMark {
   const maxPoints = input.points;
-  const base = { questionId: input.questionId, maxPoints };
   const submission = input.submission;
+  // On the base, so every outcome below carries it and none can forget to.
+  const base = { questionId: input.questionId, maxPoints, language: submission?.language ?? null };
 
-  if (submission === null) return { ...base, outcome: "blank", verdict: null, points: 0 };
+  if (submission === null) return { ...base, outcome: "blank", verdict: null, points: 0, language: null };
   if (!submission.terminal || submission.verdict === null) {
     return { ...base, outcome: "pending", verdict: submission.verdict, points: 0 };
   }

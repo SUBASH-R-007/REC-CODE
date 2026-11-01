@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  paperLanguageLabel,
   parseAttemptLayout,
   scoreAttempt,
   type AttemptResult,
@@ -55,6 +56,17 @@ export interface MyQuestionResult {
   readonly tests: readonly HiddenTestView[];
   readonly passedCases: number;
   readonly totalCases: number;
+  /**
+   * What this answer was written in (Phase 13a), with its full label, or
+   * null for a multiple-choice question and one left blank.
+   *
+   * On a candidate's own result because they chose it: a paper may accept
+   * several languages now, and somebody looking at a question that earned
+   * nothing should be able to see which editor it came out of -- not
+   * least to notice that they answered the wrong one in the wrong
+   * language.
+   */
+  readonly language: string | null;
 }
 
 export interface MyAssessmentResult {
@@ -129,6 +141,7 @@ export async function myAssessmentResult(args: {
       score: true,
       maxScore: true,
       status: true,
+      language: true,
       testResults: true,
       passedCases: true,
       totalCases: true,
@@ -177,6 +190,7 @@ export async function myAssessmentResult(args: {
               score: submission.score,
               maxScore: submission.maxScore,
               terminal: submission.status === "DONE" || submission.status === "INTERNAL_ERROR",
+              language: submission.language,
             },
     };
   });
@@ -201,6 +215,8 @@ export async function myAssessmentResult(args: {
       tests: [],
       passedCases: 0,
       totalCases: 0,
+      // A multiple-choice answer is not written in a language.
+      language: null,
     })),
     ...result.coding.marks.map((mark) => {
       const problem = paper.problems.find((p) => p.id === mark.questionId);
@@ -215,6 +231,9 @@ export async function myAssessmentResult(args: {
         tests: submission ? hiddenTestsOf(submission.testResults) : [],
         passedCases: submission?.passedCases ?? 0,
         totalCases: submission?.totalCases ?? 0,
+        // The label, resolved here: the catalog is a server-side thing and
+        // a student's page has no business importing eleven toolchains.
+        language: mark.language === null ? null : paperLanguageLabel(mark.language),
       };
     }),
   ].sort((a, b) => a.position - b.position);

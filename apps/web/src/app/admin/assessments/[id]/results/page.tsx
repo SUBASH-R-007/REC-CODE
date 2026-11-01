@@ -137,6 +137,10 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                       <th scope="col" className={TD}>Marks</th>
                       <th scope="col" className={TD}>%</th>
                       <th scope="col" className={TD}>Of which code</th>
+                      {/* Phase 13a: a paper may accept several languages and
+                          a candidate picks per question, so what they wrote
+                          it in is no longer a property of the paper. */}
+                      <th scope="col" className={TD}>Answered in</th>
                       <th scope="col" className={TD}>Watched</th>
                     </tr>
                   </thead>
@@ -180,6 +184,17 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                               MCQ {row.result.mcq.correct}/{row.result.mcq.marks.length} right
                             </span>
                           ) : null}
+                        </td>
+                        <td className={`${TD} text-xs`}>
+                          {row.languages.length === 0 ? (
+                            <span className="text-muted">—</span>
+                          ) : (
+                            row.languages.map((language) => (
+                              <span key={language.key} className="block" title={language.label}>
+                                {language.shortLabel}
+                              </span>
+                            ))
+                          )}
                         </td>
                         <td className={`${TD} text-xs`}>
                           {/* Counts, never a verdict: SPEC §5 keeps bands and

@@ -102,6 +102,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     "code_rejected",
     "code_blank",
     "code_open",
+    // Phase 13a: which language(s) the programs were answered in. A paper
+    // may accept several and a candidate picks per question, so a column
+    // of marks with no language beside it cannot be read.
+    "languages",
     "tab_switches",
     "fullscreen_exits",
     "pastes",
@@ -137,6 +141,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         row.result?.coding.rejected ?? "",
         row.result?.coding.blank ?? "",
         row.result === null ? "" : row.result.coding.pending + row.result.coding.unjudged,
+        // The toolchain keys, not the labels: a CSV is read by a machine as
+        // often as by a person, and `py312` is the value every other table
+        // in this product joins on.
+        row.languages.map((language) => language.key).join(" "),
         row.watched.focusLosses,
         row.watched.fullscreenExits,
         row.watched.pastes,
