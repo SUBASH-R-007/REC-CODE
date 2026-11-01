@@ -209,6 +209,50 @@ async function chooseLanguage(page: import("@playwright/test").Page, key: string
   await picker.selectOption(key);
 }
 
+/**
+ * Submit, and judge — with the click retried until the page shows it was
+ * heard (Phase 12w).
+ *
+ * The action bar is a client island on a server-rendered page, so a click
+ * that lands before React has attached does nothing at all and nothing
+ * retries it. Against a production build that window is short; against
+ * `next dev` it is seconds, and this is what the two earlier attempts at
+ * this test ran into: the second one "made no page requests for ten
+ * minutes", which is exactly what a lost click looks like from the outside
+ * — the test sat waiting for a verdict on a submission that had never been
+ * created (no row in `Submission` at all, checked against the database).
+ * The same race as 12v.1's question palette, and the same fix.
+ *
+ * "Heard" is a verdict badge that this submit produced: the console shows
+ * QUEUED, then RUNNING, then the verdict. COUNTED rather than matched,
+ * because a problem somebody has already answered can open with one on
+ * screen — and `not.toHaveCount` retries on its own, so the page is given
+ * as long to answer as it needs without the click being repeated.
+ *
+ * It also turns the stall into a legible failure: a submission the server
+ * REFUSES (not registered, outside the window, a rate limit) never changes
+ * the count either, so after two minutes the test says the click was not
+ * heard and attaches the screenshot of whatever the page said, instead of
+ * waiting ten minutes for a judge that was never going to answer.
+ */
+async function submitAndJudge(
+  page: import("@playwright/test").Page,
+  what: string,
+): Promise<void> {
+  const verdicts = page.locator("[data-verdict]");
+  const before = await verdicts.count();
+  await expect(async () => {
+    await page.getByRole("button", { name: "Submit" }).first().click();
+    await expect(verdicts, `${what}: the Submit click was not heard`).not.toHaveCount(before, {
+      timeout: 20_000,
+    });
+  }).toPass({ timeout: 2 * 60_000 });
+  await expect(
+    page.locator('[data-verdict="AC"]').first(),
+    `${what}: not Accepted inside the contest`,
+  ).toBeVisible({ timeout: 10 * 60_000 });
+}
+
 /** Type a whole answer into the editor, whichever editor it is. */
 async function typeSolution(page: import("@playwright/test").Page, source: string): Promise<void> {
   const editor = page.locator("[data-editor-root]").first();
@@ -560,7 +604,28 @@ test.describe("the problem kinds, in a browser", () => {
     await admin.getByLabel("Title").fill(title);
     await admin.getByLabel("Address").fill(slug);
     await admin.getByLabel("Starts").fill(istInput(new Date(Date.now() - 5 * 60_000)));
-    await admin.getByLabel("Ends").fill(istInput(new Date(Date.now() + 3 * 60 * 60 * 1000)));
+    /**
+     * Forty-five minutes, not three hours — and the reason is the rule in
+     * `lib/contests/entry.ts`, not an arbitrary number.
+     *
+     * A published contest cannot be deleted or unpublished, so every run of
+     * this test leaves a live one behind holding the same seeded problems,
+     * and the student stays registered for it. When a problem sits in more
+     * than one live contest the student is in, `findLiveContestEntry`
+     * breaks the tie by **soonest to end** — deliberately, because that is
+     * the contest they are about to lose. With a three-hour window, the
+     * leftover from the previous run always ends first, so this run's three
+     * Accepted submissions were scored onto the PREVIOUS run's board: the
+     * database showed all five of them carrying the older contest's id, and
+     * the standings assertion below is what caught it.
+     *
+     * A window shorter than anything still running makes this run's contest
+     * the one that ends first, which is the same rule working for us. The
+     * test takes a couple of minutes; forty-five is room to spare, and
+     * still shorter than any leftover from a run started within the last
+     * two hours.
+     */
+    await admin.getByLabel("Ends").fill(istInput(new Date(Date.now() + 45 * 60_000)));
     await admin.getByLabel("Standings freeze (minutes)").fill("0");
     await admin.getByLabel("Rules").fill(`Answer each one. Round ${runId}.`);
     await admin.getByRole("button", { name: "Create draft" }).click();
@@ -577,7 +642,23 @@ test.describe("the problem kinds, in a browser", () => {
     await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });
 
     await openPage(student, `/contests/${slug}`);
-    await student.getByRole("button", { name: "Register" }).click();
+    /**
+     * Waited for by assertion before it is clicked, with a timeout that
+     * suits a development server rather than the 20-second default an
+     * action inherits.
+     *
+     * One run lost here: the click reported `waiting for getByRole('button',
+     * { name: 'Register' })` for twenty seconds on a page whose trace
+     * snapshot and failure screenshot both show the button, on a tick where
+     * that page took 5.2 s to render. Probed afterwards with the same
+     * storage state against the same URL, the locator resolves instantly —
+     * so it was the page arriving late under load, not a page that was
+     * wrong, and the honest fix is to say how long we are willing to wait
+     * and why we are waiting.
+     */
+    const register = student.getByRole("button", { name: "Register" });
+    await expect(register, "the contest page offers no way to register").toBeVisible({ timeout: 60_000 });
+    await register.click();
     await expect(student.getByRole("link", { name: "Enter the arena" })).toBeVisible({ timeout: 60_000 });
 
     const judged: string[] = [];
@@ -590,9 +671,21 @@ test.describe("the problem kinds, in a browser", () => {
          * An output-only question's one case is visible, and its data IS
          * the question — so the answer is worked out from the page, which
          * is what a student does.
+         *
+         * Read from the DATA BLOCK, not from `main`. The first draft read
+         * the whole statement pane and took the first number in it, which
+         * on the first run that ever reached this line was `-1405`: the
+         * problem's own code, `REC-1405`, with the hyphen read as a minus
+         * sign by `-?\d+`. Everything else in the pane — the code, the
+         * time limit, the memory limit — is a number that is not the
+         * question, so the only safe source is the block the question is
+         * printed in.
          */
-        const body = await student.locator("main").innerText();
-        const numbers = [...body.matchAll(/-?\d+/g)].map((m) => Number(m[0]));
+        const data = await student
+          .locator('section[aria-labelledby="problem-samples"] pre')
+          .first()
+          .innerText();
+        const numbers = [...data.matchAll(/-?\d+/g)].map((m) => Number(m[0]));
         const count = numbers[0] ?? 0;
         expect(count, "the sample data did not start with a count").toBeGreaterThan(0);
         source = String(numbers.slice(1, 1 + count).reduce((a, b) => a + b, 0));
@@ -603,11 +696,7 @@ test.describe("the problem kinds, in a browser", () => {
       // C++, and a C++ program typed into a Python workspace is a CE.
       if (kind !== "answer") await chooseLanguage(student, "cpp20");
       await typeSolution(student, source!);
-      await student.getByRole("button", { name: "Submit" }).click();
-      await expect(
-        student.locator('[data-verdict="AC"]').first(),
-        `${kind}: not Accepted inside the contest`,
-      ).toBeVisible({ timeout: 10 * 60_000 });
+      await submitAndJudge(student, kind);
       judged.push(kind);
       await shot(student, testInfo, `judged-${kind}.png`);
     }
@@ -618,9 +707,21 @@ test.describe("the problem kinds, in a browser", () => {
      * student's OWN row and a score on it. The previous form
      * (`row.or(table)`) was satisfied by any table at all, which is how a
      * board that is empty by construction went unnoticed.
+     *
+     * Found by the ROW MARKED "you", not by the roll number. The first
+     * draft filtered on `ACCOUNTS.journey.identifier`, and the first run
+     * that ever reached this line found no row at all — because the board
+     * shows a rank, a public name linking to `/u/<handle>`, a score, a
+     * penalty and a solve count, and never a roll number. It should not
+     * show one either: this board is the whole college's to read. The
+     * marker the page puts on the viewer's own row is the honest handle
+     * for "my row", and it needs no seed identity to find.
      */
     await openPage(student, `/contests/${slug}/standings`);
-    const row = student.getByRole("row").filter({ hasText: ACCOUNTS.journey.identifier }).first();
+    const row = student
+      .getByRole("row")
+      .filter({ has: student.getByText("you", { exact: true }) })
+      .first();
     await expect(row, "the student has no row on the board").toBeVisible({ timeout: 60_000 });
     await expect(row, "the board shows no score for the student").toContainText(/[1-9]\d*/);
     await shot(student, testInfo, "judged-standings.png");
