@@ -129,12 +129,24 @@ export async function authorPaper(admin: Page, options: PaperOptions): Promise<A
    * candidate's set is frozen into their own attempt at start.
    */
   if (options.languages && options.languages.length > 0) {
+    /**
+     * Scoped to the PAPER's own form (Phase 13c).
+     *
+     * The page now has two kinds of language checkbox: the paper's
+     * accepted set, and the per-question narrowing in the questions
+     * table. A page-wide `getByRole("checkbox", { name: "C++20" })`
+     * matches both and Playwright refuses it in strict mode -- which is
+     * the suite catching an ambiguity the moment the second control
+     * appeared, rather than a test quietly ticking the wrong box.
+     *
+     * By substring, not by a built regular expression: the labels hold
+     * "C++20", whose plus signs are a regex that matches nothing.
+     */
+    const card = admin.locator("form").filter({ hasText: "Save the languages" }).first();
     for (const label of options.languages) {
-      // By substring, not by a built regular expression: the labels hold
-      // "C++20", whose plus signs are a regex that matches nothing.
-      await admin.getByRole("checkbox", { name: label }).check();
+      await card.getByRole("checkbox", { name: label }).check();
     }
-    await admin.getByRole("button", { name: "Save the languages" }).click();
+    await card.getByRole("button", { name: "Save the languages" }).click();
     await expect(admin.getByText(/Saved\. Candidates may answer in/)).toBeVisible({ timeout: 60_000 });
   }
 
