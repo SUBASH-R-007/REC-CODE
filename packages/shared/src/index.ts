@@ -70,6 +70,7 @@ export * from "./calendar";
 export * from "./inactivity-policy";
 export * from "./inactivity";
 export * from "./inactivity-copy";
+export * from "./inactivity-report";
 export * from "./mentor";
 export * from "./readiness";
 export * from "./readiness-snapshot";

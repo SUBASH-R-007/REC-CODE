@@ -1,5 +1,10 @@
 import type { Db } from "@recx/db";
-import { DEFAULT_INACTIVITY_POLICY, SCHEDULER_JOB_NAMES, SWEEP_HOLDBACKS } from "@recx/shared";
+import {
+  DEFAULT_INACTIVITY_POLICY,
+  SCHEDULER_JOB_NAMES,
+  SWEEP_HOLDBACKS,
+  inactivitySweepReportSchema,
+} from "@recx/shared";
 import pino from "pino";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -546,6 +551,36 @@ describe("A REPORT-ONLY POLICY WRITES NOTHING EITHER", () => {
     // process wrote tonight.
     expect(summary?.dryRun).toBe(false);
     expect(summary?.report?.reportOnly).toBe(1);
+  });
+
+  it("produces a report the page can parse, which is the only thing holding the two ends together", async () => {
+    /**
+     * Phase 12w. The job writes this object to
+     * `SchedulerJobStatus.lastReport`; `/super/jobs` reads it back with
+     * `inactivitySweepReportSchema` and shows a super-admin the figures
+     * they decide enforcement from. The scheduler does not import the web
+     * app and the web app does not import the scheduler, so nothing but
+     * this assertion notices when the shape moves.
+     *
+     * Parsed through JSON first, because that is what the column does to
+     * it — a `Date` or an `undefined` that survives in memory does not
+     * survive the round trip.
+     */
+    const { db } = recordingDb();
+    loadSweepContext.mockResolvedValue(reporting() as never);
+    sweepCandidates.mockResolvedValue([candidate()] as never);
+    const report = await new InactivitySweepJob({ db, log, dryRun: false }).tick(AT_0200_IST);
+
+    const stored: unknown = JSON.parse(JSON.stringify(report));
+    const parsed = inactivitySweepReportSchema.safeParse(stored);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues ?? [])).toBe(true);
+    // And the figures survive, rather than parsing into defaults.
+    if (parsed.success) {
+      expect(parsed.data.considered).toBe(report.considered);
+      expect(parsed.data.reportOnly).toBe(report.reportOnly);
+      expect(parsed.data.reportOnlyPolicies).toBe(report.reportOnlyPolicies);
+      expect(parsed.data.sample).toHaveLength(report.sample.length);
+    }
   });
 
   it("is per policy, not per process: one cohort can be watched while another is enforced", async () => {

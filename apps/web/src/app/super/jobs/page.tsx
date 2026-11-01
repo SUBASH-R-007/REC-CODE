@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Card, CardBody, CardHeader, EmptyState, StatCard } from "@recx/design";
-import { SCHEDULER_JOB_NAMES } from "@recx/shared";
+import { SCHEDULER_JOB_NAMES, inactivitySweepReportSchema } from "@recx/shared";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { PRIVILEGED_KIND_LABEL } from "@/lib/privileged/payloads";
 import { loadJobsPage } from "@/server/queries/super-jobs";
 import { AutoRefresh } from "@/components/admin/auto-refresh";
+import { SweepReport } from "@/components/super/sweep-report";
 import { formatIst, OperationStatusBadge, PageHeader } from "@/components/super/ui";
 
 export const metadata: Metadata = { title: "Jobs · Super-admin" };
@@ -24,6 +25,23 @@ export default async function SuperJobsPage() {
   const now = new Date();
   const data = await loadJobsPage(now);
   const byJob = new Map(data.jobs.map((j) => [j.job, j]));
+
+  /**
+   * The inactivity sweep's own report (Phase 12w).
+   *
+   * Every job writes one to `SchedulerJobStatus.lastReport` and this page
+   * showed none of them — which was fine until 12w put a switch on
+   * `/super/settings/inactivity` asking a super-admin to decide whether the
+   * nightly job may act, and pointed them here for the evidence. A product
+   * that asks somebody to decide and keeps the evidence in a log file is
+   * asking them to guess.
+   *
+   * Parsed, not cast: it is a jsonb column written by another process, and
+   * a page that cast it would render `undefined` for a field that moved
+   * instead of saying so.
+   */
+  const sweep = byJob.get("inactivitySweep") ?? null;
+  const sweepReport = sweep ? inactivitySweepReportSchema.safeParse(sweep.lastReport) : null;
 
   return (
     <div className="space-y-6">
@@ -98,6 +116,19 @@ export default async function SuperJobsPage() {
               </tbody>
             </table>
           </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="What the inactivity sweep last found"
+          subtitle="The figures the enforcement switch is decided from. Read a few nights of it before letting the job act."
+        />
+        <CardBody>
+          <SweepReport
+            report={sweepReport?.success ? sweepReport.data : null}
+            at={sweep ? formatIst(sweep.lastFinishedAt ?? sweep.lastStartedAt) : "—"}
+          />
         </CardBody>
       </Card>
 

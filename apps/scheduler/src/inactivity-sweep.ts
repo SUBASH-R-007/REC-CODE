@@ -7,7 +7,12 @@ import {
   type AppliedDecision,
   type SweepDecision,
 } from "@recx/db/inactivity";
-import { CAMPUS_TIME_ZONE, JUDGE_ENGINES, SWEEP_HOLDBACKS, type SweepHoldback } from "@recx/shared";
+import {
+  CAMPUS_TIME_ZONE,
+  JUDGE_ENGINES,
+  emptyHeldBy,
+  type InactivitySweepReport,
+} from "@recx/shared";
 import type { Logger } from "pino";
 import type { JudgeQueuePort } from "./queues";
 
@@ -53,63 +58,18 @@ export const INACTIVITY_SWEEP_BATCH = 500;
 /** Batches per tick, so a 20,000-student college finishes in one night. */
 export const INACTIVITY_SWEEP_MAX_BATCHES = 80;
 
-export interface InactivitySweepReport {
-  /** The campus day evaluated, or null when the hour gate said not yet. */
-  evaluationDay: string | null;
-  ran: boolean;
-  /** Why it did not run, when it did not. */
-  skipped?: "not-the-hour" | "already-run-today" | "no-active-policy";
-  considered: number;
-  /**
-   * What it did, by kind — or would have done under `--dry-run`, which is
-   * what the names still say. Kept as `would…` because the report is read
-   * for the dry run's sake and renaming it would make the two runs harder
-   * to compare, which is the one thing the dry run exists for.
-   */
-  wouldEscalate: number;
-  wouldClear: number;
-  held: number;
-  /** Held back, by reason — the number an administrator acts on. */
-  heldBy: Record<SweepHoldback, number>;
-  /** Students the job would stop at SOFT_RESTRICTED and hand to a human. */
-  adminReview: number;
-  /** Actually written. Zero in dry-run mode, by construction. */
-  escalated: number;
-  cleared: number;
-  /**
-   * Decisions the sweep declined to write because the policy that produced
-   * them is report-only (Phase 12w). The counterpart of `--dry-run` for one
-   * policy rather than the whole process: `considered` and every `would…`
-   * figure are the same as a live run's, and nothing was written.
-   *
-   * It counts the writes WITHHELD, so a quiet night under a report-only
-   * policy reads as zero and `reportOnlyPolicies` is what says the mode was
-   * on. A number that counted every held student instead would make a
-   * reporting sweep and an enforcing one look alike in the log.
-   */
-  reportOnly: number;
-  /** Active policies that do not enforce. The mode, stated whatever happened. */
-  reportOnlyPolicies: number;
-  /** Another writer got there first: a solve, a staff member, or the other instance. */
-  racedAway: number;
-  mentorsNotified: number;
-  contestSubmissionsCancelled: number;
-  /** True when the calendar did not cover the window for anybody at all. */
-  calendarIncomplete: boolean;
-  /** A readable sample, for the report a human reads. Counts and codes only. */
-  sample: Array<{
-    collegeId: string;
-    stage: string;
-    toStage: string;
-    kind: string;
-    countedInactiveDays: number;
-    excludedDays: number;
-    holdback: SweepHoldback | null;
-    reason: string;
-  }>;
-  failed: boolean;
-  error?: string;
-}
+/**
+ * What a tick reports, defined ONCE in `@recx/shared` (Phase 12w).
+ *
+ * This file used to declare the interface and `/super/jobs` used to render
+ * nothing, so the shape had one owner and no reader. Now the page parses
+ * the stored report with `inactivitySweepReportSchema` before showing a
+ * super-admin the figures they decide enforcement from — which makes the
+ * shape a contract between the scheduler and the web app, and a contract
+ * written down twice is a contract that drifts. The zod schema is the
+ * definition; this is that type.
+ */
+export type { InactivitySweepReport };
 
 const SAMPLE_SIZE = 25;
 
@@ -134,10 +94,6 @@ function liveMode(report: InactivitySweepReport): string {
   return enforcing
     ? "inactivity sweep (partly report-only: some policies do not enforce)"
     : "inactivity sweep (report-only: the policy does not enforce, nothing written)";
-}
-
-function emptyHeldBy(): Record<SweepHoldback, number> {
-  return Object.fromEntries(SWEEP_HOLDBACKS.map((key) => [key, 0])) as Record<SweepHoldback, number>;
 }
 
 /** The hour in campus time, whatever the server's own zone. */
@@ -282,7 +238,10 @@ export class InactivitySweepJob {
 
     if (decision.holdback !== null) {
       report.held += 1;
-      report.heldBy[decision.holdback] += 1;
+      // `?? 0` rather than `+= 1`: the shared schema reads a stored report
+      // back as a partial record (a row written before a holdback existed
+      // simply has no key for it), so the counter has to tolerate one.
+      report.heldBy[decision.holdback] = (report.heldBy[decision.holdback] ?? 0) + 1;
     } else if (decision.plan.kind === "escalate") {
       report.wouldEscalate += 1;
     } else if (decision.plan.kind === "clear") {
