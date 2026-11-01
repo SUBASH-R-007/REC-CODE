@@ -44,6 +44,7 @@ const BATCH = 2031;
 describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
   let db: import("@recx/db").Db;
   let results: typeof import("@/server/queries/admin-assessment-results");
+  let mine: typeof import("@/server/queries/my-assessment-result");
   let scopeWhere: typeof import("@/lib/auth/scope-where");
 
   let staffId = "";
@@ -69,6 +70,7 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
       log: [],
     });
     results = await import("@/server/queries/admin-assessment-results");
+    mine = await import("@/server/queries/my-assessment-result");
     scopeWhere = await import("@/lib/auth/scope-where");
 
     const staff = await db.user.create({
@@ -340,6 +342,76 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
     // is the scope and not an empty query.
     const all = await results.getAssessmentResults(wholeCollege(), assessmentId);
     expect(all.rows).toHaveLength(4);
+  });
+
+  describe("what the candidate themselves can see", () => {
+    /**
+     * The rule the feature was asked for in: "only when result published
+     * by admin". It is enforced in the WHERE clause rather than checked
+     * afterwards, and these two tests are the pair that proves it — the
+     * same candidate, the same sitting, the only difference being whether
+     * staff have released the marks.
+     */
+    let candidateId = "";
+
+    beforeAll(async () => {
+      const user = await db.user.findFirstOrThrow({
+        where: { collegeId: `${tag}-a`.toUpperCase().slice(0, 32) },
+        select: { id: true },
+      });
+      candidateId = user.id;
+    });
+
+    it("shows a candidate nothing at all before their department releases it", async () => {
+      await db.assessment.update({
+        where: { id: assessmentId },
+        data: { resultsPublishedAt: null, resultsPublishedById: null },
+      });
+      expect(await mine.myAssessmentResult({ userId: candidateId, slug: tag })).toBeNull();
+    });
+
+    it("shows them their own marks once it is released", async () => {
+      await db.assessment.update({
+        where: { id: assessmentId },
+        data: { resultsPublishedAt: new Date(), resultsPublishedById: staffId },
+      });
+      const result = await mine.myAssessmentResult({ userId: candidateId, slug: tag });
+      expect(result, "a released result is not reaching the candidate").not.toBeNull();
+      expect(result?.points).toBe(14);
+      expect(result?.maxPoints).toBe(14);
+      expect(result?.percent).toBe(100);
+      expect(result?.questions).toHaveLength(2);
+    });
+
+    it("shows them their own and nobody else's", async () => {
+      const other = await db.user.findFirstOrThrow({
+        where: { collegeId: `${tag}-b`.toUpperCase().slice(0, 32) },
+        select: { id: true },
+      });
+      const theirs = await mine.myAssessmentResult({ userId: other.id, slug: tag });
+      // Candidate B got the choice wrong and the code wrong.
+      expect(theirs?.points).toBe(0);
+      expect(theirs?.attemptId).not.toBe((await mine.myAssessmentResult({ userId: candidateId, slug: tag }))?.attemptId);
+    });
+
+    it("never names the right answer, only what the candidate's own came to", async () => {
+      // A student holding the key is a student who can pass it on, and the
+      // next cohort sits the same paper.
+      const result = await mine.myAssessmentResult({ userId: candidateId, slug: tag });
+      const serialised = JSON.stringify(result);
+      expect(serialised).not.toMatch(/correctIndex/);
+      expect(serialised).not.toMatch(/Merge sort|Quicksort|Heapsort/);
+      // And nothing about a rank, a cohort or anybody else's mark.
+      expect(serialised).not.toMatch(/rank|percentile|average|median/i);
+    });
+
+    it("goes back to showing nothing if the result is withdrawn", async () => {
+      await db.assessment.update({
+        where: { id: assessmentId },
+        data: { resultsPublishedAt: null, resultsPublishedById: null },
+      });
+      expect(await mine.myAssessmentResult({ userId: candidateId, slug: tag })).toBeNull();
+    });
   });
 
   it("gives a sitting still in progress no result at all, rather than a zero", async () => {

@@ -470,6 +470,9 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "admin-assessments#removeAssessmentMcq",
       "admin-assessments#scheduleExamSession",
       "admin-assessments#setAssessmentStatus",
+      // Phase 12y: releasing the marks to the candidates, and taking
+      // them back. Audited at SENSITIVE in both directions.
+      "admin-assessments#setAssessmentResultsPublished",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

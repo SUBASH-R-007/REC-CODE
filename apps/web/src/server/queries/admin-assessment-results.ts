@@ -79,7 +79,14 @@ export interface AssessmentResults {
 }
 
 /** A sitting that is over: its result is worth computing and showing. */
-const FINISHED: readonly string[] = ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED", "EXPIRED", "ABANDONED"];
+/**
+ * A sitting that is over: its result is worth computing and showing.
+ *
+ * VOIDED is deliberately absent — a voided sitting is one a human decided
+ * does not count, and giving it a mark on this page would invite somebody
+ * to read it as one. NOT_STARTED and DISCONNECTED are not over at all.
+ */
+const FINISHED: readonly string[] = ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED", "EXPIRED"];
 
 export async function getAssessmentResults(
   scope: StudentScope,

@@ -651,3 +651,89 @@ export async function setAssessmentStatus(
     return { status: parsed.to };
   }, "setAssessmentStatus");
 }
+
+const releaseSchema = z.object({ assessmentId: idSchema, published: z.boolean() });
+export type SetAssessmentResultsPublishedInput = z.input<typeof releaseSchema>;
+
+/**
+ * Release the marks to the candidates, or take them back (Phase 12y).
+ *
+ * Marking and releasing are two acts. A paper is marked the moment it is
+ * handed in — the multiple-choice half at once, the coding half as the
+ * judge works through it — and staff read that on the results page
+ * immediately. None of it is a RESULT until somebody says so: a question
+ * may have been wrong, the judge may have failed on one candidate, a whole
+ * cohort may have tripped over a typo. Every one of those is fixable while
+ * the marks are staff's own and none of them is fixable quietly once a
+ * candidate has read a number.
+ *
+ * Taking it back is allowed, and that is not a loophole. The reason to
+ * release carefully is that a mistake reaches people; a product that made
+ * the mistake permanent would be choosing its own dignity over theirs.
+ * Both directions are audited, and the student page says a withdrawn
+ * result is being checked rather than pretending it was never there.
+ *
+ * Still refused: releasing a DRAFT. There is nothing to release, and the
+ * refusal says so rather than writing a timestamp onto a paper nobody has
+ * sat.
+ */
+export async function setAssessmentResultsPublished(
+  input: SetAssessmentResultsPublishedInput,
+): Promise<ActionResult<{ published: boolean }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = releaseSchema.parse(input);
+
+    const assessment = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        resultsPublishedAt: true,
+        _count: { select: { attempts: true } },
+      },
+    });
+    if (!assessment) throw new NotFoundError("That assessment was not found.");
+    if (parsed.published && assessment.status === "DRAFT") {
+      throw new ValidationError("A draft has no results to release. Publish the paper and let somebody sit it first.");
+    }
+    if (parsed.published === (assessment.resultsPublishedAt !== null)) {
+      throw new ConflictError(
+        parsed.published ? "These results are already released." : "These results are not released.",
+      );
+    }
+
+    const now = new Date();
+    const moved = await db.assessment.updateMany({
+      // Conditional on what we read, so two people releasing at once does
+      // not produce two different timestamps and two audit rows claiming
+      // to be the release.
+      where: { id: assessment.id, resultsPublishedAt: assessment.resultsPublishedAt },
+      data: parsed.published
+        ? { resultsPublishedAt: now, resultsPublishedById: actor.id }
+        : { resultsPublishedAt: null, resultsPublishedById: null },
+    });
+    if (moved.count !== 1) throw new ConflictError("Somebody else changed this. Reload the page.");
+
+    await audit({
+      actorId: actor.id,
+      action: parsed.published ? "assessment.results_released" : "assessment.results_withdrawn",
+      entityType: "Assessment",
+      entityId: assessment.id,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        slug: assessment.slug,
+        candidates: assessment._count.attempts,
+        releasedAt: parsed.published ? now.toISOString() : null,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath("/admin/assessments");
+    revalidatePath(`/admin/assessments/${assessment.id}`);
+    revalidatePath(`/admin/assessments/${assessment.id}/results`);
+    revalidatePath("/assessments");
+    return { published: parsed.published };
+  }, "setAssessmentResultsPublished");
+}

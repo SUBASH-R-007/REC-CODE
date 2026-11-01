@@ -29,6 +29,12 @@ export interface AssessmentListItem {
   readonly maxAttempts: number;
   /** The student's own latest sitting, if any. */
   readonly attempt: { readonly status: AttemptStatus; readonly attemptNumber: number } | null;
+  /**
+   * Phase 12y: staff have released the marks, so this candidate can read
+   * their own. A paper they never sat has nothing to show, so the list
+   * only offers the link when both are true.
+   */
+  readonly resultReleased: boolean;
   /** What the student can do about it right now. */
   readonly action: "start" | "resume" | "finished" | "upcoming" | "closed" | "no_attempts_left";
 }
@@ -79,6 +85,7 @@ export const listMyAssessments = cache(async (user: {
       proctorMode: true,
       affectsPlacementEligibility: true,
       maxAttempts: true,
+      resultsPublishedAt: true,
       /**
        * BOTH kinds (Phase 12v). The sixth place this was counted from the
        * coding questions alone: the list a student picks a paper from told
@@ -112,6 +119,7 @@ export const listMyAssessments = cache(async (user: {
       affectsPlacementEligibility: row.affectsPlacementEligibility,
       maxAttempts: row.maxAttempts,
       attempt,
+      resultReleased: row.resultsPublishedAt !== null && attempt !== null && attempt.status !== "IN_PROGRESS",
       action: actionFor({
         now,
         opensAt: row.opensAt,

@@ -61,6 +61,8 @@ export async function listAssessments(): Promise<AssessmentRow[]> {
 
 export interface AssessmentDetail extends AssessmentRow {
   instructions: string;
+  /** Phase 12y: when staff released the marks to the candidates, if they have. */
+  resultsPublishedAt: Date | null;
   maxAttempts: number;
   maxFocusWarnings: number;
   onLimit: string;
@@ -113,6 +115,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       slug: true,
       title: true,
       instructions: true,
+      resultsPublishedAt: true,
       status: true,
       proctorMode: true,
       affectsPlacementEligibility: true,
@@ -165,6 +168,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
     slug: row.slug,
     title: row.title,
     instructions: row.instructions,
+    resultsPublishedAt: row.resultsPublishedAt,
     status: row.status,
     proctorMode: row.proctorMode,
     affectsPlacementEligibility: row.affectsPlacementEligibility,

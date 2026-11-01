@@ -2967,6 +2967,14 @@ model Assessment {
   audienceBatchYear           Int?
   audienceDepartmentCode      String?
   audienceSection             String?
+  /// When a member of staff released the marks to the candidates, and who
+  /// (Phase 12y). NULL means the paper has been sat and marked and the
+  /// result is nobody's but staff's yet: a department marks, checks and
+  /// then releases, and a result a candidate can read before anyone has
+  /// looked at it is a result nobody can correct quietly.
+  resultsPublishedAt          DateTime?
+  resultsPublishedById        String?
+
   createdById                 String
   createdAt                   DateTime         @default(now())
   updatedAt                   DateTime         @updatedAt

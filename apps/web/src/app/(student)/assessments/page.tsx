@@ -75,7 +75,18 @@ export default async function AssessmentsPage() {
               </div>
             </div>
 
-            <Action slug={assessment.slug} action={assessment.action} />
+            <div className="flex items-center gap-2">
+              {/* Phase 12y: only once a department has released the marks. */}
+              {assessment.resultReleased ? (
+                <a
+                  href={`/assessments/${assessment.slug}/result`}
+                  className="rounded-md border border-border px-3 py-1.5 text-sm font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  Your result
+                </a>
+              ) : null}
+              <Action slug={assessment.slug} action={assessment.action} />
+            </div>
           </li>
         ))}
       </ul>

@@ -8,6 +8,7 @@ import { describeScope, isEmptyScope } from "@/lib/auth/scope-where";
 import { formatCampusDateTime } from "@/lib/help/copy";
 import { getAssessmentDetail } from "@/server/queries/admin-assessments";
 import { getAssessmentResults } from "@/server/queries/admin-assessment-results";
+import { ReleaseResults } from "@/components/admin/assessments/release-results";
 
 export const metadata: Metadata = { title: "Assessment results" };
 
@@ -89,6 +90,22 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
               correct the paper.
             </p>
           ) : null}
+
+          <Card>
+            <CardHeader
+              title="Releasing these to the candidates"
+              subtitle="Marking and releasing are two acts: mark, check, then release."
+            />
+            <CardBody>
+              <ReleaseResults
+                assessmentId={id}
+                publishedAt={assessment.resultsPublishedAt}
+                candidates={results.finished}
+                provisional={results.provisional}
+                needsAttention={results.needsAttention}
+              />
+            </CardBody>
+          </Card>
 
           <Card>
             <CardHeader title={`Candidates (${results.rows.length})`} subtitle="Oldest sitting first." />
