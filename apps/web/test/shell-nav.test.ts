@@ -74,7 +74,10 @@ describe("shell navigation model", () => {
       // Phase 12i put Written between Interviews and Readiness: the
       // archive says which rounds companies run, and this is where a
       // student practises the one that has no program in it.
-      ["Assess", ["/aptitude", "/mock-interviews", "/interviews", "/written", "/placement"]],
+      // Phase 12y put Assessments first: a paper the department has set
+      // outranks the practice surfaces beside it, and since results are
+      // released there is something to come back for days later.
+      ["Assess", ["/assessments", "/aptitude", "/mock-interviews", "/interviews", "/written", "/placement"]],
       // Phase 8a put "Excused days" in ME rather than in ASSESS: it is about
       // the student's own account, not about practising. Last in the group,
       // because it is the entry nobody should need often.
@@ -90,14 +93,24 @@ describe("shell navigation model", () => {
     expect(NAV_GROUPS.every((group) => group.items.length > 0)).toBe(true);
   });
 
-  it("links contests (Phase 5) and aptitude (Phase 7), and not assessments", () => {
+  it("links contests, aptitude and assessments", () => {
     const hrefs = allNavItems().map((i) => i.href);
     expect(hrefs).toContain("/contests");
     expect(hrefs).toContain("/aptitude");
-    // A proctored assessment is something a student is SENT to at a time,
-    // not something they browse to, so it has no nav entry at all.
+    /**
+     * This test used to assert the OPPOSITE — "and not assessments", on the
+     * grounds that a proctored exam is something a student is sent to at a
+     * time rather than something they browse to. That was true while a
+     * sitting was all there was. Phase 12y gave a paper a result the
+     * student comes back for once their department releases it, and
+     * reachable only by typing the URL is not reachable.
+     *
+     * The LIST is linked; the sitting still is not. A candidate reaches a
+     * paper through the readiness check, which is where the clock starts.
+     */
+    expect(hrefs).toContain("/assessments");
     for (const item of allNavItems()) {
-      expect(item.href.startsWith("/assessments")).toBe(false);
+      expect(item.href.startsWith("/assessments/")).toBe(false);
     }
   });
 

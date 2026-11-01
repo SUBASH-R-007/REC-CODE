@@ -3,9 +3,8 @@
  * icons (the server-rendered sidebar maps `icon` keys to lucide components,
  * so no icon code ships to the browser for navigation).
  *
- * Only implemented routes appear here. COMPETE gains Contests in Phase 5 and
- * an ASSESS group (Assessments) arrives in Phases 6-7: add the entry in the
- * same change that adds the page. A group with no items is not rendered, and
+ * Only implemented routes appear here: add the entry in the same change
+ * that adds the page. A group with no items is not rendered, and
  * test/shell-nav.test.ts fails if any href here has no page.tsx — the shell
  * never shows a dead link.
  */
@@ -17,6 +16,7 @@ export type NavIconKey =
   | "learn"
   | "revision"
   | "contests"
+  | "assessments"
   | "aptitude"
   | "placement"
   | "interviews"
@@ -80,15 +80,32 @@ const LEAVE = item(
 export const NAV_GROUPS: readonly ShellNavGroup[] = Object.freeze([
   { id: "practice", label: "Practice", items: Object.freeze([PROBLEMS, REVISION, SHEETS, LEARN]) },
   { id: "compete", label: "Compete", items: Object.freeze([CONTESTS, LEADERBOARD]) },
-  // ASSESS: Phase 7's aptitude surface. The group was reserved empty for
-  // Phases 6-7 and this is its first entry — Phase 6's assessments are
-  // reached from a sitting link rather than from the nav, because a
-  // proctored exam is something a student is sent to at a time, not
-  // something they browse to.
+  /**
+   * ASSESS.
+   *
+   * This group used to leave assessments out, and said why: "a proctored
+   * exam is something a student is sent to at a time, not something they
+   * browse to". That was right while a sitting was all there was — the
+   * readiness link arrives by announcement and the clock decides when.
+   *
+   * Phase 12y changed the facts. A paper now has a RESULT a student comes
+   * back for, days later, once their department releases it; and the list
+   * at /assessments is also where they see what is coming and how many
+   * attempts they have left. Reachable only by typing the URL is not
+   * reachable (reported from use: "there is no assessment tab side bar for
+   * quick access"). It leads the group because a scheduled exam outranks
+   * everything else in it.
+   */
   {
     id: "assess",
     label: "Assess",
     items: Object.freeze([
+      item(
+        "/assessments",
+        "Assessments",
+        "assessments",
+        "Papers your department has set: what is coming, and your result once it is released",
+      ),
       item(
         "/aptitude",
         "Aptitude",
