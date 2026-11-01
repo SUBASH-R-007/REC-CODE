@@ -3930,3 +3930,74 @@ a contest. The test for it is written and the node was booted and
 advertising all eleven languages; it is the quarantine that stopped the
 run, and the control for lifting one would not open on that machine. The
 row says so.
+
+## A language per question, and what it did and did not lift (Phase 13a, 13c)
+
+**The ask.** "The admin should select what are the accepted programming
+languages to solve the problem, and the assessment page should have the
+language select option."
+
+**What a sitting had before.** One language, and nobody chose it.
+`examPaperLanguage()` returned the first enabled, current toolchain key —
+which is `cpp20` — and froze it into every attempt. A department running a
+Python paper had to ask for C++ to be disabled across the whole college,
+practice pages included, and a candidate who writes Java sat down in front
+of a C++ editor with nothing on screen to change it.
+
+**Two levels, because the sentence has two readings.** A paper accepts a
+set (`Assessment.allowedLanguages`); a question may narrow it
+(`AssessmentProblem.allowedLanguages`). Empty means "no restriction" at
+both levels, which is what every row written before these columns holds.
+A question narrows and never widens: the readiness page names the paper's
+languages before the clock starts, so a question accepting something
+outside that list would make that page a lie.
+
+**Frozen, like the version ids.** Both sets go into the attempt's `layout`
+at start. Staff may widen or narrow either at any time — including while a
+hall is sitting — and a narrowing must never strand somebody in a language
+the server has stopped accepting with their answer already written in it.
+Every path that validates a language (snapshot, Run, submit) reads the
+layout; none reads the live rows.
+
+**Three defects of one shape, all invisible with a single language.**
+`submitAttempt` read the `LanguageConfig` for `answers[0].language` and
+stamped every submission with it, so a paper answered in Python and C
+would have had the Python compiled by gcc — a compile error on a correct
+program. The Run route queued against the paper's language rather than the
+candidate's. And `writeSnapshot` treated the same text in a different
+language as "unchanged", so a switch before typing was dropped and a
+resumed sitting came back in the old language with the new language's code
+in the editor. Each is now covered by a test that fails without its fix.
+
+**Changing the language keeps the work.** Nothing in the editor is touched
+unless it is still the starter. A candidate twenty minutes into an answer
+who opens the dropdown to read what else is offered, and picks something by
+accident, must not lose twenty minutes; only an untouched editor is swapped
+to the new language's starter, which is the case where keeping the text
+would be the unhelpful answer.
+
+**What this lifted, and what it did not.** The entry above — *Four kinds an
+exam cannot sit* (Phase 12p) — named the blocker: "the one change that
+lifts all four is an exam engine change. A language per question, through
+the layout, the snapshot route, the submit route and the marking." That
+change has now happened, and the refusals for interactive, debugging,
+output-only and SQL problems still stand, because the language was never
+the whole of it:
+
+  - **SQL** needs `sql17` to be a key an exam accepts (it is a
+    `SubmitLanguageKey`, deliberately not in `LANGUAGE_CATALOG`), the
+    submission routed to the SQL engine's lane, and a result set rendered
+    rather than a diff. The per-question set is the shape that would carry
+    it — a SQL question narrows to exactly `["sql17"]` — but the routing
+    and the surface are the work.
+  - **Output-only** needs an answer box rather than an editor, and
+    `answer1` carried the same way.
+  - **Debugging** needs an edit budget that a sitting can refuse without
+    destroying work a candidate can no longer redo, which is a question
+    about when a paper submits, not about languages.
+  - **Interactive** needs a conversation surface, which the exam tree does
+    not have and should not grow casually.
+
+So the four refusals are no longer blocked on the engine; they are blocked
+on one surface each, and each is its own slice. Said here so the next
+reader does not re-derive the engine change that is already done.
