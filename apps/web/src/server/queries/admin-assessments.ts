@@ -105,6 +105,11 @@ export interface AssessmentDetail extends AssessmentRow {
     displayCode: string;
     title: string;
     revision: number;
+    /**
+     * Which of the paper's languages this question narrows to (Phase
+     * 13c). Empty -- the usual case -- means all of them.
+     */
+    allowedLanguages: string[];
   }>;
   /**
    * The multiple-choice half (Phase 12r). `correctIndex` is here and not
@@ -169,6 +174,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
           id: true,
           position: true,
           points: true,
+          allowedLanguages: true,
           problemVersion: {
             select: { revision: true, title: true, problem: { select: { slug: true, displayCode: true } } },
           },
@@ -259,6 +265,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       displayCode: p.problemVersion.problem.displayCode,
       title: p.problemVersion.title,
       revision: p.problemVersion.revision,
+      allowedLanguages: normalisePaperLanguages(p.allowedLanguages),
     })),
     mcqs: row.mcqs.map((m) => ({
       id: m.id,

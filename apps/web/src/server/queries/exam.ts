@@ -1,6 +1,11 @@
 import "server-only";
 import { cache } from "react";
-import { paperLanguageViews, type AttemptLayout, type PaperLanguageView } from "@recx/shared";
+import {
+  paperLanguageViews,
+  questionLanguages,
+  type AttemptLayout,
+  type PaperLanguageView,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 import { languagesOfSitting } from "@/lib/exam/language";
 import { renderMarkdown } from "@/lib/markdown";
@@ -64,6 +69,15 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
   const mcqs = await examMcqViews(layout);
   const accepted = await languagesOfSitting(layout);
   const languages = paperLanguageViews(accepted);
+  /**
+   * What each question narrows the paper to (Phase 13c), resolved once
+   * here so the pane renders the question's own list and the routes
+   * validate against the same thing.
+   */
+  const acceptedFor = (questionId: string): string[] => {
+    const question = layout.questions.find((q) => q.questionId === questionId);
+    return questionLanguages({ question: question?.languages, paper: accepted });
+  };
   const versionIds = layout.questions.map((question) => question.problemVersionId);
   if (versionIds.length === 0) return { questions: [], mcqs, languages, missing: [] };
 
@@ -124,12 +138,19 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
        * business shipping eleven starters, and the samples beside them are
        * already the bulk of this payload.
        */
-      starters: Object.fromEntries(accepted.map((key) => [key, starters.get(key) ?? ""])),
+      starters: Object.fromEntries(acceptedFor(question.questionId).map((key) => [key, starters.get(key) ?? ""])),
+      /**
+       * The languages THIS question accepts (Phase 13c). Usually the
+       * paper's own set; fewer when the question narrows it.
+       */
+      languages: paperLanguageViews(acceptedFor(question.questionId)),
       // Named for what it is: the key the routes validate against, which
       // is the language this question OPENS in. Handing the client the
       // editor's highlighting mode under the name `language` is what
       // stopped every sitting saving, running and submitting (12r.2).
-      languageKey: defaultLanguage,
+      // The language this question OPENS in: the first it accepts, which
+      // is the paper's default unless the question narrows past it.
+      languageKey: acceptedFor(question.questionId)[0] ?? defaultLanguage,
     });
   }
   return { questions, mcqs, languages, missing };

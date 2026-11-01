@@ -4,6 +4,7 @@ import {
   isLanguageKey,
   normalisePaperLanguages,
   paperLanguages,
+  questionLanguages,
   type AttemptLayout,
   type LanguageKey,
 } from "@recx/shared";
@@ -79,6 +80,31 @@ export async function languagesOfSitting(
   const frozen = normalisePaperLanguages(layout.languages);
   if (frozen.length > 0) return frozen;
   return [await languageOfSitting(layout)];
+}
+
+/**
+ * The languages ONE QUESTION of a sitting may be answered in (Phase 13c).
+ *
+ * The question's own frozen list when it has one, else the paper's. Both
+ * come from the attempt's layout and never from the assessment's current
+ * rows: what this candidate may answer in was decided when their paper
+ * was laid out, and a department narrowing a question while somebody is
+ * part way through must not start refusing the answer they have written.
+ *
+ * A question id that is not on this paper gets the paper's set rather
+ * than an empty one; the caller has already refused the question by then
+ * (every exam route looks it up in the layout first), and returning
+ * nothing here would turn "that question is not yours" into "no language
+ * is accepted", which is the less true of the two sentences.
+ */
+export async function languagesOfQuestion(
+  layout: Pick<AttemptLayout, "language" | "languages" | "questions">,
+  questionId: string,
+): Promise<LanguageKey[]> {
+  const paper = await languagesOfSitting(layout);
+  const question = layout.questions.find((q) => q.questionId === questionId);
+  if (!question) return paper;
+  return questionLanguages({ question: question.languages, paper });
 }
 
 /**

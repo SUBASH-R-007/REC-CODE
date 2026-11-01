@@ -9,6 +9,7 @@ import {
   matchesAnyCidr,
   requiresDeviceAssertion,
   paperQuestionCount,
+  questionLanguages,
   resolveLayout,
   type AccommodationKind,
   type AttemptLayout,
@@ -241,7 +242,11 @@ export async function startOrResumeAttempt(args: {
       seedSecret: true,
       /** Which languages the paper may be answered in (Phase 13a). */
       allowedLanguages: true,
-      problems: { select: { id: true, problemVersionId: true, position: true, points: true } },
+      // `allowedLanguages` per question (Phase 13c): the narrowing a
+      // question may put on the paper's own set.
+      problems: {
+        select: { id: true, problemVersionId: true, position: true, points: true, allowedLanguages: true },
+      },
       /**
        * The paper's MCQs (Phase 12r). `options` comes back only to be
        * counted: the layout records the order THIS candidate will see them
@@ -409,7 +414,20 @@ export async function startOrResumeAttempt(args: {
    */
   const accepted = await acceptedLanguagesFor(assessment.allowedLanguages);
   const layout = resolveLayout({
-    questions: assessment.problems,
+    /**
+     * Each question's narrowing is resolved against the paper's set HERE,
+     * so the layout stores what the candidate may actually use rather
+     * than a pair of lists that a later reader has to intersect again
+     * (Phase 13c). A question that narrows to nothing the paper accepts
+     * keeps the paper's set, which `questionLanguages` decides.
+     */
+    questions: assessment.problems.map((problem) => ({
+      ...problem,
+      languages:
+        problem.allowedLanguages.length === 0
+          ? undefined
+          : questionLanguages({ question: problem.allowedLanguages, paper: accepted }),
+    })),
     seed,
     // Frozen with the paper (Phase 12r.4), so enabling a toolchain while
     // somebody is sitting cannot move their paper to it.

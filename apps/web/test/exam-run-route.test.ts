@@ -49,7 +49,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/exam/attempt", () => ({ guardAttempt: h.guard, endAttemptSession: h.endAttemptSession }));
 vi.mock("@/lib/exam/layout", () => ({ attemptLayoutOf: h.layoutOf }));
-vi.mock("@/lib/exam/language", () => ({ languagesOfSitting: h.paperLanguages }));
+vi.mock("@/lib/exam/language", () => ({ languagesOfQuestion: h.paperLanguages }));
 vi.mock("@/lib/exam/snapshots", () => ({ writeSnapshot: h.writeSnapshot }));
 vi.mock("@/lib/judge/queue", () => ({ enqueueJudge: h.enqueue }));
 

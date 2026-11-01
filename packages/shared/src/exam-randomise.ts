@@ -102,6 +102,17 @@ export interface LayoutQuestion {
   readonly points: number;
   /** Seeds this question's hidden-test order and any generated test data. */
   readonly seed: number;
+  /**
+   * The languages THIS question may be answered in (Phase 13c), frozen
+   * with everything else.
+   *
+   * Absent means "whatever the paper accepts", which is what every
+   * question laid out before this field existed means and what most
+   * questions mean anyway. Present, it is already narrowed to the paper's
+   * set -- a question cannot accept something the paper does not, because
+   * the paper is what the candidate was told before the clock started.
+   */
+  readonly languages?: readonly string[];
 }
 
 /**
@@ -189,6 +200,8 @@ export interface AssessmentQuestionInput {
   readonly problemVersionId: string;
   readonly position: number;
   readonly points: number;
+  /** Phase 13c: the languages this question narrows the paper to, if any. */
+  readonly languages?: readonly string[];
 }
 
 /** An MCQ of the paper, as the assessment stores it (Phase 12r). */
@@ -278,6 +291,12 @@ function codingQuestions(sequence: readonly AssessmentQuestionInput[], seed: num
     problemVersionId: question.problemVersionId,
     sourcePosition: question.position,
     points: question.points,
+    // Written only when the question narrows the paper (Phase 13c), so a
+    // layout is byte-identical to one from before this field for every
+    // question that does not.
+    ...(question.languages === undefined || question.languages.length === 0
+      ? {}
+      : { languages: [...question.languages] }),
     // Keyed on the question's own source position, not its shuffled index,
     // so a candidate's test order for a given problem is stable even if the
     // order resolution ever changes.
@@ -348,6 +367,17 @@ export function parseAttemptLayout(value: unknown): AttemptLayout {
       typeof question?.seed !== "number"
     ) {
       throw new Error("stored attempt layout has a malformed question");
+    }
+    // Refused rather than repaired, for the reason the paper's own set is
+    // (Phase 13c): this is the record of what a candidate was asked.
+    if (question.languages !== undefined) {
+      if (
+        !Array.isArray(question.languages) ||
+        question.languages.length === 0 ||
+        question.languages.some((key: unknown) => typeof key !== "string" || key.length === 0)
+      ) {
+        throw new Error("stored attempt layout has a malformed question language list");
+      }
     }
   }
   return layout as AttemptLayout;

@@ -3018,6 +3018,13 @@ model AssessmentProblem {
   /// 1-based order in the question palette.
   position         Int
   points           Float          @default(1)
+  /// Which of the paper's languages THIS question may be answered in
+  /// (Phase 13c). EMPTY means all of them, which is what every question
+  /// written before this column holds. It narrows and never widens: the
+  /// paper is what the candidate was told before the clock started, so a
+  /// question accepting something the paper does not is refused by the
+  /// action and intersected away on read.
+  allowedLanguages String[]       @default([])
   createdAt        DateTime       @default(now())
 
   @@unique([assessmentId, position])

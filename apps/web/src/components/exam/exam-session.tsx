@@ -78,7 +78,14 @@ const FORGED_EVENT_CAP = 3;
  */
 export type ExamLanguageView = PaperLanguageView;
 
-/** Is this one of the languages the paper accepts? */
+/**
+ * Is this one of the languages a question accepts?
+ *
+ * The QUESTION's list, not the paper's (Phase 13c): a paper may accept
+ * C++ and Python while the question about pointers accepts only C++, and
+ * the editor, the switch and the routes all have to agree on which list
+ * applies.
+ */
 function accepts(languages: readonly ExamLanguageView[], key: string): boolean {
   return languages.some((language) => language.key === key);
 }
@@ -92,13 +99,12 @@ function accepts(languages: readonly ExamLanguageView[], key: string): boolean {
  * picker says Python is the kind of disagreement a candidate discovers by
  * submitting the wrong thing.
  */
-function openingLanguage(
-  question: ExamQuestionView,
-  languages: readonly ExamLanguageView[],
-  recovered: Readonly<Record<string, string>>,
-): string {
+function openingLanguage(question: ExamQuestionView, recovered: Readonly<Record<string, string>>): string {
   const was = recovered[question.questionId];
-  return was !== undefined && accepts(languages, was) ? was : question.languageKey;
+  // Against the QUESTION's list (Phase 13c): a candidate who worked in
+  // Python on a question the paper has since narrowed to C must not be
+  // put back into a language this question no longer accepts.
+  return was !== undefined && accepts(question.languages, was) ? was : question.languageKey;
 }
 
 export interface ExamQuestionView {
@@ -128,6 +134,13 @@ export interface ExamQuestionView {
    * request was made. Reported from a live sitting (Phase 12r.2).
    */
   readonly languageKey: string;
+  /**
+   * The languages THIS question accepts (Phase 13c) -- the paper's set,
+   * or fewer where the question narrows it ("answer this one in C"). The
+   * picker renders this list, and the routes validate against the same
+   * one.
+   */
+  readonly languages: readonly ExamLanguageView[];
 }
 
 export function ExamSession({
@@ -142,7 +155,6 @@ export function ExamSession({
   initialChoices,
   initialSources,
   initialLanguages,
-  languages,
   editorPrefs,
 }: {
   readonly attemptId: string;
@@ -172,13 +184,7 @@ export function ExamSession({
    * to the paper's default with their Python in a C++ editor.
    */
   readonly initialLanguages: Readonly<Record<string, string>>;
-  /**
-   * Every language this sitting may be answered in, from the attempt's
-   * FROZEN set (Phase 13a), labels already resolved on the server. One
-   * entry is the ordinary case for a restricted paper and the pane then
-   * shows it as text rather than a dropdown of one.
-   */
-  readonly languages: readonly ExamLanguageView[];
+
   /** The candidate's font size and tab size; the keymap is the arena's (Phase 12j). */
   readonly editorPrefs: EditorPrefs;
 }) {
@@ -188,7 +194,7 @@ export function ExamSession({
   const [sources, setSources] = useState<Record<string, string>>(() => {
     const seeded: Record<string, string> = {};
     for (const question of questions) {
-      const language = openingLanguage(question, languages, initialLanguages);
+      const language = openingLanguage(question, initialLanguages);
       seeded[question.questionId] = initialSources[question.questionId] ?? question.starters[language] ?? "";
     }
     return seeded;
@@ -204,7 +210,7 @@ export function ExamSession({
   const [langs, setLangs] = useState<Record<string, string>>(() => {
     const seeded: Record<string, string> = {};
     for (const question of questions) {
-      seeded[question.questionId] = openingLanguage(question, languages, initialLanguages);
+      seeded[question.questionId] = openingLanguage(question, initialLanguages);
     }
     return seeded;
   });
@@ -971,7 +977,9 @@ export function ExamSession({
     (next: string) => {
       const id = questionIdRef.current;
       const question = questions.find((q) => q.questionId === id);
-      if (!question || !accepts(languages, next)) return;
+      // The QUESTION's list, so a narrowed question cannot be switched
+      // into a language the paper allows elsewhere (Phase 13c).
+      if (!question || !accepts(question.languages, next)) return;
       const from = langsRef.current[id] ?? question.languageKey;
       if (from === next) return;
 
@@ -987,7 +995,7 @@ export function ExamSession({
       dirty.current = true;
       void persist("TICK");
     },
-    [languages, persist, questions],
+    [persist, questions],
   );
 
   const progress = useMemo<QuestionProgress[]>(
@@ -1142,7 +1150,7 @@ export function ExamSession({
             position={current + 1}
             total={items.length}
             prefs={editorPrefs}
-            languages={languages}
+            languages={question.languages}
             language={langs[question.questionId] ?? question.languageKey}
             onLanguageChange={changeLanguage}
           />

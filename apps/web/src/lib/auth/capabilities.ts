@@ -482,6 +482,8 @@ export const STAFF_CAPABILITIES = deepFreeze([
       // and editable after publication -- the set is frozen into each
       // attempt at start, so an edit reaches only the next candidate.
       "admin-assessments#setAssessmentLanguages",
+      // Phase 13c: narrowing one question to some of those languages.
+      "admin-assessments#setQuestionLanguages",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

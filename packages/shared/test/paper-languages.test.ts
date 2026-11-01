@@ -6,6 +6,7 @@ import {
   paperLanguageLabel,
   paperLanguageViews,
   paperLanguages,
+  questionLanguages,
   shortLanguageLabel,
 } from "../src";
 
@@ -135,6 +136,49 @@ describe("paperLanguageViews", () => {
   it("gives an unknown key a plaintext editor rather than throwing", () => {
     expect(paperLanguageViews(["fortran77"])).toEqual([
       { key: "fortran77", label: "fortran77", shortLabel: "fortran77", editorLanguage: "plaintext" },
+    ]);
+  });
+});
+
+describe("questionLanguages", () => {
+  const paper = ["cpp20", "py312", "java21"];
+
+  it("gives the paper's set to a question that does not narrow it", () => {
+    expect(questionLanguages({ question: [], paper })).toEqual(["cpp20", "java21", "py312"]);
+    expect(questionLanguages({ question: undefined, paper })).toEqual(["cpp20", "java21", "py312"]);
+  });
+
+  it("narrows to the question's own list", () => {
+    // "Answer this one in C" is a real thing to ask of a question about
+    // pointers, without making the whole paper C.
+    expect(questionLanguages({ question: ["py312"], paper })).toEqual(["py312"]);
+  });
+
+  it("narrows, and never widens", () => {
+    /**
+     * A question cannot quietly accept something the paper does not: the
+     * paper is what the candidate was told, on the readiness page, before
+     * the clock started.
+     */
+    expect(questionLanguages({ question: ["py312", "rust180"], paper })).toEqual(["py312"]);
+  });
+
+  it("falls back to the paper when narrowing would leave nothing", () => {
+    /**
+     * A question restricted to a language the paper does not accept is a
+     * misconfiguration, and the admin screen refuses it where somebody is
+     * choosing. Mid-sitting the better answer is the paper's own set: a
+     * question nobody can answer is worse than one answerable in what the
+     * paper already promised.
+     */
+    expect(questionLanguages({ question: ["rust180"], paper })).toEqual(["cpp20", "java21", "py312"]);
+  });
+
+  it("intersects with what the judge can run when asked to", () => {
+    expect(questionLanguages({ question: [], paper, available: ["cpp20", "py312"] })).toEqual(["cpp20", "py312"]);
+    expect(questionLanguages({ question: ["java21"], paper, available: ["cpp20", "py312"] })).toEqual([
+      "cpp20",
+      "py312",
     ]);
   });
 });

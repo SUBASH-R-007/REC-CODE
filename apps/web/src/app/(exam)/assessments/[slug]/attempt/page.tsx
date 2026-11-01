@@ -179,7 +179,6 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
       refuseOutsidePaste={assessment.refuseOutsidePaste}
       initialSources={recovered}
       initialLanguages={recoveredLanguages}
-      languages={paper.languages}
       editorPrefs={readEditorPrefs(user.editorPrefs)}
     />
   );

@@ -1,6 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { acceptsLanguage, type AttemptLayout } from "@recx/shared";
+import { acceptsLanguage, questionLanguages, type AttemptLayout } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
@@ -114,9 +114,15 @@ export async function submitAttempt(
    * out. The editor only ever offers the frozen set, so reaching this
    * means a client somebody has been editing.
    */
-  const accepted = await languagesOfSitting(layout);
+  const paperLanguages = await languagesOfSitting(layout);
+  const acceptedFor = (questionId: string): string[] => {
+    // Phase 13c: a question may narrow the paper, so each answer is
+    // judged against ITS OWN question's frozen list.
+    const question = layout.questions.find((q) => q.questionId === questionId);
+    return questionLanguages({ question: question?.languages, paper: paperLanguages });
+  };
   const refused = answers.find(
-    (answer) => answer.source.trim() !== "" && !acceptsLanguage(accepted, answer.language),
+    (answer) => answer.source.trim() !== "" && !acceptsLanguage(acceptedFor(answer.questionId), answer.language),
   );
   if (refused) {
     return {

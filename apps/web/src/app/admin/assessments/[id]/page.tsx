@@ -15,6 +15,7 @@ import {
 } from "@/components/admin/assessments/assessment-forms";
 import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 import { AssessmentLanguagesForm } from "@/components/admin/assessments/languages-form";
+import { QuestionLanguagesForm } from "@/components/admin/assessments/question-languages-form";
 
 export const metadata: Metadata = { title: "Assessment" };
 
@@ -39,6 +40,15 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
   if (!assessment) notFound();
 
   const draft = assessment.status === "DRAFT";
+  /**
+   * What the paper accepts, which is the most a question can be narrowed
+   * to: the ticked list, or every installed language when nothing is
+   * ticked (Phase 13c).
+   */
+  const paperLanguages =
+    assessment.allowedLanguages.length === 0
+      ? assessment.availableLanguages
+      : assessment.availableLanguages.filter((language) => assessment.allowedLanguages.includes(language.key));
   const needsAllowlist = assessment.proctorMode === "LAB_SUPERVISED";
   /**
    * The next free number in the palette, which is ONE list across both
@@ -180,6 +190,10 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
                   <th className={TD}>Problem</th>
                   <th className={TD}>Revision</th>
                   <th className={TD}>Points</th>
+                  {/* Phase 13c: the paper says what it accepts, a question
+                      may ask for less of it. The column is drawn only when
+                      there is more than one language to choose between. */}
+                  {assessment.availableLanguages.length > 1 ? <th className={TD}>Answered in</th> : null}
                   {draft ? <th className={TD} /> : null}
                 </tr>
               </thead>
@@ -194,6 +208,16 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
                     </td>
                     <td className={`${TD} tabular-nums`}>r{p.revision}</td>
                     <td className={`${TD} tabular-nums`}>{p.points}</td>
+                    {assessment.availableLanguages.length > 1 ? (
+                      <td className={TD}>
+                        <QuestionLanguagesForm
+                          assessmentProblemId={p.id}
+                          position={p.position}
+                          paper={paperLanguages}
+                          selected={p.allowedLanguages}
+                        />
+                      </td>
+                    ) : null}
                     {draft ? (
                       <td className={TD}>
                         <RemoveQuestionButton assessmentProblemId={p.id} />

@@ -431,3 +431,70 @@ describe("the accepted languages a layout freezes", () => {
     expect(layout.languages).toEqual(["cpp20", "py312"]);
   });
 });
+
+/**
+ * A question that narrows the paper (Phase 13c).
+ *
+ * The paper says what it accepts and a question may ask for less of it --
+ * "answer this one in C" -- without the department making the whole paper
+ * C. Frozen per question for the reason the paper's set is: what this
+ * candidate may answer in was decided when their paper was laid out.
+ */
+describe("the languages a question narrows the paper to", () => {
+  const narrowed = () =>
+    resolveLayout({
+      questions: [
+        { id: "q1", problemVersionId: "v1", position: 1, points: 3, languages: ["py312"] },
+        { id: "q2", problemVersionId: "v2", position: 2, points: 3 },
+      ],
+      seed: 5,
+      randomiseOrder: false,
+      language: "cpp20",
+      languages: ["cpp20", "py312"],
+    });
+
+  it("records it on the question that has one, and nowhere else", () => {
+    const layout = narrowed();
+    expect(layout.questions[0]).toMatchObject({ questionId: "q1", languages: ["py312"] });
+    expect(layout.questions[1]!.languages).toBeUndefined();
+  });
+
+  it("leaves a paper whose questions narrow nothing byte-identical to before", () => {
+    const plain = resolveLayout({
+      questions: [{ id: "q1", problemVersionId: "v1", position: 1, points: 3 }],
+      seed: 5,
+      randomiseOrder: false,
+      language: "cpp20",
+      languages: ["cpp20"],
+    });
+    expect(JSON.stringify(plain.questions[0])).not.toContain("languages");
+  });
+
+  it("round-trips through the parser", () => {
+    const layout = narrowed();
+    expect(parseAttemptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("refuses a malformed one rather than dropping it", () => {
+    const good = narrowed();
+    for (const bad of [[], "py312", [""], ["py312", 7], null]) {
+      const broken = {
+        ...good,
+        questions: [{ ...good.questions[0], languages: bad }, good.questions[1]],
+      };
+      expect(() => parseAttemptLayout(broken), JSON.stringify(bad)).toThrow(/malformed question language list/);
+    }
+  });
+
+  it("keeps its own copy, so the caller's array cannot change a frozen paper", () => {
+    const languages = ["py312"];
+    const layout = resolveLayout({
+      questions: [{ id: "q1", problemVersionId: "v1", position: 1, points: 3, languages }],
+      seed: 5,
+      language: "cpp20",
+      languages: ["cpp20", "py312"],
+    });
+    languages.push("cpp20");
+    expect(layout.questions[0]!.languages).toEqual(["py312"]);
+  });
+});

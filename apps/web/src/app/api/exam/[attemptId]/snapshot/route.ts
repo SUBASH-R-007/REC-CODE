@@ -6,7 +6,7 @@ import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
-import { languagesOfSitting } from "@/lib/exam/language";
+import { languagesOfQuestion } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 
@@ -141,7 +141,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
    * administrator narrowing the paper's languages mid-sitting must not
    * start refusing a candidate's saves.
    */
-  const accepted = await languagesOfSitting(attemptLayoutOf(guard.attempt));
+  const accepted = await languagesOfQuestion(attemptLayoutOf(guard.attempt), body.data.questionId);
   if (!acceptsLanguage(accepted, body.data.language)) {
     return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
   }

@@ -23,6 +23,7 @@ import { requireActionRole } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { ConflictError, NotFoundError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
+import { acceptedLanguagesFor } from "@/lib/exam/language";
 
 /**
  * Assessment authoring, staff only (capability "assessments.manage").
@@ -934,4 +935,110 @@ export async function setAssessmentLanguages(
     revalidatePath("/admin/assessments");
     return { languages: wanted };
   }, "setAssessmentLanguages");
+}
+
+const questionLanguagesSchema = z
+  .object({
+    assessmentProblemId: idSchema,
+    /** Empty means "every language the paper accepts", which is the default. */
+    languages: z.array(z.string().trim().min(1).max(32)).max(32),
+  })
+  .strict();
+export type SetQuestionLanguagesInput = z.input<typeof questionLanguagesSchema>;
+
+/**
+ * Narrow ONE question to some of the paper's languages (Phase 13c).
+ *
+ * "Answer this one in C" is a reasonable thing to ask of a question about
+ * pointers, and a department should not have to make the whole paper C to
+ * ask it. Empty is the default and means every language the paper
+ * accepts.
+ *
+ * **It narrows and never widens.** A question accepting something the
+ * paper does not would make the readiness page a lie -- that page names
+ * the paper's languages before the clock starts -- so a key outside the
+ * paper's set is refused here by name, and `questionLanguages()`
+ * intersects again on read in case the paper is narrowed afterwards.
+ *
+ * Editable after the paper leaves DRAFT, like the paper's own list and
+ * for the same reason: each candidate's set is frozen into their attempt
+ * at start, so an edit reaches only the next one.
+ */
+export async function setQuestionLanguages(
+  input: SetQuestionLanguagesInput,
+): Promise<ActionResult<{ languages: string[] }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = questionLanguagesSchema.parse(input);
+
+    const question = await db.assessmentProblem.findUnique({
+      where: { id: parsed.assessmentProblemId },
+      select: {
+        id: true,
+        position: true,
+        allowedLanguages: true,
+        assessment: { select: { id: true, slug: true, status: true, allowedLanguages: true } },
+        problemVersion: { select: { title: true } },
+      },
+    });
+    if (!question) throw new NotFoundError("That question was not found.");
+
+    const unknown = parsed.languages.filter((key) => !isLanguageKey(key));
+    if (unknown.length > 0) {
+      throw new ValidationError(`This platform has no language called ${unknown.join(", ")}.`);
+    }
+    const wanted = normalisePaperLanguages(parsed.languages);
+
+    /**
+     * Against the PAPER's accepted set, not against the catalogue. An
+     * empty paper list means the paper accepts every enabled language, so
+     * the question is checked against those instead -- otherwise a
+     * department that restricted nothing could not narrow a question at
+     * all.
+     */
+    const paper = await acceptedLanguagesFor(question.assessment.allowedLanguages);
+    const outside = wanted.filter((key) => !paper.includes(key));
+    if (outside.length > 0) {
+      throw new ValidationError(
+        `This paper is not answered in ${outside.map(paperLanguageLabel).join(", ")}. Add it to the paper's languages first, or pick from what the paper accepts — a question cannot accept a language the candidates were not told about.`,
+      );
+    }
+    if (wanted.length === paper.length) {
+      /**
+       * Ticking every one of them is the same as ticking none, and
+       * storing it would be a narrowing that silently stops narrowing the
+       * day somebody adds a language to the paper.
+       */
+      throw new ValidationError(
+        "That is every language this paper accepts, which is what a question with none ticked already allows. Clear them instead.",
+      );
+    }
+
+    const before = normalisePaperLanguages(question.allowedLanguages);
+    if (before.join(",") === wanted.join(",")) {
+      throw new ConflictError("That is already what this question accepts.");
+    }
+
+    await db.assessmentProblem.update({ where: { id: question.id }, data: { allowedLanguages: wanted } });
+
+    await audit({
+      actorId: actor.id,
+      action: "assessment.question_languages_changed",
+      entityType: "AssessmentProblem",
+      entityId: question.id,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        slug: question.assessment.slug,
+        status: question.assessment.status,
+        position: question.position,
+        title: question.problemVersion.title,
+        before,
+        after: wanted,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath(`/admin/assessments/${question.assessment.id}`);
+    return { languages: wanted };
+  }, "setQuestionLanguages");
 }

@@ -398,6 +398,53 @@ describe.skipIf(!ENABLED)("a paper answered in two languages, against recx_test"
     expect(await db.submission.count({ where: { assessmentAttemptId: guard.attempt.id } })).toBe(0);
   });
 
+  it("refuses a language the QUESTION narrows away, even though the paper accepts it", async () => {
+    /**
+     * Phase 13c. The paper accepts C++ and Python; question two says
+     * "answer this one in Python". A C++ answer to it is refused -- and
+     * the same C++ answer to question one, which narrows nothing, is
+     * fine. The narrowing is frozen in the layout, so this is what the
+     * candidate was asked rather than what the rows say today.
+     */
+    const narrowed = {
+      ...layout(),
+      questions: [layout().questions[0]!, { ...layout().questions[1]!, languages: ["py312"] }],
+    };
+    const guard = await sitting();
+
+    const refusal = await submitModule.submitAttempt(guard, narrowed as never, [
+      { questionId: questionIds[0]!, language: "cpp20", source: "int main(){return 0;}\n" },
+      { questionId: questionIds[1]!, language: "cpp20", source: "int main(){return 0;}\n" },
+    ]);
+    expect(refusal).toMatchObject({ submitted: false, reason: "language_not_accepted", refusedLanguage: "cpp20" });
+
+    const accepted = await submitModule.submitAttempt(guard, narrowed as never, [
+      { questionId: questionIds[0]!, language: "cpp20", source: "int main(){return 0;}\n" },
+      { questionId: questionIds[1]!, language: "py312", source: "print(3)\n" },
+    ]);
+    expect(accepted.submitted).toBe(true);
+    const rows = await db.submission.findMany({
+      where: { id: { in: accepted.submissionIds } },
+      select: { language: true, problemVersionId: true },
+    });
+    expect(rows.find((r) => r.problemVersionId === versionIds[1])!.language).toBe("py312");
+  });
+
+  it("offers the candidate only what their question accepts", async () => {
+    const narrowed = {
+      ...layout(),
+      questions: [layout().questions[0]!, { ...layout().questions[1]!, languages: ["py312"] }],
+    };
+    const paper = await paperModule.getExamPaper(narrowed as never);
+    // The paper still says both; the narrowed question says one.
+    expect(paper.languages.map((l) => l.key)).toEqual(["cpp20", "py312"]);
+    expect(paper.questions[0]!.languages.map((l) => l.key)).toEqual(["cpp20", "py312"]);
+    expect(paper.questions[1]!.languages.map((l) => l.key)).toEqual(["py312"]);
+    // And it opens in the one it accepts, with that language's starter.
+    expect(paper.questions[1]!.languageKey).toBe("py312");
+    expect(Object.keys(paper.questions[1]!.starters)).toEqual(["py312"]);
+  });
+
   it("hands the candidate both languages, with a starter for each", async () => {
     const paper = await paperModule.getExamPaper(layout() as never);
     expect(paper.languages.map((language) => language.key)).toEqual(["cpp20", "py312"]);

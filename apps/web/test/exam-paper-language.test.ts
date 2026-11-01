@@ -54,13 +54,16 @@ describe("the language a sitting sends to its routes", () => {
      * list.
      */
     expect(read("src/lib/exam/language.ts")).toContain("export async function languagesOfSitting");
+    expect(read("src/lib/exam/language.ts")).toContain("export async function languagesOfQuestion");
     for (const rel of [
       "src/server/queries/exam.ts",
       "src/app/api/exam/[attemptId]/run/route.ts",
       "src/app/api/exam/[attemptId]/snapshot/route.ts",
       "src/lib/exam/submit.ts",
     ]) {
-      expect(read(rel), rel).toContain("languagesOfSitting(");
+      // Either reader: the paper's set, or the question's narrowing of it
+      // (Phase 13c). Both read the layout and neither reads the live rows.
+      expect(read(rel), rel).toMatch(/languagesOf(Sitting|Question)\(/);
       expect(read(rel), rel).not.toContain("allowedLanguages");
     }
   });
@@ -70,10 +73,14 @@ describe("the language a sitting sends to its routes", () => {
     // one won; a key and an editor mode cannot be swapped by accident
     // because neither reads like the other.
     const query = read("src/server/queries/exam.ts");
-    expect(query).toContain("languageKey: defaultLanguage");
+    // The key a question OPENS in — the first language it accepts, which
+    // is the paper's default unless the question narrows past it (13c).
+    expect(query).toContain("languageKey: acceptedFor(question.questionId)[0] ?? defaultLanguage");
     // Phase 13a: the modes travel inside the accepted-language views,
     // resolved on the server, each field named for what it carries.
     expect(query).toContain("paperLanguageViews(accepted)");
+    // Phase 13c: and the per-question list the pane actually renders.
+    expect(query).toContain("paperLanguageViews(acceptedFor(");
   });
 
   it("sends the KEY to every route, and the mode to none of them", () => {

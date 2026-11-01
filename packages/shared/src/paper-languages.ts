@@ -83,6 +83,39 @@ export function paperLanguages(args: {
 }
 
 /**
+ * The languages ONE QUESTION may be answered in (Phase 13c).
+ *
+ * A paper says what it accepts; a question may narrow it. "Answer this one
+ * in C" is a real thing to ask of a question about pointers, and the
+ * department asking it should not have to make the whole paper C.
+ *
+ * Narrow, never widen: a question's list is intersected with the paper's,
+ * so a question cannot quietly accept something the paper does not. An
+ * empty question list means "whatever the paper accepts", which is what
+ * every question written before this existed holds.
+ *
+ * If narrowing leaves nothing -- a question restricted to a language the
+ * paper does not accept, or to one no judge can run -- the PAPER's set is
+ * returned rather than an empty one. A question nobody can answer is a
+ * worse answer to a misconfiguration than a question answerable in the
+ * languages the paper already promised, and the admin screen refuses the
+ * combination at the point somebody is choosing it.
+ */
+export function questionLanguages(args: {
+  readonly question: unknown;
+  readonly paper: readonly string[];
+  readonly available?: readonly string[];
+}): LanguageKey[] {
+  const paper = normalisePaperLanguages(args.paper);
+  const offered = args.available === undefined ? paper : paperLanguages({ allowed: paper, available: args.available });
+  const narrowed = normalisePaperLanguages(args.question);
+  if (narrowed.length === 0) return offered;
+  const allowed = new Set(offered);
+  const kept = narrowed.filter((key) => allowed.has(key));
+  return kept.length > 0 ? kept : offered;
+}
+
+/**
  * Is this language one the sitting may be answered in?
  *
  * The question the run and submit paths ask of the FROZEN set in the

@@ -12,7 +12,7 @@ import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
-import { languagesOfSitting } from "@/lib/exam/language";
+import { languagesOfQuestion } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import { enqueueJudge } from "@/lib/judge/queue";
@@ -120,7 +120,9 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
    * membership of the attempt's frozen set -- derived in one place so the
    * page and this route cannot disagree, which is the Phase 12q.5 lesson.
    */
-  const accepted = await languagesOfSitting(layout);
+  // The QUESTION's list (Phase 13c), which is the paper's unless the
+  // question narrows it. Asked of the layout, never of the current rows.
+  const accepted = await languagesOfQuestion(layout, question.questionId);
   if (!acceptsLanguage(accepted, body.data.language)) {
     return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
   }
