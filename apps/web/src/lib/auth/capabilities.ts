@@ -475,6 +475,11 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "app/admin/assessments/page.tsx",
       "app/admin/assessments/new/page.tsx",
       "app/admin/assessments/[id]/page.tsx",
+      // Phase 12y: what the paper came to. Same authority as setting it —
+      // a department that runs its own tests reads its own marks — and
+      // scoped to the reader's own students like every staff read of a
+      // candidate.
+      "app/admin/assessments/[id]/results/page.tsx",
     ],
   },
   {

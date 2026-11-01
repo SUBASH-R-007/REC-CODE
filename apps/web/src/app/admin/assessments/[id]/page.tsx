@@ -79,6 +79,17 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
           <Badge tone={assessment.status === "OPEN" ? "success" : assessment.status === "DRAFT" ? "warning" : "info"}>
             {assessment.status}
           </Badge>
+          {/**
+            * The way to the marks (Phase 12y). Shown once anybody has sat
+            * the paper, because a Results link on a paper nobody has
+            * opened leads to an empty table and reads like something is
+            * broken.
+            */}
+          {assessment.attempts > 0 ? (
+            <ButtonLink href={`/admin/assessments/${assessment.id}/results`}>
+              Results ({assessment.attempts})
+            </ButtonLink>
+          ) : null}
           <ButtonLink href="/admin/assessments" variant="outline">
             Back
           </ButtonLink>
