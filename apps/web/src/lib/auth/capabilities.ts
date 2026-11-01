@@ -473,6 +473,11 @@ export const STAFF_CAPABILITIES = deepFreeze([
       // Phase 12y: releasing the marks to the candidates, and taking
       // them back. Audited at SENSITIVE in both directions.
       "admin-assessments#setAssessmentResultsPublished",
+      // Phase 12z: the Safe Exam Browser keys a kiosk paper is verified
+      // against. STAFF, because a hall's keys belong to whoever runs the
+      // hall; the action itself keeps the college-wide pair to a
+      // super-admin, since that one is every exam's default.
+      "admin-assessments#setSebKeys",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

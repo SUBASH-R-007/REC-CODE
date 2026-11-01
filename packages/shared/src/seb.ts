@@ -141,3 +141,38 @@ export function sebUrlFor(url: string): string {
     return url;
   }
 }
+
+/**
+ * The keys an administrator saves, and what counts as one (Phase 12z).
+ *
+ * SEB reports both as a lower-case SHA-256 hex digest in its Config Tool —
+ * 64 characters — and this accepts that and a little either side, because
+ * a key is copied by hand from one window into another and a rule that
+ * refused a stray space would be refusing the commonest honest mistake.
+ * What it will not accept is something that is not a hex digest at all: a
+ * key with a typo in it refuses every candidate in the hall, and the
+ * difference between finding that out now and finding it out at 9am is
+ * the whole value of validating it.
+ *
+ * Empty means "not set": clearing a key is how a department stops using
+ * one, and the pair is stored as `{configKey, browserExamKey}` under
+ * `seb` for the college or `seb:<examSessionId>` for one hall.
+ */
+export const SEB_KEY_PATTERN = /^[0-9a-f]{32,128}$/;
+
+export function normaliseSebKey(input: string): string {
+  return input.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+/** Null when the field was left empty; the normalised key when it is one. */
+export function parseSebKey(input: string | null | undefined): { ok: true; key: string | null } | { ok: false } {
+  if (input === null || input === undefined) return { ok: true, key: null };
+  const key = normaliseSebKey(input);
+  if (key === "") return { ok: true, key: null };
+  return SEB_KEY_PATTERN.test(key) ? { ok: true, key } : { ok: false };
+}
+
+/** The PlatformSetting key the pair is stored under. */
+export function sebSettingKey(examSessionId: string | null): string {
+  return examSessionId === null ? "seb" : `seb:${examSessionId}`;
+}

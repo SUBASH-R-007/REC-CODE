@@ -11,6 +11,7 @@ import {
   PLACEMENT_REQUIRES_LAB_MESSAGE,
   paperQuestionCount,
   parseCidr,
+  parseSebKey,
   mayAffectPlacement,
   requiresCidrAllowlist,
 } from "@recx/shared";
@@ -736,4 +737,86 @@ export async function setAssessmentResultsPublished(
     revalidatePath("/assessments");
     return { published: parsed.published };
   }, "setAssessmentResultsPublished");
+}
+
+const sebKeysSchema = z
+  .object({
+    /** The hall whose own keys these are. */
+    examSessionId: z.string().min(1).max(64),
+    configKey: z.string().max(200),
+    browserExamKey: z.string().max(200),
+  })
+  .strict();
+export type SetSebKeysInput = z.input<typeof sebKeysSchema>;
+
+/**
+ * Save a hall's Safe Exam Browser keys (Phase 12z).
+ *
+ * The last link in the kiosk chain. 12y.8 generates the .seb file and the
+ * readiness page hands it to SEB; SEB then sends `sha256(url + key)` on
+ * every request and `verifySeb` compares it against the stored pair.
+ * Until this action there was nowhere to put one: the keys were
+ * `PlatformSetting` rows with no screen, so a KIOSK_SEB paper refused
+ * every candidate with "no exam keys have been configured" and the only
+ * cure was a hand-written SQL statement.
+ *
+ * On the HALL, not in a setting. The first draft wrote
+ * `PlatformSetting["seb:<id>"]` from here and
+ * `tests/repo/platform-setting-writes.test.ts` refused it: that table is
+ * the super-admin's, reserved to five audited action files, and a STAFF
+ * action writing it would widen who can write every platform setting. The
+ * fence was right and the data was in the wrong place — a key rotates per
+ * sitting and belongs beside the hall's network allowlist. The
+ * college-wide default stays a platform setting, set by a super-admin,
+ * and a hall's own pair wins over it (`sebKeysFor`).
+ *
+ * Audited at SECURITY, recording WHETHER each key was set and never
+ * which: an audit row carrying the key would be a second copy of it in a
+ * table more people can read.
+ */
+export async function setSebKeys(
+  input: SetSebKeysInput,
+): Promise<ActionResult<{ configKey: boolean; browserExamKey: boolean }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = sebKeysSchema.parse(input);
+
+    const hall = await db.examSession.findUnique({
+      where: { id: parsed.examSessionId },
+      select: { id: true, label: true, assessmentId: true },
+    });
+    if (!hall) throw new NotFoundError("That hall was not found.");
+
+    const config = parseSebKey(parsed.configKey);
+    const browser = parseSebKey(parsed.browserExamKey);
+    if (!config.ok || !browser.ok) {
+      throw new ValidationError(
+        "A key is the hex digest Safe Exam Browser shows in its Config Tool — 64 characters of 0-9 and a-f. Copy it exactly, or leave the box empty to clear it.",
+      );
+    }
+
+    await db.examSession.update({
+      where: { id: hall.id },
+      data: { sebConfigKey: config.key, sebBrowserExamKey: browser.key },
+    });
+
+    await audit({
+      actorId: actor.id,
+      action: "assessment.seb_keys_changed",
+      entityType: "ExamSession",
+      entityId: hall.id,
+      sensitivity: "SECURITY",
+      metadata: {
+        assessmentId: hall.assessmentId,
+        hall: hall.label,
+        // Whether, never which.
+        configKeySet: config.key !== null,
+        browserExamKeySet: browser.key !== null,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath(`/admin/assessments/${hall.assessmentId}`);
+    return { configKey: config.key !== null, browserExamKey: browser.key !== null };
+  }, "setSebKeys");
 }

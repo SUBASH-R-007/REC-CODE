@@ -1,5 +1,5 @@
 import "server-only";
-import { paperQuestionCount } from "@recx/shared";
+import { paperQuestionCount, sebSettingKey } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -95,6 +95,11 @@ export interface AssessmentDetail extends AssessmentRow {
     options: string[];
     correctIndex: number;
   }>;
+  /**
+   * Which SEB scopes have keys (Phase 12z). Booleans, never the keys: this
+   * is a page, and "is it set" is the only thing a person reads.
+   */
+  sebCollegeKeys: { configKey: boolean; browserExamKey: boolean };
   sessions: Array<{
     id: string;
     label: string;
@@ -104,6 +109,7 @@ export interface AssessmentDetail extends AssessmentRow {
     capacity: number;
     allowedCidrs: string[];
     seated: number;
+    sebKeys: { configKey: boolean; browserExamKey: boolean };
   }>;
 }
 
@@ -157,12 +163,30 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
           endsAt: true,
           capacity: true,
           allowedCidrs: true,
+          sebConfigKey: true,
+          sebBrowserExamKey: true,
           _count: { select: { attempts: true } },
         },
       },
     },
   });
   if (!row) return null;
+
+  /**
+   * Which SEB scopes hold a key (Phase 12z).
+   *
+   * Read as BOOLEANS and never returned: the page shows "set" or "not
+   * set", and a 64-character digest that reached the browser would be a
+   * copy of it in every proxy log between here and there for no reason
+   * anybody needs.
+   */
+  const collegeRow = await db.platformSetting.findUnique({ where: { key: sebSettingKey(null) }, select: { value: true } });
+  const collegeValue = collegeRow?.value as { configKey?: unknown; browserExamKey?: unknown } | null | undefined;
+  const sebCollegeKeys = {
+    configKey: typeof collegeValue?.configKey === "string" && collegeValue.configKey !== "",
+    browserExamKey: typeof collegeValue?.browserExamKey === "string" && collegeValue.browserExamKey !== "",
+  };
+
   return {
     id: row.id,
     slug: row.slug,
@@ -216,6 +240,8 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       capacity: s.capacity,
       allowedCidrs: s.allowedCidrs,
       seated: s._count.attempts,
+      sebKeys: { configKey: s.sebConfigKey !== null, browserExamKey: s.sebBrowserExamKey !== null },
     })),
+    sebCollegeKeys,
   };
 }

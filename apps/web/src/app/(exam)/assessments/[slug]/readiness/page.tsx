@@ -1,4 +1,7 @@
 import {
+  SEB_CONFIG_KEY_HEADER,
+  SEB_REFUSAL_MESSAGES,
+  SEB_REQUEST_HASH_HEADER,
   isFinished,
   paperQuestionCount,
   requiresDeviceAssertion,
@@ -9,7 +12,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
-import { pageRequest, verifySebRequest } from "@/lib/exam/containment";
+import { pageRequest } from "@/lib/exam/containment";
 import { START_REFUSAL_MESSAGES, type StartRefusal } from "@/lib/exam/start";
 import { ReadinessCheck } from "@/components/exam/readiness-check";
 
@@ -119,8 +122,25 @@ export default async function ReadinessPage({
   const kiosk = assessment.proctorMode === "KIOSK_SEB";
   const here = await pageRequest(`/assessments/${slug}/readiness`);
   const origin = new URL(here.url).origin;
-  const sebVerdict = kiosk ? await verifySebRequest(here, null) : null;
-  const sebOk = sebVerdict === null || sebVerdict.ok;
+  /**
+   * The panel asks ONE question: is this request coming from Safe Exam
+   * Browser at all?
+   *
+   * Not "are the keys right" — that is the start route's job, and it is
+   * the only place that can answer it: the keys are per hall, and which
+   * hall a candidate is seated in is decided when the sitting starts
+   * (`pickHall`). A readiness page that verified against the college-wide
+   * pair would tell a department that keys their halls individually that
+   * nothing is configured, every time, on a page where the right answer
+   * was "you are in the wrong browser".
+   *
+   * So: no SEB headers, no checks and no Start — here is the file. With
+   * headers, the form renders and the start route gives the authoritative
+   * answer, including the setup problem if there is one.
+   */
+  const inSeb =
+    here.headers.get(SEB_CONFIG_KEY_HEADER) !== null || here.headers.get(SEB_REQUEST_HASH_HEADER) !== null;
+  const sebOk = !kiosk || inSeb;
 
   const refusal = over
     ? START_REFUSAL_MESSAGES[spent === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left"]
@@ -162,7 +182,7 @@ export default async function ReadinessPage({
         <div className="space-y-4 px-6 pb-10">
           <div className="rounded-xl border border-warning/40 bg-warning-subtle p-4 text-sm">
             <h3 className="font-display text-base font-semibold">This paper is sat in Safe Exam Browser</h3>
-            <p className="mt-2">{sebVerdict?.ok === false ? sebVerdict.message : null}</p>
+            <p className="mt-2">{SEB_REFUSAL_MESSAGES.absent}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <a

@@ -13,6 +13,7 @@ import {
   ScheduleHallForm,
   StatusButtons,
 } from "@/components/admin/assessments/assessment-forms";
+import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 
 export const metadata: Metadata = { title: "Assessment" };
 
@@ -288,6 +289,62 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
           </div>
         )}
       </Card>
+
+      {/**
+        * The Safe Exam Browser keys (Phase 12z), on a kiosk paper only.
+        *
+        * The last link in the chain: 12y.8 generates the .seb file and the
+        * readiness page hands it to SEB, SEB sends `sha256(url + key)` on
+        * every request, and this is where the key it is compared against
+        * is saved. Without it a kiosk paper refuses every candidate with
+        * "no exam keys have been configured" — which is correct, and was
+        * uncurable through the product.
+        *
+        * Beside the halls because that is where the person who needs it
+        * already is, and one form per hall because the keys rotate per
+        * sitting: `sebKeysFor` prefers a hall's own over the college's.
+        */}
+      {assessment.proctorMode === "KIOSK_SEB" ? (
+        <Card className="mb-6 p-5">
+          <CardHeader title="Safe Exam Browser keys" />
+          <p className="mt-1 text-xs text-text-secondary">
+            Open the paper&apos;s <code className="font-mono">.seb</code> file in SEB Config Tool and copy the key it
+            shows. A hall&apos;s own keys win over the college&apos;s, so a sitting with a rotated file needs no
+            change anywhere else. Until one is set, this paper refuses every candidate — which is the right answer to
+            a kiosk exam nobody can verify, not a fault.
+          </p>
+          <p className="mt-2 text-xs text-text-secondary">
+            The file candidates are given:{" "}
+            <a className="text-primary underline-offset-2 hover:underline" href={`/api/exam/seb-config/${assessment.slug}`}>
+              {assessment.slug}.seb
+            </a>
+          </p>
+          <div className="mt-4 space-y-4">
+            {assessment.sessions.length === 0 ? (
+              <p className="rounded-lg border border-border p-3 text-sm text-text-secondary">
+                No hall is scheduled yet, and keys belong to a hall. Schedule one above and its boxes appear here.
+              </p>
+            ) : null}
+            <p className="text-xs text-muted">
+              {/* Said plainly rather than pointing at a screen that does not
+                  exist: the college-wide fallback predates this form and is
+                  still read, but nothing in the product writes it. */}
+              A hall with no keys of its own falls back to the college-wide pair, which is{" "}
+              {assessment.sebCollegeKeys.configKey ? "set" : "not set"} — that one has no screen yet, so set each
+              hall&apos;s own here.
+            </p>
+            {assessment.sessions.map((session) => (
+              <SebKeysForm
+                key={session.id}
+                examSessionId={session.id}
+                label={`${session.label}${session.room ? ` · ${session.room}` : ""}`}
+                configKeySet={session.sebKeys.configKey}
+                browserExamKeySet={session.sebKeys.browserExamKey}
+              />
+            ))}
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }

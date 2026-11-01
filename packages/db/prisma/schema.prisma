@@ -3104,6 +3104,16 @@ model ExamSession {
   /// Optional: require a college-managed device (Verified Access). Strictly
   /// optional — the platform is fully functional without it.
   requireManagedDevice Boolean             @default(false)
+  /// The Safe Exam Browser keys for THIS hall (Phase 12z), overriding the
+  /// college-wide pair in PlatformSetting `seb`. On the hall rather than in
+  /// a setting because that is what they are: a hall's configuration,
+  /// rotated per sitting, set by whoever runs the hall. Keeping them in
+  /// PlatformSetting would have meant a STAFF action writing a table the
+  /// capability matrix reserves for super-admins, which
+  /// tests/repo/platform-setting-writes.test.ts refused -- and it was right
+  /// to. Null means this hall has no key of its own and inherits.
+  sebConfigKey         String?
+  sebBrowserExamKey    String?
   createdById          String
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt

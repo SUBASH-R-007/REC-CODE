@@ -166,6 +166,28 @@ export async function checkContainment(args: {
  * uses one .seb file for everything does not have to configure each hall.
  */
 export async function sebKeysFor(examSessionId: string | null): Promise<{ configKey: string | null; browserExamKey: string | null }> {
+  /**
+   * The hall's own pair first (Phase 12z).
+   *
+   * It lives on `ExamSession` rather than in `PlatformSetting["seb:<id>"]`
+   * where this originally looked: a key rotates per sitting and belongs
+   * beside the hall's network allowlist, and PlatformSetting is the
+   * super-admin's table — a STAFF action writing it would have widened
+   * who can write every platform setting, which
+   * `tests/repo/platform-setting-writes.test.ts` refused. The old setting
+   * key is still read, so a deployment that set one by hand before there
+   * was a screen keeps working.
+   */
+  if (examSessionId) {
+    const hall = await db.examSession.findUnique({
+      where: { id: examSessionId },
+      select: { sebConfigKey: true, sebBrowserExamKey: true },
+    });
+    const configKey = hall?.sebConfigKey && hall.sebConfigKey !== "" ? hall.sebConfigKey : null;
+    const browserExamKey = hall?.sebBrowserExamKey && hall.sebBrowserExamKey !== "" ? hall.sebBrowserExamKey : null;
+    if (configKey || browserExamKey) return { configKey, browserExamKey };
+  }
+
   const keys = ["seb"];
   if (examSessionId) keys.unshift(`seb:${examSessionId}`);
   const rows = await db.platformSetting.findMany({ where: { key: { in: keys } }, select: { key: true, value: true } });
