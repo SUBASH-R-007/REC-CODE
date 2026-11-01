@@ -33,9 +33,12 @@ const CATALOGUE_KEYS = Object.keys(LANGUAGE_CATALOG);
 describe("the language a sitting sends to its routes", () => {
   it("is a catalogue key, which is what every exam route validates against", async () => {
     const mod = await import("@/lib/exam/language");
-    // One derivation, and one reader the exam surfaces ask (12q.5, 12r.4).
+    // One derivation, and the readers the exam surfaces ask (12q.5, 12r.4,
+    // and the SET of them in 13a).
     expect(typeof mod.examPaperLanguage).toBe("function");
     expect(typeof mod.languageOfSitting).toBe("function");
+    expect(typeof mod.languagesOfSitting).toBe("function");
+    expect(typeof mod.acceptedLanguagesFor).toBe("function");
     // The fallback has to be a real key, or a deployment with no enabled
     // language would hand out one nothing accepts.
     expect(CATALOGUE_KEYS).toContain("cpp20");
@@ -45,34 +48,85 @@ describe("the language a sitting sends to its routes", () => {
     /**
      * Phase 12r.4. Deriving it per request meant an administrator enabling
      * a toolchain whose key sorts earlier, while somebody was part way
-     * through, moved that candidate's whole paper to it.
+     * through, moved that candidate's whole paper to it. Phase 13a froze
+     * the whole accepted SET for the same reason, so every one of these
+     * reads `languagesOfSitting(layout)` and not the assessment's current
+     * list.
      */
-    expect(read("src/lib/exam/language.ts")).toContain("export async function languageOfSitting");
-    for (const rel of ["src/server/queries/exam.ts", "src/app/api/exam/[attemptId]/run/route.ts"]) {
-      expect(read(rel), rel).toContain("languageOfSitting(layout)");
+    expect(read("src/lib/exam/language.ts")).toContain("export async function languagesOfSitting");
+    for (const rel of [
+      "src/server/queries/exam.ts",
+      "src/app/api/exam/[attemptId]/run/route.ts",
+      "src/app/api/exam/[attemptId]/snapshot/route.ts",
+      "src/lib/exam/submit.ts",
+    ]) {
+      expect(read(rel), rel).toContain("languagesOfSitting(");
+      expect(read(rel), rel).not.toContain("allowedLanguages");
     }
   });
 
-  it("is named for what it is: the paper emits a key AND an editor mode", () => {
+  it("is named for what it is: the paper emits keys AND editor modes, separately", () => {
     // The names are the fix. `language` meant both things and the wrong
-    // one won; `languageKey` and `editorLanguage` cannot be swapped by
-    // accident because neither reads like the other.
+    // one won; a key and an editor mode cannot be swapped by accident
+    // because neither reads like the other.
     const query = read("src/server/queries/exam.ts");
     expect(query).toContain("languageKey: defaultLanguage");
-    expect(query).toContain("editorLanguage: LANGUAGE_CATALOG[defaultLanguage].editorLanguage");
+    // Phase 13a: the modes travel inside the accepted-language views,
+    // resolved on the server, each field named for what it carries.
+    expect(query).toContain("paperLanguageViews(accepted)");
   });
 
   it("sends the KEY to every route, and the mode to none of them", () => {
     const session = read("src/components/exam/exam-session.tsx");
-    // The three requests a sitting makes: snapshot, run, submit.
-    const sent = [...session.matchAll(/\?\.languageKey|language: q\.languageKey/g)];
-    expect(sent.length, "snapshot, run and submit each read languageKey").toBeGreaterThanOrEqual(3);
+    // The three requests a sitting makes: snapshot, run, submit. Each
+    // reads the question's chosen language, falling back to the key.
+    const sent = [...session.matchAll(/langsRef\.current\[/g)];
+    expect(sent.length, "snapshot, run and submit each read the chosen language").toBeGreaterThanOrEqual(3);
     // And the editor mode never leaves the component that renders it.
     expect(session).not.toMatch(/language: q\.editorLanguage|\?\.editorLanguage/);
+    // Nothing in the session READS an editor mode: it holds keys, hands
+    // the views straight to the pane, and the pane picks the mode out.
+    // (The only mention left is the Phase 12r.2 story in a comment.)
+    expect(session.replace(/\/\*[\s\S]*?\*\//g, "")).not.toContain("editorLanguage");
   });
 
-  it("gives the editor the mode, not the key", () => {
-    expect(read("src/components/exam/exam-question.tsx")).toContain("language={question.editorLanguage}");
+  it("gives the editor the mode of the language the candidate picked", () => {
+    // Phase 13a: the pane renders the ACTIVE language's grammar, so the
+    // highlighting follows the picker. Before it, the mode was fixed to
+    // the paper's one language.
+    const pane = read("src/components/exam/exam-question.tsx");
+    expect(pane).toContain("language={active?.editorLanguage");
+    expect(pane).toContain("onLanguageChange");
+  });
+
+  it("validates membership of the accepted set, not equality with one language", () => {
+    /**
+     * Phase 13a. A paper may accept several languages, so a route
+     * comparing against ONE would refuse a candidate's legitimate choice
+     * -- which is exactly how a sitting felt before this phase, when the
+     * only language was whichever toolchain key sorted first.
+     */
+    for (const rel of [
+      "src/app/api/exam/[attemptId]/run/route.ts",
+      "src/app/api/exam/[attemptId]/snapshot/route.ts",
+      "src/lib/exam/submit.ts",
+    ]) {
+      expect(read(rel), rel).toContain("acceptsLanguage(");
+    }
+  });
+
+  it("looks up a toolchain row per language used, not one for the paper", () => {
+    /**
+     * The defect this fence exists for (Phase 13a). `submitAttempt` read
+     * the LanguageConfig for `answers[0].language` and stamped every
+     * submission with it. Invisible while a sitting had one language; the
+     * moment it had two, a paper answered in Python and C would have had
+     * the Python compiled by gcc and come back as a compile error on a
+     * correct program.
+     */
+    const submit = read("src/lib/exam/submit.ts");
+    expect(submit).toContain("configs.get(answer.language)");
+    expect(submit).not.toMatch(/languageConfigId: config\.id/);
   });
 
   it("keeps an editor mode that is NOT a catalogue key, which is the whole trap", () => {

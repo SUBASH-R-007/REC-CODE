@@ -3,6 +3,7 @@ import {
   SEB_REFUSAL_MESSAGES,
   SEB_REQUEST_HASH_HEADER,
   isFinished,
+  paperLanguageViews,
   paperQuestionCount,
   requiresDeviceAssertion,
   sebLaunchUrl,
@@ -13,6 +14,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { pageRequest } from "@/lib/exam/containment";
+import { acceptedLanguagesFor } from "@/lib/exam/language";
 import { START_REFUSAL_MESSAGES, type StartRefusal } from "@/lib/exam/start";
 import { ReadinessCheck } from "@/components/exam/readiness-check";
 
@@ -57,6 +59,8 @@ export default async function ReadinessPage({
       durationSec: true,
       proctorMode: true,
       sitInPopup: true,
+      /** Which languages the programs may be answered in (Phase 13a). */
+      allowedLanguages: true,
       id: true,
       maxAttempts: true,
       affectsPlacementEligibility: true,
@@ -75,6 +79,18 @@ export default async function ReadinessPage({
     (assessment.durationSec * (1 + (accommodation?.extraTimePercent ?? 0) / 100)) / 60 +
       (accommodation?.extraTimeMinutes ?? 0),
   );
+
+  /**
+   * The languages the programs may be answered in (Phase 13a).
+   *
+   * Said BEFORE the clock starts, which is the whole reason it is here: a
+   * candidate who revises in Python and finds out at minute one that the
+   * paper is C++ has lost the only moment they could have done anything
+   * about it. The same intersection the sitting itself will freeze, so
+   * this cannot promise a language the paper will not accept.
+   */
+  const accepted = assessment._count.problems > 0 ? await acceptedLanguagesFor(assessment.allowedLanguages) : [];
+  const acceptedLabels = paperLanguageViews(accepted).map((language) => language.shortLabel);
 
   const proctorNote =
     assessment.proctorMode === "LAB_SUPERVISED"
@@ -171,6 +187,20 @@ export default async function ReadinessPage({
           // The instructions are sanitised when the assessment is saved.
           dangerouslySetInnerHTML={{ __html: assessment.instructions }}
         />
+        {acceptedLabels.length > 0 ? (
+          <p className="mt-3 text-sm text-text">
+            {acceptedLabels.length === 1 ? (
+              <>
+                The programs on this paper are answered in <strong>{acceptedLabels[0]}</strong>.
+              </>
+            ) : (
+              <>
+                You may answer the programs in <strong>{acceptedLabels.join(", ")}</strong>, and choose per question
+                once you have started.
+              </>
+            )}
+          </p>
+        ) : null}
         {accommodation && (accommodation.extraTimePercent > 0 || accommodation.extraTimeMinutes > 0) ? (
           <p className="mt-3 text-sm text-text">
             Your approved extra time is included: you have {minutes} minutes.

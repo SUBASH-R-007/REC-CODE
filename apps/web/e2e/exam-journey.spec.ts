@@ -95,6 +95,12 @@ test.describe("exam journey", () => {
       // The reason this paper is the one that tests it: the refusal happens
       // inside a browser paste event and nowhere else (Phase 12s).
       refuseOutsidePaste: true,
+      /**
+       * Two accepted languages (Phase 13a), ticked through the real admin
+       * form. The picker, the starter swap and the rule about keeping work
+       * are all browser behaviour, so this is where they are proved.
+       */
+      languages: ["C++20", "Python 3.12"],
     });
 
     // ── 4. The candidate reads the readiness page ──
@@ -151,12 +157,56 @@ test.describe("exam journey", () => {
     await goToQuestion(candidate, 1, 2);
     const editorRoot = candidate.locator("[data-editor-root]").first();
     await expect(editorRoot).toBeVisible({ timeout: 60_000 });
+
+    /**
+     * ── 7a. The language picker (Phase 13a) ──
+     *
+     * Before this phase a sitting had ONE language that nobody chose --
+     * `cpp20`, because its key sorts first among the enabled toolchains --
+     * so a candidate who writes Python sat down in front of a C++ editor
+     * with nothing on screen to change it. The paper above accepts two.
+     */
+    const language = candidate.getByRole("combobox", { name: "Language" });
+    await expect(language).toBeVisible({ timeout: 60_000 });
+    await expect(language).toHaveValue("cpp20");
+    // The full label with its compiler, because under exam conditions
+    // there is no /judge page to go and read.
+    await expect(candidate.getByText(/C\+\+20 \(GCC/).first()).toBeVisible();
+
+    /**
+     * An UNTOUCHED editor follows the picker: a Python candidate should not
+     * have to clear `class Solution {` by hand, and the starter is the one
+     * thing that is safe to replace.
+     */
+    await language.selectOption({ label: "Python 3.12" });
+    await expect(editorRoot).toContainText("def twoSum", { timeout: 30_000 });
+    await language.selectOption({ label: "C++20" });
+    await expect(editorRoot).toContainText("vector<int> twoSum", { timeout: 30_000 });
+
     await editorRoot.click();
     // Replace the starter rather than appending to it: the starter already
     // declares the method, so a second one is a redefinition — which is what
     // the Run console said, in those words, the first time this ran.
     await candidate.keyboard.press("ControlOrMeta+a");
     await candidate.keyboard.insertText(SOLUTION);
+    await expect(savePill(candidate)).toContainText(/Saved/, { timeout: 60_000 });
+
+    /**
+     * ── 7b. Changing the language KEEPS the work (Phase 13a) ──
+     *
+     * The rule that matters most about the picker, and the one only a
+     * browser can prove: a candidate twenty minutes into an answer who
+     * opens the dropdown to see what else is offered, and picks something
+     * by accident, must not lose twenty minutes of work. Their text stays
+     * exactly as it is and the picker moves; only an editor still holding
+     * the starter is swapped (asserted above, before anything was typed).
+     */
+    await language.selectOption({ label: "Python 3.12" });
+    await expect(editorRoot).toContainText("twoSum(std::vector<int>& nums", { timeout: 30_000 });
+    await expect(savePill(candidate)).toContainText(/Saved/, { timeout: 60_000 });
+    // Back to the language the answer is written in, with the answer intact.
+    await language.selectOption({ label: "C++20" });
+    await expect(editorRoot).toContainText("twoSum(std::vector<int>& nums", { timeout: 30_000 });
     await expect(savePill(candidate)).toContainText(/Saved/, { timeout: 60_000 });
 
     // ── 8. A paste the candidate did not copy inside is refused (12s.1) ──
@@ -271,9 +321,25 @@ test.describe("exam journey", () => {
     await expect(candidate.locator("[data-editor-root]")).toHaveCount(0);
     await expect(candidate.getByRole("button", { name: /Run samples/ })).toHaveCount(0);
 
-    await candidate.getByRole("radio", { name: RIGHT_OPTION }).check();
+    /**
+     * The pick RETRIES, for the reason `goToQuestion` does.
+     *
+     * The sitting is server rendered and an option only records anything
+     * once React has attached: a click that lands in that window checks
+     * the radio in the DOM, the controlled input reverts it, and no
+     * request is ever made. Nothing retries it, so the paper simply stays
+     * unanswered -- which is what happened on a dev server that was still
+     * compiling, and read as "the multiple-choice half is broken".
+     *
+     * The palette is the assertion, not the save pill: the pill says
+     * "Saved" from the first render (there is nothing unsaved yet), so a
+     * pill-only check passes without the answer ever having been recorded.
+     */
+    await expect(async () => {
+      await candidate.getByRole("radio", { name: RIGHT_OPTION }).check();
+      await expect(candidate.getByText(/1 of 1 answered/)).toBeVisible({ timeout: 10_000 });
+    }).toPass({ timeout: 90_000 });
     await expect(savePill(candidate)).toContainText(/Saved/, { timeout: 60_000 });
-    await expect(candidate.getByText(/1 of 1 answered/)).toBeVisible({ timeout: 60_000 });
 
     await candidate.getByRole("button", { name: "Submit test" }).click();
     await candidate.getByRole("button", { name: "Yes, submit" }).click();

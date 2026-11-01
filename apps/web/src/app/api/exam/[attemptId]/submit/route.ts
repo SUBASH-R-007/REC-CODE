@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { LANGUAGE_CATALOG, SNAPSHOT_MAX_BYTES } from "@recx/shared";
+import { LANGUAGE_CATALOG, LANGUAGE_NOT_ACCEPTED_MESSAGE, SNAPSHOT_MAX_BYTES } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
@@ -133,6 +133,29 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
 
   const result = await submitAttempt(guard, layout, answers);
   if (!result.submitted) {
+    /**
+     * The reason, said accurately (Phase 13a).
+     *
+     * Every refusal used to be reported as "this sitting is already
+     * finished", which is right for the common one and a lie for the
+     * others: a candidate whose language the paper does not accept, or
+     * whose toolchain has been disabled, was told their sitting was over
+     * while it was in fact still live and still savable. The two below
+     * leave the attempt IN_PROGRESS on purpose, so the message has to be
+     * one a candidate can act on.
+     */
+    if (result.reason === "language_not_accepted") {
+      return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
+    }
+    if (result.reason === "no_language") {
+      return json(
+        {
+          error:
+            "One of the languages this paper accepts is no longer available on the judge, so nothing was submitted. Tell your invigilator -- your work is saved and your sitting is still open.",
+        },
+        409,
+      );
+    }
     return json({ error: "This sitting is already finished.", revokeReason: "submitted" }, 409);
   }
   await endAttemptSession(attemptId, "submitted");

@@ -23,6 +23,7 @@ import { ExamMcq } from "@/components/exam/exam-mcq";
 import type { ExamMcqView } from "@/server/queries/exam";
 import { SaveStatePill, type SaveState } from "@/components/exam/save-state-pill";
 import { ExamQuestion } from "@/components/exam/exam-question";
+import type { PaperLanguageView } from "@recx/shared";
 import type { EditorPrefs } from "@/components/editor/editor-types";
 import { ExamBottomBar } from "@/components/exam/exam-bottom-bar";
 import { TelemetryQueue } from "@/lib/exam/client/telemetry-queue";
@@ -66,13 +67,53 @@ const COPIED_TEXT_MEMORY = 200;
  */
 const FORGED_EVENT_CAP = 3;
 
+/**
+ * One language a sitting may be answered in (Phase 13a).
+ *
+ * `PaperLanguageView`, re-exported under the name this surface uses. A
+ * TYPE import, deliberately: the labels are resolved on the server because
+ * calling the catalog's label helpers from a client component puts eleven
+ * toolchains' compiler flags in the browser bundle, which the sitting's own
+ * size budget caught at 1.2 KB over.
+ */
+export type ExamLanguageView = PaperLanguageView;
+
+/** Is this one of the languages the paper accepts? */
+function accepts(languages: readonly ExamLanguageView[], key: string): boolean {
+  return languages.some((language) => language.key === key);
+}
+
+/**
+ * The language a question OPENS in: the one it was last worked in if the
+ * paper still accepts it, else the paper's default.
+ *
+ * Used by two state initialisers that must agree — the sources and the
+ * languages — because seeding the editor with the C++ starter while the
+ * picker says Python is the kind of disagreement a candidate discovers by
+ * submitting the wrong thing.
+ */
+function openingLanguage(
+  question: ExamQuestionView,
+  languages: readonly ExamLanguageView[],
+  recovered: Readonly<Record<string, string>>,
+): string {
+  const was = recovered[question.questionId];
+  return was !== undefined && accepts(languages, was) ? was : question.languageKey;
+}
+
 export interface ExamQuestionView {
   readonly questionId: string;
   readonly title: string;
   readonly statementHtml: string;
   readonly points: number;
   readonly samples: ReadonlyArray<{ readonly input: string; readonly output: string }>;
-  readonly starter: string;
+  /**
+   * The starter code for every language this paper accepts (Phase 13a),
+   * keyed by toolchain key. Switching language mid-sitting swaps the
+   * editor to the right one with no request; a problem with no starter in
+   * a language gives an empty editor, as the practice workspace does.
+   */
+  readonly starters: Readonly<Record<string, string>>;
   /**
    * THE TOOLCHAIN KEY — `cpp20`, `c17` — which is what every exam route
    * takes, because each validates against the keys of LANGUAGE_CATALOG.
@@ -87,8 +128,6 @@ export interface ExamQuestionView {
    * request was made. Reported from a live sitting (Phase 12r.2).
    */
   readonly languageKey: string;
-  /** The editor's highlighting mode. Never sent to a route. */
-  readonly editorLanguage: string;
 }
 
 export function ExamSession({
@@ -102,6 +141,8 @@ export function ExamSession({
   mcqs,
   initialChoices,
   initialSources,
+  initialLanguages,
+  languages,
   editorPrefs,
 }: {
   readonly attemptId: string;
@@ -123,6 +164,21 @@ export function ExamSession({
   readonly refuseOutsidePaste: boolean;
   /** Recovered from the write-ahead store, newest-wins over the starter code. */
   readonly initialSources: Readonly<Record<string, string>>;
+  /**
+   * The language each question was last worked in, by questionId (Phase
+   * 13a), read from the last snapshot the server holds and clamped to the
+   * accepted set. A candidate who wrote Python, closed the laptop and came
+   * back -- or moved to another machine -- must come back to Python, not
+   * to the paper's default with their Python in a C++ editor.
+   */
+  readonly initialLanguages: Readonly<Record<string, string>>;
+  /**
+   * Every language this sitting may be answered in, from the attempt's
+   * FROZEN set (Phase 13a), labels already resolved on the server. One
+   * entry is the ordinary case for a restricted paper and the pane then
+   * shows it as text rather than a dropdown of one.
+   */
+  readonly languages: readonly ExamLanguageView[];
   /** The candidate's font size and tab size; the keymap is the arena's (Phase 12j). */
   readonly editorPrefs: EditorPrefs;
 }) {
@@ -132,7 +188,23 @@ export function ExamSession({
   const [sources, setSources] = useState<Record<string, string>>(() => {
     const seeded: Record<string, string> = {};
     for (const question of questions) {
-      seeded[question.questionId] = initialSources[question.questionId] ?? question.starter;
+      const language = openingLanguage(question, languages, initialLanguages);
+      seeded[question.questionId] = initialSources[question.questionId] ?? question.starters[language] ?? "";
+    }
+    return seeded;
+  });
+  /**
+   * Which language each question is being answered in (Phase 13a).
+   *
+   * Per question, not per paper: a candidate may reasonably write the
+   * string question in Python and the one about pointers in C, and the
+   * submit path creates one `Submission` per question anyway so there is
+   * nothing to unify.
+   */
+  const [langs, setLangs] = useState<Record<string, string>>(() => {
+    const seeded: Record<string, string> = {};
+    for (const question of questions) {
+      seeded[question.questionId] = openingLanguage(question, languages, initialLanguages);
     }
     return seeded;
   });
@@ -202,6 +274,8 @@ export function ExamSession({
   /** Events the browser did not generate; capped for the same reason. */
   const forgedEvents = useRef(0);
   const sourcesRef = useRef(sources);
+  /** The loops read the language the same way they read the source. */
+  const langsRef = useRef(langs);
   const questionIdRef = useRef(questionId);
   const dirty = useRef(false);
   const lastSavedAt = useRef(Date.now());
@@ -209,6 +283,7 @@ export function ExamSession({
   const lastBurst = useRef({ atMs: 0, chars: 0 });
 
   sourcesRef.current = sources;
+  langsRef.current = langs;
   questionIdRef.current = questionId;
 
   /** Milliseconds into the sitting, as the client believes. Server-clamped. */
@@ -326,7 +401,10 @@ export function ExamSession({
       const id = questionIdRef.current;
       const source = sourcesRef.current[id];
       if (!id || source === undefined) return;
-      const language = questions.find((candidate) => candidate.questionId === id)?.languageKey ?? "cpp20";
+      // The language THIS question is being answered in (Phase 13a), not
+      // the paper's default: the snapshot is the record of the answer, and
+      // a record whose language is wrong reconstructs as the wrong program.
+      const language = langsRef.current[id] ?? questions.find((q) => q.questionId === id)?.languageKey ?? "cpp20";
 
       // WRITE AHEAD FIRST. If the network call below fails, the work is
       // already safe and the pill can say so honestly.
@@ -418,7 +496,7 @@ export function ExamSession({
     const id = questionIdRef.current;
     const source = sourcesRef.current[id];
     if (!id || source === undefined || source.trim() === "") return;
-    const language = questions.find((candidate) => candidate.questionId === id)?.languageKey ?? "cpp20";
+    const language = langsRef.current[id] ?? questions.find((q) => q.questionId === id)?.languageKey ?? "cpp20";
     setRunning(true);
     setConsoleOpen(true);
     try {
@@ -869,6 +947,49 @@ export function ExamSession({
     [items, persist],
   );
 
+  /**
+   * Change the language this question is answered in (Phase 13a).
+   *
+   * The decision that matters is what happens to what is already in the
+   * editor, and the rule is: NOTHING, unless it is still the starter.
+   *
+   * A candidate twenty minutes into a C++ answer who opens the dropdown to
+   * read what else is offered, and picks something by accident, must not
+   * lose twenty minutes of work — so their text is left exactly as it is,
+   * the picker moves, and picking the old language back changes nothing at
+   * all. Only an editor still holding the starter (or nothing) is swapped
+   * to the new language's starter, which is the case where keeping the
+   * text would be the unhelpful answer: a Python candidate staring at
+   * `#include <iostream>`.
+   *
+   * It is persisted at once rather than waiting for the 30-second tick,
+   * because the language is now part of what the answer IS: a sitting that
+   * crashed between the switch and the next tick would come back in the
+   * old language, with the new language's code in the editor.
+   */
+  const changeLanguage = useCallback(
+    (next: string) => {
+      const id = questionIdRef.current;
+      const question = questions.find((q) => q.questionId === id);
+      if (!question || !accepts(languages, next)) return;
+      const from = langsRef.current[id] ?? question.languageKey;
+      if (from === next) return;
+
+      const current = sourcesRef.current[id] ?? "";
+      const untouched = current.trim() === "" || current.trim() === (question.starters[from] ?? "").trim();
+      langsRef.current = { ...langsRef.current, [id]: next };
+      setLangs((previous) => ({ ...previous, [id]: next }));
+      if (untouched) {
+        const starter = question.starters[next] ?? "";
+        sourcesRef.current = { ...sourcesRef.current, [id]: starter };
+        setSources((previous) => ({ ...previous, [id]: starter }));
+      }
+      dirty.current = true;
+      void persist("TICK");
+    },
+    [languages, persist, questions],
+  );
+
   const progress = useMemo<QuestionProgress[]>(
     () =>
       items.map((entry) =>
@@ -876,7 +997,18 @@ export function ExamSession({
           ? {
               visited: visited[entry.question.questionId] === true,
               // Answered means "there is work here": anything beyond the starter.
-              answered: (sources[entry.question.questionId] ?? "").trim() !== (entry.question.starter ?? "").trim(),
+              /**
+               * Answered means "there is work here": anything beyond the
+               * starter OF THE LANGUAGE THIS QUESTION IS IN (Phase 13a).
+               * Measured against the paper's default starter instead, a
+               * candidate who switched to Python and had not typed yet
+               * would see the question marked answered.
+               */
+              answered:
+                (sources[entry.question.questionId] ?? "").trim() !==
+                (
+                  entry.question.starters[langs[entry.question.questionId] ?? entry.question.languageKey] ?? ""
+                ).trim(),
               marked: marked[entry.question.questionId] === true,
             }
           : {
@@ -887,7 +1019,7 @@ export function ExamSession({
               marked: marked[entry.mcq.mcqId] === true,
             },
       ),
-    [items, visited, sources, marked, choices],
+    [items, visited, sources, langs, marked, choices],
   );
 
   const counts = paletteCounts(progress);
@@ -897,7 +1029,11 @@ export function ExamSession({
     // in one pass and the attempt closes last (lib/exam/submit.ts).
     const answers = questions.map((q) => ({
       questionId: q.questionId,
-      language: q.languageKey,
+      // Each question's own language (Phase 13a). The submit path creates
+      // one Submission per question and judges each with the toolchain
+      // named here, so a paper answered half in Python and half in C is
+      // judged that way.
+      language: langsRef.current[q.questionId] ?? q.languageKey,
       source: sourcesRef.current[q.questionId] ?? "",
     }));
     setSave({ kind: "saving" });
@@ -1006,6 +1142,9 @@ export function ExamSession({
             position={current + 1}
             total={items.length}
             prefs={editorPrefs}
+            languages={languages}
+            language={langs[question.questionId] ?? question.languageKey}
+            onLanguageChange={changeLanguage}
           />
         ) : null}
       </div>
@@ -1054,7 +1193,10 @@ export function ExamSession({
         onClear={
           question
             ? () => {
-                setSources((previous) => ({ ...previous, [question.questionId]: question.starter }));
+                setSources((previous) => ({
+                  ...previous,
+                  [question.questionId]: question.starters[langs[question.questionId] ?? question.languageKey] ?? "",
+                }));
                 dirty.current = true;
               }
             : undefined

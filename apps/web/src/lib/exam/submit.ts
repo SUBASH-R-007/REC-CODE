@@ -1,11 +1,12 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import type { AttemptLayout } from "@recx/shared";
+import { acceptsLanguage, type AttemptLayout } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
 import { flagAttemptIfNeeded } from "@/lib/integrity/flag";
 import { deriveSnapshotJumps } from "@/lib/exam/snapshot-jump";
+import { languagesOfSitting } from "@/lib/exam/language";
 import { markAttemptMcqs } from "@/lib/exam/mcq";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import type { AttemptGuardOk } from "@/lib/exam/attempt";
@@ -46,7 +47,12 @@ export interface SubmitResult {
   readonly submissionIds: string[];
   /** Questions with nothing in them, which are simply not submitted. */
   readonly blank: number;
-  readonly reason?: "already_finished" | "no_language";
+  readonly reason?: "already_finished" | "no_language" | "language_not_accepted";
+  /**
+   * The language that was refused, for the route's message (Phase 13a).
+   * Only set with `language_not_accepted`.
+   */
+  readonly refusedLanguage?: string;
 }
 
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -97,6 +103,31 @@ export async function submitAttempt(
     console.error(`[exam] attempt ${attempt.id}: marking the multiple-choice half failed`, error);
   }
 
+  /**
+   * Every answer's language must be one this sitting accepts (Phase 13a).
+   *
+   * Checked BEFORE anything is finalised, and the whole submission is
+   * refused rather than the offending answer dropped: the sitting is still
+   * live at this point, so a refusal is something a candidate can act on
+   * (pick an accepted language and hand in again), while a silently
+   * dropped answer is a zero they find out about when the results come
+   * out. The editor only ever offers the frozen set, so reaching this
+   * means a client somebody has been editing.
+   */
+  const accepted = await languagesOfSitting(layout);
+  const refused = answers.find(
+    (answer) => answer.source.trim() !== "" && !acceptsLanguage(accepted, answer.language),
+  );
+  if (refused) {
+    return {
+      submitted: false,
+      submissionIds: [],
+      blank: 0,
+      reason: "language_not_accepted",
+      refusedLanguage: refused.language,
+    };
+  }
+
   const language = answers[0]?.language;
   if (language === undefined) {
     // No code to judge — an all-multiple-choice paper, or a blank one.
@@ -107,11 +138,30 @@ export async function submitAttempt(
     return { submitted: moved, submissionIds: [], blank: layout.questions.length };
   }
 
-  const config = await db.languageConfig.findFirst({
-    where: { key: language, enabled: true, isCurrent: true },
-    select: { id: true },
-  });
-  if (!config) return { submitted: false, submissionIds: [], blank: 0, reason: "no_language" };
+  /**
+   * ONE TOOLCHAIN ROW PER LANGUAGE USED (Phase 13a).
+   *
+   * This used to read the config for `answers[0].language` and stamp every
+   * submission with it. That was invisible while a sitting had one
+   * language and would have been a quiet disaster the moment it had two: a
+   * paper answered in Python and C would have had both submissions
+   * recorded against whichever toolchain the first answer happened to use,
+   * so the judge would have compiled the Python file with gcc. The verdict
+   * would have been a compile error on a correct program.
+   */
+  const used = [...new Set(answers.filter((answer) => answer.source.trim() !== "").map((a) => a.language))];
+  const configs = new Map<string, string>();
+  for (const key of used) {
+    const row = await db.languageConfig.findFirst({
+      where: { key, enabled: true, isCurrent: true },
+      select: { id: true },
+    });
+    // A language accepted when the paper was laid out and disabled since.
+    // Refused rather than judged with another toolchain: there is nothing
+    // honest to fall back to.
+    if (!row) return { submitted: false, submissionIds: [], blank: 0, reason: "no_language" };
+    configs.set(key, row.id);
+  }
 
   // ── 1. Snapshot everything, before anything is finalised ───────────────
   for (const question of layout.questions) {
@@ -146,6 +196,15 @@ export async function submitAttempt(
       console.error(`[exam] attempt ${attempt.id}: question ${question.questionId} has no tests; not judged`);
       continue;
     }
+    const configId = configs.get(answer.language);
+    if (configId === undefined) {
+      // Cannot happen -- `used` is built from these same answers -- and if
+      // it ever does, a blank counted and logged beats a crash that loses
+      // every other question in the loop.
+      blank++;
+      console.error(`[exam] attempt ${attempt.id}: no toolchain row for ${answer.language}; not judged`);
+      continue;
+    }
     const row = await db.submission.create({
       data: {
         userId: attempt.userId,
@@ -153,7 +212,7 @@ export async function submitAttempt(
         // The PINNED version, not the live one: a problem republished
         // mid-exam must not change what this candidate was judged against.
         problemVersionId: question.problemVersionId,
-        languageConfigId: config.id,
+        languageConfigId: configId,
         language: answer.language,
         origin: "ASSESSMENT",
         lane: "ASSESSMENT",

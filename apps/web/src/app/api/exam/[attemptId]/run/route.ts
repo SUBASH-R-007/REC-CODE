@@ -1,12 +1,18 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { LANGUAGE_CATALOG, LIMITS, SNAPSHOT_MAX_BYTES } from "@recx/shared";
+import {
+  LANGUAGE_CATALOG,
+  LANGUAGE_NOT_ACCEPTED_MESSAGE,
+  LIMITS,
+  SNAPSHOT_MAX_BYTES,
+  acceptsLanguage,
+} from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
-import { languageOfSitting } from "@/lib/exam/language";
+import { languagesOfSitting } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 import { enqueueJudge } from "@/lib/judge/queue";
@@ -105,12 +111,20 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
   const layout = attemptLayoutOf(guard.attempt);
   const question = layout.questions.find((q) => q.questionId === body.data.questionId);
   if (!question) return json({ error: "That question is not part of this assessment." }, 404);
-  // The paper fixes one language, derived in one place so the page and this
-  // route cannot hand out different answers.
-  const paperLanguage = await languageOfSitting(layout);
-  if (body.data.language !== paperLanguage) {
-    return json({ error: "That is not the language this paper is answered in." }, 400);
+  /**
+   * The language must be one the paper accepts (Phase 13a).
+   *
+   * It used to have to be THE language: a sitting had one, nobody chose
+   * it, and this route compared against it. A paper may now accept
+   * several and a candidate picks per question, so the check is
+   * membership of the attempt's frozen set -- derived in one place so the
+   * page and this route cannot disagree, which is the Phase 12q.5 lesson.
+   */
+  const accepted = await languagesOfSitting(layout);
+  if (!acceptsLanguage(accepted, body.data.language)) {
+    return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
   }
+  const runLanguage = body.data.language;
   if (body.data.source.trim() === "") return json({ error: "Write some code first." }, 400);
 
   const version = await db.problemVersion.findUnique({
@@ -122,8 +136,10 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     return json({ error: "This question has no sample tests to run." }, 409);
   }
 
+  // The toolchain for the language the candidate chose, not the paper's
+  // default: a run compiled with the wrong compiler is worse than no run.
   const config = await db.languageConfig.findFirst({
-    where: { key: paperLanguage, enabled: true, isCurrent: true },
+    where: { key: runLanguage, enabled: true, isCurrent: true },
     select: { id: true },
   });
   if (!config) return json({ error: "That language is not available right now." }, 409);
@@ -157,7 +173,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
    */
   await writeSnapshot(guard, {
     questionId: question.questionId,
-    language: paperLanguage,
+    language: runLanguage,
     source: body.data.source,
     trigger: "RUN",
     atMs: body.data.atMs,
@@ -168,7 +184,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
       userId: user.id,
       problemVersionId: version.id,
       languageConfigId: config.id,
-      language: paperLanguage,
+      language: runLanguage,
       source: body.data.source,
       // Null means "run the sample tests" — there is no custom input here.
       customInput: null,

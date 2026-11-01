@@ -45,6 +45,13 @@ export interface PaperOptions {
   /** Leave out the coding question, which is the all-multiple-choice case. */
   readonly codingQuestion?: boolean;
   readonly durationMinutes?: number;
+  /**
+   * Phase 13a: the languages the paper accepts, by their short labels as
+   * the checkbox list writes them ("C++20", "Python 3.12"). Left out, the
+   * paper restricts nothing and the candidate is offered every enabled
+   * language -- which is what every paper written before 13a holds.
+   */
+  readonly languages?: readonly string[];
 }
 
 export interface AuthoredPaper {
@@ -113,6 +120,23 @@ export async function authorPaper(admin: Page, options: PaperOptions): Promise<A
   await admin.getByRole("textbox", { name: "Marks" }).fill("2");
   await admin.getByRole("button", { name: "Add question" }).click();
   await expect(admin.getByText(stem).first()).toBeVisible({ timeout: 60_000 });
+
+  /**
+   * The accepted languages, ticked through the real form (Phase 13a).
+   *
+   * On the draft page rather than the create form, because that is where
+   * the choice lives: it stays editable after publication, since a
+   * candidate's set is frozen into their own attempt at start.
+   */
+  if (options.languages && options.languages.length > 0) {
+    for (const label of options.languages) {
+      // By substring, not by a built regular expression: the labels hold
+      // "C++20", whose plus signs are a regex that matches nothing.
+      await admin.getByRole("checkbox", { name: label }).check();
+    }
+    await admin.getByRole("button", { name: "Save the languages" }).click();
+    await expect(admin.getByText(/Saved\. Candidates may answer in/)).toBeVisible({ timeout: 60_000 });
+  }
 
   await admin.getByRole("button", { name: /^Publish/ }).click();
   await expect(admin.getByText("PUBLISHED").first()).toBeVisible({ timeout: 60_000 });

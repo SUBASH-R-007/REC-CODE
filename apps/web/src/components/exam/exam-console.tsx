@@ -1,8 +1,29 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useVerdictStream } from "@/hooks/use-verdict-stream";
-import { ResultPanel } from "@/components/workspace/result-panel";
+
+/**
+ * The results panel, fetched when the drawer is first opened (Phase 13a).
+ *
+ * The panel and the view layer under it are some 650 lines that NOTHING
+ * can need until a run has been asked for -- and asking for one is a
+ * network request, so a candidate who could not fetch this chunk could not
+ * have run anything either. Keeping it in the sitting's first load spent
+ * the exam page's size budget on a drawer that opens closed.
+ *
+ * The stream hook stays eager, so the collapsed header still shows the
+ * verdict, and the drawer is opened by `runSamples` the moment a run is
+ * asked for -- which is well before there is anything to show in it.
+ */
+const ResultPanel = dynamic(
+  () => import("@/components/workspace/result-panel").then((m) => ({ default: m.ResultPanel })),
+  {
+    ssr: false,
+    loading: () => <p className="py-2 text-sm text-text-secondary">Loading the results panel…</p>,
+  },
+);
 
 /**
  * The results console, in a sitting (Phase 12q, slice 5).

@@ -121,13 +121,26 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
     distinct: ["questionId"],
   });
   const recovered: Record<string, string> = {};
+  /**
+   * And the language each question was last worked in (Phase 13a).
+   *
+   * Recovered beside the text, from the same snapshot, because they are
+   * one fact. A candidate who wrote Python, closed the laptop and came
+   * back to the paper's default would find their Python in a C++ editor,
+   * and -- worse -- hand it in to be compiled as C++. The session clamps
+   * this to the accepted set before it uses it.
+   */
+  const recoveredLanguages: Record<string, string> = {};
   for (const { questionId } of latestSnapshots) {
     const { readSnapshotTimeline } = await import("@/lib/exam/snapshots");
     const timeline = await readSnapshotTimeline({ attemptId: attempt.id, questionId });
     const last = timeline[timeline.length - 1];
     // A version whose hash did not verify is NOT handed back as the
     // candidate's work; the starter is safer than a wrong reconstruction.
-    if (last?.verified) recovered[questionId] = last.source;
+    if (last?.verified) {
+      recovered[questionId] = last.source;
+      recoveredLanguages[questionId] = last.language;
+    }
   }
 
   /**
@@ -165,6 +178,8 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
       labSupervised={assessment.proctorMode === "LAB_SUPERVISED"}
       refuseOutsidePaste={assessment.refuseOutsidePaste}
       initialSources={recovered}
+      initialLanguages={recoveredLanguages}
+      languages={paper.languages}
       editorPrefs={readEditorPrefs(user.editorPrefs)}
     />
   );

@@ -116,10 +116,27 @@ describe("writeSnapshot", () => {
 
   it("does not store an unchanged file — the 30s tick fires while a candidate reads", async () => {
     const source = "int main(){}\n";
-    h.findFirst.mockResolvedValue({ contentHash: sha(source) });
+    h.findFirst.mockResolvedValue({ contentHash: sha(source), language: "cpp20" });
     const result = await writeSnapshot(guard, input({ source }));
     expect(result).toMatchObject({ stored: false, reason: "unchanged" });
     expect(h.create).not.toHaveBeenCalled();
+  });
+
+  it("DOES store the same text in a different language (Phase 13a)", async () => {
+    /**
+     * Unchanged means the same text in the SAME LANGUAGE. Leaving the
+     * language out of that comparison was invisible while a sitting had
+     * one language and wrong the moment it had several: a candidate who
+     * switched from C++ to Python before typing anything would have had
+     * the switch dropped as "unchanged", so the server's record of their
+     * answer stayed C++ -- and a resumed sitting would have come back in
+     * C++ with Python in the editor.
+     */
+    const source = "print(1)\n";
+    h.findFirst.mockResolvedValue({ contentHash: sha(source), language: "cpp20" });
+    const result = await writeSnapshot(guard, input({ source, language: "py312" }));
+    expect(result.stored).toBe(true);
+    expect(created().language).toBe("py312");
   });
 
   it("refuses an oversized snapshot rather than truncating it", async () => {

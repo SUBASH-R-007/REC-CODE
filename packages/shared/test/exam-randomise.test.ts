@@ -350,3 +350,84 @@ describe("the language a layout freezes", () => {
     expect(with_.mcqs).toEqual(without.mcqs);
   });
 });
+
+/**
+ * The accepted SET, frozen with the paper (Phase 13a).
+ *
+ * A department may widen or narrow `Assessment.allowedLanguages` at any
+ * time, including while a hall is sitting. What this candidate may answer
+ * in was decided when their paper was laid out -- otherwise a narrowing
+ * mid-sitting strands somebody in a language the server has stopped
+ * accepting, with their answer already written in it and a clock running.
+ */
+describe("the accepted languages a layout freezes", () => {
+  it("records the whole set, on both layout versions", () => {
+    expect(
+      resolveLayout({ questions: questions(2), seed: 1, language: "cpp20", languages: ["cpp20", "py312"] }),
+    ).toMatchObject({ v: 1, language: "cpp20", languages: ["cpp20", "py312"] });
+    expect(
+      resolveLayout({
+        questions: questions(2),
+        seed: 1,
+        mcqs: mcqs(1),
+        language: "cpp20",
+        languages: ["cpp20", "py312"],
+      }),
+    ).toMatchObject({ v: 2, language: "cpp20", languages: ["cpp20", "py312"] });
+  });
+
+  it("is absent when none was given, so an attempt from before this field still parses", () => {
+    const layout = resolveLayout({ questions: questions(2), seed: 1, language: "cpp20" });
+    expect(layout.languages).toBeUndefined();
+    expect(parseAttemptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+    // And an empty list is written as "absent" rather than as a sitting
+    // that accepts nothing.
+    expect(resolveLayout({ questions: questions(1), seed: 2, languages: [] }).languages).toBeUndefined();
+  });
+
+  it("round-trips through the parser", () => {
+    const layout = resolveLayout({ questions: questions(2), seed: 3, language: "py312", languages: ["py312"] });
+    expect(parseAttemptLayout(JSON.parse(JSON.stringify(layout)))).toEqual(layout);
+  });
+
+  it("refuses a malformed set rather than repairing it", () => {
+    /**
+     * Refused, not repaired. A layout is the record of what a candidate
+     * was asked; dropping a field that is wrong would hand them a paper
+     * whose accepted languages are not the ones their sitting was laid
+     * out with -- which is the thing freezing it exists to prevent. An
+     * EMPTY array is malformed too: a sitting that accepts nothing cannot
+     * be answered, and "no restriction" is written by omitting the field.
+     */
+    const good = resolveLayout({ questions: questions(1), seed: 3, language: "cpp20", languages: ["cpp20"] });
+    for (const bad of [
+      { ...good, languages: [] },
+      { ...good, languages: "cpp20" },
+      { ...good, languages: [""] },
+      { ...good, languages: ["cpp20", 7] },
+      { ...good, languages: null },
+    ]) {
+      expect(() => parseAttemptLayout(bad), JSON.stringify(bad)).toThrow(/malformed languages/);
+    }
+  });
+
+  it("does not disturb the questions or the mcqs either", () => {
+    const without = resolveLayout({ questions: questions(5), seed: 77, mcqs: mcqs(2), language: "cpp20" });
+    const with_ = resolveLayout({
+      questions: questions(5),
+      seed: 77,
+      mcqs: mcqs(2),
+      language: "cpp20",
+      languages: ["cpp20", "java21"],
+    });
+    expect(with_.questions).toEqual(without.questions);
+    expect(with_.mcqs).toEqual(without.mcqs);
+  });
+
+  it("stores its own copy, so the caller's array cannot change a frozen paper", () => {
+    const accepted = ["cpp20", "py312"];
+    const layout = resolveLayout({ questions: questions(1), seed: 9, language: "cpp20", languages: accepted });
+    accepted.push("java21");
+    expect(layout.languages).toEqual(["cpp20", "py312"]);
+  });
+});

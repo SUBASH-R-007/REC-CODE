@@ -1,8 +1,8 @@
 import "server-only";
 import { cache } from "react";
-import { LANGUAGE_CATALOG, type AttemptLayout } from "@recx/shared";
+import { paperLanguageViews, type AttemptLayout, type PaperLanguageView } from "@recx/shared";
 import { db } from "@/lib/db";
-import { languageOfSitting } from "@/lib/exam/language";
+import { languagesOfSitting } from "@/lib/exam/language";
 import { renderMarkdown } from "@/lib/markdown";
 import type { ExamQuestionView } from "@/components/exam/exam-session";
 
@@ -26,6 +26,16 @@ export interface ExamPaper {
   readonly questions: ExamQuestionView[];
   /** The multiple-choice half, in the paper's own order (Phase 12r). */
   readonly mcqs: ExamMcqView[];
+  /**
+   * Every language this sitting may be answered in (Phase 13a), labels
+   * already resolved, taken from the attempt's FROZEN set and not from the
+   * assessment's current list.
+   *
+   * The candidate picks one of these per question. One entry is the normal
+   * case for a paper a department has restricted to a single language, and
+   * the pane shows it as text rather than a dropdown of one.
+   */
+  readonly languages: PaperLanguageView[];
   /** Questions in the layout whose version could not be read. */
   readonly missing: string[];
 }
@@ -52,8 +62,10 @@ export interface ExamMcqView {
 
 export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPaper> => {
   const mcqs = await examMcqViews(layout);
+  const accepted = await languagesOfSitting(layout);
+  const languages = paperLanguageViews(accepted);
   const versionIds = layout.questions.map((question) => question.problemVersionId);
-  if (versionIds.length === 0) return { questions: [], mcqs, missing: [] };
+  if (versionIds.length === 0) return { questions: [], mcqs, languages, missing: [] };
 
   const versions = await db.problemVersion.findMany({
     where: { id: { in: versionIds } },
@@ -71,11 +83,15 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
   });
   const byId = new Map(versions.map((version) => [version.id, version]));
 
-  // One language for the whole exam surface in 6c: the candidate's editor
-  // language per question arrives with the submit path, and the starter code
-  // is keyed by language, so the first enabled language is the default.
-  // Derived in lib/exam/language.ts, because the Run route has to agree.
-  const defaultLanguage = await languageOfSitting(layout);
+  /**
+   * The language the editor OPENS in (Phase 13a): the first of the frozen
+   * set, which for a paper restricted to one language is that language and
+   * for an attempt begun before any of this existed is the single frozen
+   * one. A candidate who has already worked on a question is put back into
+   * the language they were working in -- the attempt page reads that from
+   * the last snapshot and the session seeds itself from it.
+   */
+  const defaultLanguage = accepted[0] ?? "cpp20";
 
   const questions: ExamQuestionView[] = [];
   const missing: string[] = [];
@@ -98,16 +114,25 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
         input: test.input.inline ?? "",
         output: test.output.inline ?? "",
       })),
-      starter: starters.get(defaultLanguage) ?? "",
-      // Both, and named for what they are: the key the routes validate
-      // against, and the editor's highlighting mode. Handing the client only
-      // the second one under the name `language` is what stopped every
-      // sitting saving, running and submitting (Phase 12r.2).
+      /**
+       * The starter for EVERY accepted language (Phase 13a), so switching
+       * language in the middle of a sitting is instant and needs no
+       * request. A problem with no starter in a language gives an empty
+       * editor, which is what the practice workspace does too.
+       *
+       * Only the accepted languages: a paper restricted to Python has no
+       * business shipping eleven starters, and the samples beside them are
+       * already the bulk of this payload.
+       */
+      starters: Object.fromEntries(accepted.map((key) => [key, starters.get(key) ?? ""])),
+      // Named for what it is: the key the routes validate against, which
+      // is the language this question OPENS in. Handing the client the
+      // editor's highlighting mode under the name `language` is what
+      // stopped every sitting saving, running and submitting (12r.2).
       languageKey: defaultLanguage,
-      editorLanguage: LANGUAGE_CATALOG[defaultLanguage].editorLanguage,
     });
   }
-  return { questions, mcqs, missing };
+  return { questions, mcqs, languages, missing };
 });
 
 /**

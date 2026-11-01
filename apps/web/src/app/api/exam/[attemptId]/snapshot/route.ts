@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { LANGUAGE_CATALOG, SNAPSHOT_MAX_BYTES } from "@recx/shared";
+import { LANGUAGE_CATALOG, LANGUAGE_NOT_ACCEPTED_MESSAGE, SNAPSHOT_MAX_BYTES, acceptsLanguage } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
+import { languagesOfSitting } from "@/lib/exam/language";
+import { attemptLayoutOf } from "@/lib/exam/layout";
 import { writeSnapshot } from "@/lib/exam/snapshots";
 
 export const runtime = "nodejs";
@@ -125,6 +127,24 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     select: { id: true },
   });
   if (!question) return json({ error: "That question is not part of this assessment." }, 404);
+
+  /**
+   * And the language must be one this sitting accepts (Phase 13a).
+   *
+   * Checked here as well as on the Run and the submit, because a snapshot
+   * is the RECORD of the answer: the timeline a reviewer reads, and the
+   * text a resumed sitting comes back to. One stored against a language
+   * the paper does not accept would reconstruct as a program in the wrong
+   * language, which is a candidate's answer misrepresented.
+   *
+   * From the attempt's FROZEN set, never the assessment's current list: an
+   * administrator narrowing the paper's languages mid-sitting must not
+   * start refusing a candidate's saves.
+   */
+  const accepted = await languagesOfSitting(attemptLayoutOf(guard.attempt));
+  if (!acceptsLanguage(accepted, body.data.language)) {
+    return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
+  }
 
   const result = await writeSnapshot(guard, body.data);
   return json({

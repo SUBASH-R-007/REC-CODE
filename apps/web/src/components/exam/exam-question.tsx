@@ -4,7 +4,7 @@ import { useId } from "react";
 import { EDITOR_KEYMAP_NOTICES } from "@recx/shared";
 import { CodeEditor } from "@/components/editor/code-editor";
 import type { EditorPrefs } from "@/components/editor/editor-types";
-import type { ExamQuestionView } from "@/components/exam/exam-session";
+import type { ExamLanguageView, ExamQuestionView } from "@/components/exam/exam-session";
 
 /**
  * One question's pane (Phase 6c): the statement, its samples and the editor.
@@ -29,6 +29,9 @@ export function ExamQuestion({
   position,
   total,
   prefs,
+  languages,
+  language,
+  onLanguageChange,
 }: {
   readonly question: ExamQuestionView;
   readonly source: string;
@@ -44,8 +47,18 @@ export function ExamQuestion({
    * describe. Comfort settings change no signal, so they apply.
    */
   readonly prefs: EditorPrefs;
+  /**
+   * Every language this paper accepts, with its labels already resolved on
+   * the server (Phase 13a).
+   */
+  readonly languages: readonly ExamLanguageView[];
+  /** The one this question is being answered in. */
+  readonly language: string;
+  readonly onLanguageChange: (key: string) => void;
 }) {
   const noteId = useId();
+  const languageId = useId();
+  const active = languages.find((entry) => entry.key === language) ?? languages[0];
 
   return (
     <main className="flex min-w-0 flex-1 flex-col lg:flex-row">
@@ -101,9 +114,57 @@ export function ExamQuestion({
       </section>
 
       <section aria-label="Your answer" className="flex min-h-80 min-w-0 flex-1 flex-col">
+        {/**
+          * The language this answer is written in (Phase 13a).
+          *
+          * A sitting used to have one language nobody chose — the first
+          * enabled toolchain key, which is C++ — so a candidate who
+          * writes Python sat down in front of a C++ editor and there was
+          * nothing on the screen to change it. The department chooses what
+          * the paper accepts; this is where the candidate chooses from it.
+          *
+          * A paper restricted to ONE language shows it as text. A dropdown
+          * with a single option is a control that looks like a choice and
+          * is not, and the one thing it would do is invite a click in the
+          * middle of an exam.
+          *
+          * The full label, with the compiler and its version, because the
+          * question a candidate actually has is "which compiler am I being
+          * judged by" — and under exam conditions there is no /judge page
+          * to go and read.
+          */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2">
+          {languages.length > 1 ? (
+            <>
+              <label htmlFor={languageId} className="text-xs font-medium text-text">
+                Language
+              </label>
+              <select
+                id={languageId}
+                value={active?.key ?? language}
+                onChange={(event) => onLanguageChange(event.target.value)}
+                className="min-h-8 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text"
+              >
+                {languages.map((entry) => (
+                  <option key={entry.key} value={entry.key}>
+                    {entry.shortLabel}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-text-secondary">{active?.label ?? language}</span>
+            </>
+          ) : (
+            <span className="text-xs text-text-secondary">
+              <span className="font-medium text-text">Language:</span> {active?.label ?? language}
+            </span>
+          )}
+        </div>
         <p id={noteId} className="border-b border-border px-4 py-2 text-xs text-text-secondary">
           Tab indents. Press Esc then Tab to move focus out of the editor.
           {prefs.keymap !== "DEFAULT" ? ` ${EDITOR_KEYMAP_NOTICES.examDefault}` : ""}
+          {languages.length > 1
+            ? " Changing the language keeps what you have written, unless the editor still holds the starter."
+            : ""}
         </p>
         <div className="min-h-0 flex-1">
           <CodeEditor
@@ -112,7 +173,9 @@ export function ExamQuestion({
             onInsertion={onInsertion}
             // The reason this is pinned: see the module comment.
             forceKind="codemirror"
-            language={question.editorLanguage}
+            // The chosen language's grammar (Phase 13a), so the
+            // highlighting follows the picker rather than the paper.
+            language={active?.editorLanguage ?? "plaintext"}
             label={`Code editor for question ${position}`}
             describedBy={noteId}
             prefs={{ ...prefs, keymap: "DEFAULT" }}

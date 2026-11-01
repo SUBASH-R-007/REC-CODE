@@ -18,7 +18,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
 import { checkContainment } from "@/lib/exam/containment";
-import { examPaperLanguage } from "@/lib/exam/language";
+import { acceptedLanguagesFor } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
 import { hashUserAgent, requestIp, requestIpHash } from "@/lib/ip";
@@ -239,6 +239,8 @@ export async function startOrResumeAttempt(args: {
       audienceDepartmentCode: true,
       audienceSection: true,
       seedSecret: true,
+      /** Which languages the paper may be answered in (Phase 13a). */
+      allowedLanguages: true,
       problems: { select: { id: true, problemVersionId: true, position: true, points: true } },
       /**
        * The paper's MCQs (Phase 12r). `options` comes back only to be
@@ -398,12 +400,24 @@ export async function startOrResumeAttempt(args: {
     userId: args.userId,
     attemptNumber,
   });
+  /**
+   * The accepted languages, resolved once and frozen (Phase 13a).
+   *
+   * What the department chose, narrowed to what the judge can run. The
+   * FIRST of them is the one the editor opens in, which keeps `language`
+   * meaning exactly what it meant before: the paper's default.
+   */
+  const accepted = await acceptedLanguagesFor(assessment.allowedLanguages);
   const layout = resolveLayout({
     questions: assessment.problems,
     seed,
     // Frozen with the paper (Phase 12r.4), so enabling a toolchain while
     // somebody is sitting cannot move their paper to it.
-    language: await examPaperLanguage(),
+    language: accepted[0],
+    // And the whole set with it (Phase 13a), so narrowing the paper's list
+    // mid-sitting cannot strand a candidate in a language the server has
+    // stopped accepting -- with their answer already written in it.
+    languages: accepted,
     mcqs: assessment.mcqs.map((mcq) => ({
       id: mcq.id,
       position: mcq.position,

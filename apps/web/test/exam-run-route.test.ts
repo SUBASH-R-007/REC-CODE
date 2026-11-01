@@ -27,7 +27,7 @@ const h = vi.hoisted(() => ({
   guard: vi.fn(),
   endAttemptSession: vi.fn(),
   layoutOf: vi.fn(),
-  paperLanguage: vi.fn(),
+  paperLanguages: vi.fn(),
   writeSnapshot: vi.fn(),
   enqueue: vi.fn(),
   version: vi.fn(),
@@ -49,7 +49,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/exam/attempt", () => ({ guardAttempt: h.guard, endAttemptSession: h.endAttemptSession }));
 vi.mock("@/lib/exam/layout", () => ({ attemptLayoutOf: h.layoutOf }));
-vi.mock("@/lib/exam/language", () => ({ languageOfSitting: h.paperLanguage }));
+vi.mock("@/lib/exam/language", () => ({ languagesOfSitting: h.paperLanguages }));
 vi.mock("@/lib/exam/snapshots", () => ({ writeSnapshot: h.writeSnapshot }));
 vi.mock("@/lib/judge/queue", () => ({ enqueueJudge: h.enqueue }));
 
@@ -80,7 +80,7 @@ beforeEach(() => {
     sessionId: "sess_1",
   });
   h.layoutOf.mockReturnValue({ questions: [{ questionId: QUESTION, problemVersionId: VERSION, sourcePosition: 1, points: 10, seed: 1 }] });
-  h.paperLanguage.mockResolvedValue("cpp20");
+  h.paperLanguages.mockResolvedValue(["cpp20"]);
   h.version.mockResolvedValue({ id: VERSION, _count: { testCases: 2 } });
   h.config.mockResolvedValue({ id: "cfg_1" });
   h.runCount.mockResolvedValue(0);
@@ -139,10 +139,38 @@ describe("a sitting's Run", () => {
     expect(h.writeSnapshot).not.toHaveBeenCalled();
   });
 
-  it("refuses a language the paper is not answered in", async () => {
+  it("refuses a language this paper does not accept", async () => {
+    // One language accepted, another sent. Phase 13a: the check is
+    // membership of the attempt's FROZEN set, not equality with one
+    // language, because a paper may now accept several.
     const res = await call({ ...GOOD, language: "py312" });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toContain("language this paper is answered in");
+    expect((await res.json()).error).toContain("not answered in that language");
+    expect(h.runCreate).not.toHaveBeenCalled();
+  });
+
+  it("runs any language the paper DOES accept, with that language's toolchain", async () => {
+    /**
+     * The defect this would have caught (Phase 13a). The route used to
+     * look up the LanguageConfig for the paper's one language and stamp
+     * the run with it; on a paper accepting several, a Python run would
+     * have been queued against the C++ toolchain and come back as a
+     * compile error on a correct program.
+     */
+    h.paperLanguages.mockResolvedValue(["cpp20", "py312"]);
+    const res = await call({ ...GOOD, language: "py312" });
+    expect(res.status).toBe(200);
+    expect(h.config).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ key: "py312" }) }),
+    );
+    expect(h.runCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ language: "py312" }) }),
+    );
+    // And the snapshot written before it records the same language.
+    expect(h.writeSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ language: "py312", trigger: "RUN" }),
+    );
   });
 
   it("refuses an empty editor rather than queuing a compile error", async () => {

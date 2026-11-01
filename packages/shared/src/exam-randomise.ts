@@ -149,6 +149,23 @@ export interface AttemptLayout {
    * for all of those attempts anyway.
    */
   readonly language?: string;
+  /**
+   * Every language this paper may be answered in, frozen with it (Phase
+   * 13a).
+   *
+   * `language` above is the one the editor opens in; this is the set the
+   * candidate may choose from and the set the run, snapshot and submit
+   * paths accept. It is frozen for the reason `language` is: an
+   * administrator who narrows the paper's accepted list while somebody is
+   * part way through must not strand them in a language the server has
+   * stopped accepting -- with their answer written in it and a clock
+   * running.
+   *
+   * Optional, because attempts started before this field existed do not
+   * carry it. A reader falls back to `[language]`, which is exactly what
+   * those sittings allowed: one language, fixed.
+   */
+  readonly languages?: readonly string[];
 }
 
 /** One multiple-choice question on a candidate's paper (Phase 12r). */
@@ -202,6 +219,8 @@ export function resolveLayout(args: {
   readonly mcqs?: readonly AssessmentMcqInput[];
   /** The toolchain key the paper is answered in (Phase 12r.4). */
   readonly language?: string;
+  /** Every key it MAY be answered in (Phase 13a); frozen with the paper. */
+  readonly languages?: readonly string[];
 }): AttemptLayout {
   const ordered = [...args.questions].sort((a, b) => a.position - b.position);
   const random = xoshiro128ss(args.seed);
@@ -225,18 +244,27 @@ export function resolveLayout(args: {
         xoshiro128ss(questionSeed(args.seed, mcq.position)),
       ),
     }));
+  /**
+   * Written only when there is something to write, so a paper laid out by
+   * a caller that does not know about accepted languages is stored exactly
+   * as it was before this field existed.
+   */
+  const languages =
+    args.languages === undefined || args.languages.length === 0 ? {} : { languages: [...args.languages] };
   if (mcqs.length > 0) {
     return {
       v: 2,
       questions: codingQuestions(sequence, args.seed),
       mcqs,
       ...(args.language === undefined ? {} : { language: args.language }),
+      ...languages,
     };
   }
   return {
     v: 1,
     questions: codingQuestions(sequence, args.seed),
     ...(args.language === undefined ? {} : { language: args.language }),
+    ...languages,
   };
 }
 
@@ -278,6 +306,24 @@ export function parseAttemptLayout(value: unknown): AttemptLayout {
   }
   if (layout.language !== undefined && (typeof layout.language !== "string" || layout.language.length === 0)) {
     throw new Error("stored attempt layout has a malformed language");
+  }
+  /**
+   * The accepted set is refused rather than repaired if it is wrong
+   * (Phase 13a). A layout is the record of what a candidate was asked;
+   * silently dropping a malformed field here would hand them a paper
+   * whose accepted languages are not the ones their sitting was laid out
+   * with, which is the thing freezing it exists to prevent. An EMPTY array
+   * is malformed too: a sitting that accepts nothing cannot be answered,
+   * and "no restriction" is written by omitting the field.
+   */
+  if (layout.languages !== undefined) {
+    if (
+      !Array.isArray(layout.languages) ||
+      layout.languages.length === 0 ||
+      layout.languages.some((key: unknown) => typeof key !== "string" || key.length === 0)
+    ) {
+      throw new Error("stored attempt layout has malformed languages");
+    }
   }
   if (layout.mcqs !== undefined) {
     if (!Array.isArray(layout.mcqs)) throw new Error("stored attempt layout has malformed mcqs");

@@ -87,10 +87,20 @@ export async function writeSnapshot(
   const previous = await db.attemptSnapshot.findFirst({
     where: { attemptId: attempt.id, questionId: input.questionId },
     orderBy: [{ atMs: "desc" }, { createdAt: "desc" }],
-    select: { contentHash: true },
+    select: { contentHash: true, language: true },
   });
 
-  if (previous?.contentHash === contentHash) {
+  /**
+   * Unchanged means the same text IN THE SAME LANGUAGE (Phase 13a).
+   *
+   * The language used to be left out of this comparison, which was
+   * invisible while a sitting had one language and wrong the moment it had
+   * several: a candidate switching from C++ to Python before typing
+   * anything would have had the switch dropped as "unchanged", so the
+   * server's record of their answer stayed C++ -- and a resumed sitting
+   * would have come back in C++ with Python in the editor.
+   */
+  if (previous?.contentHash === contentHash && previous.language === input.language) {
     return { stored: false, reason: "unchanged", whole: false, contentHash, count };
   }
 
