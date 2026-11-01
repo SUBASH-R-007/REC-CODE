@@ -1,4 +1,5 @@
 import "server-only";
+import { paperQuestionCount } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -36,7 +37,10 @@ export async function listAssessments(): Promise<AssessmentRow[]> {
       opensAt: true,
       closesAt: true,
       durationSec: true,
-      _count: { select: { problems: true, sessions: true, attempts: true } },
+      // Both kinds (Phase 12v): the Questions column read `problems` alone,
+      // so an all-multiple-choice paper showed 0 to the staff member who
+      // had just authored it.
+      _count: { select: { problems: true, mcqs: true, sessions: true, attempts: true } },
     },
   });
   return rows.map((r) => ({
@@ -49,7 +53,7 @@ export async function listAssessments(): Promise<AssessmentRow[]> {
     opensAt: r.opensAt,
     closesAt: r.closesAt,
     durationSec: r.durationSec,
-    questions: r._count.problems,
+    questions: paperQuestionCount({ problems: { length: r._count.problems }, mcqs: { length: r._count.mcqs } }),
     halls: r._count.sessions,
     attempts: r._count.attempts,
   }));
@@ -124,7 +128,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       audienceBatchYear: true,
       audienceDepartmentCode: true,
       audienceSection: true,
-      _count: { select: { problems: true, sessions: true, attempts: true } },
+      _count: { select: { problems: true, mcqs: true, sessions: true, attempts: true } },
       problems: {
         orderBy: { position: "asc" },
         select: {
@@ -176,7 +180,10 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
     audienceBatchYear: row.audienceBatchYear,
     audienceDepartmentCode: row.audienceDepartmentCode,
     audienceSection: row.audienceSection,
-    questions: row._count.problems,
+    questions: paperQuestionCount({
+      problems: { length: row._count.problems },
+      mcqs: { length: row._count.mcqs },
+    }),
     halls: row._count.sessions,
     attempts: row._count.attempts,
     problems: row.problems.map((p) => ({

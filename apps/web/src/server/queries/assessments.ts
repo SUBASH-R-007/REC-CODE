@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { isFinished, type AttemptStatus } from "@recx/shared";
+import { isFinished, paperQuestionCount, type AttemptStatus } from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -79,7 +79,12 @@ export const listMyAssessments = cache(async (user: {
       proctorMode: true,
       affectsPlacementEligibility: true,
       maxAttempts: true,
-      _count: { select: { problems: true } },
+      /**
+       * BOTH kinds (Phase 12v). The sixth place this was counted from the
+       * coding questions alone: the list a student picks a paper from told
+       * them a paper of multiple-choice questions had none.
+       */
+      _count: { select: { problems: true, mcqs: true } },
       attempts: {
         where: { userId: user.id },
         orderBy: { attemptNumber: "desc" },
@@ -99,7 +104,10 @@ export const listMyAssessments = cache(async (user: {
       opensAt: row.opensAt,
       closesAt: row.closesAt,
       durationSec: row.durationSec,
-      questionCount: row._count.problems,
+      questionCount: paperQuestionCount({
+        problems: { length: row._count.problems },
+        mcqs: { length: row._count.mcqs },
+      }),
       proctorMode: row.proctorMode,
       affectsPlacementEligibility: row.affectsPlacementEligibility,
       maxAttempts: row.maxAttempts,

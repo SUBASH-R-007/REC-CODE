@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readRepoFile } from "./support/repo";
+import { findFiles, readRepoFile } from "./support/repo";
 
 /**
  * A paper holds questions of two kinds, and every place that counts them
@@ -34,20 +34,65 @@ import { readRepoFile } from "./support/repo";
  * too.
  */
 
-/** Every place that states a paper's size, and must not count one kind. */
-const COUNTS_BOTH_KINDS: ReadonlyArray<readonly [string, string]> = [
-  ["apps/web/src/lib/exam/start.ts", "paperQuestionCount(assessment)"],
-  ["apps/web/src/app/(exam)/assessments/[slug]/readiness/page.tsx", "paperQuestionCount({"],
-  // The publish gate: a paper with nothing on it cannot be opened, and a
-  // paper of multiple-choice questions is not nothing.
-  ["apps/web/src/server/actions/admin-assessments.ts", "paperQuestionCount({"],
-];
+/**
+ * Every file that asks the database for a paper's `problems` count.
+ *
+ * Hand-listing the call sites is what let this happen a sixth and seventh
+ * time: the list held the three places somebody had already fixed, so it
+ * said nothing about the student's own assessment list or the staff
+ * Questions column, which both counted `problems` alone. This asks the
+ * question the other way round — WHO COUNTS A PAPER — and makes every
+ * answer declare both kinds.
+ */
+/**
+ * Built per call, not held in a module constant.
+ *
+ * A `/g` regex carries `lastIndex`, and reusing one across `matchAll` over
+ * 700 files found NOTHING while the same pattern written inline found every
+ * site — a fence that passes because it matched nothing is the worst kind
+ * of green, so it is constructed fresh and the test below counts the sites
+ * it finds to prove it is still looking at something.
+ */
+const countSelect = () => /_count:\s*\{\s*select:\s*\{([^}]*)\}/g;
+
+/** Files that count an Assessment's questions, by what they select. */
+const assessmentCountSites = (): Array<{ rel: string; fields: string }> => {
+  const sites: Array<{ rel: string; fields: string }> = [];
+  for (const rel of findFiles({ extensions: [".ts", ".tsx"] })) {
+    if (!rel.startsWith("apps/web/src/")) continue;
+    const source = readRepoFile(rel);
+    // Only the queries that are ABOUT an assessment: a contest also has
+    // `problems`, and a contest has no multiple-choice questions.
+    if (!source.includes("db.assessment")) continue;
+    for (const match of source.matchAll(countSelect())) {
+      const fields = match[1] ?? "";
+      if (fields.includes("problems")) sites.push({ rel, fields });
+    }
+  }
+  return sites;
+};
 
 describe("a paper of two kinds", () => {
-  it("counts both kinds wherever it states its size", () => {
-    for (const [file, call] of COUNTS_BOTH_KINDS) {
-      expect(readRepoFile(file), `${file} should ask paperQuestionCount`).toContain(call);
-    }
+  it("is counted by somebody, or this fence is asserting nothing", () => {
+    // Four is the number of places that count an assessment's questions
+    // today. If this drops, the fence has stopped looking rather than the
+    // product having stopped counting.
+    expect(assessmentCountSites().length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("counts BOTH kinds everywhere an assessment's questions are counted", () => {
+    /**
+     * Seven instances, found one at a time over four phases: the start
+     * library's "nothing to sit", the sitting's marking, the admin page,
+     * the readiness page, the sitting's own empty-paper guard, the
+     * student's assessment list and the staff Questions column. Every one
+     * read correctly and was wrong.
+     */
+    const offenders = assessmentCountSites().filter((site) => !site.fields.includes("mcqs"));
+    expect(
+      offenders.map((o) => `${o.rel}: _count {${o.fields.trim()}}`),
+      "an assessment's question count must include mcqs: a paper may be all code, all questions, or a mix",
+    ).toEqual([]);
   });
 
   it("does not count the coding questions alone on the readiness page", () => {
