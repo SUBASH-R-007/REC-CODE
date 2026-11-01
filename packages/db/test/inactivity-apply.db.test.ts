@@ -130,6 +130,17 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       data: {
         ...DEFAULT_INACTIVITY_POLICY,
         isActive: true,
+        /**
+         * Enforcing, and stated rather than inherited (Phase 12w).
+         *
+         * `DEFAULT_INACTIVITY_POLICY` is report-only now, which is right for
+         * what ships and would be silently wrong here: this whole suite is
+         * about what `applyDecision()` WRITES, and spreading the default
+         * would have turned every assertion in it into a test of a policy
+         * that writes nothing — a suite that goes green while the thing it
+         * covers stops working. The fence itself is tested below.
+         */
+        enforceEnabled: true,
         batchYear: BATCH_YEAR,
         departmentCode: DEPT,
         countsAsActivity: DEFAULT_INACTIVITY_POLICY.countsAsActivity as never,
@@ -417,6 +428,59 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
       const restriction = await db.accountRestriction.findUniqueOrThrow({ where: { userId: id } });
       expect(restriction.lastEvaluatedAt).not.toBeNull();
+    });
+  });
+
+  describe("a report-only policy", () => {
+    /**
+     * Phase 12w, and the fence is HERE rather than in the scheduler that
+     * calls this, because this function is the only thing in the system that
+     * can restrict an account from a policy. A check in the caller is a
+     * check the next caller forgets — so the test drives the writer directly
+     * with the caller's check bypassed, which is the case that matters.
+     */
+    it("writes nothing at all, and the same decision enforced does write", async () => {
+      const id = await student("ro");
+      const now = new Date(NOW.getTime());
+      const all = await sweepCandidates(db as never, { now, limit: 500 });
+      const candidate = all.find((c) => c.userId === id);
+      expect(candidate, "the student is not a sweep candidate").toBeDefined();
+      const context = await loadSweepContext(db as never, [candidate!], now);
+      const decision = evaluate(candidate!, context);
+      // A real move is on the table: without the fence this would write.
+      expect(decision.plan.kind).toBe("escalate");
+      expect(decision.policy?.enforceEnabled).toBe(true);
+
+      const reporting = {
+        ...decision,
+        policy: { ...decision.policy!, enforceEnabled: false },
+      };
+      const withheld = await applyDecision(db as never, reporting, {
+        now,
+        evaluationDay: context.evaluationDay,
+      });
+      expect(withheld.skipped).toBe("report-only");
+      expect(withheld.eventId).toBeNull();
+
+      // Not one row, on any of the four tables the live path touches.
+      expect(await db.accountStatusEvent.count({ where: { userId: id } })).toBe(0);
+      expect(await db.accountRestriction.count({ where: { userId: id } })).toBe(0);
+      expect(await db.notification.count({ where: { userId: id } })).toBe(0);
+      expect((await db.user.findUniqueOrThrow({ where: { id }, select: { status: true } })).status).toBe("ACTIVE");
+
+      /**
+       * And the same decision, enforced, writes — so the four assertions
+       * above cannot be passing because this student was never going
+       * anywhere. This is the non-vacuity check, inside the test rather
+       * than beside it.
+       */
+      const applied = await applyDecision(db as never, decision, {
+        now,
+        evaluationDay: context.evaluationDay,
+      });
+      expect(applied.skipped).toBeUndefined();
+      expect(applied.eventId).not.toBeNull();
+      expect(await db.accountStatusEvent.count({ where: { userId: id } })).toBe(1);
     });
   });
 

@@ -1,0 +1,39 @@
+-- Phase 12w: a policy that watches before it acts.
+--
+-- Phase 8 shipped the inactivity engine with a dry run, as SPEC 5 asks, and
+-- the manual gate for it has now been read over seeded data. The decision
+-- taken from that report was "keep it reporting, do not let it write against
+-- a real roster yet" -- and the product had no way to say that.
+--
+-- The only lever was the scheduler's `--dry-run` flag, which is a property
+-- of the PROCESS and not of the policy: it also stops the reconciler
+-- dispatching, the outbox draining and the attempt sweep auto-submitting at
+-- a deadline. "Report, do not act" was therefore a decision an operator
+-- could record in a runbook but not actually carry out without breaking
+-- assessments -- the worst shape an operational instruction can have.
+--
+-- So report-only becomes a property of the policy version, FALSE by default:
+--
+--   * every active policy evaluates the whole roster and reports, as the
+--     dry run does, through the same `evaluate()`;
+--   * `applyDecision()` refuses to write for a policy that does not
+--     enforce -- not the stage move, not the notification, not the review
+--     item, not the counters -- so the fence is at the only writer rather
+--     than in the caller that happens to check first;
+--   * turning it on drafts a new version, is audited at SECURITY and needs
+--     a typed confirmation, because it is the act that lets a job restrict
+--     an account with no human in the loop.
+--
+-- Existing rows get FALSE, which is deliberate and is the only safe
+-- direction: a column added with a permissive default would switch on
+-- automatic enforcement for every policy already live, silently, in a
+-- migration. The one active dev policy is re-drafted by hand or by the
+-- settings page when somebody decides to enforce.
+--
+-- It is not `isActive` (which version is live for a scope) and not
+-- `autoDisableEnabled` (whether the top rung can be reached at all). The
+-- three are independent: a live policy may report without writing, and a
+-- policy that writes may still be unable to close an account.
+
+ALTER TABLE "public"."InactivityPolicy"
+  ADD COLUMN "enforceEnabled" BOOLEAN NOT NULL DEFAULT false;

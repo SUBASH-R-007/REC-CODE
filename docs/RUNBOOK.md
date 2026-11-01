@@ -1197,6 +1197,32 @@ So: the purpose is to make non-progress **visible to a named human who can
 intervene**, not to punish it. The maximum automatic consequence is a pause
 that one solved problem undoes, with nobody's permission.
 
+**It reports before it acts, and it starts that way (Phase 12w).** Every
+`InactivityPolicy` version carries `enforceEnabled`, **false by default**.
+While it is false the nightly job reads the whole roster, works out what the
+policy says about every student, and writes **none** of it: no stage move, no
+notification, no mentor email, no review item, no counters. The report is on
+`/super/jobs` under `inactivitySweep`, and the figures in it are the figures a
+live run would have acted on — it is the same `evaluate()`, which is the only
+reason a report is worth reading. The log line says which mode the night ran
+in (`inactivity sweep (report-only: …)`), so a quiet night and a watching
+night cannot be confused months later.
+
+Leaving report-only is a deliberate act on `/super/settings/inactivity`: it
+drafts a new version, needs the phrase `I ACCEPT THIS POLICY ACTS` typed, is
+audited at SECURITY and emails every super-admin. Going back to reporting
+needs nothing but the click — nobody has ever needed to be slowed down on the
+way to under-enforcing. Turning enforcement off does **not** lift the
+restrictions already written; those are stage moves with evidence behind them,
+and `/admin/inactivity` is where a person lifts one.
+
+> **Do not use the scheduler's `--dry-run` for this.** That flag belongs to
+> the whole process: it also stops the reconciler dispatching submissions, the
+> outbox draining and the attempt sweep auto-submitting a paper at its
+> deadline. "The inactivity engine should watch, not act" is `enforceEnabled`,
+> and nothing else. `--dry-run` is for a scheduler you are inspecting, not for
+> a policy decision.
+
 **What the college asked for, and what ships.** The ask was "five days of
 inactivity, then the account is disabled". That is not what ships, and the
 gap is deliberate. On the shipped defaults:
@@ -2145,3 +2171,8 @@ coordinator from actual runs — never in advance.
 | 12v.4 | 2026-11-01 | A fence that could not fail, caught before it was committed | NOTED. The first draft drove a live tick against the recording database and asserted the words "dry run" appeared nowhere — it passed, and **kept passing when the fix was reverted**, because a live tick against a fake database never reaches the summary line. A test that cannot fail is the one kind that makes things worse. It is a source assertion now (is the message chosen by the mode?), mutation-checked in both directions; the live path's behaviour is proved against a real database in `packages/db/test/inactivity-apply.db.test.ts` | Claude |
 | 8c / 8d | 2026-11-01 | **The manual dry-run gate: a human reads a sweep report before the live job goes near a roster** | **READ** (superseding the two NOT RUN rows above). `--dry-run` over the development roster at 02:00 IST: **7 considered, 0 would escalate, 0 would clear, 7 held** — 4 `open-attempt` (*"They are sitting an assessment right now."*), 3 `assessment-within-72h` — 1 admin review raised, 0 mentors notified, 0 contest submissions cancelled, `calendarIncomplete: true` and **nothing written** (`writes: false`). The holdback chain behaved as designed: it is first-match, so `calendar-incomplete` counted 0 because every student was already held for a stronger reason. Two of the gate's eight cases were present in this data (an open attempt, an assessment 48 hours out); the other six have automated tests (8c's row). The engine held everybody it could have moved, which is what "a policy engine, not a kill switch" has to mean. **Whether the live job runs against a real roster is still a decision for a person** — nothing here flipped it | Claude |
 | 12v.4 | 2026-11-01 | `pnpm lint && pnpm typecheck && pnpm test` — Windows 11 | PASS (lint 0 warnings; typecheck clean; **8,895 tests passed, 0 failed**) | Claude |
+| 12w.1 | 2026-11-01 | **The answer to the Phase 8 gate, as something the product can express: a policy that reports without acting** | DONE. The gate above was read and the decision was "keep it reporting" — and the only lever was the scheduler's `--dry-run`, which belongs to the PROCESS: carrying that instruction out would also have stopped the reconciler dispatching, the outbox draining and the attempt sweep auto-submitting a paper at its deadline. So `InactivityPolicy.enforceEnabled` (FALSE by default) decides it per policy version, and the fence is in `applyDecision()` — the only thing in the system that can restrict an account from a policy, because a check in the caller is a check the next caller forgets. `isActive: false` was not the answer either: a policy nobody configured is one the engine skips entirely, so it reports nothing. Turning enforcement on drafts a new version, needs `I ACCEPT THIS POLICY ACTS` typed, audits at SECURITY and emails every super-admin; turning it off needs one click | Claude |
+| 12w.1 | 2026-11-01 | Live: the sweep watching while the process writes | PASS. The real job against the real development roster with **`dryRun: false`** (`job.writes` true) driven at 02:00 IST: the report is identical to the dry run the gate was read from — **7 considered, 0 would escalate, 7 held** (4 `open-attempt`, 3 `assessment-within-72h`), 1 admin review — with `reportOnly: 1`, `reportOnlyPolicies: 1`, and `AccountStatusEvent` 2→2, `AccountRestriction` 2→2, `Notification` 9→9, non-ACTIVE users 0→0. The log line reads `inactivity sweep (report-only: the policy does not enforce, nothing written)` with `dryRun: false`, so a watching night can never be read as a quiet one. `reportOnly: 1` is the hold-with-review item that would have been written, which also proves the fence sits above the hold branch and not only above the stage move | Claude |
+| 12w.1 | 2026-11-01 | Two fixtures that would have gone quietly green | **FOUND AND FIXED** before the gate. `DEFAULT_INACTIVITY_POLICY` is report-only now, and two suites built their policy by spreading it: `apps/scheduler/test/inactivity-sweep.test.ts` (whose subject is what the job writes) and `packages/db/test/inactivity-apply.db.test.ts` (whose subject is the live transaction). Both would have kept passing while testing a policy that writes nothing — the exact shape of a suite that goes green as the thing it covers stops working. Each now states `enforceEnabled: true` with the reason, and report-only has its own block in each. The scheduler's new per-policy test is mutation-checked: making the fence refuse unconditionally fails it | Claude |
+| 12w.1 | 2026-11-01 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm size` — Windows 11 | PASS (lint 0 warnings; typecheck clean; **8,916 tests passed, 0 failed**: shared 2,063, judge-worker 455, sql-judge 43, db 382, design 87, scheduler 256, web 4,355, repo fences 1,275; build compiled, 92 static pages; every size budget met). Plus the whole db project against `recx_test` with `RECX_DB_TESTS=1`: **1,659 passed, none skipped** | Claude |
+| 12w.1 | 2026-11-01 | A stale comment on the file that writes the restrictions | **FOUND AND FIXED.** `packages/db/src/inactivity.ts` opened with "Nothing here writes" — true of slice 8c, false from 8d on, and the most misleading sentence available in a file whose `applyDecision()` moves an account's stage, writes the notification and cancels contest work. Rewritten to say what is still true (the reads are here, the arithmetic is in `@recx/shared`) and what is not. Same class as 12v.4's log line: a comment that described the slice it was written in rather than the code it sits on | Claude |

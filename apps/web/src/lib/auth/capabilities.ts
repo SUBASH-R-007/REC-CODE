@@ -132,6 +132,10 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       "super-inactivity#saveInactivityPolicy",
       "super-inactivity#activateInactivityPolicy",
       "super-inactivity#setAutoDisableEnabled",
+      // Phase 12w. Whether the nightly job acts on a policy or only reports
+      // on it. Audited at SECURITY for the same reason: it is the switch
+      // that lets a job move an account with nobody in the room.
+      "super-inactivity#setEnforceEnabled",
       // Phase 12b. The AI helper's kill switch and its model choice. Audited
       // at SECURITY, because turning it on starts sending students' draft
       // code to a third party.

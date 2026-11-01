@@ -1660,6 +1660,31 @@ read more than one way. The rule is §0's: **implement the narrower reading and
 write it down**, where "narrower" means the reading that does less to a
 student.
 
+### "Keep it reporting" was a decision the product could not express (decided 2026-11-01).
+
+SPEC §5 asks for the sweep's dry run to ship first and for a human to read a
+real report before the live job goes near a roster. Both happened: slice 8c
+shipped the dry run, and the manual gate was read on 2026-11-01 over the
+development roster (§3's gate log has the figures). The answer was **keep the
+engine reporting for now** — and there was no way to say that.
+
+The only lever was the scheduler's `--dry-run` flag, which is a property of
+the **process** rather than of the policy. Carrying out "report, do not act"
+with it would also have stopped the reconciler dispatching submissions, the
+outbox draining and the attempt sweep auto-submitting a paper at its deadline.
+So the honest options were an operational instruction that breaks assessments,
+or `isActive: false` — which does not report either, because a policy nobody
+configured is a policy the engine skips entirely (`skipped: no-active-policy`).
+
+*Narrower reading taken:* report-only is a property of the policy version
+(`enforceEnabled`, false by default), enforced in `applyDecision()` — the only
+thing in the system that can restrict an account from a policy. A college that
+configures thresholds now gets a watch-only period by default, reads what the
+engine would have done to whom, and leaves that state by a deliberate,
+SECURITY-audited act with a typed confirmation. The alternative reading — "an
+active policy acts, that is what active means" — would have meant the first
+night of a new policy is also the first night anybody finds out what it does.
+
 ### The college asked for five days then disabled. That is not what ships.
 
 The ask, verbatim in the brief, was "five days of inactivity, then the account

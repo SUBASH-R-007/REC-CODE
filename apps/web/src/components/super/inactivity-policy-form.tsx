@@ -52,6 +52,7 @@ export function InactivityPolicyForm({ seed }: { seed?: InactivityPolicyShape })
     warnAfterDays: seed?.warnAfterDays ?? DEFAULT_INACTIVITY_POLICY.warnAfterDays,
     softRestrictAfterDays: seed?.softRestrictAfterDays ?? DEFAULT_INACTIVITY_POLICY.softRestrictAfterDays,
     disableAfterDays: seed?.disableAfterDays ?? DEFAULT_INACTIVITY_POLICY.disableAfterDays,
+    enforceEnabled: false,
     autoDisableEnabled: false,
     graceDays: seed?.graceDays ?? DEFAULT_INACTIVITY_POLICY.graceDays,
     countsAsActivity: seed?.countsAsActivity ?? DEFAULT_INACTIVITY_POLICY.countsAsActivity,
@@ -298,7 +299,9 @@ export function InactivityPolicyForm({ seed }: { seed?: InactivityPolicyShape })
 
       <p className="text-xs text-muted">
         Saving never changes a version that already exists — every version is kept, because the decisions taken under it
-        cite it by number. Automatic disabling is off in anything saved here; it has its own switch below.
+        cite it by number. Anything saved here is <strong>report-only</strong>: once it is live the nightly job works out
+        what it says about every student and writes none of it down, until enforcement is turned on with its own switch
+        below. Automatic disabling is off in anything saved here too, and has a switch of its own.
       </p>
 
       <noscript>

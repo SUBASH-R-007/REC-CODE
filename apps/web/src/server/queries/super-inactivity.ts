@@ -28,6 +28,7 @@ const SELECT = {
   warnAfterDays: true,
   softRestrictAfterDays: true,
   disableAfterDays: true,
+  enforceEnabled: true,
   autoDisableEnabled: true,
   graceDays: true,
   countsAsActivity: true,

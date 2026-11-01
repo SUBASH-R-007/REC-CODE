@@ -7,6 +7,8 @@ import {
   AUTO_DISABLE_FLOOR_REASON,
   AVAILABLE_ACTIVITY_SIGNALS,
   DEFAULT_INACTIVITY_POLICY,
+  ENFORCE_CONFIRMATION,
+  ENFORCE_REASON,
   INACTIVITY_STAGES,
   RESTRICTION_STAGE_ADMIN_LABEL,
   RESTRICTION_STAGE_LABEL,
@@ -191,6 +193,45 @@ describe("the shipped default", () => {
     const result = inactivityPolicySchema.safeParse({ ...DEFAULT_INACTIVITY_POLICY, notifyParentEmail: true });
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error.issues[0]?.message).toMatch(/third-party personal data/);
+  });
+});
+
+describe("the shipped default only watches", () => {
+  /**
+   * Phase 12w. The Phase 8 manual gate — a human reading a real report
+   * before the job goes anywhere near a roster — was read on 2026-11-01, and
+   * the answer was to keep the engine reporting. This is that answer where a
+   * new college inherits it rather than where one person remembered it: a
+   * policy ships report-only, and leaving that state is somebody's decision.
+   */
+  it("reports rather than acts, until a human says otherwise", () => {
+    expect(DEFAULT_INACTIVITY_POLICY.enforceEnabled).toBe(false);
+  });
+
+  it("still describes the whole ladder while reporting, or the report says nothing", () => {
+    // The mode must not touch the arithmetic: the figures a report-only run
+    // produces have to be the figures a live run would act on, or reading
+    // the report tells a super-admin nothing about what enforcing would do.
+    const reporting = policy({ enforceEnabled: false });
+    const acting = policy({ enforceEnabled: true });
+    for (const days of [0, 3, 5, 10, 40]) {
+      expect(stageForCountedDays(reporting, days)).toBe(stageForCountedDays(acting, days));
+    }
+    expect(ceilingStage(reporting)).toBe(ceilingStage(acting));
+  });
+
+  it("has a confirmation phrase of its own, and an argument to read first", () => {
+    // A different phrase from the auto-disable one on purpose: they are
+    // different decisions, and muscle memory should not carry across.
+    expect(ENFORCE_CONFIRMATION).toBe("I ACCEPT THIS POLICY ACTS");
+    expect(ENFORCE_CONFIRMATION).not.toBe(AUTO_DISABLE_CONFIRMATION);
+    expect(ENFORCE_REASON).toMatch(/writes none of it down/i);
+  });
+
+  it("is a field the schema requires, so a caller cannot omit it into a default", () => {
+    const { enforceEnabled: _omitted, ...without } = DEFAULT_INACTIVITY_POLICY;
+    expect(inactivityPolicySchema.safeParse(without).success).toBe(false);
+    expect(inactivityPolicySchema.safeParse({ ...without, enforceEnabled: true }).success).toBe(true);
   });
 });
 

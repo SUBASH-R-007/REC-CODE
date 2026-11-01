@@ -22,16 +22,23 @@ export interface PolicySeedResult {
   readonly action: "created" | "left-alone";
   readonly version: number;
   readonly autoDisableEnabled: boolean;
+  /** Phase 12w: false means the sweep reads this policy and writes nothing. */
+  readonly enforceEnabled: boolean;
 }
 
 export async function syncSeededInactivityPolicy(db: Db, createdById: string): Promise<PolicySeedResult> {
   const existing = await db.inactivityPolicy.findFirst({
     where: { batchYear: null, departmentCode: null },
     orderBy: { version: "desc" },
-    select: { version: true, autoDisableEnabled: true },
+    select: { version: true, autoDisableEnabled: true, enforceEnabled: true },
   });
   if (existing) {
-    return { action: "left-alone", version: existing.version, autoDisableEnabled: existing.autoDisableEnabled };
+    return {
+      action: "left-alone",
+      version: existing.version,
+      autoDisableEnabled: existing.autoDisableEnabled,
+      enforceEnabled: existing.enforceEnabled,
+    };
   }
 
   // The same gate the settings form goes through: a seed the form would
@@ -51,7 +58,12 @@ export async function syncSeededInactivityPolicy(db: Db, createdById: string): P
       countsAsActivity: DEFAULT_INACTIVITY_POLICY.countsAsActivity as never,
       createdById,
     },
-    select: { version: true, autoDisableEnabled: true },
+    select: { version: true, autoDisableEnabled: true, enforceEnabled: true },
   });
-  return { action: "created", version: created.version, autoDisableEnabled: created.autoDisableEnabled };
+  return {
+    action: "created",
+    version: created.version,
+    autoDisableEnabled: created.autoDisableEnabled,
+    enforceEnabled: created.enforceEnabled,
+  };
 }

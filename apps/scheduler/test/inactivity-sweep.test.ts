@@ -34,7 +34,24 @@ const log = pino({ level: "silent" });
 const AT_0200_IST = new Date("2026-10-19T20:30:00.000Z");
 const AT_0900_IST = new Date("2026-10-20T03:30:00.000Z");
 
-const policy = (over = {}) => ({ version: 7, ...DEFAULT_INACTIVITY_POLICY, ...over });
+/**
+ * Enforcing, deliberately (Phase 12w).
+ *
+ * The shipped default is report-only, and nearly every test in this file is
+ * about what the job DOES — its hour gate, its batching, its writes. Leaving
+ * the fixture report-only would have quietly turned all of them into tests
+ * of a job that writes nothing, which is how a suite goes green while the
+ * thing it covers stops working. Report-only has its own block below, with
+ * its own fixture.
+ */
+const policy = (over = {}) => ({ version: 7, ...DEFAULT_INACTIVITY_POLICY, enforceEnabled: true, ...over });
+
+/** A pino that keeps what it was told, for asserting on the summary line. */
+function capturingLog() {
+  const lines: string[] = [];
+  const stream = { write: (chunk: string) => void lines.push(chunk) };
+  return { log: pino({ level: "info" }, stream as never), lines };
+}
 
 vi.mock("@recx/db/inactivity", async () => {
   const actual = await vi.importActual<typeof import("@recx/db/inactivity")>("@recx/db/inactivity");
@@ -335,6 +352,27 @@ describe("a failing tick is reported, not thrown", () => {
   });
 });
 
+/**
+ * Every mutating method a Prisma model can offer, plus the raw escapes.
+ *
+ * Module scope because two blocks need it now: a dry run writes nothing
+ * (8c), and as of 12w nor does a report-only policy with the process in live
+ * mode. One list, so a method added to Prisma later is added once.
+ */
+const MUTATIONS = [
+  "create",
+  "createMany",
+  "createManyAndReturn",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+  "$executeRaw",
+  "$executeRawUnsafe",
+  "$transaction",
+];
+
 describe("A DRY RUN WRITES NOTHING", () => {
   /**
    * What makes "dry run shipped first" a property of the code rather than an
@@ -347,20 +385,6 @@ describe("A DRY RUN WRITES NOTHING", () => {
    * `--dry-run` reports and writes nothing, and the live path is tested
    * against a real database in `packages/db/test/inactivity-apply.db.test.ts`.
    */
-  const MUTATIONS = [
-    "create",
-    "createMany",
-    "createManyAndReturn",
-    "update",
-    "updateMany",
-    "upsert",
-    "delete",
-    "deleteMany",
-    "$executeRaw",
-    "$executeRawUnsafe",
-    "$transaction",
-  ];
-
   it("touches no mutating method on any model", async () => {
     const { db, touched } = recordingDb();
     const job = new InactivitySweepJob({ db, log, dryRun: true });
@@ -402,10 +426,21 @@ describe("A DRY RUN WRITES NOTHING", () => {
       "utf8",
     );
     expect(source, "the summary line must be chosen by the mode").toMatch(
-      /this\.dryRun \? "inactivity sweep \(dry run[^"]*" : "inactivity sweep"/,
+      /this\.dryRun \? "inactivity sweep \(dry run[^"]*" : liveMode\(report\)/,
     );
     // And the mode is on the record too, so a search can filter by it.
     expect(source).toContain("dryRun: this.dryRun");
+  });
+
+  it("and the line it actually logs says it, which is the part a source match cannot prove", async () => {
+    const { db } = recordingDb();
+    const { log: capturing, lines } = capturingLog();
+    sweepCandidates.mockResolvedValue([candidate()] as never);
+    await new InactivitySweepJob({ db, log: capturing, dryRun: true }).tick(AT_0200_IST);
+
+    const summary = lines.map((line) => JSON.parse(line) as { msg: string; dryRun?: boolean }).at(-1);
+    expect(summary?.msg).toBe("inactivity sweep (dry run: nothing written)");
+    expect(summary?.dryRun).toBe(true);
   });
 
   it("says of itself whether it writes", () => {
@@ -445,5 +480,101 @@ describe("A DRY RUN WRITES NOTHING", () => {
     const { db, touched } = recordingDb();
     await (db as unknown as { user: { update: () => Promise<unknown> } }).user.update();
     expect(touched).toContain("update");
+  });
+});
+
+describe("A REPORT-ONLY POLICY WRITES NOTHING EITHER", () => {
+  /**
+   * Phase 12w, and the reason it exists rather than reusing `--dry-run`.
+   *
+   * The Phase 8 manual gate was read and the answer was "keep it reporting".
+   * `--dry-run` could not express that: it belongs to the PROCESS, so the
+   * same flag would have stopped the reconciler dispatching submissions and
+   * the attempt sweep auto-submitting a paper at its deadline. So the mode
+   * moved onto the policy, and what has to be true of it is exactly what is
+   * true of a dry run — every figure in the report is the one a live run
+   * would have acted on, and not one row is written.
+   *
+   * This runs with `dryRun: false`, which is the whole point: the process
+   * writes, and this job does not.
+   */
+  const reporting = () => context({ policies: [policy({ enforceEnabled: false })] });
+
+  it("touches no mutating method, with the process in live mode", async () => {
+    const { db, touched } = recordingDb();
+    loadSweepContext.mockResolvedValue(reporting() as never);
+    sweepCandidates.mockResolvedValue([
+      candidate(),
+      candidate({ userId: "u2", stage: "SOFT_RESTRICTED", lastActiveAt: new Date("2026-08-25T04:00:00.000Z") }),
+      candidate({ userId: "u3", stage: "WARNED", lastActiveAt: new Date("2026-10-19T04:00:00.000Z") }),
+    ] as never);
+
+    await new InactivitySweepJob({ db, log, dryRun: false }).tick(AT_0200_IST);
+    for (const mutation of MUTATIONS) {
+      expect(touched, `a report-only policy touched ${mutation}`).not.toContain(mutation);
+    }
+  });
+
+  it("still reports what it would have done, or it is worth nothing", async () => {
+    const { db } = recordingDb();
+    loadSweepContext.mockResolvedValue(reporting() as never);
+    sweepCandidates.mockResolvedValue([
+      candidate(),
+      candidate({ userId: "u2", stage: "WARNED", lastActiveAt: new Date("2026-10-19T04:00:00.000Z") }),
+    ] as never);
+
+    const report = await new InactivitySweepJob({ db, log, dryRun: false }).tick(AT_0200_IST);
+    // The same figures the dry-run block asserts, from the same planner.
+    expect(report).toMatchObject({ ran: true, considered: 2, wouldEscalate: 1, wouldClear: 1 });
+    // And nothing happened: the withheld writes are counted, and the mode
+    // is stated whatever the night held.
+    expect(report).toMatchObject({ escalated: 0, cleared: 0, reportOnly: 2, reportOnlyPolicies: 1 });
+  });
+
+  it("says so in the log, so a night of it cannot be read as a quiet night", async () => {
+    const { db } = recordingDb();
+    const { log: capturing, lines } = capturingLog();
+    loadSweepContext.mockResolvedValue(reporting() as never);
+    sweepCandidates.mockResolvedValue([candidate()] as never);
+
+    await new InactivitySweepJob({ db, log: capturing, dryRun: false }).tick(AT_0200_IST);
+    const summary = lines
+      .map((line) => JSON.parse(line) as { msg: string; dryRun?: boolean; report?: { reportOnly: number } })
+      .at(-1);
+    expect(summary?.msg).toBe("inactivity sweep (report-only: the policy does not enforce, nothing written)");
+    // Not a dry run. The distinction is the point: every other job in this
+    // process wrote tonight.
+    expect(summary?.dryRun).toBe(false);
+    expect(summary?.report?.reportOnly).toBe(1);
+  });
+
+  it("is per policy, not per process: one cohort can be watched while another is enforced", async () => {
+    /**
+     * Policies are scoped by batch and department, and the most specific one
+     * wins. A college that wants to enforce for final years while still
+     * watching the first-years has to be able to, or "report-only" would be
+     * a flag for the whole college and we would be back where we started.
+     */
+    const { db, touched } = recordingDb();
+    loadSweepContext.mockResolvedValue(
+      context({
+        policies: [
+          // The global policy acts…
+          policy({ version: 7, enforceEnabled: true }),
+          // …while this batch is only watched.
+          policy({ version: 8, enforceEnabled: false, batchYear: 2027 }),
+        ],
+      }) as never,
+    );
+    sweepCandidates.mockResolvedValue([
+      candidate({ userId: "watched", batchYear: 2027 }),
+      candidate({ userId: "enforced", batchYear: 2026 }),
+    ] as never);
+
+    const report = await new InactivitySweepJob({ db, log, dryRun: false }).tick(AT_0200_IST);
+    // Both were considered and both would move…
+    expect(report).toMatchObject({ considered: 2, wouldEscalate: 2, reportOnly: 1, reportOnlyPolicies: 1 });
+    // …and exactly one of them reached the write path.
+    expect(touched).toContain("$transaction");
   });
 });

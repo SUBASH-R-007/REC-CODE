@@ -169,6 +169,23 @@ export const AUTO_DISABLE_CONFIRMATION = "I ACCEPT THIS THRESHOLD";
 export const AUTO_DISABLE_FLOOR_REASON =
   "A threshold under a fortnight will reach a student who was simply ill. Dengue keeps somebody off a laptop for two weeks and typhoid for three, and neither of them did anything wrong.";
 
+/**
+ * Report-only, and what it takes to leave it (Phase 12w).
+ *
+ * The sweep shipped with a dry run, as SPEC §5 asks, and the manual gate for
+ * it has been read. The decision taken from that report was "keep reporting,
+ * do not write against a real roster yet" — and the only lever the product
+ * had was the scheduler's `--dry-run`, which is a property of the PROCESS:
+ * it also stops the reconciler dispatching and the attempt sweep
+ * auto-submitting at a deadline. So report-only is a property of the policy
+ * now, false by default, and leaving it is the one act in Phase 8 that lets
+ * a job move an account with nobody deciding it — hence a typed
+ * confirmation, as the auto-disable switch has.
+ */
+export const ENFORCE_CONFIRMATION = "I ACCEPT THIS POLICY ACTS";
+export const ENFORCE_REASON =
+  "While this is off the nightly job reads the whole roster, works out what the policy says about each student and writes none of it down — no nudge, no pause, no message, no review item. Turning it on means the job starts pausing accounts on its own, at 02:00, with nobody in the room. Read the last report first.";
+
 export interface InactivityPolicyShape {
   readonly version: number;
   readonly isActive: boolean;
@@ -178,6 +195,8 @@ export interface InactivityPolicyShape {
   readonly warnAfterDays: number | null;
   readonly softRestrictAfterDays: number | null;
   readonly disableAfterDays: number | null;
+  /** False = the sweep evaluates and reports, and writes nothing (12w). */
+  readonly enforceEnabled: boolean;
   readonly autoDisableEnabled: boolean;
   readonly graceDays: number;
   readonly countsAsActivity: CountsAsActivity;
@@ -210,6 +229,7 @@ export const inactivityPolicySchema = z
     warnAfterDays: threshold,
     softRestrictAfterDays: threshold,
     disableAfterDays: threshold,
+    enforceEnabled: z.boolean(),
     autoDisableEnabled: z.boolean(),
     graceDays: z.number().int().min(0).max(30),
     countsAsActivity: countsAsActivitySchema,
@@ -263,7 +283,14 @@ export const inactivityPolicySchema = z
  *
  * Counted day 3 is a nudge, day 5 a warning to the student and their mentor,
  * day 10 a soft restriction, and `DISABLED` is unreachable because
- * `autoDisableEnabled` is false. The college's stated wish was "five days,
+ * `autoDisableEnabled` is false.
+ *
+ * And as of 12w nothing happens at any of those rungs until somebody turns
+ * enforcement on: `enforceEnabled` is false, so the ladder is a report. A
+ * college that configures thresholds gets a watch-only period by default
+ * rather than a night of automatic restrictions it has not read yet.
+ *
+ * The college's stated wish was "five days,
  * then disabled"; this is not that, and the gap is recorded in
  * `docs/OPEN-QUESTIONS.md` rather than papered over — a super-admin who wants
  * day 5 to restrict sets `softRestrictAfterDays: 5` and needs no deploy,
@@ -277,6 +304,7 @@ export const DEFAULT_INACTIVITY_POLICY: Omit<InactivityPolicyShape, "version"> =
   warnAfterDays: 5,
   softRestrictAfterDays: 10,
   disableAfterDays: 30,
+  enforceEnabled: false,
   autoDisableEnabled: false,
   graceDays: 2,
   countsAsActivity: { submission: true, solve: true, login: false, lesson: true },

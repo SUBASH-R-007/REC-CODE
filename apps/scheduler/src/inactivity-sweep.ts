@@ -28,6 +28,15 @@ import type { JudgeQueuePort } from "./queues";
  * attempt, a pending appeal, an assessment 48 hours out and a student with no
  * activity — before the live job goes near a real roster.
  *
+ * That gate has now been read (2026-11-01), and the decision taken from it
+ * was to keep the engine reporting. `--dry-run` could not express that:
+ * it is a property of the PROCESS, so it would also have stopped the
+ * reconciler dispatching and the attempt sweep auto-submitting a paper at
+ * its deadline. Phase 12w moves the choice onto the policy —
+ * `enforceEnabled`, false by default — so this job can report while every
+ * other job in the same process writes normally. `applyDecision()` is where
+ * that is enforced; this job counts it and says so in the log.
+ *
  * It runs once per campus day at 02:00 Asia/Kolkata, and the gate is in the
  * data as well: `AccountStatusEvent_sweep_once_per_day` makes a second run
  * for one evaluation date a unique violation on one row rather than a second
@@ -67,6 +76,20 @@ export interface InactivitySweepReport {
   /** Actually written. Zero in dry-run mode, by construction. */
   escalated: number;
   cleared: number;
+  /**
+   * Decisions the sweep declined to write because the policy that produced
+   * them is report-only (Phase 12w). The counterpart of `--dry-run` for one
+   * policy rather than the whole process: `considered` and every `would…`
+   * figure are the same as a live run's, and nothing was written.
+   *
+   * It counts the writes WITHHELD, so a quiet night under a report-only
+   * policy reads as zero and `reportOnlyPolicies` is what says the mode was
+   * on. A number that counted every held student instead would make a
+   * reporting sweep and an enforcing one look alike in the log.
+   */
+  reportOnly: number;
+  /** Active policies that do not enforce. The mode, stated whatever happened. */
+  reportOnlyPolicies: number;
   /** Another writer got there first: a solve, a staff member, or the other instance. */
   racedAway: number;
   mentorsNotified: number;
@@ -89,6 +112,29 @@ export interface InactivitySweepReport {
 }
 
 const SAMPLE_SIZE = 25;
+
+/**
+ * What a live tick's log line says (Phase 12w).
+ *
+ * There are three modes now, not two, and a reader of this line months
+ * later has to be able to tell which one a given night ran in:
+ *
+ *   --dry-run                 the whole process wrote nothing
+ *   report-only policies      this job wrote nothing; the others wrote
+ *   enforcing                 the job acted
+ *
+ * The mixed case is real — policies are per batch and per department, so a
+ * college can enforce for final years while still watching the first — and
+ * it says so rather than rounding to either end.
+ */
+function liveMode(report: InactivitySweepReport): string {
+  if (report.reportOnlyPolicies === 0) return "inactivity sweep";
+  const enforcing = report.escalated + report.cleared > 0;
+  if (!enforcing && report.reportOnly === 0) return "inactivity sweep (nothing to write)";
+  return enforcing
+    ? "inactivity sweep (partly report-only: some policies do not enforce)"
+    : "inactivity sweep (report-only: the policy does not enforce, nothing written)";
+}
 
 function emptyHeldBy(): Record<SweepHoldback, number> {
   return Object.fromEntries(SWEEP_HOLDBACKS.map((key) => [key, 0])) as Record<SweepHoldback, number>;
@@ -143,6 +189,8 @@ export class InactivitySweepJob {
       adminReview: 0,
       escalated: 0,
       cleared: 0,
+      reportOnly: 0,
+      reportOnlyPolicies: 0,
       racedAway: 0,
       mentorsNotified: 0,
       contestSubmissionsCancelled: 0,
@@ -167,6 +215,8 @@ export class InactivitySweepJob {
         report.skipped = "already-run-today";
         return report;
       }
+      report.reportOnlyPolicies = context.policies.filter((policy) => !policy.enforceEnabled).length;
+
       if (context.policies.length === 0) {
         // Not a failure. A college that has configured no policy has chosen
         // for this engine to do nothing, and inventing a default would mean
@@ -214,7 +264,7 @@ export class InactivitySweepJob {
        */
       this.log.info(
         { report: { ...report, sample: report.sample.length }, dryRun: this.dryRun },
-        this.dryRun ? "inactivity sweep (dry run: nothing written)" : "inactivity sweep",
+        this.dryRun ? "inactivity sweep (dry run: nothing written)" : liveMode(report),
       );
     } catch (cause) {
       report.failed = true;
@@ -275,6 +325,19 @@ export class InactivitySweepJob {
     now: Date,
   ): Promise<void> {
     if (decision.plan.kind === "hold" && !decision.plan.raisesAdminReview) return;
+
+    /**
+     * Report-only (Phase 12w). `applyDecision()` refuses this too — the
+     * fence belongs at the only writer — but it is counted here, where the
+     * report is being built, and the call is not made at all: a transaction
+     * opened only to be refused is a lock taken on a student's row for
+     * nothing, 20,000 times a night on a large college.
+     */
+    if (decision.policy !== null && !decision.policy.enforceEnabled) {
+      report.reportOnly += 1;
+      return;
+    }
+
     let applied: AppliedDecision;
     try {
       applied = await applyDecision(this.db, decision, { now, evaluationDay });
@@ -322,7 +385,13 @@ export class InactivitySweepJob {
     }
   }
 
-  /** Whether this instance writes. False with `--dry-run`. */
+  /**
+   * Whether the FLAG lets this instance write. False with `--dry-run`.
+   *
+   * Not the same question as whether tonight's sweep writes anything: a
+   * report-only policy (12w) withholds every write with this true, which is
+   * the whole point of it.
+   */
   get writes(): boolean {
     return !this.dryRun;
   }

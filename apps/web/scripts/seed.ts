@@ -1021,7 +1021,7 @@ async function main() {
     {
       const pol = await syncSeededInactivityPolicy(app.db, adminId);
       log(
-        `inactivity policy: ${pol.action}, version ${pol.version}, auto-disable ${pol.autoDisableEnabled ? "ON" : "off"}`,
+        `inactivity policy: ${pol.action}, version ${pol.version}, ${pol.enforceEnabled ? "ENFORCING" : "report-only"}, auto-disable ${pol.autoDisableEnabled ? "ON" : "off"}`,
       );
     }
     // Phase 9: one readiness run, through the real 02:30 pipeline. Without

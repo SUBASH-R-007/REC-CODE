@@ -9,6 +9,7 @@ import {
 import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { activeInactivityPolicies, inactivityPolicyVersions } from "@/server/queries/super-inactivity";
 import { AutoDisableSwitch } from "@/components/super/auto-disable-switch";
+import { EnforceSwitch } from "@/components/super/enforce-switch";
 import { InactivityPolicyForm } from "@/components/super/inactivity-policy-form";
 import { PageHeader } from "@/components/super/ui";
 
@@ -91,6 +92,16 @@ export default async function SuperInactivityPage() {
             />
           ) : (
             <div className="overflow-x-auto">
+              {/* Phase 12w. Said before the ladder, because the ladder is
+                  hypothetical while this is off and a reader who missed that
+                  would read the table as a list of things happening tonight. */}
+              {live.enforceEnabled ? null : (
+                <p className="mb-4 rounded-lg border border-info/40 bg-info-subtle p-3 text-sm">
+                  <strong>Report-only.</strong> The nightly job works all of this out for every student and writes none
+                  of it down — nobody is nudged, paused or told anything. What it would have done is in the report on
+                  the scheduled jobs page. Enforcement has its own switch below.
+                </p>
+              )}
               <table className="w-full min-w-[34rem] border-collapse text-sm">
                 <caption className="sr-only">What happens at each number of counted inactive days</caption>
                 <thead>
@@ -160,6 +171,28 @@ export default async function SuperInactivityPage() {
       </Card>
 
       <Card>
+        <CardHeader
+          title="Does the job act, or only report?"
+          subtitle="Report-only is where a policy starts, and there is no hurry to leave it."
+        />
+        <CardBody>
+          {live === null ? (
+            <p className="text-sm text-text-secondary">
+              There is no live policy, so there is nothing for the job to act on or report. Draft one first — and note
+              that anything drafted is report-only until this switch says otherwise.
+            </p>
+          ) : (
+            <EnforceSwitch
+              version={live.version}
+              enabled={live.enforceEnabled}
+              autoDisableEnabled={live.autoDisableEnabled}
+              disableAfterDays={live.disableAfterDays}
+            />
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
         <CardHeader title="Automatic disabling" />
         <CardBody>
           {live === null ? (
@@ -197,6 +230,7 @@ export default async function SuperInactivityPage() {
                     <th scope="col" className="py-2 pr-3">Version</th>
                     <th scope="col" className="py-2 pr-3">Scope</th>
                     <th scope="col" className="py-2 pr-3">Ladder</th>
+                    <th scope="col" className="py-2 pr-3">Acts</th>
                     <th scope="col" className="py-2 pr-3">Auto-close</th>
                     <th scope="col" className="py-2">Written</th>
                   </tr>
@@ -220,6 +254,13 @@ export default async function SuperInactivityPage() {
                       </td>
                       <td className="py-2 pr-3">
                         {/* In words, never colour alone. */}
+                        {policy.enforceEnabled ? (
+                          <Badge tone="warning">acts</Badge>
+                        ) : (
+                          <span className="text-muted">reports only</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3">
                         {policy.autoDisableEnabled ? <Badge tone="danger">on</Badge> : <span className="text-muted">off</span>}
                       </td>
                       <td className="py-2 text-xs text-muted">{formatCampusTime(policy.createdAt)}</td>

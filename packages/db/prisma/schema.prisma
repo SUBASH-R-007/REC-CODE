@@ -3987,6 +3987,16 @@ model InactivityPolicy {
   softRestrictAfterDays Int?
   disableAfterDays      Int?
 
+  /// FALSE by default: the nightly sweep evaluates the whole roster against
+  /// this policy and REPORTS, and writes nothing at all — no stage move, no
+  /// notification, no review item. It is the dry run as a property of the
+  /// policy rather than of how the scheduler happened to be started, which
+  /// is what makes it usable: `--dry-run` is all-or-nothing for every job in
+  /// the process, so honouring "report, do not act" with that flag would
+  /// also stop auto-submitting assessments at their deadline. Turning this
+  /// on is a SECURITY-audited act with a typed confirmation.
+  enforceEnabled     Boolean @default(false)
+
   /// FALSE by default, and the top rung is unreachable while it is. Turning
   /// it on is a SECURITY-audited act that emails every super-admin.
   autoDisableEnabled Boolean @default(false)

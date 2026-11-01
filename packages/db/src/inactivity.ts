@@ -39,10 +39,23 @@ import type { Db, DbTx } from "./index";
  * have to be reproducible from their inputs by a test that touches no
  * database, because those numbers are what a disputed lockout is argued from.
  *
- * Nothing here writes. Slice 8c ships the DRY RUN first, as the spec asks,
- * and `evaluate()` returning a plan rather than performing it is what makes
- * the dry run the same code path as the live one rather than a second
+ * `evaluate()` returning a plan rather than performing it is what makes the
+ * dry run the same code path as the live one rather than a second
  * implementation that could disagree with it.
+ *
+ * This header said "Nothing here writes", which was true of slice 8c and
+ * stopped being true in 8d. `applyDecision()` below writes a stage move, a
+ * notification, an audit row and a contest cancellation in one transaction,
+ * and the three restoration paths at the bottom of the file write too — so
+ * the sentence was the most misleading line in a file about restricting
+ * student accounts. What is still true: the READS are all here and the
+ * arithmetic is all in `@recx/shared`, because the numbers a disputed
+ * lockout is argued from have to be reproducible by a test that touches no
+ * database.
+ *
+ * Phase 12w adds the fence that decides whether `applyDecision()` writes at
+ * all: a policy with `enforceEnabled` false is evaluated, reported and not
+ * acted on.
  */
 
 /** A @db.Date comes back as a UTC-midnight Date; this is its campus day. */
@@ -183,6 +196,7 @@ export async function activePolicies(db: Db): Promise<InactivityPolicyShape[]> {
     warnAfterDays: row.warnAfterDays,
     softRestrictAfterDays: row.softRestrictAfterDays,
     disableAfterDays: row.disableAfterDays,
+    enforceEnabled: row.enforceEnabled,
     autoDisableEnabled: row.autoDisableEnabled,
     graceDays: row.graceDays,
     countsAsActivity: countsAsActivitySchema.parse(row.countsAsActivity),
@@ -415,6 +429,10 @@ const FALLBACK_POLICY: InactivityPolicyShape = {
   warnAfterDays: null,
   softRestrictAfterDays: null,
   disableAfterDays: null,
+  // False, like every other flag here: if this literal ever did reach a
+  // decision, the safe reading of "no policy applies" is that nothing is
+  // written (12w).
+  enforceEnabled: false,
   autoDisableEnabled: false,
   graceDays: 0,
   countsAsActivity: { submission: true, solve: true, login: false, lesson: true },
@@ -437,7 +455,7 @@ export interface AppliedDecision {
   readonly notifiedMentor: boolean;
   readonly adminReviewOpened: boolean;
   /** Set when another writer got there first, or the state moved underneath. */
-  readonly skipped?: "already-moved" | "nothing-to-do" | "no-evidence";
+  readonly skipped?: "already-moved" | "nothing-to-do" | "no-evidence" | "report-only";
 }
 
 /**
@@ -486,6 +504,24 @@ export async function applyDecision(
     notifiedMentor: false,
     adminReviewOpened: false,
   };
+
+  /**
+   * Report-only, and this is where it is enforced (Phase 12w).
+   *
+   * The fence is here rather than in the scheduler that calls this, because
+   * this function is the ONLY thing in the system that can restrict an
+   * account from a policy — a check in the caller is a check the next caller
+   * forgets. Every write is refused, the hold's review item and counters
+   * included: "report, do not act" that still wrote a row to
+   * `/admin/inactivity` would be a third mode nobody asked for, and the one
+   * property a dry run has to have is that it writes nothing.
+   *
+   * A null policy is left alone: no policy matched this student, the plan is
+   * a hold with that as its reason, and that was already the behaviour.
+   */
+  if (decision.policy !== null && !decision.policy.enforceEnabled) {
+    return { ...base, skipped: "report-only" };
+  }
 
   if (plan.kind === "hold") {
     // Nothing moves — but the review item and the counters are still worth
