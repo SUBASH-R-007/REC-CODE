@@ -1060,6 +1060,22 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       // body must carry no answer key either way.
       status: [404],
     },
+    /**
+     * Phase 12y.4, swept from 13f. The marks of everybody who sat a paper,
+     * as a CSV. The most concentrated student data this product will ever
+     * hand over a single request -- which is why a student asking for it
+     * must get a refusal and not a file, and why the refusal is swept for
+     * canaries like everything else.
+     */
+    "api/admin/assessments/[id]/results/route.ts#GET": {
+      call: call(
+        () => studentRequest(`/api/admin/assessments/${ids.assessment}/results`),
+        () => params({ id: ids.assessment }),
+      ),
+      // 403, as the guard answers a signed-in student with no staff
+      // capability. Never 200, and never a row of somebody's marks.
+      status: [403],
+    },
     "api/admin/invigilate/[sessionId]/live/route.ts#GET": {
       call: call(
         () => studentRequest(`/api/admin/invigilate/${ids.examSession}/live`),
@@ -1081,6 +1097,22 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
             json: { answers: [] },
           }),
         () => params({ attemptId: ids.submitAttempt }),
+      ),
+      status: [200],
+    },
+    /**
+     * Phase 12y.8, swept from 13f. The `.seb` configuration a candidate
+     * hands to Safe Exam Browser. It is signed-in-only and it is a FILE,
+     * which is exactly why it belongs in this sweep: a generator that
+     * ever reached for the hall's keys, the paper's seed secret or a
+     * problem's hidden tests would put them in a document the candidate
+     * downloads and keeps. What it may contain is a start URL and a list
+     * of browser settings.
+     */
+    "api/exam/seb-config/[slug]/route.ts#GET": {
+      call: call(
+        () => studentRequest(`/api/exam/seb-config/${ids.assessmentSlug}`),
+        () => params({ slug: ids.assessmentSlug }),
       ),
       status: [200],
     },
@@ -1332,6 +1364,8 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#recentSubmissions": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).recentSubmissions!,
     "assessments#listMyAssessments": async () => (await load(path.join(QUERIES_DIR, "assessments.ts"))).listMyAssessments!,
     "sitting-report#getStudentReport": async () => (await load(path.join(QUERIES_DIR, "sitting-report.ts"))).getStudentReport!,
+    "my-assessment-result#myAssessmentResult": async () =>
+      (await load(path.join(QUERIES_DIR, "my-assessment-result.ts"))).myAssessmentResult!,
     "exam#getExamPaper": async () => (await load(path.join(QUERIES_DIR, "exam.ts"))).getExamPaper!,
     "contests#listContests": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).listContests!,
     "contests#getContest": async () => (await load(path.join(QUERIES_DIR, "contests.ts"))).getContest!,
@@ -1470,6 +1504,16 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     // The student's own report on their own sitting. Never a band, never a
     // points total — the fence over the student tree checks for both.
     "sitting-report#getStudentReport": () => [[{ attemptId: ids.attempt, userId: ids.user }]],
+    /**
+     * Phase 12y, swept from 13f. A candidate's own marks, once staff have
+     * released them. It reads the judged submissions for their sitting
+     * and projects each question's tests through `hiddenTestsOf` — an
+     * index and a verdict — so it is precisely the query that would leak
+     * a hidden case if that projection were ever widened. Called with the
+     * fixture's own slug; released or not, nothing it returns may carry a
+     * canary.
+     */
+    "my-assessment-result#myAssessmentResult": () => [[{ userId: ids.user, slug: ids.assessmentSlug }]],
     // The paper for the fixture's own attempt, which pins the canary-bearing
     // frozen version: this is the query that would leak a hidden test if the
     // exam surface ever read more of a ProblemVersion than it needs.
@@ -1617,6 +1661,9 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       params: { attemptId: ids.mockAttempt },
     }),
     "(student)/assessments/page.tsx": () => ({}),
+    // Phase 12y, swept from 13f: what a candidate reads once their marks
+    // are released, including each question's test verdicts.
+    "(student)/assessments/[slug]/result/page.tsx": () => ({ params: { slug: ids.assessmentSlug } }),
     "(student)/sittings/[attemptId]/page.tsx": () => ({ params: { attemptId: ids.attempt } }),
     "(student)/contests/page.tsx": () => ({}),
     "(student)/contests/[slug]/page.tsx": () => ({ params: { slug: ids.contestSlug } }),
