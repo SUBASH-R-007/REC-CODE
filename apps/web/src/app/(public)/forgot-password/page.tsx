@@ -4,6 +4,7 @@ import { Mail } from "lucide-react";
 import { Button, Field, Input } from "@recx/design";
 import { FORGOT_SENT, forgotErrorMessage } from "@/lib/auth/reset-errors";
 import { COLLEGE_NAME, LMS_NAME, PRODUCT_NAME } from "@/lib/brand/names";
+import { CollegeLogo } from "@/components/brand/college-logo";
 
 export const metadata: Metadata = {
   title: "Set a new password",
@@ -36,6 +37,13 @@ export default async function ForgotPasswordPage({
 
   return (
     <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-md px-4 py-10 outline-none sm:py-16">
+      {/* The mark goes ABOVE the card, not in the footer (Phase 13b).
+          A page that asks for a password is the shape of a phishing
+          page, and the institution's own mark where the eye lands first
+          is one of the few things that helps somebody tell them apart. */}
+      <div className="mb-6 flex justify-center">
+        <CollegeLogo size="md" />
+      </div>
       <div className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">
         <h1 className="font-display text-2xl font-bold tracking-tight">Set a new password</h1>
         <p className="mt-1 text-sm text-text-secondary">

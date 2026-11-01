@@ -5,6 +5,7 @@ import { PASSWORD_MIN_LENGTH } from "@/lib/auth/password";
 import { RESET_TTL_MINUTES } from "@/lib/auth/password-reset";
 import { resetErrorMessage } from "@/lib/auth/reset-errors";
 import { COLLEGE_NAME, PRODUCT_NAME } from "@/lib/brand/names";
+import { CollegeLogo } from "@/components/brand/college-logo";
 
 export const metadata: Metadata = {
   title: "Choose a password",
@@ -39,6 +40,11 @@ export default async function ResetPasswordPage({
 
   return (
     <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-md px-4 py-10 outline-none sm:py-16">
+      {/* Above the card, for the reason the sibling page says: this is the
+          shape of a phishing page, and the real mark helps (Phase 13b). */}
+      <div className="mb-6 flex justify-center">
+        <CollegeLogo size="md" />
+      </div>
       <div className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">
         <h1 className="font-display text-2xl font-bold tracking-tight">Choose a password</h1>
         <p className="mt-1 text-sm text-text-secondary">

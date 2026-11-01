@@ -1,12 +1,12 @@
 import type { Role, User } from "@recx/db";
 import { db } from "@/lib/db";
-import { COLLEGE_NAME } from "@/lib/brand/names";
 import { NotificationsBell } from "@/components/shell/notifications-bell";
 import { PaletteLauncher } from "@/components/shell/palette-launcher";
 import { MobileNav, SidebarFooterNav, SidebarNav } from "@/components/shell/sidebar-nav";
 import { UserMenu } from "@/components/shell/user-menu";
 import { VitalsReporter } from "@/components/shell/vitals-reporter";
 import { UserMenuLink } from "@/components/shell/user-menu-link";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { Wordmark } from "@/components/shell/wordmark";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 
@@ -48,7 +48,12 @@ export async function AppShell({ user, children }: { user: User; children: React
         </div>
         <div className="border-t border-border px-3 py-3">
           <SidebarFooterNav />
-          <p className="px-3 pt-2 text-[0.68rem] leading-relaxed text-text-secondary">{COLLEGE_NAME}</p>
+          {/* The college's own mark rather than its name in small grey
+              type (Phase 13b): this is the one place in the signed-in
+              shell that says whose platform this is. */}
+          <div className="px-3 pt-3">
+            <CollegeLogo size="sm" />
+          </div>
         </div>
       </aside>
 

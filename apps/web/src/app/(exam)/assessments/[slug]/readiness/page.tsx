@@ -12,6 +12,7 @@ import {
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { db } from "@/lib/db";
 import { pageRequest } from "@/lib/exam/containment";
 import { acceptedLanguagesFor } from "@/lib/exam/language";
@@ -176,6 +177,19 @@ export default async function ReadinessPage({
       ) : null}
 
       <div className="px-6 pt-6">
+        {/**
+          * The college's mark, on the checks and NOT inside the sitting
+          * (Phase 13b).
+          *
+          * This is the page where a candidate confirms what they are about
+          * to sit, and whose paper it is belongs on it. The sitting itself
+          * gets nothing: SPEC §5 keeps that screen to the question, the
+          * clock and the answer, and a logo in an exam is one more thing
+          * competing with a paper somebody is being marked on.
+          */}
+        <div className="mb-4">
+          <CollegeLogo size="sm" />
+        </div>
         <h2 className="font-display text-xl font-semibold text-text">{assessment.title}</h2>
         {assessment.affectsPlacementEligibility ? (
           <p className="mt-2 rounded-md border border-info/40 bg-info-subtle px-3 py-2 text-sm text-info">

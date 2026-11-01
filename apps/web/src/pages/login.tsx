@@ -8,6 +8,7 @@ import { PASSWORD_SET_NOTICE } from "@/lib/auth/reset-errors";
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors";
 import { SESSION_COOKIE } from "@/lib/auth/session-token";
 import { hasLiveSession } from "@/lib/pages-server";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { Wordmark } from "@/components/shell/wordmark";
 
 /**
@@ -128,14 +129,23 @@ export default function LoginPage({ error, notice, identifier, invalid, focus }:
               ))}
             </ul>
           </div>
-          <p className="text-sm text-primary-fg/70">{COLLEGE_NAME}</p>
+          {/* The college's own mark, where its name used to be set in
+              small type (Phase 13b). The panel is `aria-hidden`, so the
+              mark is decorative here -- the name is still announced from
+              the footer under the form. */}
+          <CollegeLogo size="lg" decorative />
         </section>
 
         {/* Form panel */}
         <section className="flex flex-1 items-center justify-center px-4 py-10">
           <div className="w-full max-w-md">
-            <div className="mb-8 flex justify-center lg:hidden">
+            {/* On a phone the brand panel is hidden, so this is the only
+                place the institution appears above the fold (Phase 13b).
+                The product's mark first, the college's under it: they say
+                different things and neither substitutes for the other. */}
+            <div className="mb-8 flex flex-col items-center gap-3 lg:hidden">
               <Wordmark size="lg" />
+              <CollegeLogo size="sm" />
             </div>
 
             <div className="rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-8">

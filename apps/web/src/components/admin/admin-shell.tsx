@@ -3,6 +3,7 @@ import { Accessibility, Calculator, ClipboardCheck, UserRoundSearch, ChartColumn
 import { MenuDetails } from "@/components/admin/menu-details";
 import { NavLink } from "@/components/shell/nav-link";
 import { UserMenu } from "@/components/shell/user-menu";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { Wordmark } from "@/components/shell/wordmark";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { adminNavFor, type AdminNavGroup, type AdminNavIcon } from "@/components/admin/admin-nav";
@@ -109,6 +110,11 @@ export function AdminShell({
         </div>
         <div role="region" className="scroll-thin flex-1 overflow-y-auto px-3 pb-4 pt-2" tabIndex={0} aria-label="Admin sections">
           <AdminNav groups={groups} idPrefix="side" />
+        </div>
+        {/* Phase 13b: staff see the same institutional mark the students
+            do, in the same corner. */}
+        <div className="border-t border-border px-4 py-3">
+          <CollegeLogo size="sm" />
         </div>
       </aside>
 

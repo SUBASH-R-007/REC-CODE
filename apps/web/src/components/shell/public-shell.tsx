@@ -1,5 +1,7 @@
 import { ButtonLink } from "@recx/design";
 import { getCurrentUser } from "@/lib/auth/session";
+import { COLLEGE_NAME, PRODUCT_NAME } from "@/lib/brand/names";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { AppShell } from "@/components/shell/app-shell";
 import { Wordmark } from "@/components/shell/wordmark";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
@@ -26,9 +28,26 @@ export async function PublicShell({ children }: { children: React.ReactNode }) {
           </ButtonLink>
         </div>
       </header>
-      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-7xl px-4 pb-16 pt-6 outline-none sm:px-6">
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-7xl px-4 pb-10 pt-6 outline-none sm:px-6">
         {children}
       </main>
+      {/*
+        A footer, for the signed-out visitor only (Phase 13b).
+
+        This shell wraps the two pages somebody outside the college can
+        land on -- a student's public profile and the judge's own
+        specification -- and both are read by people deciding whether to
+        believe what is on them. Whose platform it is belongs at the
+        bottom of the page, and a signed-in viewer never sees this shell
+        at all: they get the app chrome, which carries the mark in the
+        sidebar.
+      */}
+      <footer className="mx-auto flex w-full max-w-7xl items-center gap-3 px-4 pb-10 sm:px-6">
+        <CollegeLogo size="sm" decorative />
+        <p className="text-xs text-text-secondary">
+          {PRODUCT_NAME} · {COLLEGE_NAME}
+        </p>
+      </footer>
     </div>
   );
 }

@@ -8,6 +8,8 @@ import {
   isExportCode,
   topicsTouched,
 } from "@recx/shared";
+import { PRODUCT_NAME } from "@/lib/brand/names";
+import { CollegeLogo } from "@/components/brand/college-logo";
 import { db } from "@/lib/db";
 import { verifyStored } from "@/lib/export/signature";
 
@@ -207,9 +209,22 @@ function Shell({
 
   return (
     <main id="main-content" className="mx-auto w-full max-w-2xl space-y-6 px-4 py-8">
-      <header className="space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">REC Code</p>
-        <h1 className="font-display text-2xl font-bold tracking-tight">Verify a record</h1>
+      <header className="space-y-3">
+        {/**
+          * The college's mark, on the one page in this product written for
+          * somebody who does not have an account (Phase 13b).
+          *
+          * A recruiter following a link from a CV is being asked to believe
+          * a claim about a student. What makes that page worth reading is
+          * whose it is, so the institution's mark goes above the heading --
+          * and it is an ordinary <img>, because this page is deliberately
+          * complete with no JavaScript at all.
+          */}
+        <CollegeLogo size="md" />
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{PRODUCT_NAME}</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight">Verify a record</h1>
+        </div>
       </header>
 
       <div className={`space-y-1 rounded-xl border p-4 ${tone}`}>
