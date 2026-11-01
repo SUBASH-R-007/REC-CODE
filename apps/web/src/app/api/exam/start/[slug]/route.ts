@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { seeOther } from "@/lib/http/form-body";
 import { requireActionUser } from "@/lib/auth/guards";
 import { AppError } from "@/lib/errors";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
@@ -23,6 +24,28 @@ export const dynamic = "force-dynamic";
  * POST, and reached from the readiness page's own form, so it works with no
  * JavaScript and so a link preview or a prefetch cannot start somebody's
  * clock.
+ *
+ * **The redirect is RELATIVE, and that is not a style choice** (Phase 13a).
+ *
+ * It used to be `NextResponse.redirect(new URL(to, request.url), 303)`,
+ * which writes an ABSOLUTE `Location` built from the host Next believes it
+ * is serving. When that host is not the one the browser typed, the redirect
+ * crosses origin -- and the page's own Content-Security-Policy says
+ * `form-action 'self'`, which Chromium enforces on a form submission's
+ * REDIRECT as well as on its action. The browser then blocks the
+ * submission outright: *"Sending form data to '...' violates the following
+ * Content Security Policy directive: form-action 'self'"*, printed in a
+ * console the candidate does not have open. No request, no attempt, no
+ * message on screen -- the Start button simply does nothing, for every
+ * candidate.
+ *
+ * Found on this machine, where the dev server is reached as `127.0.0.1` and
+ * Next resolves `request.url` to `localhost`; in production the same thing
+ * happens behind any proxy or alternate hostname. A relative `Location` is
+ * resolved by the browser against the URL IT used, so it is same-origin by
+ * construction and there is nothing left to get wrong. `seeOther` is the
+ * helper the sign-in routes have always used -- which is exactly why the
+ * login form never had this bug.
  */
 export async function POST(request: Request, context: { params: Promise<{ slug: string }> }): Promise<Response> {
   const { slug } = await context.params;
@@ -64,7 +87,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       started.refusal === "not_found"
         ? "/assessments"
         : `/assessments/${encodeURIComponent(slug)}/readiness?refused=${started.refusal}`;
-    return NextResponse.redirect(new URL(to, request.url), 303);
+    return seeOther(to);
   }
-  return NextResponse.redirect(new URL(`/assessments/${encodeURIComponent(slug)}/attempt`, request.url), 303);
+  return seeOther(`/assessments/${encodeURIComponent(slug)}/attempt`);
 }
