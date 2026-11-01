@@ -1,6 +1,9 @@
 import type { Db } from "@recx/db";
 import { DEFAULT_INACTIVITY_POLICY, SCHEDULER_JOB_NAMES, SWEEP_HOLDBACKS } from "@recx/shared";
 import pino from "pino";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   INACTIVITY_SWEEP_BATCH,
@@ -373,6 +376,36 @@ describe("A DRY RUN WRITES NOTHING", () => {
     for (const mutation of MUTATIONS) {
       expect(touched, `the sweep touched ${mutation}`).not.toContain(mutation);
     }
+  });
+
+  it("says so IN THE LOG as well, or an operator reads the wrong night's work", () => {
+    /**
+     * Phase 12v. The line was `"inactivity sweep (dry run)"`,
+     * unconditionally — true in 8c, and a false statement in the
+     * operational log from 8d on: a live run that restricted accounts
+     * logged itself as having written nothing, while `docs/RUNBOOK.md`
+     * §2.12's incident procedures are read off these lines.
+     *
+     * Asserted against the source, and the reason is worth stating because
+     * the first draft of this test was WORSE THAN NOTHING: it drove a live
+     * tick against the recording database and asserted the words "dry run"
+     * appeared nowhere, which passed — and went on passing when the fix was
+     * reverted, because a live tick against a fake database never reaches
+     * the summary line at all. A fence that cannot fail is the one kind of
+     * test that makes things worse, so this one asks the only question that
+     * can be answered here: is the message chosen by the mode? The live
+     * path's own behaviour is proved against a real database in
+     * `packages/db/test/inactivity-apply.db.test.ts`.
+     */
+    const source = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "inactivity-sweep.ts"),
+      "utf8",
+    );
+    expect(source, "the summary line must be chosen by the mode").toMatch(
+      /this\.dryRun \? "inactivity sweep \(dry run[^"]*" : "inactivity sweep"/,
+    );
+    // And the mode is on the record too, so a search can filter by it.
+    expect(source).toContain("dryRun: this.dryRun");
   });
 
   it("says of itself whether it writes", () => {

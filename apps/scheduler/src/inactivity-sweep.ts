@@ -51,7 +51,12 @@ export interface InactivitySweepReport {
   /** Why it did not run, when it did not. */
   skipped?: "not-the-hour" | "already-run-today" | "no-active-policy";
   considered: number;
-  /** What it WOULD do, by kind. Nothing is written in this slice. */
+  /**
+   * What it did, by kind — or would have done under `--dry-run`, which is
+   * what the names still say. Kept as `would…` because the report is read
+   * for the dry run's sake and renaming it would make the two runs harder
+   * to compare, which is the one thing the dry run exists for.
+   */
   wouldEscalate: number;
   wouldClear: number;
   held: number;
@@ -199,7 +204,18 @@ export class InactivitySweepJob {
       }
 
       this.lastEvaluationDay = context.evaluationDay;
-      this.log.info({ report: { ...report, sample: report.sample.length } }, "inactivity sweep (dry run)");
+      /**
+       * The line said "inactivity sweep (dry run)" unconditionally, which
+       * was true in 8c and became a FALSE STATEMENT IN THE OPERATIONAL LOG
+       * in 8d: a live run that restricted accounts logged itself as having
+       * written nothing, and `docs/RUNBOOK.md` §2.12's incident procedures
+       * are read off these lines. The mode is a field now, so a search for
+       * what the sweep did on a given night cannot be misread.
+       */
+      this.log.info(
+        { report: { ...report, sample: report.sample.length }, dryRun: this.dryRun },
+        this.dryRun ? "inactivity sweep (dry run: nothing written)" : "inactivity sweep",
+      );
     } catch (cause) {
       report.failed = true;
       report.error = cause instanceof Error ? cause.message : String(cause);

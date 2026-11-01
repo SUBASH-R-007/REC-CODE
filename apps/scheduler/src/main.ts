@@ -262,11 +262,24 @@ async function tick(): Promise<boolean> {
       return { ok: !report.failed, report };
     }),
   );
-  // Inactivity: a DRY RUN in this slice. It counts, applies the holdbacks and
-  // reports; it writes nothing to User, AccountRestriction or
-  // AccountStatusEvent. SPEC §5 asks for the dry run to ship first, and the
-  // manual gate is a human reading its output over seeded data before the
-  // job is allowed to write anything at all.
+  /**
+   * Inactivity: the policy engine. It counts days against the calendar,
+   * applies the holdbacks and either reports or acts.
+   *
+   * This comment used to say "a DRY RUN in this slice [...] it writes
+   * nothing to User, AccountRestriction or AccountStatusEvent", which was
+   * true of slice 8c and stopped being true in 8d — and a stale comment
+   * about whether a job can restrict somebody's account is the worst place
+   * in this file to have one. Unless the scheduler was started with
+   * `--dry-run`, this job WRITES: one transaction per decision, carrying
+   * `AccountStatusEvent`, `AccountRestriction`, `User.status`, a
+   * `Notification` and an `AuditLog` row.
+   *
+   * `--dry-run` reports the same decisions and writes none of them, through
+   * the same `evaluate()`, which is the only reason a dry run is worth
+   * having. `docs/RUNBOOK.md` §2.13's inactivity section is the operator's
+   * copy of this.
+   */
   results.push(
     await runJob("inactivitySweep", async () => {
       const report = await inactivitySweep.tick(now);
