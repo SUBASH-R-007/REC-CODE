@@ -68,8 +68,29 @@ export async function releaseContestRating(
         throw new ConflictError("This contest has already been rated. A rating is computed once and is then final.");
       }
       if (!contest.isRated) throw new ValidationError("This contest was announced as unrated.");
-      if (contest.status !== "FINISHED") {
-        throw new ValidationError("Only a finished contest can be rated.");
+      /**
+       * Finished by the CLOCK (Phase 12x).
+       *
+       * This refused any contest whose status was not FINISHED — a state
+       * nothing in the product has ever written. `publishContest` sets
+       * PUBLISHED and
+       * there a contest stays; everything a student sees derives
+       * upcoming / running / finished from the window. So no contest could
+       * be rated, ever, and the gate below it ("the standings have not
+       * been ranked yet") could not be satisfied either, because the rank
+       * job was looking for the same state (`contest-rank.ts` says the
+       * rest of it).
+       *
+       * The window is the honest test, and a stricter one than the status
+       * would have been: it cannot be stale, and a contest still inside it
+       * is refused however its row is labelled. A CANCELLED contest is
+       * refused by name, since a cancelled contest's board is not a result.
+       */
+      if (contest.status === "CANCELLED" || contest.status === "DRAFT") {
+        throw new ValidationError("Only a published contest that has finished can be rated.");
+      }
+      if (contest.endsAt.getTime() > Date.now()) {
+        throw new ValidationError("Only a finished contest can be rated; this one is still running.");
       }
 
       // The rated field: live RATED entries only. VIRTUAL replays and

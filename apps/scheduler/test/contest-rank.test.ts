@@ -32,7 +32,7 @@ function fakeDb(
   const versionBumps: string[] = [];
   const db = {
     contest: {
-      findMany: vi.fn(async () => contests),
+      findMany: vi.fn(async (_args?: { where?: Record<string, unknown> }) => contests),
       update: vi.fn(async ({ where }: { where: { id: string } }) => {
         versionBumps.push(where.id);
         return {};
@@ -151,13 +151,44 @@ describe("ranking", () => {
     expect(updates).toEqual([]);
   });
 
-  it("only considers RUNNING and FINISHED contests", async () => {
-    const { db } = fakeDb([], {});
-    const job = new ContestRankJob({ db: db as never, log, dryRun: false });
-    await job.tick(now);
-    expect(db.contest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: { in: ["RUNNING", "FINISHED"] } } }),
+  it("picks contests by the CLOCK, because nothing ever writes RUNNING or FINISHED", async () => {
+    /**
+     * Phase 12x. This test read:
+     *
+     *     expect(db.contest.findMany).toHaveBeenCalledWith(
+     *       expect.objectContaining({ where: { status: { in: ["RUNNING", "FINISHED"] } } }));
+     *
+     * — and it passed for six phases while the job ranked nothing at all,
+     * because it asserted the query rather than the answer. Nothing in the
+     * product has ever written either status: `publishContest` sets
+     * PUBLISHED and there a contest stays, while the student pages derive
+     * running / finished from the window. So `rank` was null on every
+     * `ContestStanding` row ever written, and `rateContest` — which wants
+     * FINISHED, then wants every row ranked — could not run either.
+     *
+     * A test that locks in the shape of a query is worth very little; this
+     * one was worth less than nothing, because it made the mistake look
+     * deliberate. So it asks what the job is FOR instead: a contest that is
+     * live by the clock, published and ordinary, must be ranked.
+     */
+    const { db, updates } = fakeDb(
+      [{ id: "live", kind: "ICPC", slug: "live" }],
+      { live: [row("a", 3, 10, null), row("b", 1, 5, null)] },
     );
+    const job = new ContestRankJob({ db: db as never, log, dryRun: false });
+    const report = await job.tick(now);
+
+    expect(report).toMatchObject({ contests: 1, reranked: 2 });
+    expect(updates).toEqual([
+      { userId: "a", rank: 1 },
+      { userId: "b", rank: 2 },
+    ]);
+
+    // And the query it asked: the window, not a status nobody writes.
+    const where = db.contest.findMany.mock.calls[0]?.[0]?.where as Record<string, unknown>;
+    expect(where.startsAt).toEqual({ lte: now });
+    expect(where.OR).toEqual([{ endsAt: { gt: now } }, { standings: { some: { rank: null } } }]);
+    expect(where.status).toEqual({ in: ["PUBLISHED", "RUNNING", "FINISHED"] });
   });
 
   it("ranks several contests in one pass", async () => {

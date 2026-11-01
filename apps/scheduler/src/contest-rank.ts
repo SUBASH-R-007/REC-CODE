@@ -61,11 +61,46 @@ export class ContestRankJob {
     this.lastRunMs = now.getTime();
 
     try {
-      // A board is worth ranking while the contest is live, and once more
-      // after it ends so the final board is right before rating. A RATED
-      // contest is finished with everybody already placed.
+      /**
+       * Chosen by the CLOCK, not by `Contest.status` (Phase 12x).
+       *
+       * This query asked for `status IN (RUNNING, FINISHED)` — and nothing
+       * in the product has ever written either one. `publishContest` sets
+       * PUBLISHED and that is where a contest stays for ever; the student
+       * pages compute upcoming / running / finished from `startsAt` and
+       * `endsAt` through `phaseOf()`, and never read those two states. So
+       * this job's own query matched nothing, on every tick, since Phase 5:
+       * `rank` was null on every `ContestStanding` row ever written, and
+       * `rateContest` — which refuses a contest that is not FINISHED, and
+       * refuses again if any row is unranked — could never run at all.
+       *
+       * The manual gate for Phase 5 passed because `contest-sim.ts` writes
+       * `status: "RUNNING"` itself and sets FINISHED at the end. The
+       * simulation created a state the product cannot.
+       *
+       * Two readings were available: teach the product to advance the
+       * lifecycle, or treat the clock as the authority it already is
+       * everywhere a student can see. The second is the narrower one and
+       * the one that does not break anything: `findLiveContestEntry`
+       * decides whether a submission belongs to a contest by
+       * `status: "PUBLISHED"` plus the window, so a job that moved a live
+       * contest to RUNNING would have stopped submissions counting the
+       * moment it started — the exact bug 12q.3 fixed, reintroduced from
+       * the other end. RUNNING and FINISHED stay in the enum for the
+       * simulation and for rows that already carry them.
+       *
+       * A board is worth ranking while the contest is live, and after it
+       * ends until everybody on it has a rank. The second half is a
+       * relation filter rather than a time window, so an ended board
+       * settles once and then drops out of this query for good instead of
+       * being re-read every fifteen seconds for ever.
+       */
       const contests = await this.db.contest.findMany({
-        where: { status: { in: ["RUNNING", "FINISHED"] } },
+        where: {
+          status: { in: ["PUBLISHED", "RUNNING", "FINISHED"] },
+          startsAt: { lte: now },
+          OR: [{ endsAt: { gt: now } }, { standings: { some: { rank: null } } }],
+        },
         select: { id: true, kind: true, slug: true },
       });
       report.contests = contests.length;

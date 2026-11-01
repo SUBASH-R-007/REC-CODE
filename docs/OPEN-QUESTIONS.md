@@ -1163,6 +1163,30 @@ Each is the narrower reading, implemented as described.
 
 ## Phase 5 — decisions recorded during the build
 
+- **`Contest.status` is the editorial state; the CLOCK says whether a contest
+  is running (decided 2026-11-01, Phase 12x).** The enum has DRAFT,
+  PUBLISHED, RUNNING, FINISHED, RATED and CANCELLED, and nothing in the
+  product has ever written RUNNING or FINISHED: `publishContest` sets
+  PUBLISHED, and every student-facing page derives upcoming / running /
+  finished from `startsAt` and `endsAt` through `phaseOf()`. Two consumers
+  read the enum as if something advanced it, and both were therefore dead
+  code in a live system — `ContestRankJob` asked for `status IN (RUNNING,
+  FINISHED)`, so `rank` was null on every `ContestStanding` row ever
+  written, and `releaseContestRating` refused anything not FINISHED, so no
+  contest could be rated at all. Phase 5's manual gate passed because
+  `scripts/contest-sim.ts` writes those states itself; the simulation
+  created a state the product cannot.
+
+  *Narrower reading taken:* fix the two consumers, not the data. They ask
+  the window now. Advancing the lifecycle instead would have meant teaching
+  every consumer about the new states, and one of them —
+  `findLiveContestEntry`, which decides whether a submission belongs to a
+  contest — matches on `status: "PUBLISHED"`, so a job that moved a live
+  contest to RUNNING would have stopped submissions counting the moment it
+  started: the bug 12q.3 fixed, reintroduced from the other end. RUNNING and
+  FINISHED stay in the enum for the simulation and for any row that already
+  carries one; the rank job tolerates them, and nothing requires them.
+
 - **The rating formula's three corrections are in tension; the resolution is
   written into `packages/shared/src/rating.ts`.** The spec fixes the order:
   level the field so Σdelta = 0, *then* shift the top
