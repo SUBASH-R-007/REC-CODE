@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash } from "node:crypto";
+import { headers } from "next/headers";
 import {
   SEB_CONFIG_KEY_HEADER,
   SEB_REQUEST_HASH_HEADER,
@@ -11,6 +12,7 @@ import {
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 import { requestIp } from "@/lib/ip";
 
 /**
@@ -194,4 +196,56 @@ export async function verifySebRequest(request: Request, examSessionId: string |
     },
     sha256,
   });
+}
+
+/**
+ * The containment check for a PAGE render (Phase 12y.7).
+ *
+ * `guardAttempt` runs this on every request a sitting makes — the
+ * heartbeat, each telemetry flush, each snapshot, the submit — and the
+ * attempt PAGE went through none of them. It asked only for a signed-in
+ * user with an attempt in progress, and then rendered the paper. So a
+ * candidate who started a KIOSK_SEB sitting inside Safe Exam Browser could
+ * open the same URL in an ordinary browser and READ EVERY QUESTION; the
+ * same hole let a lab-supervised paper be read from off the hall network.
+ * They could not submit from there — the routes are guarded — but the
+ * questions were the thing worth taking.
+ *
+ * A page has no `Request` object, so this builds the one SEB hashed: the
+ * host the browser actually asked for (not `APP_URL`, which is a
+ * deployment's idea of itself and can differ behind a proxy or in
+ * development), the path being rendered, and the real headers.
+ *
+ * Audited, unlike the heartbeat's check: a page load is a person trying to
+ * open the paper, which is exactly the event an invigilator should see.
+ */
+export async function checkPageContainment(args: {
+  readonly pathname: string;
+  readonly attempt: {
+    readonly id: string;
+    readonly userId: string;
+    readonly assessmentId: string;
+    readonly examSessionId: string | null;
+    readonly proctorMode: string;
+  };
+}): Promise<ContainmentResult> {
+  return checkContainment({ request: await pageRequest(args.pathname), attempt: args.attempt, audited: true });
+}
+
+/**
+ * The `Request` a page render did not get.
+ *
+ * A server component has headers but no Request, and both the SEB check
+ * and the readiness page need the absolute URL SEB hashed. Built from the
+ * host the browser actually asked for rather than from `APP_URL`, which
+ * is a deployment's idea of itself and can differ behind a proxy or in
+ * development — and a URL that differs by one character hashes to
+ * something else entirely.
+ */
+export async function pageRequest(pathname: string): Promise<Request> {
+  const incoming = await headers();
+  const host = incoming.get("x-forwarded-host") ?? incoming.get("host") ?? new URL(env().APP_URL).host;
+  const proto =
+    incoming.get("x-forwarded-proto") ?? (/^(localhost|127\.|\[::1\])/.test(host) ? "http" : "https");
+  return new Request(`${proto}://${host}${pathname}`, { headers: new Headers(incoming) });
 }

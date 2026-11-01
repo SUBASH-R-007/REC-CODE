@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { msRemaining } from "@recx/shared";
 import { requireUser } from "@/lib/auth/guards";
+import { checkPageContainment } from "@/lib/exam/containment";
 import { readEditorPrefs } from "@/components/profile/settings-schema";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
@@ -60,6 +61,46 @@ export default async function AttemptPage({ params }: { params: Promise<{ slug: 
   });
   if (!live) redirect(`/assessments/${slug}/readiness`);
   void session;
+
+  /**
+   * The hall and Safe Exam Browser, checked HERE too (Phase 12y.7).
+   *
+   * Every request a sitting makes goes through `guardAttempt`, which runs
+   * this — the heartbeat, each telemetry flush, each snapshot, the submit.
+   * This page went through none of them: a signed-in user with an attempt
+   * in progress, and then the paper. So a candidate who started a
+   * KIOSK_SEB sitting inside Safe Exam Browser could open this same URL in
+   * an ordinary browser and read every question, and a lab-supervised
+   * paper could be read from anywhere. They could not submit from there,
+   * but the questions were the thing worth taking.
+   */
+  const containment = await checkPageContainment({
+    pathname: `/assessments/${slug}/attempt`,
+    attempt: {
+      id: live.id,
+      userId: user.id,
+      assessmentId: assessment.id,
+      examSessionId: live.examSessionId,
+      proctorMode: assessment.proctorMode,
+    },
+  });
+  if (!containment.ok) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center gap-4 p-6">
+        <h1 className="font-display text-2xl font-semibold text-text">This paper cannot be opened here</h1>
+        <p className="text-sm text-text-secondary">{containment.message}</p>
+        <p className="text-sm text-text-secondary">
+          Your sitting is safe and its clock is unchanged. Open it the way your department told you to, or ask your
+          invigilator.
+        </p>
+        <p className="text-sm">
+          <a href={`/assessments/${slug}/readiness`} className="text-primary underline-offset-2 hover:underline">
+            ← Back to the checks
+          </a>
+        </p>
+      </main>
+    );
+  }
 
   const attempt = live;
   const layout = attemptLayoutOf(attempt);

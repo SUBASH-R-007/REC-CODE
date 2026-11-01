@@ -38,6 +38,7 @@ export * from "./exam-result";
 export * from "./exam-randomise";
 export * from "./cidr";
 export * from "./seb";
+export * from "./seb-config";
 export * from "./device";
 export * from "./triage";
 export * from "./roster";

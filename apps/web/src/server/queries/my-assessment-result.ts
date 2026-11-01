@@ -6,6 +6,7 @@ import {
   type CodingMarkingInput,
   type Verdict,
 } from "@recx/shared";
+import { hiddenTestsOf, type HiddenTestView } from "@/lib/judge/view";
 import { db } from "@/lib/db";
 
 /**
@@ -40,6 +41,20 @@ export interface MyQuestionResult {
   readonly outcome: string;
   readonly points: number;
   readonly maxPoints: number;
+  /**
+   * Every test the judge ran on this question, passed or not (Phase
+   * 12y.6) — asked for: "students must be able to view the results of
+   * hidden test case whether they passed or not".
+   *
+   * The HIDDEN projection, through `hiddenTestsOf`: an index, a verdict, a
+   * time and a memory figure, and nothing else. A candidate learns which
+   * case they failed, which is what tells them what they got wrong; they
+   * do not learn the case itself, because the next cohort sits the same
+   * paper. Empty for a multiple-choice question and for one left blank.
+   */
+  readonly tests: readonly HiddenTestView[];
+  readonly passedCases: number;
+  readonly totalCases: number;
 }
 
 export interface MyAssessmentResult {
@@ -108,7 +123,16 @@ export async function myAssessmentResult(args: {
   const submissions = await db.submission.findMany({
     where: { assessmentAttemptId: attempt.id, userId: args.userId },
     orderBy: { createdAt: "desc" },
-    select: { problemVersionId: true, verdict: true, score: true, maxScore: true, status: true },
+    select: {
+      problemVersionId: true,
+      verdict: true,
+      score: true,
+      maxScore: true,
+      status: true,
+      testResults: true,
+      passedCases: true,
+      totalCases: true,
+    },
   });
   const latest = new Map<string, (typeof submissions)[number]>();
   for (const submission of submissions) {
@@ -174,9 +198,13 @@ export async function myAssessmentResult(args: {
       outcome: mark.outcome,
       points: mark.points,
       maxPoints: mark.maxPoints,
+      tests: [],
+      passedCases: 0,
+      totalCases: 0,
     })),
     ...result.coding.marks.map((mark) => {
       const problem = paper.problems.find((p) => p.id === mark.questionId);
+      const submission = problem ? latest.get(problem.problemVersionId) : undefined;
       return {
         kind: "coding" as const,
         position: problem?.position ?? 0,
@@ -184,6 +212,9 @@ export async function myAssessmentResult(args: {
         outcome: mark.outcome,
         points: mark.points,
         maxPoints: mark.maxPoints,
+        tests: submission ? hiddenTestsOf(submission.testResults) : [],
+        passedCases: submission?.passedCases ?? 0,
+        totalCases: submission?.totalCases ?? 0,
       };
     }),
   ].sort((a, b) => a.position - b.position);

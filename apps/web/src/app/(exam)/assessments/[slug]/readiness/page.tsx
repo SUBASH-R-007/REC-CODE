@@ -1,8 +1,15 @@
-import { isFinished, paperQuestionCount, requiresDeviceAssertion, type AttemptStatus } from "@recx/shared";
+import {
+  isFinished,
+  paperQuestionCount,
+  requiresDeviceAssertion,
+  sebLaunchUrl,
+  type AttemptStatus,
+} from "@recx/shared";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
+import { pageRequest, verifySebRequest } from "@/lib/exam/containment";
 import { START_REFUSAL_MESSAGES, type StartRefusal } from "@/lib/exam/start";
 import { ReadinessCheck } from "@/components/exam/readiness-check";
 
@@ -93,6 +100,28 @@ export default async function ReadinessPage({
   const over =
     latest !== null && isFinished(latest.status as AttemptStatus) && spent >= assessment.maxAttempts;
 
+  /**
+   * Safe Exam Browser, before anything else (Phase 12y.8).
+   *
+   * A kiosk paper refused at Start with "open the exam from the .seb file
+   * your department gave you" — and this product produced no such file,
+   * so the sentence named something that did not exist. It does now, and
+   * the candidate gets the one thing that actually helps: a link that
+   * opens the exam IN Safe Exam Browser, with the plain download beside it
+   * for a machine that does not know the `seb:` scheme.
+   *
+   * Until SEB is verified the checks and the Start button are not drawn at
+   * all. The server would refuse the start anyway, but walking somebody
+   * through four readiness checks and a consent box before telling them
+   * they are in the wrong browser is a waste of the ten minutes before an
+   * exam.
+   */
+  const kiosk = assessment.proctorMode === "KIOSK_SEB";
+  const here = await pageRequest(`/assessments/${slug}/readiness`);
+  const origin = new URL(here.url).origin;
+  const sebVerdict = kiosk ? await verifySebRequest(here, null) : null;
+  const sebOk = sebVerdict === null || sebVerdict.ok;
+
   const refusal = over
     ? START_REFUSAL_MESSAGES[spent === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left"]
     : refused && refused in START_REFUSAL_MESSAGES
@@ -129,7 +158,33 @@ export default async function ReadinessPage({
         ) : null}
       </div>
 
-      {over ? (
+      {kiosk && !sebOk ? (
+        <div className="space-y-4 px-6 pb-10">
+          <div className="rounded-xl border border-warning/40 bg-warning-subtle p-4 text-sm">
+            <h3 className="font-display text-base font-semibold">This paper is sat in Safe Exam Browser</h3>
+            <p className="mt-2">{sebVerdict?.ok === false ? sebVerdict.message : null}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={sebLaunchUrl(`${origin}/api/exam/seb-config/${slug}`)}
+              className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              Open in Safe Exam Browser
+            </a>
+            <a
+              href={`/api/exam/seb-config/${slug}`}
+              className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              Download the .seb file
+            </a>
+          </div>
+          <p className="text-xs text-muted">
+            The first link hands the settings straight to Safe Exam Browser. If nothing happens, it is not installed on
+            this machine — download the file and open it with Safe Exam Browser, or ask your invigilator. Your
+            attempts are untouched either way; nothing has started.
+          </p>
+        </div>
+      ) : over ? (
         <div className="px-6 pb-10">
           <p className="text-sm text-text-secondary">
             Nothing more to do here. Your result appears on your assessment list when it is published.

@@ -65,8 +65,28 @@ export const listMyAssessments = cache(async (user: {
   const now = new Date();
   const rows = await db.assessment.findMany({
     where: {
-      // DRAFT is never visible to a student; ARCHIVED is history.
-      status: { in: ["PUBLISHED", "OPEN", "CLOSED"] },
+      /**
+       * DRAFT is never visible to a student. ARCHIVED was excluded too —
+       * "ARCHIVED is history" — and that was right while this list was
+       * only a way IN to a paper: nobody needs to see a paper they can no
+       * longer sit.
+       *
+       * Phase 12y.5: it is also the way to a RESULT, and a department
+       * archives a paper as soon as it is done with it. So a released
+       * result vanished from the student's list the moment the paper was
+       * filed away — which is exactly when they go looking for it.
+       * (Reported from use: "when the results are published, it is not
+       * visible to the students". Both released papers on the development
+       * database were ARCHIVED.)
+       *
+       * An archived paper is listed only when this student SAT it: their
+       * own history, not a filing cabinet of papers that were never
+       * theirs.
+       */
+      OR: [
+        { status: { in: ["PUBLISHED", "OPEN", "CLOSED"] } },
+        { status: "ARCHIVED", attempts: { some: { userId: user.id } } },
+      ],
       AND: [
         { OR: [{ audienceBatchYear: null }, { audienceBatchYear: user.batchYear }] },
         { OR: [{ audienceDepartmentCode: null }, { audienceDepartmentCode: user.departmentCode }] },

@@ -45,6 +45,7 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
   let db: import("@recx/db").Db;
   let results: typeof import("@/server/queries/admin-assessment-results");
   let mine: typeof import("@/server/queries/my-assessment-result");
+  let listing: typeof import("@/server/queries/assessments");
   let scopeWhere: typeof import("@/lib/auth/scope-where");
 
   let staffId = "";
@@ -71,6 +72,7 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
     });
     results = await import("@/server/queries/admin-assessment-results");
     mine = await import("@/server/queries/my-assessment-result");
+    listing = await import("@/server/queries/assessments");
     scopeWhere = await import("@/lib/auth/scope-where");
 
     const staff = await db.user.create({
@@ -266,6 +268,18 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
           status: "DONE",
           judgeState: "DONE",
           verdict: args.verdict,
+          /**
+           * Per-test results, as the judge stores them (Phase 12y.6). The
+           * student's result reads these through `hiddenTestsOf`, which
+           * is the projection that decides a candidate sees an index and
+           * a verdict and never the case itself.
+           */
+          testResults: [
+            { i: 0, v: "AC", ms: 12, kb: 2048 },
+            { i: 1, v: args.verdict === "AC" ? "AC" : "WA", ms: 15, kb: 2048 },
+          ] as never,
+          passedCases: args.verdict === "AC" ? 2 : 1,
+          totalCases: 2,
           sourceSha256: randomBytes(32).toString("hex"),
           sourceBytes: 42,
         } as never,
@@ -394,6 +408,36 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
       expect(theirs?.attemptId).not.toBe((await mine.myAssessmentResult({ userId: candidateId, slug: tag }))?.attemptId);
     });
 
+    it("shows which hidden tests passed, and nothing about what was in them", async () => {
+      await db.assessment.update({
+        where: { id: assessmentId },
+        data: { resultsPublishedAt: new Date(), resultsPublishedById: staffId },
+      });
+      const result = await mine.myAssessmentResult({ userId: candidateId, slug: tag });
+      const coding = result?.questions.find((q) => q.kind === "coding");
+      expect(coding?.totalCases).toBe(2);
+      expect(coding?.passedCases).toBe(2);
+      expect(coding?.tests.map((t) => [t.i, t.v])).toEqual([
+        [0, "AC"],
+        [1, "AC"],
+      ]);
+      // Four keys and no more: the hidden-test rule in lib/judge/view.ts.
+      for (const test of coding?.tests ?? []) {
+        expect(Object.keys(test).sort()).toEqual(["i", "kb", "ms", "v"]);
+      }
+    });
+
+    it("shows the failing case by number, which is the part a candidate can learn from", async () => {
+      const other = await db.user.findFirstOrThrow({
+        where: { collegeId: `${tag}-b`.toUpperCase().slice(0, 32) },
+        select: { id: true },
+      });
+      const result = await mine.myAssessmentResult({ userId: other.id, slug: tag });
+      const coding = result?.questions.find((q) => q.kind === "coding");
+      expect(coding?.passedCases).toBe(1);
+      expect(coding?.tests.map((t) => t.v)).toEqual(["AC", "WA"]);
+    });
+
     it("never names the right answer, only what the candidate's own came to", async () => {
       // A student holding the key is a student who can pass it on, and the
       // next cohort sits the same paper.
@@ -403,6 +447,45 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
       expect(serialised).not.toMatch(/Merge sort|Quicksort|Heapsort/);
       // And nothing about a rank, a cohort or anybody else's mark.
       expect(serialised).not.toMatch(/rank|percentile|average|median/i);
+    });
+
+    it("still lists the paper after it is ARCHIVED, so a released result does not vanish when it is filed away", async () => {
+      /**
+       * The bug this is here to refuse, reported from use: "when the
+       * results are published, it is not visible to the students". The
+       * list asked for `status IN (PUBLISHED, OPEN, CLOSED)` — "ARCHIVED
+       * is history" — which was right while the list was only a way IN to
+       * a paper. It is also the way to a RESULT now, and a department
+       * archives a paper as soon as it is done with it, which is exactly
+       * when a student goes looking. Both released papers on the
+       * development database were ARCHIVED and neither was reachable.
+       *
+       * A fresh object per call on purpose: `listMyAssessments` is wrapped
+       * in React's `cache()`, which keys on argument identity, so reusing
+       * one would hand back the previous state's answer.
+       */
+      await db.assessment.update({
+        where: { id: assessmentId },
+        data: { status: "ARCHIVED", resultsPublishedAt: new Date(), resultsPublishedById: staffId },
+      });
+      const candidate = await db.user.findFirstOrThrow({
+        where: { collegeId: `${tag}-a`.toUpperCase().slice(0, 32) },
+        select: { id: true, batchYear: true, departmentCode: true, section: true },
+      });
+
+      const listed = await listing.listMyAssessments({ ...candidate });
+      const row = listed.find((entry) => entry.slug === tag);
+      expect(row, "an archived paper the student sat is not listed").toBeDefined();
+      expect(row?.resultReleased).toBe(true);
+
+      // And it is their OWN history, not a filing cabinet: a student who
+      // never sat it does not see it.
+      const stranger = await db.user.findFirstOrThrow({
+        where: { collegeId: `${tag}-staff`.toUpperCase().slice(0, 32) },
+        select: { id: true, batchYear: true, departmentCode: true, section: true },
+      });
+      const theirs = await listing.listMyAssessments({ ...stranger });
+      expect(theirs.some((entry) => entry.slug === tag)).toBe(false);
     });
 
     it("goes back to showing nothing if the result is withdrawn", async () => {

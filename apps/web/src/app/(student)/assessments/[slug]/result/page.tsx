@@ -99,20 +99,54 @@ export default async function MyAssessmentResultPage({ params }: { params: Promi
         <CardBody>
           <ul className="divide-y divide-border">
             {result.questions.map((question, index) => (
-              <li key={`${question.kind}-${question.position}-${index}`} className="flex flex-wrap items-baseline justify-between gap-2 py-3">
-                <div>
-                  <p className="text-sm font-medium">
-                    {question.position}. {question.label}
+              <li key={`${question.kind}-${question.position}-${index}`} className="py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {question.position}. {question.label}
+                    </p>
+                    <p className="text-xs text-text-secondary">
+                      {OUTCOME_LABEL[question.outcome] ?? question.outcome}
+                      {question.totalCases > 0
+                        ? ` · ${question.passedCases} of ${question.totalCases} tests passed`
+                        : ""}
+                    </p>
+                  </div>
+                  <p className="tabular-nums text-sm">
+                    {formatMarks(question.points)}
+                    <span className="text-muted"> / {formatMarks(question.maxPoints)}</span>
+                    {question.outcome === "pending" ? (
+                      <Badge tone="warning" className="ml-2">judging</Badge>
+                    ) : null}
                   </p>
-                  <p className="text-xs text-text-secondary">{OUTCOME_LABEL[question.outcome] ?? question.outcome}</p>
                 </div>
-                <p className="tabular-nums text-sm">
-                  {formatMarks(question.points)}
-                  <span className="text-muted"> / {formatMarks(question.maxPoints)}</span>
-                  {question.outcome === "pending" ? (
-                    <Badge tone="warning" className="ml-2">judging</Badge>
-                  ) : null}
-                </p>
+
+                {/**
+                  * Every test the judge ran, passed or not (Phase 12y.6).
+                  *
+                  * The index and the verdict, never the case: a candidate
+                  * learns WHICH one they failed, which is what tells them
+                  * what they got wrong, and not what was in it — the next
+                  * cohort sits the same paper. `hiddenTestsOf` is the one
+                  * projection that decides that, shared with the practice
+                  * console.
+                  */}
+                {question.tests.length > 0 ? (
+                  <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`Tests for question ${question.position}`}>
+                    {question.tests.map((test) => (
+                      <li
+                        key={test.i}
+                        className={
+                          test.v === "AC"
+                            ? "rounded-md border border-success/30 bg-success-subtle px-2 py-0.5 text-xs text-success"
+                            : "rounded-md border border-danger/30 bg-danger-subtle px-2 py-0.5 text-xs text-danger"
+                        }
+                      >
+                        <span className="font-mono">#{test.i + 1}</span> {test.v === "AC" ? "passed" : test.v}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -120,8 +154,9 @@ export default async function MyAssessmentResultPage({ params }: { params: Promi
       </Card>
 
       <p className="text-xs text-muted">
-        This is your own result. It shows no rank and no comparison with anybody else, and your department sees the
-        same marks you do. If you think a question was marked wrongly, speak to them — they can correct it.
+        This is your own result. The tests show which cases your answer passed and which it did not, never what was
+        in them. It shows no rank and no comparison with anybody else, and your department sees the same marks you
+        do. If you think a question was marked wrongly, speak to them — they can correct it.
       </p>
     </div>
   );

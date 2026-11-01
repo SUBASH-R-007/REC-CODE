@@ -248,6 +248,22 @@ const storedTestSchema = z.object({
 });
 type StoredTest = z.infer<typeof storedTestSchema>;
 
+/**
+ * Every stored test as the HIDDEN projection — index, verdict, time,
+ * memory, and nothing else (Phase 12y.6).
+ *
+ * For a surface that has to say whether each case passed without being a
+ * console: the assessment result a candidate reads after their department
+ * releases the marks. It goes through `hiddenTest()` rather than mapping
+ * the rows itself, so the four-key rule at the top of this file has one
+ * implementation and `view.test.ts` guards this caller too. A sample's
+ * input and expected output are not withheld here because they are
+ * secret — they are simply not what this view is for.
+ */
+export function hiddenTestsOf(testResults: unknown): HiddenTestView[] {
+  return parseStoredTests(testResults).map(hiddenTest);
+}
+
 function parseStoredTests(raw: unknown): StoredTest[] {
   if (!Array.isArray(raw)) return [];
   const byIndex = new Map<number, StoredTest>();

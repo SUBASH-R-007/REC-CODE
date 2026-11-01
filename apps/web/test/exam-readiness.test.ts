@@ -51,8 +51,16 @@ describe("the readiness page", () => {
     // route, so the answer arrives before four checks and a consent box.
     expect(page).toContain("isFinished(latest.status as AttemptStatus)");
     expect(page).toContain("spent >= assessment.maxAttempts");
-    // And the form is not rendered at all in that case.
-    expect(page).toMatch(/\{over \?/);
+    /**
+     * And the form is not rendered at all in that case. Matched as "the
+     * `over` branch comes before `<ReadinessCheck`" rather than as the
+     * exact opening of the expression: Phase 12y.8 put the Safe Exam
+     * Browser panel in front of both, so `{over ?` became `: over ?`, and
+     * a test that pinned the punctuation failed on a change that moved
+     * nothing it was about.
+     */
+    expect(page).toContain("over ?");
+    expect(page.indexOf("over ?")).toBeLessThan(page.indexOf("<ReadinessCheck"));
     expect(page).toContain("<ReadinessCheck");
   });
 });
