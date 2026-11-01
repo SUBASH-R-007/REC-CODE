@@ -2963,6 +2963,15 @@ model Assessment {
   /// precompute papers for every assessment. Never sent to a client, never
   /// logged, never in an audit row.
   seedSecret                  String           @default(dbgenerated("(gen_random_uuid())::text"))
+  /// Which toolchains this paper may be answered in (Phase 13a). EMPTY
+  /// means every enabled language, which is what every paper written
+  /// before this column held and what "the department restricted
+  /// nothing" means. A candidate picks one of these per question and the
+  /// set is frozen into their layout at start, so changing it cannot move
+  /// a sitting that is already running. Not in the published-immutable
+  /// tuple: a department that forgot Java an hour before the next hall
+  /// must be able to add it, and nobody already sitting is affected.
+  allowedLanguages            String[]         @default([])
   /// Audience; null = every value of that dimension.
   audienceBatchYear           Int?
   audienceDepartmentCode      String?

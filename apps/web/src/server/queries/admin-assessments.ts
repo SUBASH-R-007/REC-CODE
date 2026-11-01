@@ -1,5 +1,11 @@
 import "server-only";
-import { paperQuestionCount, sebSettingKey } from "@recx/shared";
+import {
+  normalisePaperLanguages,
+  paperLanguageViews,
+  paperQuestionCount,
+  sebSettingKey,
+  type PaperLanguageView,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -70,6 +76,24 @@ export interface AssessmentDetail extends AssessmentRow {
   /** Phase 12s: the two per-paper watching options. */
   refuseOutsidePaste: boolean;
   sitInPopup: boolean;
+  /**
+   * Which languages the paper may be answered in (Phase 13a), as the
+   * administrator saved it: EMPTY means every enabled language, and the
+   * page says so rather than showing an empty list that reads like a
+   * paper nobody can sit.
+   */
+  allowedLanguages: string[];
+  /**
+   * Every language this platform can actually judge right now -- the
+   * enabled, current `LanguageConfig` keys. The checkbox list is drawn
+   * from these, so an administrator can only promise candidates something
+   * the judge can run.
+   *
+   * As views, with their labels already resolved: the catalog they come
+   * from carries every compiler argv for eleven toolchains and has no
+   * business in a browser bundle (see `PaperLanguageView`).
+   */
+  availableLanguages: PaperLanguageView[];
   audienceBatchYear: number | null;
   audienceDepartmentCode: string | null;
   audienceSection: string | null;
@@ -134,6 +158,7 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
       strictMode: true,
       refuseOutsidePaste: true,
       sitInPopup: true,
+      allowedLanguages: true,
       audienceBatchYear: true,
       audienceDepartmentCode: true,
       audienceSection: true,
@@ -180,6 +205,16 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
    * copy of it in every proxy log between here and there for no reason
    * anybody needs.
    */
+  /**
+   * What the judge can run right now (Phase 13a). Read here rather than in
+   * the page so the two lists -- what this paper accepts and what exists --
+   * come from one query and cannot disagree.
+   */
+  const installed = await db.languageConfig.findMany({
+    where: { enabled: true, isCurrent: true },
+    select: { key: true },
+  });
+
   const collegeRow = await db.platformSetting.findUnique({ where: { key: sebSettingKey(null) }, select: { value: true } });
   const collegeValue = collegeRow?.value as { configKey?: unknown; browserExamKey?: unknown } | null | undefined;
   const sebCollegeKeys = {
@@ -205,6 +240,8 @@ export async function getAssessmentDetail(id: string): Promise<AssessmentDetail 
     strictMode: row.strictMode,
     refuseOutsidePaste: row.refuseOutsidePaste,
     sitInPopup: row.sitInPopup,
+    allowedLanguages: normalisePaperLanguages(row.allowedLanguages),
+    availableLanguages: paperLanguageViews(normalisePaperLanguages(installed.map((language) => language.key))),
     audienceBatchYear: row.audienceBatchYear,
     audienceDepartmentCode: row.audienceDepartmentCode,
     audienceSection: row.audienceSection,

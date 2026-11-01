@@ -8,6 +8,9 @@ import {
   ASSESSMENT_PROCTORED_MESSAGE,
   FOCUS_LIMIT_ACTIONS,
   LAB_NEEDS_ALLOWLIST_MESSAGE,
+  isLanguageKey,
+  normalisePaperLanguages,
+  paperLanguageLabel,
   PLACEMENT_REQUIRES_LAB_MESSAGE,
   paperQuestionCount,
   parseCidr,
@@ -819,4 +822,116 @@ export async function setSebKeys(
     revalidatePath(`/admin/assessments/${hall.assessmentId}`);
     return { configKey: config.key !== null, browserExamKey: browser.key !== null };
   }, "setSebKeys");
+}
+
+const languagesSchema = z
+  .object({
+    assessmentId: idSchema,
+    /**
+     * The keys an administrator ticked. An empty list is a valid answer and
+     * means "no restriction" — not "nothing", which is what makes the
+     * checkbox list safe to clear.
+     */
+    languages: z.array(z.string().trim().min(1).max(32)).max(32),
+  })
+  .strict();
+export type SetAssessmentLanguagesInput = z.input<typeof languagesSchema>;
+
+/**
+ * Choose which languages a paper may be answered in (Phase 13a).
+ *
+ * The thing a department could not say. A sitting had ONE language and
+ * nobody chose it: `cpp20`, or whatever enabled toolchain key sorted
+ * first, frozen into every attempt. Running a Python paper meant disabling
+ * C++ for the whole college — every other exam and every practice page
+ * included — and a candidate who writes Java sat down in front of a C++
+ * editor with no way to change it.
+ *
+ * Three decisions here are worth stating.
+ *
+ * **Empty means every enabled language**, which is what every paper
+ * already in the database holds. A paper nobody has restricted must not
+ * become a paper nobody can sit.
+ *
+ * **An unknown key is refused by name**, rather than dropped quietly. The
+ * reader (`normalisePaperLanguages`) drops what it does not recognise,
+ * because it also reads rows written by older builds; a person ticking
+ * boxes gets told.
+ *
+ * **A language with no enabled, current `LanguageConfig` is refused too.**
+ * An administrator picking a toolchain this platform cannot run would be
+ * promising candidates an editor whose every Run comes back "that language
+ * is not available right now". The list is checked against what is
+ * installed at the moment it is saved, and `paperLanguages()` intersects
+ * again when a paper is sat, because a toolchain can be disabled in
+ * between.
+ *
+ * Editable after the paper leaves DRAFT, unlike its window or its clock.
+ * It cannot move under anybody sitting — the accepted set is frozen into
+ * each attempt's layout at start — so the only thing an edit changes is
+ * what the NEXT candidate is offered, and a department that forgot a
+ * language an hour before the second hall has to be able to add it.
+ */
+export async function setAssessmentLanguages(
+  input: SetAssessmentLanguagesInput,
+): Promise<ActionResult<{ languages: string[] }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = languagesSchema.parse(input);
+
+    const assessment = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: { id: true, slug: true, status: true, allowedLanguages: true },
+    });
+    if (!assessment) throw new NotFoundError("That assessment was not found.");
+
+    const unknown = parsed.languages.filter((key) => !isLanguageKey(key));
+    if (unknown.length > 0) {
+      throw new ValidationError(`This platform has no language called ${unknown.join(", ")}.`);
+    }
+    const wanted = normalisePaperLanguages(parsed.languages);
+
+    const installed = await db.languageConfig.findMany({
+      where: { enabled: true, isCurrent: true },
+      select: { key: true },
+    });
+    const available = new Set(normalisePaperLanguages(installed.map((row) => row.key)));
+    const missing = wanted.filter((key) => !available.has(key));
+    if (missing.length > 0) {
+      throw new ValidationError(
+        `${missing.map(paperLanguageLabel).join(", ")} is not enabled on this platform right now, so a candidate could not be judged in it. Ask a super-admin to enable the toolchain first, or leave it out.`,
+      );
+    }
+
+    const before = normalisePaperLanguages(assessment.allowedLanguages);
+    if (before.join(",") === wanted.join(",")) {
+      throw new ConflictError("That is already what this paper accepts.");
+    }
+
+    await db.assessment.update({ where: { id: assessment.id }, data: { allowedLanguages: wanted } });
+
+    await audit({
+      actorId: actor.id,
+      action: "assessment.languages_changed",
+      entityType: "Assessment",
+      entityId: assessment.id,
+      // A term of the paper, changeable after publication: who widened or
+      // narrowed what a cohort could answer in is exactly what a dispute
+      // asks about.
+      sensitivity: "SENSITIVE",
+      metadata: {
+        slug: assessment.slug,
+        status: assessment.status,
+        before,
+        after: wanted,
+        /** Said plainly, because an empty list does not read as "all". */
+        restricted: wanted.length > 0,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath(`/admin/assessments/${assessment.id}`);
+    revalidatePath("/admin/assessments");
+    return { languages: wanted };
+  }, "setAssessmentLanguages");
 }

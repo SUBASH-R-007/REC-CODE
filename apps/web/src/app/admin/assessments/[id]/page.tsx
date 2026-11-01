@@ -14,6 +14,7 @@ import {
   StatusButtons,
 } from "@/components/admin/assessments/assessment-forms";
 import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
+import { AssessmentLanguagesForm } from "@/components/admin/assessments/languages-form";
 
 export const metadata: Metadata = { title: "Assessment" };
 
@@ -136,6 +137,27 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
         </dl>
         <div className="mt-5 border-t border-border pt-5">
           <StatusButtons assessmentId={assessment.id} status={assessment.status} />
+        </div>
+      </Card>
+
+      {/**
+        * Which languages the paper is answered in (Phase 13a).
+        *
+        * Beside the terms rather than inside them, because unlike the
+        * window and the clock it stays editable after publication: it
+        * cannot move under anybody sitting (each attempt freezes its own
+        * set) so the only thing an edit changes is what the next
+        * candidate is offered.
+        */}
+      <Card className="mb-6 p-5">
+        <CardHeader title="Languages" subtitle="What candidates may answer the programs in." />
+        <div className="mt-4">
+          <AssessmentLanguagesForm
+            assessmentId={assessment.id}
+            available={assessment.availableLanguages}
+            selected={assessment.allowedLanguages}
+            published={assessment.status !== "DRAFT"}
+          />
         </div>
       </Card>
 

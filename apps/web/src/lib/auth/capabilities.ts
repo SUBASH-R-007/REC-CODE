@@ -478,6 +478,10 @@ export const STAFF_CAPABILITIES = deepFreeze([
       // hall; the action itself keeps the college-wide pair to a
       // super-admin, since that one is every exam's default.
       "admin-assessments#setSebKeys",
+      // Phase 13a: which languages the paper may be answered in. Staff,
+      // and editable after publication -- the set is frozen into each
+      // attempt at start, so an edit reaches only the next candidate.
+      "admin-assessments#setAssessmentLanguages",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

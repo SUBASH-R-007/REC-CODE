@@ -36,6 +36,7 @@ export * from "./exam-snapshot";
 export * from "./exam-mcq";
 export * from "./exam-result";
 export * from "./exam-randomise";
+export * from "./paper-languages";
 export * from "./cidr";
 export * from "./seb";
 export * from "./seb-config";
