@@ -229,4 +229,56 @@ test.describe("exam journey", () => {
     await expect(candidate.getByRole("button", { name: /Start the assessment/i })).toHaveCount(0);
     await expect(candidate.getByRole("button", { name: "Test full screen" })).toHaveCount(0);
   });
+
+  test("a paper that is only multiple-choice can be sat and handed in", async ({ browser }) => {
+    /**
+     * The case that fired 12t's empty-paper guard on the FIRST render, and
+     * the case every count in the product got wrong at least once: a paper
+     * with no coding question at all. The mixed journey above would not
+     * have caught it — it opens on a coding question, so `question` was
+     * defined and the guard stayed quiet until the candidate clicked the
+     * second item.
+     *
+     * Short on purpose: everything the long journey asserts about saving,
+     * running and handing in holds whatever the paper is made of. What is
+     * particular here is that one question is a whole paper.
+     */
+    test.setTimeout(8 * 60_000);
+    const staffContext = await contextAs(browser, "admin");
+    const admin = await staffContext.newPage();
+    const paper = await authorPaper(admin, { runId: `${runId}q`, codingQuestion: false });
+
+    const candidateContext = await contextAs(browser, "journey", {
+      permissions: ["clipboard-read", "clipboard-write"],
+    });
+    const candidate = await candidateContext.newPage();
+    await openPage(candidate, `/assessments/${paper.slug}/readiness`);
+    // One question, not none, and the singular rather than "1 questions".
+    await expect(candidate.getByText(/1 question(?!s)/).first()).toBeVisible({ timeout: 60_000 });
+
+    await walkReadinessChecks(candidate);
+    await candidate.getByRole("button", { name: "Start the assessment" }).click();
+    await expect(candidate).toHaveURL(new RegExp(`/assessments/${paper.slug}/attempt$`), {
+      timeout: 120_000,
+    });
+
+    // The sitting itself, which used to be replaced by "This paper has no
+    // questions. Tell your invigilator." the moment it rendered.
+    await expect(candidate.getByText(/Question 1 of 1/).first()).toBeVisible({ timeout: 60_000 });
+    await expect(candidate.getByText(/no questions/i)).toHaveCount(0);
+    await expect(candidate.getByRole("radio", { name: RIGHT_OPTION })).toBeVisible();
+    // No editor and no Run on a paper with nothing to run.
+    await expect(candidate.locator("[data-editor-root]")).toHaveCount(0);
+    await expect(candidate.getByRole("button", { name: /Run samples/ })).toHaveCount(0);
+
+    await candidate.getByRole("radio", { name: RIGHT_OPTION }).check();
+    await expect(savePill(candidate)).toContainText(/Saved/, { timeout: 60_000 });
+    await expect(candidate.getByText(/1 of 1 answered/)).toBeVisible({ timeout: 60_000 });
+
+    await candidate.getByRole("button", { name: "Submit test" }).click();
+    await candidate.getByRole("button", { name: "Yes, submit" }).click();
+    await expect(candidate.getByText(/Handed in\. Your answers are saved/)).toBeVisible({
+      timeout: 120_000,
+    });
+  });
 });
