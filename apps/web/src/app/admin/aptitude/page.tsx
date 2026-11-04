@@ -154,57 +154,60 @@ export default async function AdminAptitudePage({ searchParams }: { searchParams
         />
       ) : (
         <TableFrame label="Aptitude questions">
-          <thead>
-            <tr className={THEAD_ROW}>
-              <th className={TH}>Code</th>
-              <th className={TH}>Topic</th>
-              <th className={TH}>Kind</th>
-              <th className={TH}>Status</th>
-              <th className={TH}>Working</th>
-              <th className={TH}>Served</th>
-              <th className={TH}>Accuracy</th>
-              <th className={TH}>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.rows.map((row) => (
-              <tr key={row.id} className={TBODY_ROW}>
-                <td className={TD}>
-                  <Link href={`/admin/aptitude/${row.id}`} className="font-medium text-primary underline">
-                    {row.displayCode}
-                  </Link>
-                </td>
-                <td className={TD}>
-                  <div>{row.topicLabel}</div>
-                  <div className="text-xs text-muted">{APTITUDE_AREA_LABEL[row.area]}</div>
-                </td>
-                <td className={TD}>{row.kind.toLowerCase().replaceAll("_", " ")}</td>
-                <td className={TD}>
-                  <Badge tone={row.status === "PUBLISHED" ? "success" : row.status === "RETIRED" ? "default" : "info"}>
-                    {row.status.toLowerCase().replace("_", " ")}
-                  </Badge>
-                </td>
-                <td className={TD}>
-                  {/* The explanation is mandatory at publish, so a draft with
-                      none is a draft that cannot be published yet. */}
-                  {row.hasExplanation ? (
-                    <span className="text-text-secondary">Written</span>
-                  ) : (
-                    <span className="text-warning">Missing</span>
-                  )}
-                </td>
-                <td className={TD}>{row.timesServed}</td>
-                <td className={TD}>
-                  {row.accuracyPercent === null ? (
-                    <span className="text-muted">—</span>
-                  ) : (
-                    <span>{row.accuracyPercent}%</span>
-                  )}
-                </td>
-                <td className={TD}>{formatDateTime(row.updatedAt)}</td>
+          <table className="w-full text-sm">
+            <caption className="sr-only">Every aptitude question in the bank that matches the filters</caption>
+            <thead>
+              <tr className={THEAD_ROW}>
+                <th className={TH}>Code</th>
+                <th className={TH}>Topic</th>
+                <th className={TH}>Kind</th>
+                <th className={TH}>Status</th>
+                <th className={TH}>Working</th>
+                <th className={TH}>Served</th>
+                <th className={TH}>Accuracy</th>
+                <th className={TH}>Updated</th>
               </tr>
-            ))}
-          </tbody>
+            </thead>
+            <tbody>
+              {list.rows.map((row) => (
+                <tr key={row.id} className={TBODY_ROW}>
+                  <td className={TD}>
+                    <Link href={`/admin/aptitude/${row.id}`} className="font-medium text-primary underline">
+                      {row.displayCode}
+                    </Link>
+                  </td>
+                  <td className={TD}>
+                    <div>{row.topicLabel}</div>
+                    <div className="text-xs text-muted">{APTITUDE_AREA_LABEL[row.area]}</div>
+                  </td>
+                  <td className={TD}>{row.kind.toLowerCase().replaceAll("_", " ")}</td>
+                  <td className={TD}>
+                    <Badge tone={row.status === "PUBLISHED" ? "success" : row.status === "RETIRED" ? "default" : "info"}>
+                      {row.status.toLowerCase().replace("_", " ")}
+                    </Badge>
+                  </td>
+                  <td className={TD}>
+                    {/* The explanation is mandatory at publish, so a draft with
+                        none is a draft that cannot be published yet. */}
+                    {row.hasExplanation ? (
+                      <span className="text-text-secondary">Written</span>
+                    ) : (
+                      <span className="text-warning">Missing</span>
+                    )}
+                  </td>
+                  <td className={TD}>{row.timesServed}</td>
+                  <td className={TD}>
+                    {row.accuracyPercent === null ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <span>{row.accuracyPercent}%</span>
+                    )}
+                  </td>
+                  <td className={TD}>{formatDateTime(row.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </TableFrame>
       )}
 
@@ -233,22 +236,25 @@ export default async function AdminAptitudePage({ searchParams }: { searchParams
           and a candidate is told it is not their problem — so check here before publishing a pattern.
         </p>
         <TableFrame label="Published pool by topic">
-          <thead>
-            <tr className={THEAD_ROW}>
-              <th className={TH}>Topic</th>
-              <th className={TH}>Published</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pool.map((entry) => (
-              <tr key={entry.topic} className={TBODY_ROW}>
-                <td className={TD}>{entry.label}</td>
-                <td className={TD}>
-                  {entry.count === 0 ? <span className="text-warning">None</span> : entry.count}
-                </td>
+          <table className="w-full text-sm">
+            <caption className="sr-only">How many published questions each topic has</caption>
+            <thead>
+              <tr className={THEAD_ROW}>
+                <th className={TH}>Topic</th>
+                <th className={TH}>Published</th>
               </tr>
-            ))}
-          </tbody>
+            </thead>
+            <tbody>
+              {pool.map((entry) => (
+                <tr key={entry.topic} className={TBODY_ROW}>
+                  <td className={TD}>{entry.label}</td>
+                  <td className={TD}>
+                    {entry.count === 0 ? <span className="text-warning">None</span> : entry.count}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </TableFrame>
       </section>
     </div>

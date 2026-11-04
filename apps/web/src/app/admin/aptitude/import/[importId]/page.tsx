@@ -88,64 +88,67 @@ export default async function AptitudeImportResultPage({
 
       {rows.length === 0 ? null : (
         <TableFrame label="Rows">
-          <thead>
-            <tr className={THEAD_ROW}>
-              <th className={TH}>Line</th>
-              <th className={TH}>Result</th>
-              <th className={TH}>Question</th>
-              <th className={TH}>What happened</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.line} className={TBODY_ROW}>
-                <td className={TD}>{row.line}</td>
-                <td className={TD}>
-                  <Badge
-                    tone={
-                      row.status === "FAILED"
-                        ? "danger"
-                        : row.status === "CREATED"
-                          ? "success"
-                          : row.status === "NEW_REVISION"
-                            ? "info"
-                            : "default"
-                    }
-                  >
-                    {row.status === "NEW_REVISION" ? "revised" : row.status.toLowerCase()}
-                  </Badge>
-                </td>
-                <td className={TD}>
-                  {row.questionId ? (
-                    <Link href={`/admin/aptitude/${row.questionId}`} className="text-primary underline">
-                      {row.displayCode ?? "Open"}
-                    </Link>
-                  ) : (
-                    <span className="text-muted">{row.displayCode ?? "—"}</span>
-                  )}
-                </td>
-                <td className={TD}>
-                  {issues(row.errors).length > 0 ? (
-                    <ul className="space-y-1 text-sm text-danger">
-                      {issues(row.errors).map((issue, index) => (
-                        <li key={index}>{issue.message ?? "Refused."}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {issues(row.warnings).length > 0 ? (
-                    <ul className="mt-1 space-y-1 text-xs text-warning">
-                      {issues(row.warnings).map((issue, index) => (
-                        <li key={index}>{issue.message}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  {issues(row.errors).length === 0 && issues(row.warnings).length === 0 ? (
-                    <span className="text-muted">—</span>
-                  ) : null}
-                </td>
+          <table className="w-full text-sm">
+            <caption className="sr-only">Every row of this import and what happened to it</caption>
+            <thead>
+              <tr className={THEAD_ROW}>
+                <th className={TH}>Line</th>
+                <th className={TH}>Result</th>
+                <th className={TH}>Question</th>
+                <th className={TH}>What happened</th>
               </tr>
-            ))}
-          </tbody>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.line} className={TBODY_ROW}>
+                  <td className={TD}>{row.line}</td>
+                  <td className={TD}>
+                    <Badge
+                      tone={
+                        row.status === "FAILED"
+                          ? "danger"
+                          : row.status === "CREATED"
+                            ? "success"
+                            : row.status === "NEW_REVISION"
+                              ? "info"
+                              : "default"
+                      }
+                    >
+                      {row.status === "NEW_REVISION" ? "revised" : row.status.toLowerCase()}
+                    </Badge>
+                  </td>
+                  <td className={TD}>
+                    {row.questionId ? (
+                      <Link href={`/admin/aptitude/${row.questionId}`} className="text-primary underline">
+                        {row.displayCode ?? "Open"}
+                      </Link>
+                    ) : (
+                      <span className="text-muted">{row.displayCode ?? "—"}</span>
+                    )}
+                  </td>
+                  <td className={TD}>
+                    {issues(row.errors).length > 0 ? (
+                      <ul className="space-y-1 text-sm text-danger">
+                        {issues(row.errors).map((issue, index) => (
+                          <li key={index}>{issue.message ?? "Refused."}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {issues(row.warnings).length > 0 ? (
+                      <ul className="mt-1 space-y-1 text-xs text-warning">
+                        {issues(row.warnings).map((issue, index) => (
+                          <li key={index}>{issue.message}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {issues(row.errors).length === 0 && issues(row.warnings).length === 0 ? (
+                      <span className="text-muted">—</span>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </TableFrame>
       )}
 

@@ -40,45 +40,48 @@ export default async function AptitudeImportPage({ searchParams }: { searchParam
           <p className="text-sm text-text-secondary">Nothing has been imported yet.</p>
         ) : (
           <TableFrame label="Import history">
-            <thead>
-              <tr className={THEAD_ROW}>
-                <th className={TH}>File</th>
-                <th className={TH}>When</th>
-                <th className={TH}>Result</th>
-                <th className={TH}>Created</th>
-                <th className={TH}>Revised</th>
-                <th className={TH}>Unchanged</th>
-                <th className={TH}>Failed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.rows.map((row) => (
-                <tr key={row.id} className={TBODY_ROW}>
-                  <td className={TD}>
-                    <Link href={`/admin/aptitude/import/${row.id}`} className="text-primary underline">
-                      {row.fileName}
-                    </Link>
-                    <div className="text-xs text-muted">
-                      {Math.max(1, Math.round(row.sizeBytes / 1024))} KB · {row.via}
-                      {row.defaultTopic ? ` · default ${row.defaultTopic}` : ""}
-                    </div>
-                  </td>
-                  <td className={TD}>{formatDateTime(row.startedAt)}</td>
-                  <td className={TD}>
-                    <Badge tone={row.status === "DONE" ? "success" : row.status === "FAILED" ? "danger" : "info"}>
-                      {row.status.toLowerCase()}
-                    </Badge>
-                    {row.error ? <div className="mt-1 max-w-sm text-xs text-danger">{row.error}</div> : null}
-                  </td>
-                  <td className={TD}>{row.created}</td>
-                  <td className={TD}>{row.revised}</td>
-                  <td className={TD}>{row.unchanged}</td>
-                  <td className={TD}>
-                    {row.failed > 0 ? <span className="text-warning">{row.failed}</span> : row.failed}
-                  </td>
+            <table className="w-full text-sm">
+              <caption className="sr-only">Earlier aptitude imports and what each one did</caption>
+              <thead>
+                <tr className={THEAD_ROW}>
+                  <th className={TH}>File</th>
+                  <th className={TH}>When</th>
+                  <th className={TH}>Result</th>
+                  <th className={TH}>Created</th>
+                  <th className={TH}>Revised</th>
+                  <th className={TH}>Unchanged</th>
+                  <th className={TH}>Failed</th>
                 </tr>
-              ))}
-            </tbody>
+              </thead>
+              <tbody>
+                {history.rows.map((row) => (
+                  <tr key={row.id} className={TBODY_ROW}>
+                    <td className={TD}>
+                      <Link href={`/admin/aptitude/import/${row.id}`} className="text-primary underline">
+                        {row.fileName}
+                      </Link>
+                      <div className="text-xs text-muted">
+                        {Math.max(1, Math.round(row.sizeBytes / 1024))} KB · {row.via}
+                        {row.defaultTopic ? ` · default ${row.defaultTopic}` : ""}
+                      </div>
+                    </td>
+                    <td className={TD}>{formatDateTime(row.startedAt)}</td>
+                    <td className={TD}>
+                      <Badge tone={row.status === "DONE" ? "success" : row.status === "FAILED" ? "danger" : "info"}>
+                        {row.status.toLowerCase()}
+                      </Badge>
+                      {row.error ? <div className="mt-1 max-w-sm text-xs text-danger">{row.error}</div> : null}
+                    </td>
+                    <td className={TD}>{row.created}</td>
+                    <td className={TD}>{row.revised}</td>
+                    <td className={TD}>{row.unchanged}</td>
+                    <td className={TD}>
+                      {row.failed > 0 ? <span className="text-warning">{row.failed}</span> : row.failed}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </TableFrame>
         )}
 
