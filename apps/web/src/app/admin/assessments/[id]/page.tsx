@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, ButtonLink, Card, CardHeader, EmptyState } from "@recx/design";
-import { requirePageRole } from "@/lib/auth/guards";
+import { requireAdminScopePage } from "@/lib/auth/scope";
 import { formatCampusDateTime } from "@/lib/help/copy";
 import { getAssessmentDetail } from "@/server/queries/admin-assessments";
 import {
@@ -34,7 +34,14 @@ const MODE_LABEL: Record<string, string> = {
  * editable; after that the database refuses, and so does this page.
  */
 export default async function AdminAssessmentPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageRole("ADMIN", "SUPER_ADMIN");
+  /**
+   * The scoped guard (Phase 13j). This page reads no candidate itself,
+   * but it shares a query module with the list, which counts sittings by
+   * the reader's own students -- and `tests/repo/admin-scope.test.ts` R8
+   * asks every page that can reach a student read to load its scope
+   * rather than rely on which export it happens to call.
+   */
+  await requireAdminScopePage();
   const { id } = await params;
   const assessment = await getAssessmentDetail(id);
   if (!assessment) notFound();

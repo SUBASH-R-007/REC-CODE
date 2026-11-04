@@ -6,6 +6,7 @@ import {
   sebSettingKey,
   type PaperLanguageView,
 } from "@recx/shared";
+import { scopedStudentWhere, type StudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
 
 /**
@@ -26,13 +27,86 @@ export interface AssessmentRow {
   durationSec: number;
   questions: number;
   halls: number;
+  /**
+   * Sittings by THIS reader's own students (Phase 13j).
+   *
+   * It used to be every sitting in the college, which disagreed with the
+   * results page -- scoped since 12y -- for any administrator who does
+   * not cover the whole college. Two numbers for the same word on two
+   * screens is how somebody concludes that marks are missing.
+   */
   attempts: number;
+  /**
+   * Of those, the ones in progress right now. The number an invigilator
+   * opens this page for during an exam.
+   */
+  sitting: number;
+  /** Phase 13j: whether the marks have been let out to the candidates. */
+  resultsPublishedAt: Date | null;
 }
 
-export async function listAssessments(): Promise<AssessmentRow[]> {
+/** Phase 13j: one page of the list, and how to ask for the next. */
+export interface AssessmentPage {
+  readonly rows: readonly AssessmentRow[];
+  /** Every paper matching the filters, not just this page. */
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly pageCount: number;
+}
+
+export const ASSESSMENT_PAGE_SIZE = 25;
+
+/** The statuses the filter offers, in the order a paper moves through them. */
+export const ASSESSMENT_STATUSES = ["DRAFT", "PUBLISHED", "OPEN", "CLOSED", "ARCHIVED"] as const;
+export type AssessmentStatusFilter = (typeof ASSESSMENT_STATUSES)[number];
+
+export interface AssessmentQuery {
+  /** Matched against the title and the address, case-insensitively. */
+  readonly search?: string;
+  readonly status?: AssessmentStatusFilter | null;
+  /** 1-based. Out-of-range pages clamp rather than 404. */
+  readonly page?: number;
+}
+
+/**
+ * One page of the assessment list (Phase 13j).
+ *
+ * It used to be `take: 200` and nothing else: no search, no filter, and a
+ * silent cap that would quietly stop showing a department's older papers
+ * in the third year of use -- with nothing on the page saying so, which is
+ * the part that makes a cap worse than a page break. A college runs
+ * hundreds of papers a year and the one somebody wants is usually named,
+ * so the list is searched, filtered by status and paged, and says how many
+ * matched.
+ *
+ * `mode: "insensitive"` on both fields: staff type a paper's name the way
+ * they say it, not the way it was capitalised when it was created.
+ */
+export async function listAssessments(scope: StudentScope, query: AssessmentQuery = {}): Promise<AssessmentPage> {
+  const search = (query.search ?? "").trim();
+  const where = {
+    ...(query.status ? { status: query.status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { title: { contains: search, mode: "insensitive" as const } },
+            { slug: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
+  const total = await db.assessment.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / ASSESSMENT_PAGE_SIZE));
+  // Clamped rather than refused: a stale "page 9" link after somebody
+  // archives half the list should show the last page, not an error.
+  const page = Math.min(Math.max(1, Math.trunc(query.page ?? 1)), pageCount);
+
   const rows = await db.assessment.findMany({
+    where,
     orderBy: [{ opensAt: "desc" }],
-    take: 200,
+    skip: (page - 1) * ASSESSMENT_PAGE_SIZE,
+    take: ASSESSMENT_PAGE_SIZE,
     select: {
       id: true,
       slug: true,
@@ -43,32 +117,74 @@ export async function listAssessments(): Promise<AssessmentRow[]> {
       opensAt: true,
       closesAt: true,
       durationSec: true,
+      resultsPublishedAt: true,
       // Both kinds (Phase 12v): the Questions column read `problems` alone,
       // so an all-multiple-choice paper showed 0 to the staff member who
       // had just authored it.
-      _count: { select: { problems: true, mcqs: true, sessions: true, attempts: true } },
+      _count: { select: { problems: true, mcqs: true, sessions: true } },
     },
   });
-  return rows.map((r) => ({
-    id: r.id,
-    slug: r.slug,
-    title: r.title,
-    status: r.status,
-    proctorMode: r.proctorMode,
-    affectsPlacementEligibility: r.affectsPlacementEligibility,
-    opensAt: r.opensAt,
-    closesAt: r.closesAt,
-    durationSec: r.durationSec,
-    questions: paperQuestionCount({ problems: { length: r._count.problems }, mcqs: { length: r._count.mcqs } }),
-    halls: r._count.sessions,
-    attempts: r._count.attempts,
-  }));
+
+  /**
+   * The sittings, for the papers on THIS page only and for the reader's
+   * own students, in one grouped query.
+   *
+   * Not `_count: { attempts: true }`, for two reasons: it holds one count
+   * per relation, so the total and the in-progress count cannot both live
+   * there, and it cannot carry the AdminScope filter at all -- which is
+   * how this column came to show a department administrator the whole
+   * college's sittings beside a results page showing them their own.
+   *
+   * DISCONNECTED counts as sitting: a candidate whose connection dropped
+   * is still in the hall with the clock running, and an invigilator
+   * reading "12 sitting now" needs them in the number.
+   */
+  const sat = new Map<string, { total: number; live: number }>();
+  if (rows.length > 0) {
+    const grouped = await db.assessmentAttempt.groupBy({
+      by: ["assessmentId", "status"],
+      where: { assessmentId: { in: rows.map((r) => r.id) }, user: scopedStudentWhere(scope) },
+      _count: { _all: true },
+    });
+    for (const row of grouped) {
+      const entry = sat.get(row.assessmentId) ?? { total: 0, live: 0 };
+      entry.total += row._count._all;
+      if (row.status === "IN_PROGRESS" || row.status === "DISCONNECTED") entry.live += row._count._all;
+      sat.set(row.assessmentId, entry);
+    }
+  }
+
+  return {
+    rows: rows.map((r) => ({
+      id: r.id,
+      slug: r.slug,
+      title: r.title,
+      status: r.status,
+      proctorMode: r.proctorMode,
+      affectsPlacementEligibility: r.affectsPlacementEligibility,
+      opensAt: r.opensAt,
+      closesAt: r.closesAt,
+      durationSec: r.durationSec,
+      questions: paperQuestionCount({ problems: { length: r._count.problems }, mcqs: { length: r._count.mcqs } }),
+      halls: r._count.sessions,
+      attempts: sat.get(r.id)?.total ?? 0,
+      sitting: sat.get(r.id)?.live ?? 0,
+      resultsPublishedAt: r.resultsPublishedAt,
+    })),
+    total,
+    page,
+    pageSize: ASSESSMENT_PAGE_SIZE,
+    pageCount,
+  };
 }
 
-export interface AssessmentDetail extends AssessmentRow {
+/**
+ * `sitting` is the list's own column (Phase 13j) and costs a grouped query
+ * over the page's ids; the detail page is one paper and has the hall
+ * dashboard beside it, so it is omitted here rather than computed twice.
+ */
+export interface AssessmentDetail extends Omit<AssessmentRow, "sitting"> {
   instructions: string;
-  /** Phase 12y: when staff released the marks to the candidates, if they have. */
-  resultsPublishedAt: Date | null;
   maxAttempts: number;
   maxFocusWarnings: number;
   onLimit: string;

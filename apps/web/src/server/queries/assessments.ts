@@ -1,6 +1,13 @@
 import "server-only";
 import { cache } from "react";
-import { isFinished, paperQuestionCount, type AttemptStatus } from "@recx/shared";
+import {
+  isFinished,
+  normalisePaperLanguages,
+  paperLanguageViews,
+  paperQuestionCount,
+  type AttemptStatus,
+  type PaperLanguageView,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 
 /**
@@ -37,6 +44,37 @@ export interface AssessmentListItem {
   readonly resultReleased: boolean;
   /** What the student can do about it right now. */
   readonly action: "start" | "resume" | "finished" | "upcoming" | "closed" | "no_attempts_left";
+  /**
+   * Which languages a coding question on this paper may be answered in
+   * (Phase 13j), with their labels resolved here -- the catalog carries
+   * every compiler argv for eleven toolchains and has no business in a
+   * candidate's bundle.
+   *
+   * It is the one thing a candidate wants to know before a coding paper
+   * and the list never said it: a paper restricted to C is a different
+   * evening's revision from one that takes Python. Empty means the paper
+   * restricts nothing, and the page says so rather than showing a blank.
+   * The per-question narrowing is not here: it is frozen into each
+   * attempt and shown in the sitting, and listing it before the paper
+   * would describe questions the candidate has not been shown.
+   */
+  readonly languages: readonly PaperLanguageView[];
+  /** Phase 13j: which group the page files it under. */
+  readonly group: "open" | "upcoming" | "past";
+}
+
+/**
+ * Which heading a paper belongs under (Phase 13j).
+ *
+ * From what the candidate can DO, not from the window alone: a paper
+ * whose attempts are used up is in the past whatever its clock says, and
+ * one being sat right now is open even if it technically closed a minute
+ * ago -- the resume link has to stay reachable.
+ */
+function groupFor(action: AssessmentListItem["action"]): AssessmentListItem["group"] {
+  if (action === "start" || action === "resume") return "open";
+  if (action === "upcoming") return "upcoming";
+  return "past";
 }
 
 function actionFor(args: {
@@ -94,7 +132,15 @@ export const listMyAssessments = cache(async (user: {
       ],
     },
     orderBy: [{ opensAt: "desc" }],
-    take: 50,
+    /**
+     * Phase 13j: 50 was a silent cap. A student in their fourth year has
+     * sat more papers than that, and the ones it dropped were the oldest
+     * -- which is where a released result somebody is looking for lives.
+     * 300 is above any real student's total, and the page groups the
+     * list, so the finished ones are out of the way rather than in front
+     * of the paper opening this afternoon.
+     */
+    take: 300,
     select: {
       slug: true,
       title: true,
@@ -112,6 +158,8 @@ export const listMyAssessments = cache(async (user: {
        * them a paper of multiple-choice questions had none.
        */
       _count: { select: { problems: true, mcqs: true } },
+      // Phase 13j: what a candidate may answer the programs in.
+      allowedLanguages: true,
       attempts: {
         where: { userId: user.id },
         orderBy: { attemptNumber: "desc" },
@@ -125,6 +173,14 @@ export const listMyAssessments = cache(async (user: {
     const attempt = row.attempts[0]
       ? { status: row.attempts[0].status as AttemptStatus, attemptNumber: row.attempts[0].attemptNumber }
       : null;
+    const action = actionFor({
+      now,
+      opensAt: row.opensAt,
+      closesAt: row.closesAt,
+      status: row.status,
+      maxAttempts: row.maxAttempts,
+      attempt,
+    });
     return {
       slug: row.slug,
       title: row.title,
@@ -140,14 +196,9 @@ export const listMyAssessments = cache(async (user: {
       maxAttempts: row.maxAttempts,
       attempt,
       resultReleased: row.resultsPublishedAt !== null && attempt !== null && attempt.status !== "IN_PROGRESS",
-      action: actionFor({
-        now,
-        opensAt: row.opensAt,
-        closesAt: row.closesAt,
-        status: row.status,
-        maxAttempts: row.maxAttempts,
-        attempt,
-      }),
+      action,
+      languages: paperLanguageViews(normalisePaperLanguages(row.allowedLanguages)),
+      group: groupFor(action),
     };
   });
 });
