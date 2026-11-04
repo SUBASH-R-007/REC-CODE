@@ -500,6 +500,14 @@ export const STAFF_CAPABILITIES = deepFreeze([
       "admin-assessments#setAssessmentLanguages",
       // Phase 13c: narrowing one question to some of those languages.
       "admin-assessments#setQuestionLanguages",
+      /**
+       * Phase 13i: awarding a question to everyone, or withdrawing
+       * it from the paper, after a cohort has answered it. Staff,
+       * because it is the remedy for a question the department
+       * itself set; always with a reason, audited at SENSITIVE,
+       * and it moves marks that may already be released.
+       */
+      "admin-assessments#setQuestionModeration",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

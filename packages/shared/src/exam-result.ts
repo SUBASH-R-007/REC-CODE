@@ -1,4 +1,5 @@
 import { markMcqs, type McqTotals } from "./exam-mcq";
+import { moderatedMark, type QuestionModeration } from "./exam-moderation";
 import type { Verdict } from "./verdict";
 
 /**
@@ -51,7 +52,11 @@ export type CodingOutcome =
   /** The judge failed on it (IE). Not a zero, and not the candidate's fault. */
   | "unjudged"
   /** Nothing was handed in for this question. */
-  | "blank";
+  | "blank"
+  /** Phase 13i: moderated to full marks for everybody. */
+  | "awarded"
+  /** Phase 13i: withdrawn from the paper, for everybody. */
+  | "dropped";
 
 export interface CodingMarkingInput {
   /** The paper's question, not the problem: a paper may ask the same problem twice. */
@@ -80,6 +85,11 @@ export interface CodingMarkingInput {
      */
     readonly language?: string | null;
   } | null;
+  /**
+   * Phase 13i: awarded to everyone, or dropped from the paper. Absent
+   * means NONE.
+   */
+  readonly moderation?: QuestionModeration;
 }
 
 export interface CodingMark {
@@ -105,6 +115,9 @@ export interface CodingTotals {
   readonly pending: number;
   readonly unjudged: number;
   readonly blank: number;
+  /** Phase 13i: awarded to everyone, and withdrawn from the paper. */
+  readonly awarded: number;
+  readonly dropped: number;
 }
 
 /** Verdicts that earn nothing and are the candidate's own result. */
@@ -115,6 +128,15 @@ export function markCoding(input: CodingMarkingInput): CodingMark {
   const submission = input.submission;
   // On the base, so every outcome below carries it and none can forget to.
   const base = { questionId: input.questionId, maxPoints, language: submission?.language ?? null };
+
+  /**
+   * Moderation first (Phase 13i), before even "was anything handed in":
+   * a question dropped from the paper is worth nothing to anybody, and
+   * one awarded to everyone is worth its marks to the candidate who
+   * never reached it as much as to the one who answered it.
+   */
+  const moderated = moderatedMark(input.moderation, maxPoints);
+  if (moderated) return { ...base, verdict: submission?.verdict ?? null, ...moderated };
 
   if (submission === null) return { ...base, outcome: "blank", verdict: null, points: 0, language: null };
   if (!submission.terminal || submission.verdict === null) {
@@ -158,6 +180,8 @@ export function markCodingQuestions(inputs: readonly CodingMarkingInput[]): Codi
     pending: count("pending"),
     unjudged: count("unjudged"),
     blank: count("blank"),
+    awarded: count("awarded"),
+    dropped: count("dropped"),
   };
 }
 

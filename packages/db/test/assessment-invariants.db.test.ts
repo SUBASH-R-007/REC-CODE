@@ -355,6 +355,149 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     });
   });
 
+  /**
+   * Phase 13i: a moderated question carries a reason and a stamp, and an
+   * unmoderated one carries neither.
+   *
+   * The CHECK is not belt and braces over the server action. A mark that
+   * moved with nothing recorded is a mark nobody can explain to the
+   * candidate who lost it or defend to the one who gained it, and the
+   * half-states are exactly what a later edit, an import or a hand-written
+   * UPDATE would leave behind: a question marked DROPPED with no reason,
+   * or a reason left over on a question whose moderation was undone.
+   */
+  describe("a moderated question records why and who", () => {
+    const moderated = { moderationReason: "Two of the options were correct.", moderatedById: "", moderatedAt: new Date() };
+
+    it("refuses a moderated coding question with no reason", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const message = await refused(() =>
+        db.assessmentProblem.create({
+          data: {
+            assessmentId: a.id,
+            problemVersionId: frozenVersionId,
+            position: 1,
+            moderation: "DROPPED",
+            moderatedById: superId,
+            moderatedAt: new Date(),
+          },
+        }),
+      );
+      expect(message).toMatch(/moderation_check/);
+    });
+
+    it("refuses a moderated coding question with no stamp", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const message = await refused(() =>
+        db.assessmentProblem.create({
+          data: {
+            assessmentId: a.id,
+            problemVersionId: frozenVersionId,
+            position: 1,
+            moderation: "FULL_MARKS",
+            moderationReason: "The checker rejected a correct program.",
+          },
+        }),
+      );
+      expect(message).toMatch(/moderation_check/);
+    });
+
+    it("refuses a reason left behind on an unmoderated question", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const message = await refused(() =>
+        db.assessmentMcq.create({
+          data: {
+            assessmentId: a.id,
+            position: 1,
+            stem: "Which of these is stable?",
+            options: ["Quicksort", "Merge sort"],
+            correctIndex: 1,
+            moderationReason: "left over from an undone moderation",
+          },
+        }),
+      );
+      expect(message).toMatch(/moderation_check/);
+    });
+
+    it("accepts a complete moderation on either kind, and undoing it", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const m = await db.assessmentMcq.create({
+        data: {
+          assessmentId: a.id,
+          position: 1,
+          stem: "Which of these is stable?",
+          options: ["Quicksort", "Merge sort"],
+          correctIndex: 1,
+          ...moderated,
+          moderation: "FULL_MARKS",
+          moderatedById: superId,
+        },
+        select: { id: true, moderation: true },
+      });
+      expect(m.moderation).toBe("FULL_MARKS");
+
+      const p = await db.assessmentProblem.create({
+        data: {
+          assessmentId: a.id,
+          problemVersionId: frozenVersionId,
+          position: 2,
+          ...moderated,
+          moderation: "DROPPED",
+          moderatedById: superId,
+        },
+        select: { id: true, moderation: true },
+      });
+      expect(p.moderation).toBe("DROPPED");
+
+      // Undoing clears all three together, which the CHECK requires.
+      const undone = await db.assessmentMcq.update({
+        where: { id: m.id },
+        data: { moderation: "NONE", moderationReason: null, moderatedById: null, moderatedAt: null },
+        select: { moderation: true, moderationReason: true },
+      });
+      expect(undone).toEqual({ moderation: "NONE", moderationReason: null });
+    });
+
+    it("refuses undoing that leaves the reason behind", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const m = await db.assessmentMcq.create({
+        data: {
+          assessmentId: a.id,
+          position: 1,
+          stem: "Which of these is stable?",
+          options: ["Quicksort", "Merge sort"],
+          correctIndex: 1,
+          ...moderated,
+          moderation: "DROPPED",
+          moderatedById: superId,
+        },
+        select: { id: true },
+      });
+      const message = await refused(() =>
+        db.assessmentMcq.update({ where: { id: m.id }, data: { moderation: "NONE" } }),
+      );
+      expect(message).toMatch(/moderation_check/);
+    });
+
+    it("refuses a reason too short to be one", async () => {
+      const a = await db.assessment.create({ data: assessment(), select: { id: true } });
+      const message = await refused(() =>
+        db.assessmentProblem.create({
+          data: {
+            assessmentId: a.id,
+            problemVersionId: frozenVersionId,
+            position: 1,
+            moderation: "DROPPED",
+            moderationReason: "bad",
+            moderatedById: superId,
+            moderatedAt: new Date(),
+          },
+        }),
+      );
+      expect(message).toMatch(/moderation_check/);
+    });
+  });
+
   it("SNAPSHOT_JUMP is a ProctorEventKind, so an accommodation can exempt it", async () => {
     const [row] = await db.$queryRawUnsafe<Array<{ ok: boolean }>>(
       `SELECT 'SNAPSHOT_JUMP' = ANY(enum_range(NULL::"public"."ProctorEventKind")::text[]) AS ok`,

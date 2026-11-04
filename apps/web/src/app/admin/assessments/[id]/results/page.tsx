@@ -13,6 +13,7 @@ import {
   getAssessmentResults,
   type AssessmentAttendance,
 } from "@/server/queries/admin-assessment-results";
+import { ModerateQuestion } from "@/components/admin/assessments/moderate-question";
 import { RejudgePaper } from "@/components/admin/assessments/rejudge-paper";
 import { ReleaseResults } from "@/components/admin/assessments/release-results";
 
@@ -297,6 +298,9 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                       <th scope="col" className={TD}>None</th>
                       <th scope="col" className={TD}>Blank</th>
                       <th scope="col" className={TD}>Open</th>
+                      {/* Phase 13i: the two remedies, beside the numbers
+                          that are the reason to reach for one. */}
+                      <th scope="col" className={TD}>After the paper</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -307,19 +311,44 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                           {q.kind === "mcq" ? <Badge tone="info" className="mr-2">choice</Badge> : null}
                           {q.label}
                         </td>
-                        <td className={`${TD} tabular-nums`}>{formatMarks(q.maxPoints)}</td>
+                        <td className={`${TD} tabular-nums`}>
+                          {/* Phase 13i: a withdrawn question is worth
+                              nothing to anybody, and a column that still
+                              showed its marks would not add up to the
+                              total in the header. */}
+                          {q.moderation === "DROPPED" ? (
+                            <span className="text-muted" title={`Was worth ${formatMarks(q.maxPoints)}`}>
+                              —
+                            </span>
+                          ) : (
+                            formatMarks(q.maxPoints)
+                          )}
+                        </td>
                         <td className={`${TD} tabular-nums`}>{q.fullMarks}</td>
                         <td className={`${TD} tabular-nums`}>{q.kind === "mcq" ? "—" : q.partial}</td>
                         <td className={`${TD} tabular-nums`}>{q.zero}</td>
                         <td className={`${TD} tabular-nums`}>{q.blank}</td>
                         <td className={`${TD} tabular-nums`}>{q.open > 0 ? q.open : "—"}</td>
+                        <td className={TD}>
+                          <ModerateQuestion
+                            assessmentId={id}
+                            kind={q.kind}
+                            questionId={q.questionId}
+                            moderation={q.moderation}
+                            reason={q.moderationReason}
+                            marks={`${formatMarks(q.maxPoints)} marks`}
+                          />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <p className="mt-3 text-xs text-muted">
-                <strong>Blank</strong> is a question nobody answered — which on a timed paper usually means they never
+                <strong>Awarded to all</strong> gives every candidate the question's marks whatever they answered;
+                <strong> withdrawn</strong> takes the question out of the total as well, so the paper is worth less and
+                the percentages stay honest. Both are recorded with your reason, and both move marks that may already
+                have been released. <strong>Blank</strong> is a question nobody answered — which on a timed paper usually means they never
                 reached it. <strong>Open</strong> is still being judged, or the judge failed on it; neither is counted
                 as a wrong answer.
               </p>

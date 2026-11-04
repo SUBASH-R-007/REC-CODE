@@ -3025,11 +3025,35 @@ model AssessmentProblem {
   /// question accepting something the paper does not is refused by the
   /// action and intersected away on read.
   allowedLanguages String[]       @default([])
+  /// Phase 13i: what an examiner decided about this question AFTER the
+  /// paper was sat. The arithmetic is in
+  /// packages/shared/src/exam-moderation.ts; the CHECK below requires a
+  /// reason and a stamp whenever this is not NONE, because a mark that
+  /// moved with nothing recorded is a mark nobody can defend.
+  moderation       QuestionModeration @default(NONE)
+  moderationReason String?
+  /// The staff member who decided it. No relation deliberately: a
+  /// back-relation on User for an administrative stamp is not worth it,
+  /// the id is only ever resolved through staffOnlyWhere, and no staff row
+  /// is ever hard-deleted (admin-scope R10).
+  moderatedById    String?
+  moderatedAt      DateTime?
   createdAt        DateTime       @default(now())
 
   @@unique([assessmentId, position])
   @@unique([assessmentId, problemVersionId])
   @@index([problemVersionId])
+}
+
+/// What an examiner decided about one question AFTER the paper was sat
+/// (Phase 13i). NONE is every question until somebody decides otherwise.
+enum QuestionModeration {
+  NONE
+  /// Everybody gets the question's marks, whatever they answered.
+  FULL_MARKS
+  /// The question counts for nobody and leaves the paper's total, so a
+  /// paper of 50 becomes a paper of 47 and the percentages stay honest.
+  DROPPED
 }
 
 /// A multiple-choice question on an assessment (Phase 12r).
@@ -3050,7 +3074,10 @@ model AssessmentProblem {
 ///   - CHECK AssessmentMcq_stem_check / _points_check / _position_check;
 ///   - TRIGGER AssessmentMcq_position_free: the palette is ONE numbered list,
 ///     so a position already taken by an AssessmentProblem is refused (and
-///     the mirror trigger refuses it the other way round).
+///     the mirror trigger refuses it the other way round);
+///   - CHECK AssessmentMcq_moderation_check: a moderated question carries a
+///     reason of 5 to 500 characters and a stamp, and an unmoderated one
+///     carries neither (Phase 13i).
 model AssessmentMcq {
   id           String     @id @default(cuid())
   assessmentId String
@@ -3066,6 +3093,19 @@ model AssessmentMcq {
   points       Float      @default(1)
   /// Shown after the paper closes, if the author wrote one.
   explanation  String?    @db.Text
+  /// Phase 13i: what an examiner decided about this question AFTER the
+  /// paper was sat. The arithmetic is in
+  /// packages/shared/src/exam-moderation.ts; the CHECK below requires a
+  /// reason and a stamp whenever this is not NONE, because a mark that
+  /// moved with nothing recorded is a mark nobody can defend.
+  moderation       QuestionModeration @default(NONE)
+  moderationReason String?
+  /// The staff member who decided it. No relation deliberately: a
+  /// back-relation on User for an administrative stamp is not worth it,
+  /// the id is only ever resolved through staffOnlyWhere, and no staff row
+  /// is ever hard-deleted (admin-scope R10).
+  moderatedById    String?
+  moderatedAt      DateTime?
   createdAt    DateTime   @default(now())
 
   answers AssessmentMcqAnswer[]

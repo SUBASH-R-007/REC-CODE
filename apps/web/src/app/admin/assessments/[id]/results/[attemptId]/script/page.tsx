@@ -34,6 +34,9 @@ const OUTCOME: Record<string, { label: string; tone: "default" | "info" | "succe
   rejected: { label: "Not accepted", tone: "danger" },
   pending: { label: "Still being judged", tone: "warning" },
   unjudged: { label: "The judge failed on it", tone: "warning" },
+  // Phase 13i: moderated after the paper, which overrides what they wrote.
+  awarded: { label: "Awarded to everyone", tone: "info" },
+  dropped: { label: "Withdrawn from the paper", tone: "warning" },
 };
 
 function Marks({ answer }: { answer: ScriptAnswer }) {
@@ -132,6 +135,23 @@ export default async function AttemptScriptPage({
                   }
                 />
                 <CardBody>
+                  {/* Phase 13i: said before the answer, because it decides
+                      what the answer is worth. */}
+                  {answer.moderation !== "NONE" ? (
+                    <p className="mb-3 rounded-lg border border-info/40 bg-info-subtle p-2 text-sm">
+                      <strong>
+                        {answer.moderation === "DROPPED"
+                          ? "Withdrawn from the paper after it was sat."
+                          : "Awarded to every candidate after the paper was sat."}
+                      </strong>{" "}
+                      {answer.moderation === "DROPPED"
+                        ? "It counts for nobody and its marks are out of the total."
+                        : "Everybody has its full marks whatever they answered."}
+                      {answer.moderationReason ? (
+                        <span className="mt-1 block text-text-secondary">{answer.moderationReason}</span>
+                      ) : null}
+                    </p>
+                  ) : null}
                   {answer.kind === "mcq" ? (
                     <>
                       <p className="whitespace-pre-wrap text-sm text-text">{answer.stem}</p>

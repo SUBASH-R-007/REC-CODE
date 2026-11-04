@@ -26,6 +26,8 @@
  *     than silently marked zero.
  */
 
+import { moderatedMark, type QuestionModeration } from "./exam-moderation";
+
 export interface McqMarkingInput {
   readonly mcqId: string;
   readonly points: number;
@@ -35,9 +37,15 @@ export interface McqMarkingInput {
   readonly correctIndex: number;
   /** What the candidate picked, as a position in the order they were shown. */
   readonly chosenShownIndex: number | null;
+  /**
+   * Phase 13i: awarded to everyone, or dropped from the paper. Absent
+   * means NONE, which is what every question is until somebody decides
+   * otherwise after the paper has been sat.
+   */
+  readonly moderation?: QuestionModeration;
 }
 
-export type McqOutcome = "correct" | "wrong" | "blank" | "corrupt";
+export type McqOutcome = "correct" | "wrong" | "blank" | "corrupt" | "awarded" | "dropped";
 
 export interface McqMark {
   readonly mcqId: string;
@@ -54,6 +62,9 @@ export interface McqTotals {
   readonly wrong: number;
   readonly blank: number;
   readonly corrupt: number;
+  /** Phase 13i: awarded to everyone, and withdrawn from the paper. */
+  readonly awarded: number;
+  readonly dropped: number;
 }
 
 /** Which stored option a candidate picked, or null when they picked none. */
@@ -68,6 +79,15 @@ export function storedIndexOf(input: Pick<McqMarkingInput, "optionOrder" | "chos
 
 export function markMcq(input: McqMarkingInput): McqMark {
   const max = input.points;
+  /**
+   * Moderation first (Phase 13i). A question awarded to everyone or
+   * dropped from the paper is not marked at all, so what the candidate
+   * left behind -- blank, wrong, even a corrupt index -- cannot change
+   * what it is worth. Deciding it afterwards would mean a dropped
+   * question still reported somebody as having got it wrong.
+   */
+  const moderated = moderatedMark(input.moderation, max);
+  if (moderated) return { mcqId: input.mcqId, ...moderated };
   if (input.chosenShownIndex === null) {
     return { mcqId: input.mcqId, outcome: "blank", points: 0, maxPoints: max };
   }
@@ -99,6 +119,8 @@ export function markMcqs(inputs: readonly McqMarkingInput[]): McqTotals {
     wrong: count("wrong"),
     blank: count("blank"),
     corrupt: count("corrupt"),
+    awarded: count("awarded"),
+    dropped: count("dropped"),
   };
 }
 

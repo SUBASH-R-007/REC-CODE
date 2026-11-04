@@ -12,16 +12,18 @@ import {
   normalisePaperLanguages,
   paperLanguageLabel,
   PLACEMENT_REQUIRES_LAB_MESSAGE,
+  QUESTION_MODERATIONS,
   paperQuestionCount,
   parseCidr,
   parseSebKey,
   mayAffectPlacement,
   requiresCidrAllowlist,
+  type QuestionModeration,
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { requireActionRole } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
-import { ConflictError, NotFoundError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
+import { AppError, ConflictError, NotFoundError, ValidationError, runAction, type ActionResult } from "@/lib/errors";
 import { requestIpHash } from "@/lib/ip";
 import { acceptedLanguagesFor } from "@/lib/exam/language";
 
@@ -1041,4 +1043,128 @@ export async function setQuestionLanguages(
     revalidatePath(`/admin/assessments/${question.assessment.id}`);
     return { languages: wanted };
   }, "setQuestionLanguages");
+}
+
+// ── Moderating a question after the paper ──────────────────────────────
+
+const moderationSchema = z
+  .object({
+    assessmentId: idSchema,
+    kind: z.enum(["coding", "mcq"]),
+    questionId: idSchema,
+    moderation: z.enum(QUESTION_MODERATIONS),
+    reason: z
+      .string()
+      .trim()
+      .min(5, "Give a reason of at least 5 characters — it is recorded, and a candidate may ask.")
+      .max(500, "Keep the reason under 500 characters."),
+  })
+  .strict();
+export type SetQuestionModerationInput = z.input<typeof moderationSchema>;
+
+/**
+ * Award a question to everyone, withdraw it from the paper, or undo
+ * either (Phase 13i).
+ *
+ * The remedy an examiner needs when a question turns out to be wrong
+ * after a cohort has answered it. What each one does to the arithmetic is
+ * in `packages/shared/src/exam-moderation.ts`, where it can be read
+ * without a database; this is the authority, the record and the refusals.
+ *
+ *   - **A reason is always required**, including for undoing. A mark that
+ *     moved with nothing recorded is a mark nobody can explain to the
+ *     candidate who lost it. For a moderated question it is stored on the
+ *     row as well, because staff reading the results months later cannot
+ *     read the audit log (`tests/repo/admin-scope.test.ts` R5) and should
+ *     not have to.
+ *   - **Allowed while the paper is still open.** Spotting a broken
+ *     question mid-exam and taking it out at once is better for every
+ *     candidate than letting the rest of the hall answer it. Nothing a
+ *     candidate can see changes: marks are not shown during a sitting.
+ *   - **Not allowed on a question of another paper**, even a real one —
+ *     the id is checked against the assessment rather than trusted.
+ *
+ * Audited at SENSITIVE: it changes marks, which is the definition of a
+ * sensitive act on this surface. Whether the results had already been
+ * released is in the row, since that is the detail that decides whether
+ * anybody had read the old mark.
+ */
+export async function setQuestionModeration(
+  input: SetQuestionModerationInput,
+): Promise<ActionResult<{ moderation: QuestionModeration }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = moderationSchema.parse(input);
+    const assessment = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: { id: true, slug: true, status: true, resultsPublishedAt: true },
+    });
+    if (!assessment) throw new NotFoundError("That assessment was not found.");
+
+    const now = new Date();
+    const moderated = parsed.moderation !== "NONE";
+    /**
+     * NONE stores no reason, no stamp: the CHECK on both tables refuses
+     * the half-states, so the two halves of this object have to agree.
+     * The reason still reaches the audit row.
+     */
+    const data = moderated
+      ? {
+          moderation: parsed.moderation,
+          moderationReason: parsed.reason,
+          moderatedById: actor.id,
+          moderatedAt: now,
+        }
+      : { moderation: "NONE" as const, moderationReason: null, moderatedById: null, moderatedAt: null };
+
+    const where = { id: parsed.questionId, assessmentId: assessment.id };
+    const previous =
+      parsed.kind === "coding"
+        ? await db.assessmentProblem.findFirst({
+            where,
+            select: { id: true, position: true, moderation: true },
+          })
+        : await db.assessmentMcq.findFirst({
+            where,
+            select: { id: true, position: true, moderation: true },
+          });
+    if (!previous) throw new NotFoundError("That question is not on this paper.");
+    if (previous.moderation === parsed.moderation) {
+      throw new ValidationError(
+        parsed.moderation === "NONE"
+          ? "That question is not moderated."
+          : "That question already carries exactly this moderation.",
+      );
+    }
+
+    const moved =
+      parsed.kind === "coding"
+        ? await db.assessmentProblem.updateMany({ where, data })
+        : await db.assessmentMcq.updateMany({ where, data });
+    if (moved.count !== 1) {
+      throw new AppError("That question changed a moment ago. Refresh the page and try again.", 409);
+    }
+
+    await audit({
+      actorId: actor.id,
+      action: "assessment.question.moderated",
+      entityType: parsed.kind === "coding" ? "AssessmentProblem" : "AssessmentMcq",
+      entityId: parsed.questionId,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        assessmentId: assessment.id,
+        slug: assessment.slug,
+        position: previous.position,
+        from: previous.moderation,
+        to: parsed.moderation,
+        reason: parsed.reason,
+        resultsWereReleased: assessment.resultsPublishedAt !== null,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath(`/admin/assessments/${assessment.id}`);
+    revalidatePath(`/admin/assessments/${assessment.id}/results`);
+    return { moderation: parsed.moderation };
+  }, "setQuestionModeration");
 }

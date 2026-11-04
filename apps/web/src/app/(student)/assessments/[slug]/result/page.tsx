@@ -36,6 +36,9 @@ const OUTCOME_LABEL: Record<string, string> = {
   rejected: "Not accepted",
   pending: "Still being judged",
   unjudged: "The judge could not finish this — your department has been told",
+  // Phase 13i: moderated after the paper. The fact, never the reason.
+  awarded: "Marked for everyone",
+  dropped: "Withdrawn — it counts for nobody",
 };
 
 export default async function MyAssessmentResultPage({ params }: { params: Promise<{ slug: string }> }) {

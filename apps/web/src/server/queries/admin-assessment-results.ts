@@ -9,6 +9,7 @@ import {
   type CodingMarkingInput,
   type PaperLanguageView,
   type ProctorEventKind,
+  type QuestionModeration,
   type Verdict,
 } from "@recx/shared";
 import type { AccountStatus } from "@recx/db";
@@ -94,6 +95,10 @@ export interface QuestionStat {
   readonly blank: number;
   /** Pending or unjudged: not a score, and the reason a total is provisional. */
   readonly open: number;
+  /** Phase 13i: the question's own id, so the moderation control can act. */
+  readonly questionId: string;
+  readonly moderation: QuestionModeration;
+  readonly moderationReason: string | null;
 }
 
 export interface AssessmentResults {
@@ -146,10 +151,22 @@ export async function getAssessmentResults(
             position: true,
             points: true,
             problemVersionId: true,
+            moderation: true,
+            moderationReason: true,
             problemVersion: { select: { title: true, problem: { select: { displayCode: true } } } },
           },
         },
-        mcqs: { orderBy: { position: "asc" }, select: { id: true, position: true, points: true, correctIndex: true } },
+        mcqs: {
+          orderBy: { position: "asc" },
+          select: {
+            id: true,
+            position: true,
+            points: true,
+            correctIndex: true,
+            moderation: true,
+            moderationReason: true,
+          },
+        },
       },
     }),
     db.assessmentAttempt.findMany({
@@ -298,12 +315,16 @@ interface Paper {
     readonly points: number;
     readonly problemVersionId: string;
     readonly problemVersion: { readonly title: string; readonly problem: { readonly displayCode: string } };
+    readonly moderation: QuestionModeration;
+    readonly moderationReason: string | null;
   }>;
   readonly mcqs: ReadonlyArray<{
     readonly id: string;
     readonly position: number;
     readonly points: number;
     readonly correctIndex: number;
+    readonly moderation: QuestionModeration;
+    readonly moderationReason: string | null;
   }>;
 }
 
@@ -337,7 +358,7 @@ function resultOf(
   attempt: AttemptAnswers,
   submissions: readonly SubmissionRow[],
   paper: Paper,
-  mcqById: Map<string, { correctIndex: number; points: number }>,
+  mcqById: Map<string, { correctIndex: number; points: number; moderation: QuestionModeration }>,
 ): { readonly result: AttemptResult; readonly layoutUnreadable: boolean } {
   let laid: ReadonlyArray<{ mcqId: string; optionOrder: readonly number[] }> = [];
   let layoutUnreadable = false;
@@ -369,6 +390,8 @@ function resultOf(
         optionOrder: entry.optionOrder,
         correctIndex: row.correctIndex,
         chosenShownIndex: chosen.get(entry.mcqId) ?? null,
+        // Phase 13i: decided after the paper, and it overrides everything.
+        moderation: row.moderation,
       },
     ];
   });
@@ -386,6 +409,7 @@ function resultOf(
     return {
       questionId: problem.id,
       points: problem.points,
+      moderation: problem.moderation,
       submission:
         submission === undefined
           ? null
@@ -414,6 +438,9 @@ function summarise(rows: readonly AttemptResultRow[], paper: Paper, rejudgeable:
       const marks = done.flatMap((r) => r.result?.mcq.marks.filter((m) => m.mcqId === mcq.id) ?? []);
       return {
         kind: "mcq" as const,
+        questionId: mcq.id,
+        moderation: mcq.moderation,
+        moderationReason: mcq.moderationReason,
         position: mcq.position,
         label: `Q${mcq.position}`,
         maxPoints: mcq.points,
@@ -428,6 +455,9 @@ function summarise(rows: readonly AttemptResultRow[], paper: Paper, rejudgeable:
       const marks = done.flatMap((r) => r.result?.coding.marks.filter((m) => m.questionId === problem.id) ?? []);
       return {
         kind: "coding" as const,
+        questionId: problem.id,
+        moderation: problem.moderation,
+        moderationReason: problem.moderationReason,
         position: problem.position,
         label: `${problem.problemVersion.problem.displayCode} · ${problem.problemVersion.title}`,
         maxPoints: problem.points,
@@ -440,8 +470,14 @@ function summarise(rows: readonly AttemptResultRow[], paper: Paper, rejudgeable:
     }),
   ].sort((a, b) => a.position - b.position || a.kind.localeCompare(b.kind));
 
+  /**
+   * Phase 13i: a withdrawn question is out of the paper's total too.
+   * Leaving it in would put "out of 50 marks" at the top of a page whose
+   * every row was marked out of 47.
+   */
   const maxPoints =
-    paper.mcqs.reduce((sum, m) => sum + m.points, 0) + paper.problems.reduce((sum, p) => sum + p.points, 0);
+    paper.mcqs.filter((m) => m.moderation !== "DROPPED").reduce((sum, m) => sum + m.points, 0) +
+    paper.problems.filter((p) => p.moderation !== "DROPPED").reduce((sum, p) => sum + p.points, 0);
 
   return {
     rows,

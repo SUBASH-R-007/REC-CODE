@@ -118,10 +118,14 @@ export async function myAssessmentResult(args: {
               position: true,
               points: true,
               problemVersionId: true,
+              moderation: true,
               problemVersion: { select: { title: true, problem: { select: { displayCode: true } } } },
             },
           },
-          mcqs: { orderBy: { position: "asc" }, select: { id: true, position: true, points: true, correctIndex: true } },
+          mcqs: {
+            orderBy: { position: "asc" },
+            select: { id: true, position: true, points: true, correctIndex: true, moderation: true },
+          },
         },
       },
     },
@@ -173,6 +177,13 @@ export async function myAssessmentResult(args: {
         optionOrder: entry.optionOrder,
         correctIndex: row.correctIndex,
         chosenShownIndex: chosen.get(entry.mcqId) ?? null,
+        /**
+         * Phase 13i. A candidate is told THAT a question was moderated --
+         * their total depends on it -- and never why: the reason staff
+         * write is for staff, and a sentence explaining an answer would
+         * hand it to the next cohort.
+         */
+        moderation: row.moderation,
       },
     ];
   });
@@ -182,6 +193,7 @@ export async function myAssessmentResult(args: {
     return {
       questionId: problem.id,
       points: problem.points,
+      moderation: problem.moderation,
       submission:
         submission === undefined
           ? null

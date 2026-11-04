@@ -10,6 +10,7 @@ import {
   type CodingOutcome,
   type McqOutcome,
   type PaperLanguageView,
+  type QuestionModeration,
   type Verdict,
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
@@ -86,6 +87,9 @@ export interface ScriptMcq {
   readonly points: number;
   readonly maxPoints: number;
   readonly explanation: string | null;
+  /** Phase 13i: decided after the paper, with the reason staff wrote. */
+  readonly moderation: QuestionModeration;
+  readonly moderationReason: string | null;
 }
 
 export interface ScriptCoding {
@@ -113,6 +117,9 @@ export interface ScriptCoding {
   readonly source: string | null;
   readonly sourceBytes: number;
   readonly purged: boolean;
+  /** Phase 13i: decided after the paper, with the reason staff wrote. */
+  readonly moderation: QuestionModeration;
+  readonly moderationReason: string | null;
 }
 
 export type ScriptAnswer = ScriptMcq | ScriptCoding;
@@ -223,6 +230,8 @@ export async function getAttemptScript(
         points: true,
         problemVersionId: true,
         allowedLanguages: true,
+        moderation: true,
+        moderationReason: true,
         problemVersion: {
           select: { title: true, problem: { select: { displayCode: true, slug: true } } },
         },
@@ -230,7 +239,17 @@ export async function getAttemptScript(
     }),
     db.assessmentMcq.findMany({
       where: { assessmentId: attempt.assessment.id },
-      select: { id: true, position: true, points: true, stem: true, options: true, correctIndex: true, explanation: true },
+      select: {
+        id: true,
+        position: true,
+        points: true,
+        stem: true,
+        options: true,
+        correctIndex: true,
+        explanation: true,
+        moderation: true,
+        moderationReason: true,
+      },
     }),
   ]);
   const questionById = new Map(questions.map((q) => [q.id, q]));
@@ -296,6 +315,7 @@ export async function getAttemptScript(
     const mark = markCoding({
       questionId: question.id,
       points: question.points,
+      moderation: question.moderation,
       submission:
         submission === null
           ? null
@@ -320,6 +340,8 @@ export async function getAttemptScript(
       verdict: mark.verdict,
       points: mark.points,
       maxPoints: mark.maxPoints,
+      moderation: question.moderation,
+      moderationReason: question.moderationReason,
       language: mark.language === null ? null : (paperLanguageViews([mark.language])[0] ?? null),
       /**
        * What the question accepted, read from the FROZEN layout first: an
@@ -350,6 +372,7 @@ export async function getAttemptScript(
     const mark = markMcq({
       mcqId: mcq.id,
       points: mcq.points,
+      moderation: mcq.moderation,
       optionOrder: laid.optionOrder,
       correctIndex: mcq.correctIndex,
       chosenShownIndex,
@@ -370,6 +393,8 @@ export async function getAttemptScript(
       points: mark.points,
       maxPoints: mark.maxPoints,
       explanation: mcq.explanation,
+      moderation: mcq.moderation,
+      moderationReason: mcq.moderationReason,
     });
   }
 
