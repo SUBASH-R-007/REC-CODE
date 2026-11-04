@@ -1168,3 +1168,193 @@ export async function setQuestionModeration(
     return { moderation: parsed.moderation };
   }, "setQuestionModeration");
 }
+
+// ── Reusing a paper ────────────────────────────────────────────────────
+
+const duplicateSchema = z
+  .object({
+    assessmentId: idSchema,
+    slug: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use lower-case words joined by hyphens, e.g. cse-2027-midsem-b.")
+      .max(80),
+    title: z.string().trim().min(1, "Give the copy a title.").max(ASSESSMENT_LIMITS.title.max),
+    opensAt: dateFromInput("opening time"),
+    closesAt: dateFromInput("closing time"),
+  })
+  .superRefine((value, ctx) => {
+    if (value.closesAt <= value.opensAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["closesAt"],
+        message: "The assessment must close after it opens.",
+      });
+    }
+  });
+export type DuplicateAssessmentInput = z.input<typeof duplicateSchema>;
+
+/**
+ * Copy a paper, questions and all, into a new DRAFT (Phase 13l).
+ *
+ * The commonest thing a department does with an assessment is set it
+ * again: the same paper for the other section, the same mid-semester test
+ * for next year's batch, a re-sit for the people who missed it. Until now
+ * that meant re-authoring it by hand — every pinned problem looked up
+ * again by address, every multiple-choice question retyped with its
+ * options in order and its answer line — which is slow and, worse, is the
+ * kind of slow that produces a paper subtly different from the one it was
+ * meant to match.
+ *
+ * What is copied: the terms, the watching knobs, the audience, the
+ * accepted languages, and every question at THE SAME PINNED REVISION,
+ * with its points, its position and its own language narrowing. The copy
+ * asks the same questions as the original, which is the point.
+ *
+ * What is NOT copied, each for a reason:
+ *
+ *   - **The status.** A copy is a DRAFT. Publishing is a decision, and a
+ *     paper that opened itself because its original was open would be a
+ *     paper nobody meant to set.
+ *   - **The window.** Required, and new: a copy carrying the original's
+ *     window is a paper that already closed.
+ *   - **Any moderation.** Awarding a question to everyone or withdrawing
+ *     it was a decision about one sitting of one cohort. Carrying it over
+ *     would silently annul a question for a cohort that has not sat it.
+ *   - **The halls.** A hall is a room, a clock and a network allowlist;
+ *     the copy is for a different time and usually a different room, and
+ *     an inherited CIDR allowlist is a lab door left open.
+ *   - **The Safe Exam Browser keys.** They are a secret for one paper,
+ *     and copying a secret quietly is how it ends up somewhere nobody
+ *     chose to put it.
+ *   - **Everything a sitting produced**: attempts, marks, whether the
+ *     results were released.
+ *
+ * One transaction, so a copy is whole or is not there at all — a
+ * half-copied paper is worse than none, because somebody would publish
+ * it.
+ */
+export async function duplicateAssessment(
+  input: DuplicateAssessmentInput,
+): Promise<ActionResult<{ id: string; slug: string; questions: number }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole("ADMIN", "SUPER_ADMIN");
+    const parsed = duplicateSchema.parse(input);
+
+    const source = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: {
+        id: true,
+        slug: true,
+        instructions: true,
+        proctorMode: true,
+        affectsPlacementEligibility: true,
+        durationSec: true,
+        maxAttempts: true,
+        maxFocusWarnings: true,
+        onLimit: true,
+        strictMode: true,
+        refuseOutsidePaste: true,
+        sitInPopup: true,
+        allowedLanguages: true,
+        audienceBatchYear: true,
+        audienceDepartmentCode: true,
+        audienceSection: true,
+        problems: {
+          orderBy: { position: "asc" },
+          select: { position: true, points: true, problemVersionId: true, allowedLanguages: true },
+        },
+        mcqs: {
+          orderBy: { position: "asc" },
+          select: { position: true, points: true, stem: true, options: true, correctIndex: true, explanation: true },
+        },
+      },
+    });
+    if (!source) throw new NotFoundError("That assessment was not found.");
+
+    const taken = await db.assessment.findUnique({ where: { slug: parsed.slug }, select: { id: true } });
+    if (taken) throw new ConflictError("An assessment already uses that address.");
+
+    const copy = await db.$transaction(async (tx) => {
+      const created = await tx.assessment.create({
+        data: {
+          slug: parsed.slug,
+          title: parsed.title,
+          opensAt: parsed.opensAt,
+          closesAt: parsed.closesAt,
+          // A copy is always a draft; see the comment above.
+          status: "DRAFT",
+          instructions: source.instructions,
+          proctorMode: source.proctorMode,
+          affectsPlacementEligibility: source.affectsPlacementEligibility,
+          durationSec: source.durationSec,
+          maxAttempts: source.maxAttempts,
+          maxFocusWarnings: source.maxFocusWarnings,
+          onLimit: source.onLimit,
+          strictMode: source.strictMode,
+          refuseOutsidePaste: source.refuseOutsidePaste,
+          sitInPopup: source.sitInPopup,
+          allowedLanguages: source.allowedLanguages,
+          audienceBatchYear: source.audienceBatchYear,
+          audienceDepartmentCode: source.audienceDepartmentCode,
+          audienceSection: source.audienceSection,
+          createdById: actor.id,
+        },
+        select: { id: true, slug: true },
+      });
+
+      /**
+       * The SAME pinned revision, not the problem's current one. A copy
+       * set for the other section must ask exactly what the first section
+       * was asked, and `AssessmentProblem` refuses an unfrozen version
+       * anyway (`AssessmentProblem_frozen_check`).
+       */
+      if (source.problems.length > 0) {
+        await tx.assessmentProblem.createMany({
+          data: source.problems.map((problem) => ({
+            assessmentId: created.id,
+            problemVersionId: problem.problemVersionId,
+            position: problem.position,
+            points: problem.points,
+            allowedLanguages: problem.allowedLanguages,
+          })),
+        });
+      }
+      if (source.mcqs.length > 0) {
+        await tx.assessmentMcq.createMany({
+          data: source.mcqs.map((mcq) => ({
+            assessmentId: created.id,
+            position: mcq.position,
+            points: mcq.points,
+            stem: mcq.stem,
+            options: mcq.options,
+            correctIndex: mcq.correctIndex,
+            explanation: mcq.explanation,
+          })),
+        });
+      }
+      return created;
+    });
+
+    const questions = source.problems.length + source.mcqs.length;
+    await audit({
+      actorId: actor.id,
+      action: "assessment.created",
+      entityType: "Assessment",
+      entityId: copy.id,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        slug: copy.slug,
+        via: "duplicate",
+        copiedFrom: source.id,
+        copiedFromSlug: source.slug,
+        questions,
+        proctorMode: source.proctorMode,
+        placement: String(source.affectsPlacementEligibility),
+      },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath("/admin/assessments");
+    return { id: copy.id, slug: copy.slug, questions };
+  }, "duplicateAssessment");
+}

@@ -508,6 +508,14 @@ export const STAFF_CAPABILITIES = deepFreeze([
        * and it moves marks that may already be released.
        */
       "admin-assessments#setQuestionModeration",
+      /**
+       * Phase 13l: setting the same paper again for another
+       * section or year. Staff, and the same authority as
+       * creating one -- which is what it does, from an existing
+       * paper rather than from a form. The copy is a DRAFT, and
+       * carries no hall, no SEB key and no moderation.
+       */
+      "admin-assessments#duplicateAssessment",
     ],
     pages: [
       "app/admin/assessments/page.tsx",

@@ -13,6 +13,7 @@ import {
   ScheduleHallForm,
   StatusButtons,
 } from "@/components/admin/assessments/assessment-forms";
+import { DuplicateAssessmentForm } from "@/components/admin/assessments/duplicate-form";
 import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 import { AssessmentLanguagesForm } from "@/components/admin/assessments/languages-form";
 import { QuestionLanguagesForm } from "@/components/admin/assessments/question-languages-form";
@@ -398,6 +399,26 @@ export default async function AdminAssessmentPage({ params }: { params: Promise<
           </div>
         </Card>
       ) : null}
+
+      {/**
+        * Setting the same paper again (Phase 13l), last on the page
+        * because it is the thing somebody does after they have read the
+        * rest of it and decided this is the paper they want.
+        */}
+      <Card className="mb-6 p-5">
+        <CardHeader
+          title="Set this paper again"
+          subtitle="For the other section, next year's batch, or a re-sit."
+        />
+        <div className="mt-3">
+          <DuplicateAssessmentForm
+            assessmentId={assessment.id}
+            title={assessment.title}
+            questions={assessment.problems.length + assessment.mcqs.length}
+            halls={assessment.sessions.length}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
