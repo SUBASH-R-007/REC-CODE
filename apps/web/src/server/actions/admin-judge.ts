@@ -12,8 +12,9 @@ import { CAP_TIME_ZONE, parseIstLocalDateTime } from "@/lib/judge/caps";
 import { allowUnhardenedNodes } from "@/lib/judge/lanes";
 import { isHeartbeatStale, NODE_ACTIONS, planNodeTransition } from "@/lib/judge/metrics";
 import { enqueueJudge } from "@/lib/judge/queue";
-import { PURGED_SOURCE_MESSAGE, resetForRejudge } from "@/lib/judge/rejudge";
+import { PURGED_SOURCE_MESSAGE, SOURCE_NOT_ARCHIVED_SQL, resetForRejudge } from "@/lib/judge/rejudge";
 import { revalidateLanguageConfigs } from "@/server/queries/judge-languages";
+import { revalidatePath } from "next/cache";
 
 /**
  * /admin/judge mutations. Every one is guarded server-side, validated with
@@ -200,6 +201,143 @@ export async function rejudgeSubmission(
     });
     return { id: submissionId, dispatched };
   }, "rejudgeSubmission");
+}
+
+// ── Rejudge one paper ──────────────────────────────────────────────────
+
+/**
+ * Submissions a single rejudge of one paper may move.
+ *
+ * A paper is a cohort times its programs: three hundred candidates and
+ * four coding questions is twelve hundred, which the REJUDGE lane's
+ * weighted ceiling absorbs without starving a live exam. Above this it is
+ * a college-wide event rather than a correction to one paper, and the
+ * SUPER_ADMIN global rejudge — two-person approved, per problem — is the
+ * instrument for that. Refusing is better than half-doing it.
+ */
+const REJUDGE_PAPER_MAX = 2_000;
+
+/** Sittings whose answers are final enough to rejudge. */
+const REJUDGEABLE_ATTEMPT_STATUSES = ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED", "EXPIRED", "VOIDED"];
+
+const rejudgePaperSchema = z.object({ assessmentId: idSchema, reason: reasonSchema });
+export type RejudgeAssessmentInput = z.input<typeof rejudgePaperSchema>;
+
+/**
+ * Rejudge every program handed in for one assessment (Phase 13h.3).
+ *
+ * The gap this fills: when a question's tests turn out to be wrong — the
+ * commonest reason a cohort all fails one question — the results page's
+ * only advice was to rejudge from `/admin/judge`, which takes one
+ * submission id at a time. Three hundred candidates meant three hundred
+ * trips. The SUPER_ADMIN global rejudge is not the same act: it is per
+ * PROBLEM across the whole college with two-person approval, so it also
+ * moves every practice and contest submission of that problem, and it
+ * cannot be reached by the department that set the paper.
+ *
+ * Bounded deliberately:
+ *
+ *   - **Finished sittings only.** Rejudging a program handed in by
+ *     somebody still sitting the paper would take their verdict away
+ *     while they are looking at it.
+ *   - **In scope only**, like every staff read or write about a
+ *     candidate, and asserted twice — the attempt rows and the
+ *     submissions both carry the filter.
+ *   - **Never a purged source.** A submission whose code was purged keeps
+ *     its verdict forever; rejudging it would compile an empty file over
+ *     the top of that verdict.
+ *   - **Capped**, and refused rather than truncated above the cap.
+ *
+ * One audit row, naming the paper and the count: a row per submission
+ * would bury the fact that this was one deliberate act by one person.
+ * Whether the marks had already been released is recorded in it, because
+ * that is the detail somebody will want months later.
+ */
+export async function rejudgeAssessment(
+  input: RejudgeAssessmentInput,
+): Promise<ActionResult<{ count: number; dispatched: number }>> {
+  return runAction(async () => {
+    const actor = await requireActionRole(...ADMIN_ROLES);
+    const scope = await loadStudentScope(actor);
+    const parsed = rejudgePaperSchema.parse(input);
+    const paper = await db.assessment.findUnique({
+      where: { id: parsed.assessmentId },
+      select: { id: true, slug: true, title: true, resultsPublishedAt: true },
+    });
+    if (!paper) throw new NotFoundError("That assessment was not found.");
+
+    const ids = await db.$transaction(async (tx) => {
+      /**
+       * Locked in id order, which is what keeps two of these from
+       * deadlocking against each other, and the same `FOR UPDATE` the
+       * single rejudge takes: a finalise committing concurrently is
+       * either fully before this reset or refused after it.
+       */
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "Submission".id
+          FROM "Submission"
+          JOIN "User" u ON u.id = "Submission"."userId"
+          JOIN "AssessmentAttempt" att ON att.id = "Submission"."assessmentAttemptId"
+         WHERE att."assessmentId" = ${paper.id}
+           AND att.status::text = ANY(${REJUDGEABLE_ATTEMPT_STATUSES}::text[])
+           AND "Submission".status IN ('DONE', 'INTERNAL_ERROR')
+           AND ${scopedStudentSql(scope, "u")}
+           AND ${SOURCE_NOT_ARCHIVED_SQL}
+         ORDER BY "Submission".id
+         LIMIT ${REJUDGE_PAPER_MAX + 1}
+         FOR UPDATE OF "Submission"`;
+      if (locked.length === 0) {
+        throw new ValidationError(
+          "There is nothing to rejudge on this paper: no finished sitting of yours has a judged program whose code is still stored.",
+        );
+      }
+      if (locked.length > REJUDGE_PAPER_MAX) {
+        throw new ValidationError(
+          `This paper has more than ${REJUDGE_PAPER_MAX.toLocaleString("en-IN")} judged programs. A rejudge that size is a college-wide operation — ask a super-admin to run a global rejudge of the question instead.`,
+        );
+      }
+      const list = locked.map((row) => row.id);
+      await resetForRejudge(tx, list, new Date());
+      return list;
+    });
+
+    /**
+     * After commit, like every enqueue: a row Redis refused stays QUEUED
+     * on lane REJUDGE and the reconciler picks it up, so a judge that was
+     * down when this ran costs a delay rather than a lost rejudge.
+     */
+    let dispatched = 0;
+    for (const id of ids) {
+      if (await enqueueJudge("submission", id, "REJUDGE")) dispatched += 1;
+    }
+    if (dispatched > 0) {
+      await db.submission.updateMany({
+        where: { id: { in: ids }, judgeState: "PENDING", user: scopedStudentWhere(scope) },
+        data: { judgeState: "DISPATCHED" },
+      });
+    }
+
+    await audit({
+      actorId: actor.id,
+      action: "judge.rejudge",
+      entityType: "Assessment",
+      entityId: paper.id,
+      sensitivity: "SENSITIVE",
+      metadata: {
+        scope: "assessment",
+        slug: paper.slug,
+        count: ids.length,
+        dispatched,
+        // The detail somebody will ask about later: were the marks out?
+        resultsWereReleased: paper.resultsPublishedAt !== null,
+        reason: parsed.reason,
+      },
+      ipHash: await requestIpHash(),
+    });
+
+    revalidatePath(`/admin/assessments/${paper.id}/results`);
+    return { count: ids.length, dispatched };
+  }, "rejudgeAssessment");
 }
 
 // ── Language configuration ─────────────────────────────────────────────

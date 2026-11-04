@@ -532,6 +532,14 @@ const EXEMPTIONS: readonly Exemption[] = [
     count: 1,
     reason: "the LMS roster copy; planRosterImport() checked every target cohort with scopeCovers() first",
   },
+  {
+    file: "apps/web/src/server/queries/admin-attempt-script.ts",
+    rule: "R5",
+    call: "submissionSource.findMany",
+    count: 1,
+    reason:
+      "the answer script (Phase 13h.1), and the ONLY read of a submission's source in admin code. R5 is right about every other one -- a student's practice code is theirs -- and an exam answer handed in for marks is a different object: it is the script, and the examiner who awards the marks may read what they are awarding them for. Narrow by construction: only the submissions that count, only for a FINISHED sitting of an in-scope candidate, and only after the AuditLog row at SENSITIVE naming the candidate, which is written before any of these rows are fetched",
+  },
 ];
 
 function applyExemptions(file: string, findings: Finding[]): { violations: Finding[]; stale: string[] } {

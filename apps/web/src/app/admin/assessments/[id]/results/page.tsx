@@ -7,7 +7,13 @@ import { requireAdminScopePage } from "@/lib/auth/scope";
 import { describeScope, isEmptyScope } from "@/lib/auth/scope-where";
 import { formatCampusDateTime } from "@/lib/help/copy";
 import { getAssessmentDetail } from "@/server/queries/admin-assessments";
-import { getAssessmentResults } from "@/server/queries/admin-assessment-results";
+import {
+  ABSENT_ROW_LIMIT,
+  getAssessmentAttendance,
+  getAssessmentResults,
+  type AssessmentAttendance,
+} from "@/server/queries/admin-assessment-results";
+import { RejudgePaper } from "@/components/admin/assessments/rejudge-paper";
 import { ReleaseResults } from "@/components/admin/assessments/release-results";
 
 export const metadata: Metadata = { title: "Assessment results" };
@@ -34,9 +40,10 @@ const TD = "px-3 py-2";
 export default async function AssessmentResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { scope } = await requireAdminScopePage();
   const { id } = await params;
-  const [assessment, results] = await Promise.all([
+  const [assessment, results, attendance] = await Promise.all([
     getAssessmentDetail(id),
     getAssessmentResults(scope, id),
+    getAssessmentAttendance(scope, id),
   ]);
   if (!assessment) notFound();
 
@@ -76,15 +83,27 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
           description="An administrator needs an active scope grant to see candidates. Ask a super-admin for one — this page is empty because of your access, not because nobody sat the paper."
         />
       ) : results.rows.length === 0 ? (
-        <EmptyState
-          title="Nobody has sat this paper yet"
-          description="Results appear here as candidates hand in. A sitting still in progress is listed without a mark, because an unfinished paper has no result."
-        />
+        <>
+          <EmptyState
+            title="Nobody has sat this paper yet"
+            description="Results appear here as candidates hand in. A sitting still in progress is listed without a mark, because an unfinished paper has no result."
+          />
+          {/* Phase 13h.2: who it was set for is worth saying even when
+              nobody has sat it — "nobody came" and "nobody was invited"
+              are different problems with different phone calls. */}
+          <Attendance attendance={attendance} />
+        </>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <StatCard label="Finished" value={results.finished} hint="Handed in, auto-submitted or ended." />
             <StatCard label="Still sitting" value={results.inProgress} hint="No mark yet, by design." />
+            {/* Phase 13h.2: the question an invigilator is asked first. */}
+            <StatCard
+              label="Absent"
+              value={attendance === null ? "—" : attendance.expected - attendance.sat}
+              hint={attendance === null ? undefined : `Of ${attendance.expected} it was set for.`}
+            />
             <StatCard label="Average" value={percent(results.averagePercent)} hint="Of the finished sittings." />
             <StatCard label="Median" value={percent(results.medianPercent)} />
           </div>
@@ -142,6 +161,11 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                           it in is no longer a property of the paper. */}
                       <th scope="col" className={TD}>Answered in</th>
                       <th scope="col" className={TD}>Watched</th>
+                      {/* Phase 13h: the marked paper. A link rather than a
+                          column of its own content, because opening one
+                          writes an audit row and a table that opened every
+                          candidate's script would write one per row. */}
+                      <th scope="col" className={TD}>Script</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -216,6 +240,18 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
                             <span className="block text-danger">stored paper unreadable</span>
                           ) : null}
                         </td>
+                        <td className={`${TD} text-xs`}>
+                          {row.result === null ? (
+                            <span className="text-muted">still sitting</span>
+                          ) : (
+                            <Link
+                              href={`/admin/assessments/${id}/results/${row.attemptId}/script`}
+                              className="text-primary underline-offset-2 hover:underline"
+                            >
+                              Read it
+                            </Link>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -223,6 +259,24 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
               </div>
             </CardBody>
           </Card>
+
+          {/* Phase 13h.3: right after the table above has shown somebody
+              that a question was the question's fault. */}
+          <Card>
+            <CardHeader
+              title="Judging this paper again"
+              subtitle="For when a question's tests were wrong, not the cohort."
+            />
+            <CardBody>
+              <RejudgePaper
+                assessmentId={id}
+                programs={results.rejudgeable}
+                released={assessment.resultsPublishedAt !== null}
+              />
+            </CardBody>
+          </Card>
+
+          <Attendance attendance={attendance} />
 
           <Card>
             <CardHeader
@@ -274,5 +328,90 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Who the paper was set for and who did not sit it (Phase 13h.2).
+ *
+ * Its own component because it renders in two places: under the results
+ * table, and on its own when nobody has sat the paper at all — which is
+ * exactly the case where the number matters most.
+ *
+ * Nothing here is a judgement. An absence has a dozen honest causes and
+ * this page knows none of them; what it can do is name the candidates so
+ * somebody can ask.
+ */
+function Attendance({ attendance }: { attendance: AssessmentAttendance | null }) {
+  if (attendance === null) return null;
+  const { expected, sat, absent, truncated, audience } = attendance;
+  const missing = expected - sat;
+  const setFor =
+    [
+      audience.batchYear === null ? null : `batch ${audience.batchYear}`,
+      audience.departmentCode === null ? null : audience.departmentCode,
+      audience.section === null ? null : `section ${audience.section}`,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "every student";
+
+  return (
+    <Card>
+      <CardHeader
+        title={`Who did not sit it (${missing})`}
+        subtitle={`Set for ${setFor} — ${expected} ${expected === 1 ? "student" : "students"} in your scope, ${sat} of whom opened a sitting.`}
+      />
+      <CardBody>
+        {expected === 0 ? (
+          <p className="text-sm text-text-secondary">
+            Nobody in your scope matches this paper&apos;s audience. Either it was set for a cohort you do not cover,
+            or its batch, department and section do not describe anybody — worth checking on the paper itself before
+            it opens.
+          </p>
+        ) : missing === 0 ? (
+          <p className="text-sm text-text-secondary">
+            Everybody it was set for opened a sitting. Whether they finished is the table above.
+          </p>
+        ) : (
+          <>
+            <div role="region" tabIndex={0} aria-label="Absent candidates" className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full min-w-[32rem] text-left text-sm">
+                <caption className="sr-only">Candidates the paper was set for who did not open a sitting</caption>
+                <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">
+                  <tr>
+                    <th scope="col" className={TD}>Roll number</th>
+                    <th scope="col" className={TD}>Candidate</th>
+                    <th scope="col" className={TD}>Batch</th>
+                    <th scope="col" className={TD}>Department</th>
+                    <th scope="col" className={TD}>Section</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {absent.map((row) => (
+                    <tr key={row.userId} className="border-t border-border">
+                      <th scope="row" className={`${TD} font-mono text-xs`}>{row.collegeId}</th>
+                      <td className={TD}>{row.name}</td>
+                      <td className={`${TD} tabular-nums`}>{row.batchYear ?? "—"}</td>
+                      <td className={TD}>{row.departmentCode ?? "—"}</td>
+                      <td className={TD}>{row.section ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {truncated ? (
+              <p className="mt-3 text-xs text-muted">
+                The first {ABSENT_ROW_LIMIT} are listed, in roll-number order. A paper this size is usually missing a
+                whole cohort rather than individuals — the counts above are the ones to read.
+              </p>
+            ) : null}
+            <p className="mt-3 text-xs text-muted">
+              An absence is not a finding. Accommodations, a withdrawal, a clash, a hall that never opened and an
+              illness all look identical here.
+            </p>
+          </>
+        )}
+      </CardBody>
+    </Card>
   );
 }

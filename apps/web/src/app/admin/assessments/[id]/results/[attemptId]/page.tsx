@@ -55,6 +55,16 @@ export default async function AttemptAuditPage({
           {audit.submittedAt ? ` · handed in ${formatCampusDateTime(audit.submittedAt)}` : " · not handed in"}
           {audit.hall ? ` · ${audit.hall}${audit.seatLabel ? ` · ${audit.seatLabel}` : ""}` : ""}
         </p>
+        {/* Phase 13h: the other half of a disputed sitting. This page is
+            what was watched; that one is what was written. */}
+        <p className="text-sm">
+          <Link
+            href={`/admin/assessments/${id}/results/${attemptId}/script`}
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            Read their answer script →
+          </Link>
+        </p>
       </header>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

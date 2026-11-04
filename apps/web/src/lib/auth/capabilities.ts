@@ -335,9 +335,22 @@ export const STAFF_CAPABILITIES = deepFreeze([
   },
   {
     key: "judge.operate",
-    label: "Operate the judge (drain nodes, rejudge one submission, toggle languages)",
+    label: "Operate the judge (drain nodes, rejudge one submission or one paper, toggle languages)",
     roles: STAFF,
-    actions: ["admin-judge#setJudgeNodeStatus", "admin-judge#rejudgeSubmission", "admin-judge#setLanguageEnabled"],
+    actions: [
+      "admin-judge#setJudgeNodeStatus",
+      "admin-judge#rejudgeSubmission",
+      /**
+       * Phase 13h.3: every program on one paper, reached from its results
+       * page. Same authority as rejudging one of them — it is the same act
+       * repeated, bounded to the reader's own students, to finished
+       * sittings and to a cap, and audited as one row naming the paper.
+       * The college-wide rejudge of a PROBLEM stays SUPER_ADMIN with two
+       * people approving it.
+       */
+      "admin-judge#rejudgeAssessment",
+      "admin-judge#setLanguageEnabled",
+    ],
     pages: ["app/admin/judge/page.tsx"],
   },
   {
@@ -500,6 +513,18 @@ export const STAFF_CAPABILITIES = deepFreeze([
       // Phase 12y.4: everything recorded about one sitting. Signals, never
       // a band — the verdict lives on /admin/integrity.
       "app/admin/assessments/[id]/results/[attemptId]/page.tsx",
+      /**
+       * Phase 13h.1: the answer script — what the candidate was asked,
+       * what they answered, and what it earned.
+       *
+       * Same authority as setting and marking the paper: a department
+       * that runs its own tests reads its own candidates' answers, scoped
+       * to the reader's own students. Only once the sitting is over, and
+       * every open writes an AuditLog row at SENSITIVE naming the
+       * candidate — it is the most revealing staff read in the product,
+       * and the only admin code allowed near a submission's source.
+       */
+      "app/admin/assessments/[id]/results/[attemptId]/script/page.tsx",
     ],
     // The marks as a CSV, scoped to the reader's own students and audited
     // on every download (Phase 12y.4).

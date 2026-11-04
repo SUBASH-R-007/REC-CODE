@@ -238,14 +238,14 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `integrity.review` | staff | - | - | yes | - | yes | 2 actions, 2 pages |
 | `exam.invigilate` | staff | - | - | yes | - | yes | 5 actions, 1 route, 2 pages |
 | `exam.device.enrol` | staff | - | - | yes | - | yes | 1 action, 1 route, 1 page |
-| `judge.operate` | staff | - | - | yes | - | yes | 3 actions, 1 page |
+| `judge.operate` | staff | - | - | yes | - | yes | 4 actions, 1 page |
 | `students.view` | staff | - | - | yes | - | yes | 5 pages |
 | `inactivity.review` | staff | - | - | yes | - | yes | 2 actions, 1 page |
 | `students.signOut` | staff | - | - | yes | - | yes | 1 action, 1 page |
 | `roster.import` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
 | `plans.manage` | staff | - | - | yes | - | yes | 11 actions, 6 pages |
 | `contests.manage` | staff | - | - | yes | - | yes | 4 actions, 3 pages |
-| `assessments.manage` | staff | - | - | yes | - | yes | 11 actions, 1 route, 5 pages |
+| `assessments.manage` | staff | - | - | yes | - | yes | 11 actions, 1 route, 6 pages |
 | `announcements.manage` | staff | - | - | yes | - | yes | 3 actions, 3 pages |
 | `accommodations.request` | staff | - | - | yes | - | yes | 2 actions, 3 pages |
 | `aptitude.authoring` | staff | - | - | yes | - | yes | 6 actions, 2 routes, 5 pages |
@@ -419,6 +419,21 @@ suite.
   submission is checked to be the author's OWN accepted practice
   submission; an id trusted here would be a way to render another
   student's code.
+* **An examiner may read an exam answer script, and nothing else a student
+  wrote.** `tests/repo/admin-scope.test.ts` R5 keeps admin code out of
+  `Note`, `CodeDraft`, `SubmissionSource` and `AuditLog` entirely, which is
+  right for practice code: it is the student's. An exam answer handed in for
+  marks is a different object — it is the script, and the examiner who
+  awards the marks may read what they are awarding them for. So exactly one
+  module (`server/queries/admin-attempt-script.ts`, Phase 13h.1) is exempt,
+  by name and with an exact count, and it is narrow by construction: only
+  the submissions that count towards the marks, only for a sitting that is
+  OVER (a paper still being sat has no script at all — reading a candidate's
+  editor while the clock runs is invigilation, and it belongs on
+  `/admin/invigilate`), only for a candidate inside the reader's own
+  AdminScope, and only after one `AuditLog` row at SENSITIVE naming the
+  candidate, written BEFORE the rows are fetched so a read that failed
+  half-way still leaves the record that somebody looked.
 * **The AI helper (Phase 12b) is the one feature that sends student work to
   a third party, and it is off until a super-admin turns it on.** What is
   sent, per question: the public problem statement, that student's own

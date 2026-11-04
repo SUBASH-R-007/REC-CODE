@@ -11,6 +11,7 @@ import {
   type ProctorEventKind,
   type Verdict,
 } from "@recx/shared";
+import type { AccountStatus } from "@recx/db";
 import { scopedStudentWhere, type StudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
 
@@ -106,6 +107,18 @@ export interface AssessmentResults {
   readonly needsAttention: number;
   readonly averagePercent: number | null;
   readonly medianPercent: number | null;
+  /**
+   * Judged programs on finished sittings whose code is still stored: what
+   * a rejudge of this paper would move (Phase 13h.3).
+   *
+   * The same rule as `rejudgeAssessment`, written in Prisma's idiom
+   * rather than its SQL -- including `NOT: { source: { is: { archivedAt:
+   * { not: null } } } }`, which matches a submission with no source row
+   * as well as one whose source is unarchived, exactly as the action's
+   * `NOT EXISTS` does. The action is authoritative; this is the number
+   * the page offers before anybody clicks.
+   */
+  readonly rejudgeable: number;
 }
 
 /** A sitting that is over: its result is worth computing and showing. */
@@ -257,7 +270,25 @@ export async function getAssessmentResults(
     });
   }
 
-  return summarise(rows, paper);
+  /**
+   * What a rejudge of this paper would move (Phase 13h.3): judged
+   * programs on FINISHED sittings whose code is still stored, scoped
+   * again on the student like every other read here.
+   */
+  const finishedAttemptIds = rows.filter((r) => r.result !== null).map((r) => r.attemptId);
+  const rejudgeable =
+    finishedAttemptIds.length === 0
+      ? 0
+      : await db.submission.count({
+          where: {
+            assessmentAttemptId: { in: finishedAttemptIds },
+            user: scopedStudentWhere(scope),
+            status: { in: ["DONE", "INTERNAL_ERROR"] },
+            NOT: { source: { is: { archivedAt: { not: null } } } },
+          },
+        });
+
+  return summarise(rows, paper, rejudgeable);
 }
 
 interface Paper {
@@ -371,7 +402,7 @@ function resultOf(
   return { result: scoreAttempt({ mcqs, coding }), layoutUnreadable };
 }
 
-function summarise(rows: readonly AttemptResultRow[], paper: Paper): AssessmentResults {
+function summarise(rows: readonly AttemptResultRow[], paper: Paper, rejudgeable: number): AssessmentResults {
   const done = rows.filter((r) => r.result !== null);
   const percents = done
     .map((r) => r.result?.percent)
@@ -425,6 +456,7 @@ function summarise(rows: readonly AttemptResultRow[], paper: Paper): AssessmentR
     ),
     averagePercent: percents.length > 0 ? percents.reduce((a, b) => a + b, 0) / percents.length : null,
     medianPercent: median(percents),
+    rejudgeable,
   };
 }
 
@@ -449,6 +481,7 @@ function empty(): AssessmentResults {
     needsAttention: 0,
     averagePercent: null,
     medianPercent: null,
+    rejudgeable: 0,
   };
 }
 
@@ -589,5 +622,124 @@ export async function getAttemptAudit(scope: StudentScope, attemptId: string): P
       occurredAt: event.occurredAt,
     })),
     truncated,
+  };
+}
+
+// ── Who did not sit it ─────────────────────────────────────────────────
+
+export interface AbsentRow {
+  readonly userId: string;
+  readonly collegeId: string;
+  readonly name: string;
+  readonly batchYear: number | null;
+  readonly departmentCode: string | null;
+  readonly section: string | null;
+}
+
+export interface AssessmentAttendance {
+  /** Students the paper was set for, inside the reader's own scope. */
+  readonly expected: number;
+  /** Of those, how many opened a sitting. */
+  readonly sat: number;
+  readonly absent: readonly AbsentRow[];
+  /** True when `absent` is the cap rather than everybody. */
+  readonly truncated: boolean;
+  /**
+   * The audience, as the paper states it. A null dimension means every
+   * value of it, which is also what makes "expected" a real number rather
+   * than a guess.
+   */
+  readonly audience: {
+    readonly batchYear: number | null;
+    readonly departmentCode: string | null;
+    readonly section: string | null;
+  };
+}
+
+/** At most this many names on one page; a college-wide paper has thousands. */
+export const ABSENT_ROW_LIMIT = 500;
+
+/**
+ * Who was expected to sit this paper and did not (Phase 13h.2).
+ *
+ * The results table lists candidates who STARTED, which answers "how did
+ * they do" and cannot answer "who is missing" — and on a timed paper that
+ * is the question an invigilator is asked first and a department is asked
+ * afterwards. Until now "Nobody has sat this paper yet" and "forty of a
+ * hundred and twenty sat it" rendered as the same empty-ish table.
+ *
+ * Expected is not invented here: `Assessment.audienceBatchYear`,
+ * `audienceDepartmentCode` and `audienceSection` already decide whose
+ * `/assessments` list a paper appears on (`server/queries/assessments.ts`),
+ * with a null dimension meaning every value of it. This asks the same
+ * question of the same columns, so the two can never disagree about who was
+ * invited — then takes away everybody who has an attempt row, and narrows
+ * the whole thing to the reader's own AdminScope like every staff read of a
+ * candidate.
+ *
+ * ACTIVE and SOFT_RESTRICTED count as expected; DISABLED, GRADUATED and
+ * ARCHIVED do not. A soft restriction is about practice and XP and has
+ * never stopped anybody sitting a paper, so leaving those students out
+ * would under-report an absence that matters; a disabled or graduated
+ * account was never going to sit it, and listing them would bury the
+ * candidates somebody has to telephone.
+ */
+export async function getAssessmentAttendance(
+  scope: StudentScope,
+  assessmentId: string,
+): Promise<AssessmentAttendance | null> {
+  const paper = await db.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { audienceBatchYear: true, audienceDepartmentCode: true, audienceSection: true },
+  });
+  if (!paper) return null;
+
+  const audience = {
+    batchYear: paper.audienceBatchYear,
+    departmentCode: paper.audienceDepartmentCode,
+    section: paper.audienceSection,
+  };
+  /** A null dimension constrains nothing; a set one must match exactly. */
+  const invited = {
+    status: { in: ["ACTIVE", "SOFT_RESTRICTED"] satisfies AccountStatus[] },
+    ...(audience.batchYear === null ? {} : { batchYear: audience.batchYear }),
+    ...(audience.departmentCode === null ? {} : { departmentCode: audience.departmentCode }),
+    ...(audience.section === null ? {} : { section: audience.section }),
+  };
+
+  const [expected, sat, absent] = await Promise.all([
+    db.user.count({ where: scopedStudentWhere(scope, invited) }),
+    db.user.count({
+      where: scopedStudentWhere(scope, { ...invited, assessmentAttempts: { some: { assessmentId } } }),
+    }),
+    db.user.findMany({
+      where: scopedStudentWhere(scope, { ...invited, assessmentAttempts: { none: { assessmentId } } }),
+      orderBy: [{ collegeId: "asc" }],
+      take: ABSENT_ROW_LIMIT + 1,
+      select: {
+        id: true,
+        collegeId: true,
+        firstName: true,
+        lastName: true,
+        batchYear: true,
+        departmentCode: true,
+        section: true,
+      },
+    }),
+  ]);
+
+  return {
+    expected,
+    sat,
+    absent: absent.slice(0, ABSENT_ROW_LIMIT).map((user) => ({
+      userId: user.id,
+      collegeId: user.collegeId,
+      name: `${user.firstName} ${user.lastName}`.trim(),
+      batchYear: user.batchYear,
+      departmentCode: user.departmentCode,
+      section: user.section,
+    })),
+    truncated: absent.length > ABSENT_ROW_LIMIT,
+    audience,
   };
 }
