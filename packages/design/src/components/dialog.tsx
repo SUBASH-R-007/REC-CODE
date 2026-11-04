@@ -35,12 +35,32 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  /**
+   * Set while THIS component closes the element, so that the native `close`
+   * event which follows is not mistaken for the user dismissing the dialog.
+   *
+   * Without it, no dialog in the app could be opened in development.
+   * React remounts every effect once on mount in development (StrictMode),
+   * which runs the unmount cleanup below while the dialog is still mounted
+   * and open. `close()` queues a `close` event; `onClose` read that as a
+   * dismissal and told the parent, the parent cleared the state that was
+   * holding the dialog open, and it vanished in the same frame it appeared
+   * — with no error anywhere, because every part was doing its job. Found
+   * on /admin/judge, where it made returning a quarantined node to service
+   * impossible; it applied to all 23 dialogs.
+   */
+  const closingSelf = useRef(false);
+
+  const closeElement = (dialog: HTMLDialogElement) => {
+    closingSelf.current = true;
+    dialog.close();
+  };
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
+    if (!open && dialog.open) closeElement(dialog);
   }, [open]);
 
   // Most callers unmount the dialog instead of passing open={false}: close the
@@ -48,7 +68,7 @@ export function Dialog({
   useLayoutEffect(() => {
     const dialog = ref.current;
     return () => {
-      if (dialog?.open) dialog.close();
+      if (dialog?.open) closeElement(dialog);
     };
   }, []);
 
@@ -58,6 +78,12 @@ export function Dialog({
     <dialog
       ref={ref}
       onClose={() => {
+        // Our own close() is not a dismissal: the effects above already know
+        // what the parent wants.
+        if (closingSelf.current) {
+          closingSelf.current = false;
+          return;
+        }
         // The browser may still close it on its own (a second Escape without
         // user activation is not cancelable). A non-dismissible dialog opens
         // again; otherwise the parent, which still thinks it is open, is told.
