@@ -47,6 +47,47 @@ export interface QueueRow {
   readonly assessmentTitle: string;
 }
 
+/** What the page shows at once; above this it says so (Phase 13m). */
+export const QUEUE_PAGE_LIMIT = 300;
+
+/**
+ * How many flags are read before the sample rule is applied.
+ *
+ * `inLowBandSample` is a hash of the attempt id in TypeScript, so "is
+ * this LOW flag in the mandatory sample" cannot be asked of the
+ * database. The rows are read, filtered here, and the page is told when
+ * there were more — which is the honest shape, and better than the
+ * `take: 300` that used to be applied BEFORE the filter, where a run of
+ * unsampled LOW flags could push real work off the end of a queue that
+ * then looked short.
+ */
+const QUEUE_READ_LIMIT = 2_000;
+
+export interface QueueCounts {
+  /** Queue work: open flags that are not bulk-cleared LOW. */
+  readonly open: number;
+  readonly overdue: number;
+  readonly high: number;
+  readonly medium: number;
+  /** LOW flags in the mandatory sample — the only LOW ones that are work. */
+  readonly lowSampled: number;
+}
+
+export interface ReviewQueue {
+  readonly rows: readonly QueueRow[];
+  readonly counts: QueueCounts;
+  /** True when more matched than the page shows. */
+  readonly truncated: boolean;
+  /** True when the reader is looking at a slice rather than the queue. */
+  readonly filtered: boolean;
+}
+
+export interface QueueFilters {
+  readonly band?: TriageBand | null;
+  readonly overdueOnly?: boolean;
+  readonly includeResolved?: boolean;
+}
+
 /**
  * The queue, worst first.
  *
@@ -55,13 +96,19 @@ export interface QueueRow {
  * flag appears only when it is in the mandatory sample, because the rest are
  * bulk-cleared and a queue that lists every LOW flag is a queue nobody
  * finishes.
+ *
+ * Filtered and counted since 13m. A queue with a 72-hour deadline on
+ * every row, and no way to ask for the overdue ones or for one band, is
+ * a queue worked top to bottom by whoever opens it — and the counts are
+ * what a head of department is actually asked for ("how many are late?"),
+ * which until now nobody could answer without counting rows on a screen.
  */
-export async function listReviewQueue(options: { readonly includeResolved?: boolean } = {}): Promise<QueueRow[]> {
+export async function listReviewQueue(options: QueueFilters = {}): Promise<ReviewQueue> {
   const now = new Date();
   const flags = await db.integrityFlag.findMany({
     where: options.includeResolved ? {} : { status: "OPEN" },
     orderBy: [{ band: "desc" }, { substantivePoints: "desc" }, { flaggedAt: "asc" }],
-    take: 300,
+    take: QUEUE_READ_LIMIT,
     select: {
       id: true,
       attemptId: true,
@@ -81,7 +128,7 @@ export async function listReviewQueue(options: { readonly includeResolved?: bool
     },
   });
 
-  return flags
+  const queue = flags
     .map((flag) => ({
       flagId: flag.id,
       attemptId: flag.attemptId,
@@ -99,6 +146,30 @@ export async function listReviewQueue(options: { readonly includeResolved?: bool
     }))
     // A LOW flag outside the sample is bulk-cleared and is not queue work.
     .filter((row) => row.band !== "LOW" || row.inSample);
+
+  /**
+   * Counted over the whole queue, not over the filtered slice: the point
+   * of "4 overdue" is to be true while you are looking at the HIGH ones.
+   */
+  const counts: QueueCounts = {
+    open: queue.length,
+    overdue: queue.filter((row) => row.overdue).length,
+    high: queue.filter((row) => row.band === "HIGH").length,
+    medium: queue.filter((row) => row.band === "MEDIUM").length,
+    lowSampled: queue.filter((row) => row.band === "LOW").length,
+  };
+
+  const filtered = queue.filter(
+    (row) =>
+      (options.band == null || row.band === options.band) && (!options.overdueOnly || row.overdue),
+  );
+
+  return {
+    rows: filtered.slice(0, QUEUE_PAGE_LIMIT),
+    counts,
+    truncated: filtered.length > QUEUE_PAGE_LIMIT,
+    filtered: options.band != null || options.overdueOnly === true,
+  };
 }
 
 export interface FlagDetail {

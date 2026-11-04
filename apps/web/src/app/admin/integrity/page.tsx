@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
-import { EmptyState } from "@recx/design";
+import { EmptyState, StatCard } from "@recx/design";
 import { formatCampusTime } from "@recx/shared";
 import { requireAdminScopePage } from "@/lib/auth/scope";
-import { listReviewQueue } from "@/server/queries/admin-integrity";
+import { QUEUE_PAGE_LIMIT, listReviewQueue } from "@/server/queries/admin-integrity";
+import type { TriageBand } from "@recx/shared";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 
 export const metadata: Metadata = { title: "Integrity review" };
@@ -23,9 +24,29 @@ export const dynamic = "force-dynamic";
  * "the cost of slow review on the institution, not on the student's placement
  * timeline". An overdue row is a staffing problem, not a student's problem.
  */
-export default async function IntegrityQueuePage() {
+const BANDS = ["HIGH", "MEDIUM", "LOW"] as const;
+
+/** A filter link that keeps the other filter. */
+function filterHref(band: string | null, overdue: boolean): string {
+  const params = new URLSearchParams();
+  if (band) params.set("band", band);
+  if (overdue) params.set("overdue", "1");
+  const query = params.toString();
+  return query ? `/admin/integrity?${query}` : "/admin/integrity";
+}
+
+export default async function IntegrityQueuePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ band?: string; overdue?: string }>;
+}) {
   await requireAdminScopePage();
-  const queue = await listReviewQueue();
+  const params = await searchParams;
+  const band = (BANDS as readonly string[]).includes(params.band ?? "")
+    ? (params.band as TriageBand)
+    : null;
+  const overdueOnly = params.overdue === "1";
+  const { rows, counts, truncated, filtered } = await listReviewQueue({ band, overdueOnly });
 
   return (
     <div>
@@ -34,17 +55,68 @@ export default async function IntegrityQueuePage() {
         description="Sittings withheld from the public leaderboard pending a human decision. Nothing here is a finding: a flag means something unusual was recorded and somebody has to read it. Anything unreviewed after 72 hours publishes itself as cleared."
       />
 
-      {queue.length === 0 ? (
+      {/**
+        * The counts first (Phase 13m). "How many are late" is the
+        * question a head of department is asked, and until now the only
+        * way to answer it was to count rows on a screen. They are over
+        * the whole queue, never the filtered slice: the point of "4
+        * overdue" is that it stays true while you read the HIGH ones.
+        */}
+      {counts.open > 0 ? (
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Waiting" value={counts.open} hint="Open flags that are real queue work." />
+          <StatCard
+            label="Past the deadline"
+            value={counts.overdue}
+            hint="Each publishes itself as cleared. A staffing problem, not a student's."
+          />
+          <StatCard label="High band" value={counts.high} hint="Two independent reviewers each." />
+          <StatCard label="Medium" value={counts.medium} />
+        </div>
+      ) : null}
+
+      {counts.open > 0 ? (
+        <nav className="mt-4 flex flex-wrap items-center gap-2 text-sm" aria-label="Filter the queue">
+          <span className="text-text-secondary">Show</span>
+          {[
+            { label: "Everything", band: null as string | null, overdue: false },
+            { label: "Overdue only", band: null as string | null, overdue: true },
+            ...BANDS.map((b) => ({ label: b, band: b as string | null, overdue: false })),
+          ].map((option) => {
+            const active = (option.band ?? null) === band && option.overdue === overdueOnly;
+            return (
+              <Link
+                key={`${option.label}`}
+                href={filterHref(option.band, option.overdue)}
+                aria-current={active ? "true" : undefined}
+                className={`rounded-full border px-3 py-1 ${
+                  active
+                    ? "border-primary bg-primary-subtle font-medium text-primary"
+                    : "border-border text-text-secondary hover:bg-primary-subtle"
+                }`}
+              >
+                {option.label}
+              </Link>
+            );
+          })}
+        </nav>
+      ) : null}
+
+      {rows.length === 0 ? (
         <div className="mt-6">
           <EmptyState
             icon={<ShieldCheck className="h-6 w-6" aria-hidden />}
-            title="Nothing waiting"
-            description="No sitting is currently withheld. Low-band flags are bulk-cleared with a random sample, and those appear here when sampled."
+            title={filtered ? "Nothing matches that filter" : "Nothing waiting"}
+            description={
+              filtered
+                ? "The queue is not empty — nothing in it matches what you asked for. Show everything to see the rest."
+                : "No sitting is currently withheld. Low-band flags are bulk-cleared with a random sample, and those appear here when sampled."
+            }
           />
         </div>
       ) : (
         <ul className="mt-6 flex flex-col gap-2">
-          {queue.map((row) => (
+          {rows.map((row) => (
             <li key={row.flagId} className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-border bg-surface p-4">
               <span
                 className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
@@ -84,6 +156,13 @@ export default async function IntegrityQueuePage() {
           ))}
         </ul>
       )}
+
+      {truncated ? (
+        <p className="mt-4 text-xs text-muted">
+          The first {QUEUE_PAGE_LIMIT} are shown, worst first. Filter by band or to the overdue ones to work through
+          the rest.
+        </p>
+      ) : null}
     </div>
   );
 }
