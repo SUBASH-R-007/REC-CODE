@@ -4,7 +4,7 @@ import { requireAdminScopeAction } from "@/lib/auth/scope";
 import { isEmptyScope } from "@/lib/auth/scope-where";
 import { AppError } from "@/lib/errors";
 import { db } from "@/lib/db";
-import { getAssessmentResults } from "@/server/queries/admin-assessment-results";
+import { getAssessmentAttendance, getAssessmentResults } from "@/server/queries/admin-assessment-results";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +31,13 @@ export const dynamic = "force-dynamic";
  *     person who pulled it and the moment, the way the placement export
  *     does — so a spreadsheet found on a shared drive in March can still
  *     say where it came from.
+ *
+ * Since 13m.2 it also carries the people who did NOT sit it, with
+ * `sat=no` and no marks. One file, because the question a department
+ * asks of this spreadsheet is "how did the cohort do", and a cohort
+ * includes the forty who never arrived — exporting only the candidates
+ * who turned up produces a column of marks whose denominator is
+ * invisible, which is how an absence quietly becomes a pass rate.
  *
  * What it does NOT carry: any integrity band, score or verdict. Those are
  * `/admin/integrity`'s, where a person decides with the reasoning beside
@@ -67,7 +74,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     );
   }
 
-  const results = await getAssessmentResults(scope, id);
+  const [results, attendance] = await Promise.all([
+    getAssessmentResults(scope, id),
+    getAssessmentAttendance(scope, id),
+  ]);
+  const absent = attendance?.absent ?? [];
 
   await audit({
     actorId,
@@ -75,7 +86,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     entityType: "Assessment",
     entityId: id,
     sensitivity: "SENSITIVE",
-    metadata: { slug: paper.slug, rows: results.rows.length, maxPoints: results.maxPoints },
+    metadata: {
+      slug: paper.slug,
+      rows: results.rows.length,
+      absent: absent.length,
+      maxPoints: results.maxPoints,
+    },
   });
 
   const at = new Date().toISOString();
@@ -84,6 +100,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     "name",
     "department",
     "batch",
+    // Phase 13m.2: "no" on a row for somebody the paper was set for who
+    // never opened a sitting. Early, so a spreadsheet sorted on it puts
+    // the absences together.
+    "sat",
     "attempt",
     "status",
     "started_at",
@@ -115,7 +135,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const lines = [
     // Provenance first, as the placement export does: a file on a shared
     // drive in March can still say where it came from.
-    `# REC Code · ${paper.title} (${paper.slug}) · exported ${at} by ${actorLabel} · ${results.rows.length} candidates in scope`,
+    `# REC Code · ${paper.title} (${paper.slug}) · exported ${at} by ${actorLabel} · ${results.rows.length} sat, ${absent.length} did not, in your scope`,
     header.join(","),
     ...results.rows.map((row) =>
       [
@@ -123,6 +143,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         row.name,
         row.departmentCode ?? "",
         row.batchYear ?? "",
+        "yes",
         row.attemptNumber,
         row.status,
         row.startedAt.toISOString(),
@@ -149,6 +170,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
         row.watched.fullscreenExits,
         row.watched.pastes,
         row.watched.longestGapSeconds,
+      ]
+        .map(csvCell)
+        .join(","),
+    ),
+    /**
+     * Then the absences, in roll-number order, with every mark column
+     * empty rather than zero. A zero is a mark somebody earned; an
+     * absence is not a mark at all, and a spreadsheet that averages the
+     * column must not be handed a nought for a candidate who was never
+     * in the room.
+     */
+    ...absent.map((row) =>
+      [
+        row.collegeId,
+        row.name,
+        row.departmentCode ?? "",
+        row.batchYear ?? "",
+        "no",
+        "",
+        "ABSENT",
+        ...Array.from({ length: header.length - 7 }, () => ""),
       ]
         .map(csvCell)
         .join(","),

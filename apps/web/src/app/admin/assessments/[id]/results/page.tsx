@@ -72,7 +72,7 @@ export default async function AssessmentResultsPage({ params }: { params: Promis
               Export as CSV
             </a>{" "}
             <span className="text-xs text-muted">
-              Your students only, and every download is recorded.
+              Your students only, the absentees included, and every download is recorded.
             </span>
           </p>
         ) : null}
