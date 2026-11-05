@@ -27,6 +27,7 @@ import type { PaperLanguageView } from "@recx/shared";
 import type { EditorPrefs } from "@/components/editor/editor-types";
 import { ExamBottomBar } from "@/components/exam/exam-bottom-bar";
 import { TelemetryQueue } from "@/lib/exam/client/telemetry-queue";
+import { displayCount } from "@/lib/exam/client/exam-browser-bridge";
 import { clearAttempt, markSynced, putDraft } from "@/lib/exam/client/draft-store";
 import { sha256Hex } from "@/lib/exam/client/sha256";
 
@@ -841,8 +842,36 @@ export function ExamSession({
   useEffect(() => {
     if (revoked) return;
     if (navigator.webdriver) record({ kind: "AUTOMATION_HINT", atMs: 0 });
-    const screenWithExtended = screen as Screen & { isExtended?: boolean };
-    if (screenWithExtended.isExtended === true) record({ kind: "MULTI_MONITOR", atMs: 0 });
+
+    /**
+     * Displays, from the best source available (Phase 14d).
+     *
+     * `screen.isExtended` is what a web page has, and PROCTORING.md §2 is
+     * blunt about it: Chromium-only, absent for reasons that mean nothing,
+     * and falsified by a content script that runs before any page script.
+     * It stays as the fallback because most sittings are in an ordinary
+     * browser and an unreliable hint is still worth a line a reviewer can
+     * discount.
+     *
+     * Inside REC Exam Browser the question is asked of the operating
+     * system instead, which is one of the few things the application
+     * genuinely knows that a page does not. Same signal either way --
+     * MULTI_MONITOR means more than one screen, and PROCTORING.md §3 means
+     * it is a line a reviewer reads and never a refusal.
+     */
+    let cancelled = false;
+    void displayCount().then((count) => {
+      if (cancelled) return;
+      if (count !== null) {
+        if (count > 1) record({ kind: "MULTI_MONITOR", atMs: 0 });
+        return;
+      }
+      const screenWithExtended = screen as Screen & { isExtended?: boolean };
+      if (screenWithExtended.isExtended === true) record({ kind: "MULTI_MONITOR", atMs: 0 });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [record, revoked]);
 
   /**

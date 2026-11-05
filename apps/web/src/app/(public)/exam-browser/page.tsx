@@ -41,7 +41,10 @@ export default async function ExamBrowserPage() {
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-text-secondary">
           <li>Opens full screen on your exam and nothing else. No address bar, no tabs, no other sites.</li>
           <li>Proves to the server that the paper is being sat inside it, on every request.</li>
-          <li>Turns off copy and paste inside the window, and clears your clipboard when it starts and when it ends.</li>
+          <li>
+            Clears your clipboard when the sitting starts and when it ends. It does not read what was in it, and it
+            does not stop you copying and pasting your own work inside the paper.
+          </li>
           <li>Counts how many screens are attached, so you can unplug a second one before the clock starts.</li>
           <li>Asks the operating system to keep the window out of screen recordings and screen shares.</li>
         </ul>

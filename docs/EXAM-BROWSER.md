@@ -91,8 +91,20 @@ because the rest of that list is unchanged.
   application with `--remote-debugging-port`, `--load-extension`,
   `--disable-web-security` or `--inspect` is the obvious first attack. The
   application refuses to start with any of them (§7).
-* **Paste can actually be refused.** Not merely instrumented. Read the
-  honesty note in §6 before believing this is worth much.
+* **The clipboard can be emptied**, at the start of a sitting and at the
+  end of it. Emptying is not reading, and nothing here ever asks what was
+  in it (§4).
+
+  What this deliberately does **not** do is block paste. The first draft
+  of this document said it would, and that was wrong on the product's own
+  terms: `PROCTORING.md` §2 settled the question before this application
+  existed -- "paste is instrumented, not blocked", because a tool that
+  types the clipboard as synthetic keystrokes walks straight past a block
+  and the only person inconvenienced is the honest candidate who meant to
+  move a line of their own code. The exam page already records the event
+  and its size, and a paper that wants more has `refuseOutsidePaste`
+  (§9 of that document), which is a per-paper decision rather than a
+  property of the browser.
 
 **Unchanged, and no desktop application changes them:**
 
