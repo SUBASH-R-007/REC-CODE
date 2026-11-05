@@ -26,6 +26,7 @@ const MODE_LABEL: Record<string, string> = {
   ADVISORY: "Advisory — watched and recorded, sat anywhere",
   REMOTE_MONITORED: "Remote monitored — a registered device",
   KIOSK_SEB: "Kiosk (Safe Exam Browser), verified per request",
+  KIOSK_RECX: "Kiosk (REC Exam Browser), verified per request against a key minted for each sitting",
   LAB_SUPERVISED: "Lab supervised — a college hall, on the hall's network",
 };
 

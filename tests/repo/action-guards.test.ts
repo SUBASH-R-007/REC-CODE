@@ -111,7 +111,7 @@ const ROUTE_EXEMPT_PREFIXES = [
    * A second attempt to spend one is refused and audited.
    * `apps/web/test/exam-browser.test.ts` asserts each of those.
    */
-  "apps/web/src/app/api/exam/browser/",
+  "apps/web/src/app/api/exam/browser/exchange/",
 ];
 
 const actionFiles = findFiles({ under: [ACTIONS_DIR], extensions: [".ts"] }).filter(

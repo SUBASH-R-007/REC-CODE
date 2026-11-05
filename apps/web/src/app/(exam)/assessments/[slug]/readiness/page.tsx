@@ -1,4 +1,5 @@
 import {
+  RECX_SITTING_HEADER,
   SEB_CONFIG_KEY_HEADER,
   SEB_REFUSAL_MESSAGES,
   SEB_REQUEST_HASH_HEADER,
@@ -13,6 +14,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
 import { CollegeLogo } from "@/components/brand/college-logo";
+import { LaunchExamBrowser } from "@/components/exam/launch-exam-browser";
 import { db } from "@/lib/db";
 import { pageRequest } from "@/lib/exam/containment";
 import { acceptedLanguagesFor } from "@/lib/exam/language";
@@ -98,7 +100,9 @@ export default async function ReadinessPage({
       ? "This assessment is sat in a supervised lab. Your invigilator will seat you before you start."
       : assessment.proctorMode === "KIOSK_SEB"
         ? "This assessment runs in Safe Exam Browser. Start it from the kiosk build, not from an ordinary browser."
-        : null;
+        : assessment.proctorMode === "KIOSK_RECX"
+          ? "This assessment runs in REC Exam Browser. Launch it from here, not from an ordinary browser."
+          : null;
 
   /**
    * Whether there is anything left to start (Phase 12t).
@@ -158,6 +162,25 @@ export default async function ReadinessPage({
   const inSeb =
     here.headers.get(SEB_CONFIG_KEY_HEADER) !== null || here.headers.get(SEB_REQUEST_HASH_HEADER) !== null;
   const sebOk = !kiosk || inSeb;
+
+  /**
+   * REC Exam Browser, the same shape and for the same reason (Phase 14e).
+   *
+   * One question only: is this request coming from the exam browser at
+   * all? Whether its signature VERIFIES is the start route's business, and
+   * `containment.ts` answers it there with the attempt in hand. A
+   * readiness page that tried would have no attempt to compare the sitting
+   * against, so it could only ever answer "some browser signed something",
+   * which is not a question worth asking.
+   *
+   * Until then the checks and the Start button are not drawn: walking
+   * somebody through four readiness checks and a consent box before
+   * telling them they are in the wrong browser wastes the ten minutes
+   * before an exam.
+   */
+  const recxKiosk = assessment.proctorMode === "KIOSK_RECX";
+  const inRecxBrowser = here.headers.get(RECX_SITTING_HEADER) !== null;
+  const recxOk = !recxKiosk || inRecxBrowser;
 
   const refusal = over
     ? START_REFUSAL_MESSAGES[spent === 1 && assessment.maxAttempts === 1 ? "finished" : "no_attempts_left"]
@@ -222,7 +245,31 @@ export default async function ReadinessPage({
         ) : null}
       </div>
 
-      {kiosk && !sebOk ? (
+      {recxKiosk && !recxOk ? (
+        <div className="space-y-4 px-6 pb-10">
+          <div className="rounded-xl border border-warning/40 bg-warning-subtle p-4 text-sm">
+            <h3 className="font-display text-base font-semibold">This paper is sat in REC Exam Browser</h3>
+            <p className="mt-2">
+              Launching it opens a window of its own with no address bar and no tabs, on this paper and nothing else.
+              It closes when you hand in, and installs nothing that keeps running afterwards.
+            </p>
+          </div>
+          <LaunchExamBrowser slug={slug} />
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href="/exam-browser"
+              className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              Install REC Exam Browser
+            </a>
+          </div>
+          <p className="text-xs text-muted">
+            It is monitored and recorded, like every proctored assessment here, and what it records is in your
+            college's proctoring notice. It cannot see your camera, your microphone or your screen, and it reads
+            nothing on this machine outside the exam.
+          </p>
+        </div>
+      ) : kiosk && !sebOk ? (
         <div className="space-y-4 px-6 pb-10">
           <div className="rounded-xl border border-warning/40 bg-warning-subtle p-4 text-sm">
             <h3 className="font-display text-base font-semibold">This paper is sat in Safe Exam Browser</h3>

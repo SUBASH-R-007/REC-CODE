@@ -1124,6 +1124,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * ever returned, so a refusal that leaked anything at all about the
      * sitting it refused would be leaking it to an unauthenticated caller.
      */
+    /**
+     * Phase 14e. Minting a launch, swept against a paper that does not
+     * exist. The 404 must look exactly like the one a paper S cannot see
+     * would produce: a candidate who can tell "no such assessment" from
+     * "an assessment you are not in the audience for" can enumerate the
+     * college's exam timetable from a slug guess.
+     */
+    "api/exam/browser/launch/[slug]/route.ts#POST": {
+      call: call(
+        () => studentRequest(`/api/exam/browser/launch/${tag}-no-such-assessment`, { method: "POST" }),
+        () => params({ slug: `${tag}-no-such-assessment` }),
+      ),
+      status: [404],
+    },
     "api/exam/browser/exchange/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/exam/browser/exchange", { method: "POST", json: { token: "n".repeat(64) } }),

@@ -348,6 +348,21 @@ const ROUTE_CALLS: Record<string, () => [Request, ...unknown[]]> = {
     }),
     { params: Promise.resolve({ interviewId: "nope" }) },
   ],
+  /**
+   * Phase 14e. Minting a launch for REC Exam Browser, from the readiness
+   * page. A slug that does not exist, deliberately: what this matrix is
+   * asking is whether the GUARD refuses the wrong role, and it must reach
+   * that answer before it reaches the database. The browser's own
+   * exchange is not here because it is unauthenticated by design and
+   * lives in PUBLIC_ROUTES.
+   */
+  "app/api/exam/browser/launch/[slug]/route.ts#POST": () => [
+    new Request("http://localhost:3100/api/exam/browser/launch/nothing-here", {
+      method: "POST",
+      headers: { host: "localhost:3100", origin: "http://localhost:3100" },
+    }),
+    { params: Promise.resolve({ slug: "nothing-here" }) },
+  ],
   // Phase 12a. Starting a sitting: a form POST from the readiness page.
   "app/api/exam/start/[slug]/route.ts#POST": () => [
     new Request("http://localhost:3100/api/exam/start/nothing-here", {

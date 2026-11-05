@@ -702,6 +702,11 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
       // Phase 12a. Starting a sitting: a route handler because it writes the
       // attempt-token cookie, which a page render may not do.
       "app/api/exam/start/[slug]/route.ts#POST",
+      // Phase 14e. Minting a launch for REC Exam Browser: the candidate's
+      // own, signed in, on the readiness page. The browser's own exchange
+      // is unauthenticated and sits in PUBLIC_ROUTES instead -- by then
+      // there is no session to check, and the token is the credential.
+      "app/api/exam/browser/launch/[slug]/route.ts#POST",
       "app/api/exam/[attemptId]/hb/route.ts#POST",
       "app/api/exam/[attemptId]/events/route.ts#POST",
       "app/api/exam/[attemptId]/snapshot/route.ts#POST",

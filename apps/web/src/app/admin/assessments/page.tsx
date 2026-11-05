@@ -18,6 +18,7 @@ const MODE_SHORT: Record<string, string> = {
   ADVISORY: "Advisory",
   REMOTE_MONITORED: "Remote",
   KIOSK_SEB: "Kiosk (SEB)",
+  KIOSK_RECX: "Kiosk (REC)",
   LAB_SUPERVISED: "Lab",
 };
 
