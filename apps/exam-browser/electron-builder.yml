@@ -1,0 +1,125 @@
+# Packaging REC Exam Browser (Phase 14f).
+#
+# What a college installs, and the shape of it. Every entry below is either
+# load-bearing for the posture in docs/EXAM-BROWSER.md or there to keep the
+# install as small an imposition as possible on a candidate's own machine --
+# they are being asked to install software to sit an exam, which is not a
+# small thing to ask.
+#
+# tests/repo/exam-browser-posture.test.ts reads this file.
+
+appId: in.edu.rec.code.exam-browser
+productName: REC Exam Browser
+copyright: Rajalakshmi Engineering College
+
+directories:
+  output: release
+  buildResources: build
+
+# dist/ and the manifest, and nothing else. `@recx/shared` is bundled into
+# dist/main.js by tsup, so no node_modules are shipped -- which is also why
+# the installer is small and why there is nothing in it to audit but our own
+# two files.
+files:
+  - dist/**/*
+  - package.json
+  # Belt and braces on top of `@recx/shared` being a devDependency.
+  # electron-builder ships production dependencies by default, and the first
+  # build of this configuration put 4.3 MB of zod -- its own test suite
+  # included -- inside the installer, because `@recx/shared` depends on it
+  # and was listed as a runtime dependency. tsup inlines the shared module
+  # into dist/main.js, so the application needs no node_modules at all, and
+  # saying so twice is cheap. Phase 14c shipped the same mistake one layer
+  # up (290 KB of aptitude taxonomy in a 14 KB bundle); this is the version
+  # of it that a dependency list rather than an import statement causes.
+  - "!node_modules/**/*"
+
+# Nothing is smuggled in beside the application. No helper binary, no
+# bundled config file a candidate could edit, no certificate store of our
+# own: the exam origins are compiled into dist/main.js (src/config.ts says
+# why that is the security property rather than a convenience).
+extraResources: []
+extraFiles: []
+
+# The scheme the readiness page uses to start a sitting. It MUST match
+# EXAM_BROWSER_SCHEME in packages/shared/src/exam-browser.ts: an installer
+# that registered a different one would leave every Launch button pressing
+# nothing, and the fence checks the two agree.
+protocols:
+  - name: REC Exam Browser launch
+    schemes:
+      - recx-exam
+
+# NO auto-update feed, on purpose. docs/EXAM-BROWSER.md §4 forbids a
+# background updater by name -- a process that keeps running when no paper
+# is being sat is the desktop agent docs/PROCTORING.md §5 refuses -- so the
+# deployment publishes installers and a latest.json, the readiness check
+# tells a candidate when their copy is too old, and a person installs the
+# new one. `publish: null` keeps electron-builder from writing an update
+# feed into the artifacts.
+publish: null
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Signed in CI from secrets that are not in this repository. Nothing here
+  # names a certificate, so a local build is unsigned and says so.
+  signAndEditExecutable: true
+
+nsis:
+  # Per-user, so installing needs no administrator. A candidate on their own
+  # laptop should not have to find someone with an admin password an hour
+  # before a paper, and nothing this application does needs the machine.
+  perMachine: false
+  oneClick: true
+  allowToChangeInstallationDirectory: false
+  # One ordinary uninstall that leaves nothing behind
+  # (docs/EXAM-BROWSER.md §4). deleteAppDataOnUninstall is true because the
+  # sitting itself writes nothing -- the window runs in an in-memory
+  # Chromium session -- so whatever is in there is Chromium's own scaffolding
+  # and should go with it.
+  deleteAppDataOnUninstall: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  # It is launched from the readiness page, through the scheme above. A
+  # desktop icon invites starting it on its own, which only ever produces
+  # the dialog telling the candidate to start from REC Code.
+  runAfterFinish: false
+
+mac:
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # The window asks the operating system to keep itself out of screen
+  # recordings; it never records anything itself, so no capture, camera or
+  # microphone entitlement is requested, and none is listed here.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  writeUpdateInfo: false
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Education
+  # Unsigned, for lab machines that already run a managed image
+  # (docs/EXAM-BROWSER.md §8).
+  desktop:
+    entry:
+      # Not shown in the applications menu: it is started by the scheme.
+      NoDisplay: "true"
+
+appImage:
+  license: null
+
+artifactName: REC-Exam-Browser-${version}-${os}-${arch}.${ext}

@@ -7,6 +7,9 @@ import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { redis } from "@/lib/redis";
 import { loadMailHealth } from "@/server/queries/super-dashboard";
+import { examBrowserVersionFloor } from "@/lib/exam/containment";
+import { EXAM_BROWSER_PROTOCOL_VERSION } from "@recx/shared";
+import { ExamBrowserFloorForm } from "@/components/super/exam-browser-floor-form";
 import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 import { TestEmailButton } from "@/components/super/test-email-button";
 import { formatIst, Notice, PageHeader } from "@/components/super/ui";
@@ -41,12 +44,15 @@ function Status({ ok, label }: { ok: boolean; label: string }) {
  */
 export default async function SuperIntegrationsPage() {
   await requireSuperAdminPage();
-  const [mail, outbox, lastSent, redisOk, sebRow] = await Promise.all([
+  const [mail, outbox, lastSent, redisOk, sebRow, examBrowserFloor] = await Promise.all([
     loadMailHealth(),
     db.schedulerJobStatus.findUnique({ where: { job: "outbox" }, select: { lastStartedAt: true, lastOk: true } }),
     db.emailOutbox.findFirst({ where: { status: "SENT" }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
     redisReachable(),
     db.platformSetting.findUnique({ where: { key: sebSettingKey(null) }, select: { value: true } }),
+    // Phase 14f. Read through the same function the containment check
+    // uses, so the screen cannot show a floor the check would not apply.
+    examBrowserVersionFloor(),
   ]);
   // Booleans, never the keys themselves.
   const sebValue = sebRow?.value as { configKey?: unknown; browserExamKey?: unknown } | null | undefined;
@@ -128,6 +134,26 @@ export default async function SuperIntegrationsPage() {
             configKeySet={collegeSeb.configKey}
             browserExamKeySet={collegeSeb.browserExamKey}
           />
+        </CardBody>
+      </Card>
+      <Card>
+        <CardHeader
+          title="REC Exam Browser"
+          subtitle="The other kiosk option, and the one control a deployment has over which builds may sit a paper."
+        />
+        <CardBody className="space-y-3 text-sm">
+          <p className="text-text-secondary">
+            A paper set to REC Exam Browser is sat in an application the candidate launches for that one sitting, which
+            presents a key minted for it. Unlike Safe Exam Browser there is no shared secret to configure here: the key
+            is derived per sitting from the deployment&apos;s own secret, so there is nothing on this page to leak.
+            What there is instead is a floor — the lowest build this deployment will accept, which is how a copy found
+            to have a flaw stops being usable the day it is known rather than at the next release.
+          </p>
+          <ExamBrowserFloorForm current={examBrowserFloor} />
+          <p className="text-xs text-muted">
+            Handshake version {EXAM_BROWSER_PROTOCOL_VERSION}. Candidates read what the application does, and what it
+            cannot do, at <span className="font-mono">/exam-browser</span>.
+          </p>
         </CardBody>
       </Card>
       <Card>

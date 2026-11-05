@@ -9,16 +9,18 @@
     "dev": "tsup && electron dist/main.js",
     "build": "tsup",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@recx/shared": "workspace:*"
+    "test": "vitest run",
+    "release": "tsup && electron-builder",
+    "release:dir": "tsup && electron-builder --dir"
   },
   "devDependencies": {
+    "@recx/shared": "workspace:*",
     "@types/node": "^22.18.0",
     "electron": "45.2.3",
+    "electron-builder": "26.18.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
-  }
+  },
+  "author": "Rajalakshmi Engineering College"
 }

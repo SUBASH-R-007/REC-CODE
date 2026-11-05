@@ -1688,6 +1688,103 @@ engine's problem, not a capacity problem.
 
 ---
 
+### 2.20 Running a hall on REC Exam Browser (Phase 14f)
+
+The other kiosk option. `KIOSK_SEB` and `KIOSK_RECX` both exist and a paper
+is set to one of them; this is the second. `docs/EXAM-BROWSER.md` is what
+the application is and what it is worth — read §6 before telling anybody
+what it guarantees, because the honest answer is narrower than it looks.
+
+**What it is worth, in one line for an invigilator:** it raises the cost of
+the easy ways to get help and leaves a record a person reads. It is not a
+claim that nobody can cheat, and the phone on the desk is outside the reach
+of any software. You are still the control that matters most.
+
+#### Before the day
+
+1. **Publish a build.** `deploy/exam-browser/README.md`. Check one download
+   per platform from outside the college network; a 404 here is a hall that
+   cannot sit.
+2. **Tell candidates where it comes from.** `/exam-browser` is public and
+   says what the application does and what it cannot do. Point at that
+   page, not at a file in a chat message: a candidate who learns to install
+   exam software from a link somebody sent them has learnt the wrong thing.
+3. **Set the paper to REC Exam Browser.** A published paper's proctor mode
+   is fixed by a trigger, so this is chosen when the paper is created. A
+   paper already published in another mode cannot be flipped — which is the
+   rule working: a paper's meaning must not change under the candidates
+   sitting it.
+4. **Check `EXAM_BROWSER_SECRET` is set** in the deployment's environment.
+   Every sitting key is derived from it. The application refuses to start in
+   production with the development default, so a missing one is a hall that
+   cannot sit rather than a hall sitting with a known key — but find out
+   the week before, not at nine.
+
+#### On the day
+
+1. Candidates sign in **in their ordinary browser**, open the paper and
+   reach the readiness check. The Launch panel is there instead of the
+   usual checks.
+2. Pressing **Launch** mints a single-use token, good for five minutes, and
+   hands it to the operating system. The exam browser opens full screen on
+   the readiness page, already signed in — nobody should be typing a
+   password into a window with no address bar, and if anybody is, stop and
+   read the next section.
+3. They press **Start** inside that window and sit the paper.
+4. The sitting ends when they hand in. The application quits and leaves
+   nothing running.
+
+#### When something goes wrong
+
+| What the candidate sees | What it means | What to do |
+|---|---|---|
+| Nothing happens on Launch | The application is not installed, or the scheme is not registered | Install it. The readiness page's own status line says this; `/exam-browser` has the version. |
+| "That launch has already been used" | The token was spent twice | Press Launch again — a fresh token costs nothing. **If they only pressed it once, tell someone:** two copies holding one sitting's key is the event worth seeing, and it is in the audit log as `exam.browser.launch_reused`. |
+| "This launch pointed somewhere this exam browser is not allowed to go" | Something tried to point the college's application at a server it was not shipped to talk to | **Do not let them enter a password.** This is not the candidate's fault. Record the machine and tell whoever runs the platform. |
+| "Your exam browser is too old" | The installed copy is below the version floor | Install the current build. If a whole hall sees it, the floor is wrong, not the hall — see below. |
+| A sign-in form inside the exam browser | The sitting's session is gone: expired, revoked, or the paper was already handed in | Close it and launch again from the readiness check. A candidate should never type a password into that window. |
+| The window shows an extra-screen warning | A second display is attached | Ask them to unplug it before the clock starts. It is reported, never refused: `docs/PROCTORING.md` §3 governs it like every other signal. |
+
+#### Cutting off a bad build
+
+`/super/settings/integrations` → **REC Exam Browser** → lowest accepted
+version. SUPER_ADMIN only, audited at SECURITY with the previous value and
+the new one.
+
+Raising it refuses every candidate on an older copy **from their next
+request onwards, including candidates part-way through a paper.** So:
+
+* raise it when a build is known to be bad, not as housekeeping;
+* never during a sitting, unless the sitting is the reason;
+* if a hall cannot start and the floor was changed recently, clear it
+  first and ask questions afterwards. The button is next to the field.
+
+An unreadable stored floor is ignored and logged rather than applied, so a
+typo cannot lock a hall out — but it will be silently doing nothing, which
+is why it is logged.
+
+#### What is not true of it
+
+Written here because a runbook is where somebody looks for permission to
+claim something:
+
+* It does not watch the candidate. No camera, no microphone, no screen
+  recording, no keystrokes, no reading of the clipboard. `/exam-browser`
+  says so to candidates and `tests/repo/exam-browser-posture.test.ts` fails
+  the build if any of it appears.
+* It does not stop copy and paste. Paste is instrumented, not blocked
+  (`docs/PROCTORING.md` §2), and a tool that types the clipboard as
+  keystrokes walks past any block.
+* It does not survive the sitting. No service, no scheduled task, no
+  autostart entry, nothing in the system tray.
+* It cannot see a second machine, a phone, or a person in the room. Those
+  are yours.
+* A `KIOSK_RECX` result is still not a credential. Only `LAB_SUPERVISED`
+  results may feed shortlisting, certificates or placement eligibility
+  (`docs/PROCTORING.md` §3).
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -2375,3 +2472,11 @@ coordinator from actual runs — never in advance.
 | 14h | 2026-11-05 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm size` -- Windows 11 | PASS (lint 0 warnings; typecheck clean; **9,391 tests passed, 0 failed** -- plus the 7 of `exam-browser-sitting.db.test.ts`, which the Windows gate skips and which were run separately with RECX_DB_TESTS=1 against recx_test; build compiled; every size budget met). The first run failed at the build step on the EPERM this repository knows well: `preview_stop` reported the dev server stopped and left the whole next chain alive, four PIDs holding Prisma query engine DLL, after every test had already passed | Claude |
 | 14h | 2026-11-05 | What the application actually puts on the wire | PASS, and this was the one thing neither the database test nor the dev server could show. The database test builds attestation headers by hand, so it proves the server's half; the dev server never needed them on the readiness page. Pressing Start inside the kiosk window is not drivable from here -- there is no desktop control in this session, and the application refuses `--remote-debugging-port` by design, which is the point of it. So the application's own origin allowlist, which is configurable in development, was pointed at a throwaway server that answers the exchange and then records and verifies what follows. Three events: the exchange carried NO signature and no cookie, correctly, since the key it would sign with is what comes back; the first navigation carried all six headers with a signature that held when recomputed against the key the probe had issued, AND the session cookie, which proves the cookie is placed before the window navigates; and a `fetch()` made by page JavaScript was signed too, with a different nonce. So every request the window makes is signed without the page knowing anything about the key, which is what `onBeforeSendHeaders` was for | Claude |
 | 14h | 2026-11-05 | What is still not verified end to end | NOTED, so nobody reads the rows above as more than they are. Nothing has yet pressed Start inside a real kiosk window against the real server: the binding, the refusals, the relaunch and the revocation are proved against a real database with real headers, and the signing path is proved in the real binary against a stand-in origin, but the two halves have not been run as one. What would close it is a hall rehearsal with a person at the keyboard, which belongs with 14f's per-hall runbook | Claude |
+| 14f | 2026-11-05 | The installer, and what was nearly inside it | DONE. `electron-builder.yml` with NSIS, dmg and AppImage targets, the `recx-exam` scheme registered by the installer, per-user install so no candidate needs an administrator, and `publish: null` because a background updater is the desktop agent the charter refuses. The first build shipped **4.3 MB** -- the whole of zod, its own test suite included -- because `@recx/shared` was a runtime dependency and electron-builder ships those. tsup already inlines it, so the application needs no node_modules at all: 4.3 MB -> 83 KB, five files, all ours. Phase 14c shipped this mistake one layer up, caused by an import; this one was caused by a dependency list | Claude |
+| 14f | 2026-11-05 | An icon, which is not decoration | DONE. `src/config.ts` argues that any web page can open `recx-exam://launch` and that the worst it can do is start the real application -- but a candidate still has to tell the real window from a page pretending to be it, and a kiosk exam browser wearing the default Electron logo gives them nothing to recognise. Generated from zlib and nothing else, so the repository gains no image dependency for one file: a dark window frame with a bar where an address bar is not, which is the one true thing about the window | Claude |
+| 14f | 2026-11-05 | The version floor has a screen | DONE, and it was in exactly the position the Safe Exam Browser pair was in before 13d -- a `PlatformSetting` row with no UI, so the only way to cut off a bad build was a hand-written SQL statement against production, at nine in the morning, with a hall waiting. `/super/settings/integrations` now carries it beside the SEB card, SUPER_ADMIN only, audited at SECURITY with the previous value AND the new one, because "what was it before" is the first question anybody asks when a hall cannot start. The field starts filled (unlike the SEB keys, which are secrets and must not be printed back), clearing is a button rather than a blanked field, and the consequence is written next to it in the second person | Claude |
+| 14f | 2026-11-05 | Which direction an unreadable floor fails in | DONE, as a function rather than three lines inside the containment check -- the same lesson 14g's renewal bug taught this morning. `meetsVersionFloor` compares three numbers, so a floor that is not three numbers would read as "below every floor" and refuse every build in the hall. `versionFloorOf` returns no floor and says it is unreadable, and the caller logs that, because a setting somebody saved and that is being ignored should not be ignored silently. Eight tests, including that everything the schema will store is something the comparison can use | Claude |
+| 14f | 2026-11-05 | Where a college puts the installers | DONE. `deploy/Caddyfile` serves `/downloads/exam-browser/*` as files from the edge, never through the application: a 90 MB download has no business occupying a worker a hall is sitting on. Versioned names are `immutable` for a year because a name never points at different bytes; `latest.json` is `no-store` because it is the one thing that changes. `deploy/exam-browser/README.md` is the publishing procedure, and it says plainly why the college publishes rather than us -- a candidate installing exam software should be installing a copy their own department can vouch for, from the hostname they already sign in to | Claude |
+| 14f | 2026-11-05 | `RUNBOOK.md` §2.20, written for the person in the room | DONE. Before the day, on the day, and a table of what a candidate might see with what it means and what to do -- including the two that are not the candidate's fault: a second exchange of one token (tell someone) and a bad origin (do not let them enter a password). It ends with what is NOT true of the application, because a runbook is where somebody looks for permission to claim something, and the honest list is shorter than the hopeful one | Claude |
+| 14f | 2026-11-05 | The packaged binary refuses a debugger | PASS. `release/win-unpacked/REC Exam Browser.exe --remote-debugging-port=9222` printed the refusal and exited 2. Proved in 14c for `electron dist/main.js`; this is the same check on the artefact a candidate would actually install, where `app.isPackaged` is true and the development origin variable is ignored | Claude |
+| 14f | 2026-11-05 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm size` -- Windows 11 | PASS (lint 0 warnings; typecheck clean; **9,414 tests passed, 0 failed** -- 23 new over 14h; build compiled; every size budget met). Installers are NOT built by the gate: `pnpm build` compiles the two source files and `pnpm --filter @recx/exam-browser release` is a separate command, because the size budgets are about what a candidate downloads over a hall network and an Electron installer is not that | Claude |

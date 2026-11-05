@@ -56,6 +56,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+      # The exam browser's installers and latest.json (Phase 14f). Read
+      # only, and outside the application entirely: Caddy serves these as
+      # files so a 90 MB download never occupies a web worker that a hall
+      # is using. deploy/exam-browser/README.md is how a release gets here.
+      - ${RECX_EXAM_BROWSER_DIR:-./exam-browser/public}:/srv/exam-browser:ro
     networks: [edge, app]
     logging: *logging
 

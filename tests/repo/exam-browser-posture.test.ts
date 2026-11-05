@@ -32,6 +32,15 @@ export function withoutComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 }
 
+/**
+ * The same idea for XML, and for the same reason. The entitlements file
+ * lists what it does NOT ask for, which is the most useful thing it says
+ * and exactly what a scan for those names would trip over.
+ */
+export function withoutXmlComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, "");
+}
+
 const all = () => sources().map((rel) => ({ rel, text: withoutComments(readRepoFile(rel)) }));
 const main = () => withoutComments(readRepoFile("apps/exam-browser/src/main.ts"));
 
@@ -52,6 +61,9 @@ describe("the scanner itself", () => {
     expect(withoutComments(block)).toContain("const b = 2;");
     expect(withoutComments('const u = "https://x.test";')).toContain("https://x.test");
     expect(withoutComments("globalShortcut.register()")).toContain("globalShortcut");
+    const plist = "<!-- not device.camera -->\n<key>com.apple.security.cs.allow-jit</key>";
+    expect(withoutXmlComments(plist)).not.toContain("device.camera");
+    expect(withoutXmlComments(plist)).toContain("allow-jit");
   });
 });
 
@@ -362,5 +374,115 @@ describe("the session the window is signed in with (Phase 14g)", () => {
     expect(cookie).toBeGreaterThan(-1);
     expect(load).toBeGreaterThan(-1);
     expect(cookie).toBeLessThan(load);
+  });
+});
+
+describe("what a college actually installs (Phase 14f)", () => {
+  /**
+   * The packaging configuration is part of the posture, not a build
+   * detail. An installer decides what lands on a candidate's machine, what
+   * it registers with the operating system, and whether anything is left
+   * running afterwards -- which is the line `docs/PROCTORING.md` §5 draws
+   * between an exam browser and a desktop agent.
+   */
+  const builder = () => readRepoFile("apps/exam-browser/electron-builder.yml");
+  const manifest = () => JSON.parse(readRepoFile("apps/exam-browser/package.json")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+
+  it("registers the scheme the readiness page actually opens, and no other", () => {
+    /**
+     * An installer registering a different scheme than the application
+     * parses would leave every Launch button pressing nothing -- and the
+     * failure would appear on a morning when a hall full of candidates is
+     * waiting, because nothing else exercises the association.
+     */
+    const shared = readRepoFile("packages/shared/src/exam-browser.ts");
+    const scheme = /EXAM_BROWSER_SCHEME = "([^"]+)"/.exec(shared)?.[1];
+    expect(scheme, "EXAM_BROWSER_SCHEME").toBeTruthy();
+
+    const schemes = builder()
+      .slice(builder().indexOf("protocols:"))
+      .split("\n")
+      .slice(0, 6)
+      .filter((line) => /^\s+- \S/.test(line) && !/name:/.test(line))
+      .map((line) => line.replace(/^\s+-\s*/, "").trim());
+    expect(schemes).toEqual([scheme]);
+  });
+
+  it("ships no auto-updater and no update feed", () => {
+    /**
+     * `docs/EXAM-BROWSER.md` §4 forbids a background updater by name. The
+     * posture scan above keeps `electron-updater` out of the source; this
+     * keeps it out of the manifest and keeps electron-builder from writing
+     * an update feed into the artifacts, which is the other half of the
+     * same promise.
+     */
+    const pkg = manifest();
+    const named = { ...pkg.dependencies, ...pkg.devDependencies };
+    expect(Object.keys(named).filter((name) => /updater/.test(name))).toEqual([]);
+    expect(builder()).toMatch(/^publish: null$/m);
+  });
+
+  it("installs for one user, so no candidate needs an administrator", () => {
+    /**
+     * A candidate on their own laptop should not have to find somebody with
+     * an admin password an hour before a paper, and nothing this
+     * application does needs the machine.
+     */
+    expect(builder()).toMatch(/perMachine: false/);
+  });
+
+  it("puts nothing in the package but the application's own two files", () => {
+    /**
+     * The first build of this configuration shipped 4.3 MB of zod -- its
+     * own test suite included -- because `@recx/shared` was a runtime
+     * dependency and electron-builder ships those. tsup inlines the shared
+     * module, so the application needs no node_modules at all, and a
+     * dependency list is an easier thing to change by accident than an
+     * import statement. Phase 14c shipped the same mistake one layer up.
+     */
+    const pkg = manifest();
+    expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+    expect(builder()).toMatch(/- "!node_modules\/\*\*\/\*"/);
+    // And nothing smuggled in beside the application: no helper binary, no
+    // editable config file, no certificate store of our own.
+    expect(builder()).toMatch(/extraResources: \[\]/);
+    expect(builder()).toMatch(/extraFiles: \[\]/);
+  });
+
+  it("asks macOS for nothing it is forbidden to do", () => {
+    /**
+     * An entitlements file is the most legible statement a macOS
+     * application makes about what it is capable of. This one should be
+     * readable in ten seconds, and the camera should visibly not be in it.
+     */
+    const plist = withoutXmlComments(readRepoFile("apps/exam-browser/build/entitlements.mac.plist"));
+    for (const forbidden of [
+      "device.camera",
+      "device.audio-input",
+      "device.microphone",
+      "personal-information",
+      "files.user-selected",
+      "screen-capture",
+    ]) {
+      expect(plist, forbidden).not.toContain(forbidden);
+    }
+    // The two Chromium cannot run without, and nothing else.
+    expect((plist.match(/<key>/g) ?? []).length).toBe(2);
+  });
+
+  it("has an icon of its own, which is not decoration", () => {
+    /**
+     * `src/config.ts` explains that any web page can open
+     * `recx-exam://launch`, and that the worst such a page can do is start
+     * the real application. A candidate still has to be able to tell the
+     * real window from a page pretending to be it, and an application
+     * wearing the default Electron logo gives them nothing to recognise.
+     */
+    expect(findFiles({ under: ["apps/exam-browser/build"], extensions: [".png"] })).toContain(
+      "apps/exam-browser/build/icon.png",
+    );
   });
 });

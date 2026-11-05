@@ -365,16 +365,42 @@ Written here so they are built with the application rather than after it.
 ## 8. Build and release shape
 
 * `apps/exam-browser`, package `@recx/exam-browser`, Electron with its own
-  `release` script. Excluded from `pnpm size`, whose budgets are about what
-  a candidate downloads over the hall's network.
+  `release` script (`electron-builder.yml`). Excluded from `pnpm size`,
+  whose budgets are about what a candidate downloads over the hall's
+  network, and from the default build: `pnpm build` compiles the two source
+  files, and producing installers is a separate command.
 * Windows and macOS installers, code-signed in CI from secrets that are not
   in this repository. Linux is an AppImage, unsigned, for lab machines that
-  already run a managed image.
+  already run a managed image. **Nothing in this repository can produce a
+  signed build**, and a local one says so — "no code signing certificate
+  configured, signing is skipped".
+* **The package contains the application and nothing else**: five files,
+  83 KB, all of them ours. The first build of the configuration shipped
+  4.3 MB — the whole of zod, its own test suite included — because
+  `@recx/shared` was listed as a runtime dependency and electron-builder
+  ships those. tsup inlines the shared module, so the application needs no
+  `node_modules` at all. That is Phase 14c's bundle mistake one layer down,
+  caused by a dependency list rather than an import statement, and §7's
+  fences now hold both.
+* The installer registers `recx-exam://` and installs per user, so no
+  candidate needs an administrator an hour before a paper. No autostart
+  entry, no service, no tray icon, **and no update feed**: electron-builder
+  is configured `publish: null`, because a background updater is the
+  desktop agent `PROCTORING.md` §5 refuses.
 * The deployment serves the installers and a `latest.json` naming the
-  minimum version each platform must present. `deploy/` gains a static path
-  and nothing else.
-* The version floor is a platform setting, so a bad build is cut off without
-  a redeploy.
+  current build per platform, as FILES from the edge rather than through
+  the application — `deploy/Caddyfile` gains one static path, and
+  `deploy/exam-browser/README.md` is how a release gets there. A 90 MB
+  download has no business occupying a worker a hall is sitting on.
+* The version floor is a platform setting with a screen
+  (`/super/settings/integrations`), so a bad build is cut off in the
+  morning without a redeploy. It was a row with no screen until 14f, which
+  meant the only way to use the control was a hand-written SQL statement
+  against a production database — exactly where the Safe Exam Browser keys
+  were before 13d. What is published and what is refused are separate
+  decisions on purpose: publishing inconveniences nobody, and raising the
+  floor refuses every candidate on an older copy from their next request,
+  including candidates part-way through a paper.
 
 ---
 
@@ -391,4 +417,4 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14e | Readiness and admin surfaces: launching, installing, the version floor, what the examiner chooses. |
 | 14g | The sitting carries its own session, so the window never meets a sign-in form — what launching the real application found (§5). |
 | 14h | The sitting is bound to the attempt at start and resume, and ends on submit, auto-submit and the deadline sweep (§5 step 7). Before this, a `KIOSK_RECX` paper could not be sat at all. |
-| 14f | Packaging, signing, the installer path in `deploy/`, and the runbook for a hall. |
+| 14f | Packaging (`electron-builder.yml`, icon, entitlements), the installer path in `deploy/`, the version floor's screen, and `RUNBOOK.md` §2.20 for a hall. Signing is configured but cannot be done here. |

@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { ValidationError, runAction, type ActionResult } from "@/lib/errors";
+import { EXAM_BROWSER_SETTING_KEY, examBrowserSettingSchema } from "@/lib/exam/exam-browser-setting";
 import { requestIpHash } from "@/lib/ip";
 
 /**
@@ -151,4 +152,71 @@ export async function setCollegeSebKeys(
     revalidatePath("/super/settings/integrations");
     return { configKey: config.key !== null, browserExamKey: browser.key !== null };
   }, "setCollegeSebKeys");
+}
+
+
+/**
+ * The lowest REC Exam Browser version this deployment accepts (Phase 14f).
+ *
+ * The same situation the Safe Exam Browser pair was in before 13d: the
+ * value lived in a `PlatformSetting` row with no screen, so the only way
+ * to cut off a bad build was a hand-written SQL statement against a
+ * production database, at nine in the morning, with a hall waiting. That
+ * is not a control anybody would use.
+ *
+ * Raising it is the emergency lever: a build with a flaw stops being
+ * usable the day it is known, because `checkContainment` refuses an
+ * attestation presenting a lower version. It is therefore also a lever
+ * that locks candidates out of their exam if it is set above what they
+ * have installed -- which is why the audit row records both the previous
+ * value and the new one, and why clearing it is one obvious action rather
+ * than a field somebody has to blank.
+ */
+const versionFloorSchema = z.object({
+  /** Empty clears the floor, which is how a hall gets unstuck in a hurry. */
+  minVersion: z.string().trim().max(32, "That is not a version."),
+});
+export type SetExamBrowserFloorInput = z.input<typeof versionFloorSchema>;
+
+export async function setExamBrowserVersionFloor(
+  input: SetExamBrowserFloorInput,
+): Promise<ActionResult<{ minVersion: string | null }>> {
+  return runAction(async () => {
+    const actor = await requireSuperAdmin();
+    const { minVersion } = versionFloorSchema.parse(input);
+
+    const next = minVersion === "" ? {} : examBrowserSettingSchema.parse({ minVersion });
+    const value = next as Prisma.InputJsonValue;
+
+    const previous = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"setting:" + EXAM_BROWSER_SETTING_KEY}))`;
+      const row = await tx.platformSetting.findUnique({ where: { key: EXAM_BROWSER_SETTING_KEY } });
+      const current = row ? examBrowserSettingSchema.safeParse(row.value) : null;
+      await tx.platformSetting.upsert({
+        where: { key: EXAM_BROWSER_SETTING_KEY },
+        create: { key: EXAM_BROWSER_SETTING_KEY, value },
+        update: { value },
+      });
+      return current?.success ? (current.data.minVersion ?? null) : null;
+    });
+
+    await audit({
+      actorId: actor.id,
+      action: "settings.exam_browser_floor_set",
+      entityType: "PlatformSetting",
+      entityId: EXAM_BROWSER_SETTING_KEY,
+      sensitivity: "SECURITY",
+      /**
+       * Both values, because this is a lever that can lock a hall out of
+       * an exam, and "what was it before" is the first question anybody
+       * asks when it does. Neither is a secret: a version number is
+       * printed on the public page at /exam-browser.
+       */
+      metadata: { previous, minVersion: next.minVersion ?? null, ipHash: await requestIpHash() },
+    });
+
+    revalidatePath("/super/settings/integrations");
+    revalidatePath("/exam-browser");
+    return { minVersion: next.minVersion ?? null };
+  }, "setExamBrowserVersionFloor");
 }

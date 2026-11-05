@@ -14,6 +14,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { noteExamBrowserSeen, verifyExamBrowserRequest } from "@/lib/exam/exam-browser";
+import { EXAM_BROWSER_SETTING_KEY, versionFloorOf } from "@/lib/exam/exam-browser-setting";
 import { requestIp } from "@/lib/ip";
 
 /**
@@ -210,9 +211,16 @@ export async function checkContainment(args: {
  * a redeploy is not available then (docs/EXAM-BROWSER.md §8).
  */
 export async function examBrowserVersionFloor(): Promise<string | null> {
-  const row = await db.platformSetting.findUnique({ where: { key: "exam-browser" }, select: { value: true } });
-  const value = row?.value as { minVersion?: unknown } | null;
-  return typeof value?.minVersion === "string" && value.minVersion !== "" ? value.minVersion : null;
+  const row = await db.platformSetting.findUnique({
+    where: { key: EXAM_BROWSER_SETTING_KEY },
+    select: { value: true },
+  });
+  const { floor, unreadable } = versionFloorOf(row?.value ?? null);
+  if (unreadable) {
+    // Saved by somebody, applied by nobody: that should not be silent.
+    console.error("[exam-browser] the stored version floor is unreadable and is being ignored");
+  }
+  return floor;
 }
 
 /**

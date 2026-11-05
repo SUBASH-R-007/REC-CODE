@@ -83,6 +83,44 @@
 		}
 	}
 
+	# ── The exam browser's installers (Phase 14f) ────────────────────────
+	#
+	# Served as files by the edge, not by the application. A candidate
+	# downloading a 90 MB installer should not occupy a Next.js worker that
+	# a hall full of people is using to sit a paper, and an installer has no
+	# reason to touch the application at all.
+	#
+	# `docs/EXAM-BROWSER.md` §8: the college publishes the installers
+	# itself, so the copy a candidate installs is one their department can
+	# vouch for, and /exam-browser tells them to ask their department rather
+	# than offering a download from a third party.
+	@installers path /downloads/exam-browser/*
+	handle @installers {
+		root * /srv/exam-browser
+		header {
+			# Immutable: every artefact name carries its version
+			# (REC-Exam-Browser-1.0.0-win-x64.exe), so a name never points at
+			# different bytes and a year is safe.
+			Cache-Control "public, max-age=31536000, immutable"
+			# An installer is not a page; nothing about it should be guessed.
+			X-Content-Type-Options "nosniff"
+			Content-Disposition "attachment"
+		}
+		# latest.json is the exception: it is the thing that CHANGES when a
+		# release is published, and a cached copy would send a hall to the
+		# build it was meant to replace.
+		@manifest path /downloads/exam-browser/latest.json
+		header @manifest {
+			Cache-Control "no-store"
+			Content-Disposition "inline"
+		}
+		file_server {
+			# No directory listing: what exists is named by latest.json, and
+			# an index invites installing last term's build.
+			browse off
+		}
+	}
+
 	# ── Never proxied ────────────────────────────────────────────────────
 	#
 	# `/api/metrics` is scraped over the monitoring network, not the

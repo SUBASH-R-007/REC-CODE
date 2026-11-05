@@ -127,6 +127,11 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       // Phase 13d: the college-wide Safe Exam Browser pair, which a hall
       // with no keys of its own falls back to.
       "super-settings#setCollegeSebKeys",
+      // Phase 14f: the lowest REC Exam Browser version this deployment
+      // accepts. The emergency lever that cuts off a known-bad build
+      // without a redeploy -- and, set wrongly, the one that locks a hall
+      // out of its exam.
+      "super-settings#setExamBrowserVersionFloor",
       "super-flags#setFeatureFlag",
       "super-branding#saveBrandTheme",
       // Phase 8b. The inactivity thresholds are settings, not constants —
