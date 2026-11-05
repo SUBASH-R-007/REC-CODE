@@ -28,6 +28,7 @@ export * from "./proctor";
 export * from "./accommodation";
 export * from "./assessment";
 export * from "./attempt-clock";
+export * from "./exam-browser";
 export * from "./exam-protocol";
 export * from "./exam-timer";
 export * from "./exam-palette";
