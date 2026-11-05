@@ -42,6 +42,11 @@ export default async function ExamBrowserPage() {
           <li>Opens full screen on your exam and nothing else. No address bar, no tabs, no other sites.</li>
           <li>Proves to the server that the paper is being sat inside it, on every request.</li>
           <li>
+            Signs itself in from the Launch you pressed in your own browser, so you never type your password into this
+            window. The sitting shows up in your own list of signed-in devices as &ldquo;REC Exam Browser&rdquo;, and it
+            ends when the paper does.
+          </li>
+          <li>
             Clears your clipboard when the sitting starts and when it ends. It does not read what was in it, and it
             does not stop you copying and pasting your own work inside the paper.
           </li>
@@ -61,6 +66,10 @@ export default async function ExamBrowserPage() {
           <li>It cannot read what you type outside the exam, and does not record keystrokes anywhere.</li>
           <li>It cannot read what was in your clipboard — it clears it, which is not the same as looking at it.</li>
           <li>It cannot read your files, your browsing history or any password you have saved.</li>
+          <li>
+            It cannot keep you signed in afterwards. Nothing about the sitting is written to your disk, and the sign-in
+            it used stops working when the paper ends.
+          </li>
           <li>
             It does not keep running. There is no service, no startup entry and no icon left in your system tray; when
             the paper ends, the program ends.

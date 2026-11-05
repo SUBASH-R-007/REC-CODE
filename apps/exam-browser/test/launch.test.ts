@@ -1,7 +1,14 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { examBrowserLaunchUrl, examBrowserSigningInput, RECX_SIGNATURE_HEADER, RECX_SITTING_HEADER } from "@recx/shared/exam-browser";
+import {
+  examBrowserLaunchUrl,
+  examBrowserSigningInput,
+  RECX_SESSION_COOKIE,
+  RECX_SIGNATURE_HEADER,
+  RECX_SITTING_HEADER,
+} from "@recx/shared/exam-browser";
 import { EXCHANGE_PATH, exchange, launchUrlIn } from "../src/launch";
+import { sessionCookieFor } from "../src/policy";
 import { attestationHeaders, heldSitting, holdSitting, releaseSitting, type Sitting } from "../src/sitting";
 
 /**
@@ -14,12 +21,17 @@ import { attestationHeaders, heldSitting, holdSitting, releaseSitting, type Sitt
 const ALLOWED = ["https://code.rec.edu.in"];
 const TOKEN = "t".repeat(48);
 
+/** Far enough ahead that the expiry is a future moment whenever this runs. */
+const SESSION_EXPIRY = new Date(Date.now() + 2 * 3_600_000);
+
 const okBody = {
   protocol: 1,
   sittingId: "sit_1",
   sittingKey: "k".repeat(64),
   assessmentId: "asm_1",
   assessmentSlug: "mid-term-ds",
+  sessionToken: "s".repeat(43),
+  sessionExpiresAt: SESSION_EXPIRY.toISOString(),
 };
 
 const fakeFetch = (body: unknown, status = 200) =>
@@ -58,6 +70,8 @@ describe("exchanging the launch token", () => {
         origin: ALLOWED[0],
         assessmentId: "asm_1",
         assessmentSlug: "mid-term-ds",
+        sessionToken: "s".repeat(43),
+        sessionExpiresAtMs: SESSION_EXPIRY.getTime(),
       },
     });
     expect(fetchImpl.mock.calls[0]![0]).toBe(`${ALLOWED[0]}${EXCHANGE_PATH}`);
@@ -106,7 +120,16 @@ describe("exchanging the launch token", () => {
   });
 
   it("refuses a reply missing any field rather than half-starting a sitting", async () => {
-    for (const missing of ["sittingId", "sittingKey", "assessmentId", "assessmentSlug"]) {
+    for (const missing of [
+      "sittingId",
+      "sittingKey",
+      "assessmentId",
+      "assessmentSlug",
+      // Phase 14g. A reply without a session would open the sign-in form
+      // inside a frame with no address bar, so it is not a partial success.
+      "sessionToken",
+      "sessionExpiresAt",
+    ]) {
       const body: Record<string, unknown> = { ...okBody };
       delete body[missing];
       const outcome = await exchange({
@@ -131,6 +154,69 @@ describe("exchanging the launch token", () => {
   });
 });
 
+describe("the session the exchange hands back (Phase 14g)", () => {
+  it("refuses an expiry that is not a date rather than opening a window with no cookie", async () => {
+    const outcome = await exchange({
+      launchUrl: examBrowserLaunchUrl({ origin: ALLOWED[0]!, token: TOKEN }),
+      allowedOrigins: ALLOWED,
+      fetchImpl: fakeFetch({ ...okBody, sessionExpiresAt: "soon" }) as unknown as typeof fetch,
+    });
+    expect(outcome).toEqual({ ok: false, reason: "exchange_malformed" });
+  });
+
+  it("sends no cookie of its own to the exchange, because it has none to send", async () => {
+    const fetchImpl = fakeFetch(okBody);
+    await exchange({
+      launchUrl: examBrowserLaunchUrl({ origin: ALLOWED[0]!, token: TOKEN }),
+      allowedOrigins: ALLOWED,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(fetchImpl.mock.calls[0]?.[1]?.credentials).toBe("omit");
+  });
+});
+
+describe("the cookie that signs the window in (Phase 14g)", () => {
+  const base = { origin: "https://code.rec.edu.in", token: "s".repeat(43), expiresAtMs: Date.now() + 3_600_000 };
+
+  it("is http-only, so the page the candidate can script cannot read it", () => {
+    expect(sessionCookieFor(base).httpOnly).toBe(true);
+  });
+
+  it("carries the name the server reads", () => {
+    expect(sessionCookieFor(base).name).toBe(RECX_SESSION_COOKIE);
+  });
+
+  it("is Secure on https and not on http, because Chromium refuses the other way round", () => {
+    expect(sessionCookieFor(base).secure).toBe(true);
+    expect(sessionCookieFor({ ...base, origin: "http://localhost:3000" }).secure).toBe(false);
+  });
+
+  it("goes to the exam origin and the whole of it, and nowhere else", () => {
+    const spec = sessionCookieFor(base);
+    expect(spec.url).toBe(base.origin);
+    expect(spec.path).toBe("/");
+    expect(spec.sameSite).toBe("lax");
+  });
+
+  it("leaves the expiry off when it is not a future moment, rather than setting a dead cookie", () => {
+    for (const expiresAtMs of [Date.now() - 1_000, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const spec = sessionCookieFor({ ...base, expiresAtMs });
+      expect(spec.expirationDate, String(expiresAtMs)).toBeUndefined();
+    }
+  });
+
+  it("passes a future expiry through in seconds, which is what Chromium wants", () => {
+    const expiresAtMs = Date.now() + 7_200_000;
+    expect(sessionCookieFor({ ...base, expiresAtMs }).expirationDate).toBe(Math.floor(expiresAtMs / 1000));
+  });
+
+  it("holds the token and nothing derived from it", () => {
+    // The whole value, unaltered: a cookie the server cannot hash back to
+    // its Session row would send the candidate to the sign-in form.
+    expect(sessionCookieFor(base).value).toBe(base.token);
+  });
+});
+
 describe("the key this copy is holding", () => {
   const sitting: Sitting = {
     sittingId: "sit_1",
@@ -138,6 +224,8 @@ describe("the key this copy is holding", () => {
     origin: ALLOWED[0]!,
     assessmentId: "asm_1",
     assessmentSlug: "mid-term-ds",
+    sessionToken: "s".repeat(43),
+    sessionExpiresAtMs: SESSION_EXPIRY.getTime(),
   };
 
   it("is forgotten when the sitting is released", () => {
@@ -155,6 +243,8 @@ describe("the headers it signs with", () => {
     origin: ALLOWED[0]!,
     assessmentId: "asm_1",
     assessmentSlug: "mid-term-ds",
+    sessionToken: "s".repeat(43),
+    sessionExpiresAtMs: SESSION_EXPIRY.getTime(),
   };
   const url = `${ALLOWED[0]}/api/exam/att_1/hb`;
 

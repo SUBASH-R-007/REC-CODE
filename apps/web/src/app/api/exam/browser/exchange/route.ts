@@ -28,6 +28,18 @@ export const dynamic = "force-dynamic";
  * five minutes, once. Spending it is recorded, and a second attempt to
  * spend it is refused and audited — two applications holding one sitting's
  * key is the event an invigilator should hear about.
+ *
+ * Phase 14g made that worth more, and the increase is worth being exact
+ * about. This response now also carries a SESSION for the candidate the
+ * token was minted for, because the application is a fresh Chromium with no
+ * cookies and the readiness page answered its first request with a redirect
+ * to the sign-in form. So a token spent by somebody else buys a session on
+ * that candidate's account, lasting the paper plus an hour, which is more
+ * than one sitting's attestation was worth on its own. What bounds it is
+ * unchanged -- minted for a signed-in candidate, single use, five minutes,
+ * and ended with the sitting -- and what it is NOT is a way in from
+ * outside: the token only exists because the candidate was already signed in
+ * in their own browser when they pressed Launch.
  */
 
 /**
@@ -81,8 +93,13 @@ export async function POST(request: Request): Promise<Response> {
     entityType: "ExamBrowserSitting",
     entityId: result.sittingId,
     sensitivity: "SECURITY",
-    // The sitting and the paper. Never the key, and never the token.
-    metadata: { assessmentId: result.assessmentId },
+    /**
+     * The sitting and the paper, and THAT a session was issued -- never
+     * which, and never its value. Same rule as the sitting key, same
+     * reason: an audit row is read by people who should not be able to use
+     * what they are reading (docs/EXAM-BROWSER.md §5).
+     */
+    metadata: { assessmentId: result.assessmentId, sessionIssued: true },
   });
 
   return json(
@@ -92,6 +109,12 @@ export async function POST(request: Request): Promise<Response> {
       sittingKey: result.sittingKey,
       assessmentId: result.assessmentId,
       assessmentSlug: result.assessmentSlug,
+      /**
+       * The one place this value is ever readable. `cache-control:
+       * no-store` above is load-bearing for exactly this line.
+       */
+      sessionToken: result.sessionToken,
+      sessionExpiresAt: result.sessionExpiresAt.toISOString(),
     },
     200,
   );

@@ -1,8 +1,11 @@
 # REC Exam Browser — what it is, and what it is worth
 
-> **Status:** the posture, written before any code exists, in the same way
-> `docs/PROCTORING.md` was written before the proctoring engine. Nothing
-> here is implemented yet. The phase plan is §9.
+> **Status:** written before any code existed, in the same way
+> `docs/PROCTORING.md` was written before the proctoring engine. Slices 14a
+> to 14g have shipped, each on the repository gate; §9 says what each one
+> was and what is left. Where the implementation taught us something the
+> design had wrong, this document says so rather than being quietly
+> corrected — §5's body hash and §3's paste block are both retractions.
 
 ---
 
@@ -144,7 +147,11 @@ Two further rules that only arise once software is installed:
   reporter to a third party, no update ping to anywhere but the college's
   own deployment.
 * **Uninstalling it is one ordinary uninstall**, and it leaves nothing
-  behind.
+  behind. The sitting runs in an in-memory Chromium session — a partition
+  with no `persist:` prefix — so its cookies, its cache and its storage live
+  in the process and die with it. Nothing about a sitting is in the user
+  data directory to be left on a shared machine, which matters more from
+  14g on, because the window now holds a real session cookie (§5).
 
 ---
 
@@ -166,8 +173,47 @@ it.
    application. If it is not installed, the page says so and offers the
    installer for this platform.
 4. The application exchanges the launch token, over TLS to the exam origin,
-   for a **sitting key** it holds in memory only. The token is spent; a
-   second exchange fails and is audited.
+   for a **sitting key** it holds in memory only, **and for a session**. The
+   token is spent; a second exchange fails and is audited.
+
+   The session was not in the first draft, and leaving it out was the one
+   mistake in this design that no test could have found. Launching the real
+   application for the first time produced
+   `GET /assessments/…/readiness 307` and `no cookie -> 307 /login`: the
+   application is a fresh Chromium with no cookies, every exam page requires
+   a signed-in user, and so the candidate would have met a password form
+   inside a window with no address bar — which §6 of this document and §5 of
+   `PROCTORING.md` both say must never be taught to anybody. Thirty-one
+   application tests and twenty server tests passed throughout, because not
+   one of them navigates.
+
+   So the exchange issues a `Session` for the candidate the launch token was
+   minted for, returns its token once, and records on the sitting row
+   *which* session that was. The application sets it as a cookie on the exam
+   origin **before its first navigation**, with `httpOnly`, `sameSite=lax`
+   and `Secure` following the scheme. The candidate signs in once, in their
+   own browser, and never types a password into the kiosk window.
+
+   **What this costs, stated plainly.** A launch token was worth one
+   sitting's attestation for five minutes; it is now worth that plus a
+   session on the candidate's account for the length of the paper and an
+   hour. Four things bound it, and none of them is "the token is hard to
+   guess":
+
+   * it only exists because the candidate was already signed in, in their
+     own browser, when they pressed Launch — so this is not a way in from
+     outside;
+   * it is single use and lives five minutes, and a second exchange is
+     refused and audited;
+   * the session dies when the sitting ends — `endExamBrowserSitting`
+     deletes the row, which is why the pointer's foreign key is `SET NULL`
+     and a separate `sessionIssuedAt` records that there was one;
+   * it is `httpOnly` in an in-memory partition, so neither the page the
+     candidate can script nor the disk ever holds it.
+
+   It is also visible: the session calls itself "REC Exam Browser" on the
+   candidate's own devices screen, so a sitting they did not start is
+   something they can see and end themselves.
 5. Every subsequent request carries a signature over the method, the URL, a
    nonce, a timestamp and the sitting id, under that sitting key, plus the
    application's version.
@@ -200,8 +246,10 @@ on managed hardware, and that has not changed. What this design does is
 raise the cost from "copy a file once" to "attack each sitting with a
 debugger, while the server watches one key".
 
-**Audit records whether attestation held and which version presented it,
-never the key.** Same rule as SEB, same reason.
+**Audit records whether attestation held, which version presented it, and
+that a session was issued — never the key and never the session's value.**
+Same rule as SEB, same reason: an audit row is read by people who should
+not be able to use what they are reading.
 
 ---
 
@@ -283,4 +331,6 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14c | The application: window, origin lock, argv refusal, the launch handshake. |
 | 14d | The measures of §3, each with its fence, and the proctor events they emit. |
 | 14e | Readiness and admin surfaces: launching, installing, the version floor, what the examiner chooses. |
+| 14g | The sitting carries its own session, so the window never meets a sign-in form — what launching the real application found (§5). |
+| 14h | The sitting is bound to the attempt at start, and ends with it. Until this lands a `KIOSK_RECX` paper cannot be sat: the containment check reads the expected sitting off the attempt, and nothing writes it. |
 | 14f | Packaging, signing, the installer path in `deploy/`, and the runbook for a hall. |

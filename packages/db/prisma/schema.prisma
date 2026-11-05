@@ -702,6 +702,11 @@ model Session {
   impersonationId String?               @unique
   impersonation   ImpersonationSession? @relation(fields: [impersonationId], references: [id], onDelete: SetNull)
 
+  /// Set when this session was issued to a REC Exam Browser sitting rather
+  /// than to a sign-in (Phase 14g). Ending the sitting deletes the session,
+  /// which is what revokes it.
+  examBrowserSitting ExamBrowserSitting?
+
   @@index([userId])
   @@index([expiresAt])
 }
@@ -3192,6 +3197,14 @@ model ExamBrowserSitting {
   lastSeenAt      DateTime?
   /// Hashed, like everywhere else -- never a raw IP (SPEC section 4).
   ipHashBound     String?
+  /// The session this sitting's window holds, so the application never
+  /// meets a sign-in form (Phase 14g). SetNull because ending a sitting
+  /// DELETES the session -- that is what revocation means here.
+  sessionId       String?    @unique
+  session         Session?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  /// Survives that deletion, so the row still answers "was this sitting
+  /// given a session, and when". Never the token: a Session stores a digest.
+  sessionIssuedAt DateTime?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 

@@ -4,8 +4,17 @@ import { BrowserWindow, app, clipboard, dialog, ipcMain, screen, session } from 
 import { EXAM_BROWSER_SCHEME } from "@recx/shared/exam-browser";
 import { APP_VERSION, WINDOW, readinessPath } from "./config";
 import { LAUNCH_FAILURE_MESSAGES, exchange, launchUrlIn } from "./launch";
-import { allowedOrigins, displayReport, navigationDecision, permissionDecision, shouldAttest, startupDecision } from "./policy";
-import { attestationHeaders, heldSitting, holdSitting, releaseSitting } from "./sitting";
+import {
+  EXAM_PARTITION,
+  allowedOrigins,
+  displayReport,
+  navigationDecision,
+  permissionDecision,
+  sessionCookieFor,
+  shouldAttest,
+  startupDecision,
+} from "./policy";
+import { attestationHeaders, heldSitting, holdSitting, releaseSitting, type Sitting } from "./sitting";
 
 /**
  * REC Exam Browser — the main process (Phase 14c).
@@ -21,8 +30,10 @@ import { attestationHeaders, heldSitting, holdSitting, releaseSitting } from "./
  *
  *   1. The operating system hands us `recx-exam://launch?origin=…&token=…`.
  *   2. The origin is checked against this build's own list before anything
- *      is sent anywhere, then the token is exchanged for a sitting key.
- *   3. A window opens on the readiness page of that origin and can reach
+ *      is sent anywhere, then the token is exchanged for a sitting key and
+ *      a session.
+ *   3. The session is placed as a cookie BEFORE the first navigation, and a
+ *      window opens on the readiness page of that origin and can reach
  *      nothing else.
  *   4. Every request to that origin carries an attestation header set.
  *   5. The paper ends, the key is forgotten, the application quits. It
@@ -61,6 +72,17 @@ if (!app.requestSingleInstanceLock()) {
 
 app.setAsDefaultProtocolClient(EXAM_BROWSER_SCHEME);
 
+/**
+ * The session every request in this application goes through.
+ *
+ * `fromPartition` with no `persist:` prefix is an in-memory session
+ * (`policy.ts`'s `EXAM_PARTITION` says why that matters), and it is used
+ * instead of `session.defaultSession` everywhere: the default session writes
+ * cookies and cache into the user data directory, and from Phase 14g the
+ * cookie in question is a live session on the candidate's account.
+ */
+const examSession = () => session.fromPartition(EXAM_PARTITION, { cache: false });
+
 let mainWindow: BrowserWindow | null = null;
 /** Set once, by the first launch URL we successfully exchange. */
 let origins: readonly string[] = [];
@@ -88,6 +110,9 @@ function createWindow(origin: string): BrowserWindow {
     minHeight: WINDOW.minHeight,
     webPreferences: {
       preload: path.join(DIRNAME, "preload.js"),
+      // The in-memory session, so nothing this sitting touches is written
+      // to disk -- the session cookie above all.
+      partition: EXAM_PARTITION,
       // The renderer gets no Node, its own world, and an OS sandbox.
       contextIsolation: true,
       nodeIntegration: false,
@@ -149,7 +174,8 @@ function createWindow(origin: string): BrowserWindow {
  * chunk loads — is signed without the page knowing anything about it.
  */
 function attachAttestation(): void {
-  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+  const sittingSession = examSession();
+  sittingSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const sitting = heldSitting();
     if (!sitting || !shouldAttest(details.url, sitting.origin)) {
       callback({ requestHeaders: details.requestHeaders });
@@ -165,10 +191,10 @@ function attachAttestation(): void {
 
   // Nothing gets a permission. Both handlers, because Chromium asks
   // through one or the other depending on the API.
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
+  sittingSession.setPermissionRequestHandler((_contents, permission, callback) => {
     callback(permissionDecision(permission));
   });
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => permissionDecision(permission));
+  sittingSession.setPermissionCheckHandler((_contents, permission) => permissionDecision(permission));
 }
 
 /**
@@ -202,6 +228,32 @@ async function openSitting(launchUrl: string): Promise<void> {
    */
   clipboard.clear();
 
+  /**
+   * Before the window, and before any navigation (Phase 14g).
+   *
+   * Launching the real application for the first time is what found this:
+   * every exam page requires a signed-in user, this is a fresh Chromium
+   * with no cookies, and the readiness page answered with a 307 to /login
+   * -- a password form inside a frame with no address bar, which is exactly
+   * the habit `docs/EXAM-BROWSER.md` §5 says must never be taught. No unit
+   * test could have seen it, because none of them navigate.
+   *
+   * A failure here is fatal rather than logged: carrying on would load the
+   * sign-in form, which is the one outcome this must not produce.
+   */
+  if (!(await placeSessionCookie(outcome.sitting))) {
+    await dialog.showMessageBox({
+      type: "warning",
+      title: "REC Exam Browser",
+      message:
+        "This sitting could not be opened on this machine. Close this window and launch it again from the readiness check. If it happens twice, tell your invigilator.",
+      buttons: ["Close"],
+    });
+    releaseSitting();
+    app.quit();
+    return;
+  }
+
   if (!mainWindow) mainWindow = createWindow(outcome.sitting.origin);
   const displays = displayReport(screen.getAllDisplays().length);
   if (displays.worthReporting) {
@@ -211,6 +263,32 @@ async function openSitting(launchUrl: string): Promise<void> {
   }
 
   await mainWindow.loadURL(`${outcome.sitting.origin}${readinessPath(outcome.sitting.assessmentSlug)}`);
+}
+
+/**
+ * Sign this window in, once, with the session the exchange handed back.
+ *
+ * The token goes from the exchange response into Chromium's cookie store
+ * for the exam origin and nowhere else: it is not logged, not written to a
+ * file, and not exposed through the preload. `sessionCookieFor` builds the
+ * record and holds the rules (`httpOnly`, `secure` following the scheme);
+ * this is the one line that applies it.
+ */
+async function placeSessionCookie(sitting: Sitting): Promise<boolean> {
+  try {
+    await examSession().cookies.set(
+      sessionCookieFor({
+        origin: sitting.origin,
+        token: sitting.sessionToken,
+        expiresAtMs: sitting.sessionExpiresAtMs,
+      }),
+    );
+    return true;
+  } catch (error) {
+    // The name of the failure, never the value that failed to be set.
+    console.error("[exam-browser] could not open the sitting:", error instanceof Error ? error.name : "unknown");
+    return false;
+  }
 }
 
 app.on("second-instance", (_event, argv) => {

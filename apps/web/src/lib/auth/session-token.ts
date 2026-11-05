@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Db } from "@recx/db";
+import { RECX_SESSION_COOKIE } from "@recx/shared";
 
 /**
  * Session lookup by raw cookie token, shared by session.ts (App Router) and
@@ -8,7 +9,15 @@ import type { Db } from "@recx/db";
  * module has neither and takes the database client as an argument.
  */
 
-export const SESSION_COOKIE = "recx_session";
+/**
+ * One name, declared in `packages/shared` (Phase 14g).
+ *
+ * REC Exam Browser sets this cookie itself from the value the launch
+ * exchange hands it, so the name is now part of a protocol two
+ * independently built halves speak. A rename that reached only one of them
+ * would log every candidate out of their exam.
+ */
+export const SESSION_COOKIE = RECX_SESSION_COOKIE;
 
 /** Account states that may hold a session. SOFT_RESTRICTED can still sign in. */
 const SIGN_IN_STATUSES = new Set(["ACTIVE", "SOFT_RESTRICTED"]);

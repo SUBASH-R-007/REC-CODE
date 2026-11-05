@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EXAM_BROWSER_PROTOCOL_VERSION,
@@ -32,16 +32,33 @@ const h = vi.hoisted(() => ({
   sitting: null as null | { id: string; assessmentId: string; expiresAt: Date; boundAt: Date | null },
   findUnique: vi.fn(),
   updateMany: vi.fn(),
+  update: vi.fn(),
   attemptUpdateMany: vi.fn(),
+  sessionCreate: vi.fn(),
+  sessionDeleteMany: vi.fn(),
   redisSet: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    examBrowserSitting: { findUnique: h.findUnique, updateMany: h.updateMany, create: vi.fn() },
+/**
+ * One client object, handed to the callback as the transaction client too
+ * (Phase 14g). The exchange runs its three writes inside `$transaction`, and
+ * a mock that gave the callback a different object would let a test pass
+ * while the real writes went nowhere.
+ */
+vi.mock("@/lib/db", () => {
+  const client = {
+    examBrowserSitting: {
+      findUnique: h.findUnique,
+      updateMany: h.updateMany,
+      update: h.update,
+      create: vi.fn(),
+    },
     assessmentAttempt: { updateMany: h.attemptUpdateMany },
-  },
-}));
+    session: { create: h.sessionCreate, deleteMany: h.sessionDeleteMany },
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
+  };
+  return { db: client };
+});
 vi.mock("@/lib/env", () => ({ env: () => ({ EXAM_BROWSER_SECRET: SECRET }) }));
 vi.mock("@/lib/ip", () => ({ requestIpHash: async () => "f".repeat(64) }));
 vi.mock("@/lib/redis", () => ({ redis: () => ({ set: h.redisSet }) }));
@@ -57,7 +74,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.findUnique.mockResolvedValue(null);
   h.updateMany.mockResolvedValue({ count: 1 });
+  h.update.mockResolvedValue({});
   h.attemptUpdateMany.mockResolvedValue({ count: 0 });
+  h.sessionCreate.mockResolvedValue({ id: "ses_1" });
+  h.sessionDeleteMany.mockResolvedValue({ count: 1 });
   // A fresh nonce: SET NX returns "OK" when the key did not exist.
   h.redisSet.mockResolvedValue("OK");
 });
@@ -121,24 +141,27 @@ describe("the sitting key is derived, never stored", () => {
 describe("spending a launch token", () => {
   const live = () => ({
     id: SITTING,
+    userId: "usr_1",
     assessmentId: "asm_1",
     // The application needs the slug, because the readiness page is
-    // addressed by slug and the id would 404.
-    assessment: { slug: "mid-term-ds" },
+    // addressed by slug and the id would 404. `durationSec` sets how long
+    // the sitting's own session lasts (Phase 14g).
+    assessment: { slug: "mid-term-ds", durationSec: 3_600 },
     expiresAt: new Date(Date.now() + 60_000),
     boundAt: null as Date | null,
   });
 
-  it("hands back the sitting and its derived key", async () => {
+  it("hands back the sitting, its derived key and a session", async () => {
     h.findUnique.mockResolvedValue(live());
     const result = await exchangeLaunchToken("t".repeat(43));
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       sittingId: SITTING,
       sittingKey: deriveSittingKey(SITTING),
       assessmentId: "asm_1",
       assessmentSlug: "mid-term-ds",
     });
+    expect(result.ok === true && result.sessionToken).toMatch(/^[A-Za-z0-9_-]{40,}$/);
   });
 
   it("looks the token up by its digest, never by the token", async () => {
@@ -179,6 +202,99 @@ describe("spending a launch token", () => {
 
     const where = h.updateMany.mock.calls[0]![0]!.where as { boundAt: null };
     expect(where.boundAt).toBeNull();
+  });
+});
+
+describe("the session the sitting is issued (Phase 14g)", () => {
+  const live = () => ({
+    id: SITTING,
+    userId: "usr_1",
+    assessmentId: "asm_1",
+    assessment: { slug: "mid-term-ds", durationSec: 3_600 },
+    expiresAt: new Date(Date.now() + 60_000),
+    boundAt: null as Date | null,
+  });
+
+  /**
+   * Why there is a session at all: launching the real application found
+   * that it is a fresh Chromium with no cookies, so the readiness page
+   * answered its first request with a 307 to /login -- a password form in a
+   * window with no address bar, which `docs/EXAM-BROWSER.md` §5 says must
+   * never be taught to a candidate. No unit test could see it; these keep
+   * the fix honest.
+   */
+
+  it("stores only a digest of the token, never the token", async () => {
+    h.findUnique.mockResolvedValue(live());
+    const result = await exchangeLaunchToken("t".repeat(43));
+    const data = h.sessionCreate.mock.calls[0]![0]!.data as { tokenHash: string };
+    const token = result.ok === true ? result.sessionToken : "";
+
+    expect(data.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(data.tokenHash).toBe(createHash("sha256").update(token).digest("hex"));
+    expect(JSON.stringify(data)).not.toContain(token);
+  });
+
+  it("issues it to the candidate the launch token was minted for, and to nobody else", async () => {
+    h.findUnique.mockResolvedValue(live());
+    await exchangeLaunchToken("t".repeat(43));
+    expect((h.sessionCreate.mock.calls[0]![0]!.data as { userId: string }).userId).toBe("usr_1");
+  });
+
+  it("lasts the paper plus an hour, so it outlives nothing but the sitting", async () => {
+    h.findUnique.mockResolvedValue(live());
+    const before = Date.now();
+    const result = await exchangeLaunchToken("t".repeat(43));
+    const expiresAt = result.ok === true ? result.sessionExpiresAt.getTime() : 0;
+
+    expect(expiresAt - before).toBeGreaterThanOrEqual(3_600_000 + 3_600_000 - 1_000);
+    expect(expiresAt - before).toBeLessThanOrEqual(3_600_000 + 3_600_000 + 5_000);
+  });
+
+  it("names itself, so the candidate can see it on their own devices screen", async () => {
+    h.findUnique.mockResolvedValue(live());
+    await exchangeLaunchToken("t".repeat(43));
+    expect((h.sessionCreate.mock.calls[0]![0]!.data as { userAgent: string }).userAgent).toBe("REC Exam Browser");
+  });
+
+  it("records which session the sitting holds, so ending the sitting can revoke it", async () => {
+    h.findUnique.mockResolvedValue(live());
+    await exchangeLaunchToken("t".repeat(43));
+    const call = h.update.mock.calls[0]![0] as { data: { sessionId: string; sessionIssuedAt: Date } };
+    expect(call.data.sessionId).toBe("ses_1");
+    expect(call.data.sessionIssuedAt).toBeInstanceOf(Date);
+  });
+
+  it("issues none when the token was already spent", async () => {
+    /**
+     * The three writes are one fact. A token the database refuses to claim
+     * must not leave a live session on a candidate's account behind it.
+     */
+    h.findUnique.mockResolvedValue(live());
+    h.updateMany.mockResolvedValue({ count: 0 });
+    expect(await exchangeLaunchToken("t".repeat(43))).toMatchObject({ ok: false, reason: "already_used" });
+    expect(h.sessionCreate).not.toHaveBeenCalled();
+  });
+
+  it("is deleted when the sitting ends, in that order", async () => {
+    h.findUnique.mockResolvedValue({ sessionId: "ses_1" });
+    await endExamBrowserSitting(SITTING);
+
+    // The attempt's column first: that is what the hot path compares, so
+    // clearing it is what actually stops the key working.
+    expect(h.attemptUpdateMany.mock.invocationCallOrder[0]!).toBeLessThan(
+      h.sessionDeleteMany.mock.invocationCallOrder[0]!,
+    );
+    expect(h.sessionDeleteMany).toHaveBeenCalledWith({ where: { id: "ses_1" } });
+    // And `endedAt` last, which is only the record of when.
+    expect(h.sessionDeleteMany.mock.invocationCallOrder[0]!).toBeLessThan(h.updateMany.mock.invocationCallOrder[0]!);
+  });
+
+  it("ends a sitting that never held one without touching any session", async () => {
+    h.findUnique.mockResolvedValue({ sessionId: null });
+    await endExamBrowserSitting(SITTING);
+    expect(h.sessionDeleteMany).not.toHaveBeenCalled();
+    expect(h.updateMany).toHaveBeenCalled();
   });
 });
 

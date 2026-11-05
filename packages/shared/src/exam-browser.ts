@@ -22,8 +22,10 @@
  *
  * Signing a request rather than the URL alone is the other difference from
  * `seb.ts`. SEB hashes the URL, so a captured header is good for every
- * request to that URL; here the method, the body and a nonce are in the
- * signature, so a captured header is good for one request.
+ * request to that URL; here the method, the URL, the sitting and a NONCE are
+ * in the signature, and the nonce is what makes a captured header good for
+ * one request. The body is deliberately not signed -- `examBrowserSigningInput`
+ * says why, and `docs/EXAM-BROWSER.md` §5 records the retraction.
  */
 
 /**
@@ -43,6 +45,23 @@ export const RECX_SITTING_HEADER = "x-recx-exam-sitting";
 export const RECX_NONCE_HEADER = "x-recx-exam-nonce";
 export const RECX_TIMESTAMP_HEADER = "x-recx-exam-timestamp";
 export const RECX_SIGNATURE_HEADER = "x-recx-exam-signature";
+
+/**
+ * The cookie the web app's session lives in (Phase 14g).
+ *
+ * Part of this protocol, not an implementation detail of either half.
+ * REC Exam Browser is a fresh Chromium with no cookies, so the exchange
+ * that spends the launch token also hands back a session, and the
+ * application sets it under this name before it navigates -- otherwise the
+ * readiness page answers with a redirect to the sign-in form, inside a
+ * window with no address bar, which is the one habit
+ * `docs/EXAM-BROWSER.md` §5 says must never be taught to a candidate.
+ *
+ * Declared here so the two halves cannot drift: the server's own
+ * `SESSION_COOKIE` is this constant, and a rename that reached one half
+ * only would log every candidate out of their exam at the worst moment.
+ */
+export const RECX_SESSION_COOKIE = "recx_session";
 
 /**
  * How far out of step a candidate's clock may be.

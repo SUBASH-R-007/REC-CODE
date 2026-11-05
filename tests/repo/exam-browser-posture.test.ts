@@ -272,3 +272,95 @@ describe("it holds nothing it should not", () => {
     expect(preload).toMatch(/contextBridge\.exposeInMainWorld/);
   });
 });
+
+describe("the session the window is signed in with (Phase 14g)", () => {
+  /**
+   * The application now holds a real session cookie for the candidate's
+   * account, because launching it for the first time showed that a fresh
+   * Chromium with no cookies gets a 307 to /login -- a password form inside
+   * a window with no address bar, which `docs/EXAM-BROWSER.md` §5 says must
+   * never be taught to anybody.
+   *
+   * That makes the cookie store a place a credential lives, and these are
+   * the rules that stop it becoming a place one is LEFT.
+   */
+
+  it("runs the sitting in an in-memory session, so nothing is written to disk", () => {
+    /**
+     * In Electron a partition without the `persist:` prefix is in-memory:
+     * cookies, cache and storage live in the process and die with it. With
+     * the prefix, the session cookie would be written into the user data
+     * directory and would still be there tomorrow, on a machine that may be
+     * shared.
+     */
+    const policy = withoutComments(readRepoFile("apps/exam-browser/src/policy.ts"));
+    expect(policy).toMatch(/export const EXAM_PARTITION = "(?!persist:)[^"]+"/);
+    expect(main()).toMatch(/fromPartition\(EXAM_PARTITION/);
+    expect(main()).toMatch(/partition: EXAM_PARTITION/);
+
+    const offenders = all().filter(({ text }) => /persist:/.test(text)).map(({ rel }) => rel);
+    expect(offenders, "no persistent partition anywhere in the application").toEqual([]);
+  });
+
+  it("never touches the default session, which is the one that persists", () => {
+    /**
+     * `session.defaultSession` writes to the user data directory. Every
+     * handler and every cookie goes through the in-memory partition
+     * instead, and one line reverting to the default would quietly undo the
+     * rule above.
+     */
+    const offenders = all().filter(({ text }) => /defaultSession/.test(text)).map(({ rel }) => rel);
+    expect(offenders, "use examSession(), not session.defaultSession").toEqual([]);
+  });
+
+  it("sets the cookie http-only, so the page cannot read it", () => {
+    /**
+     * The page inside this window is the one place a candidate can run
+     * their own JavaScript. A session cookie it could read is a session it
+     * could carry somewhere else.
+     */
+    const policy = withoutComments(readRepoFile("apps/exam-browser/src/policy.ts"));
+    expect(policy).toMatch(/httpOnly: true/);
+    expect(policy).not.toMatch(/httpOnly: false/);
+  });
+
+  it("decides Secure from the scheme rather than hardcoding it either way", () => {
+    /**
+     * Not `true`: Chromium refuses a Secure cookie on an http:// URL and
+     * this repository's own development origin is http://localhost:3000, so
+     * hardcoding true would break every developer. Not `false` either: a
+     * release build talks to https, and a session cookie without Secure is
+     * one that leaks over a downgrade. So it follows the origin, which was
+     * already checked against this build's allowlist.
+     */
+    const policy = withoutComments(readRepoFile("apps/exam-browser/src/policy.ts"));
+    expect(policy).toMatch(/secure: args\.origin\.startsWith\("https:\/\/"\)/);
+  });
+
+  it("never logs the session token, or anything else it holds", () => {
+    const offenders = all()
+      .flatMap(({ rel, text }) => (text.match(/console\.[a-z]+\([^)]*\)/g) ?? []).map((call) => ({ rel, call })))
+      .filter(({ call }) => /sessionToken|sittingKey|\btoken\b/.test(call))
+      .map(({ rel, call }) => `${rel}: ${call}`);
+    expect(offenders, "a credential in a log file is a credential on disk").toEqual([]);
+  });
+
+  it("keeps the session out of the renderer as well as the key", () => {
+    const preload = withoutComments(readRepoFile("apps/exam-browser/src/preload.ts"));
+    expect(preload).not.toMatch(/sessionToken|sessionCookie|cookies/);
+  });
+
+  it("places the cookie before the window ever navigates", () => {
+    /**
+     * Order, not politeness. Loading the readiness page first means the
+     * candidate sees the sign-in form for however long the cookie takes to
+     * arrive, which is the outcome this slice exists to remove.
+     */
+    const text = main();
+    const cookie = text.indexOf("placeSessionCookie(outcome.sitting)");
+    const load = text.indexOf("mainWindow.loadURL");
+    expect(cookie).toBeGreaterThan(-1);
+    expect(load).toBeGreaterThan(-1);
+    expect(cookie).toBeLessThan(load);
+  });
+});

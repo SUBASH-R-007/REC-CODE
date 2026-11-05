@@ -12,6 +12,7 @@ import {
   verifyExamBrowser,
   type ExamBrowserVerdict,
 } from "@recx/shared";
+import { hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { requestIpHash } from "@/lib/ip";
@@ -36,6 +37,30 @@ const sha256 = (text: string) => createHash("sha256").update(text).digest("hex")
 
 /** How long a launch token stays usable. Long enough to install nothing. */
 export const LAUNCH_TOKEN_TTL_MS = 5 * 60_000;
+
+/**
+ * How much longer than the paper the sitting's own session lasts.
+ *
+ * The session exists so the application never meets a sign-in form, and it
+ * should outlive nothing but the paper. An hour past the clock covers a
+ * reading-time allowance, an accommodation, a pause an invigilator granted
+ * and the minutes between the readiness page and pressing Start. It is
+ * deliberately not capped from above: a paper that runs four hours needs a
+ * session that runs four hours, and a session that expired mid-answer would
+ * put the candidate in front of the login form this whole slice exists to
+ * prevent.
+ */
+export const EXAM_BROWSER_SESSION_SLACK_MS = 60 * 60_000;
+
+/**
+ * What the sitting's session calls itself.
+ *
+ * `Session.userAgent` is shown on the candidate's own devices screen, so
+ * this is the line they read there. Naming it plainly is the point: a second
+ * live session on their account that they did not create by signing in is
+ * something they are entitled to see and to end.
+ */
+export const EXAM_BROWSER_SESSION_AGENT = "REC Exam Browser";
 
 /**
  * How long a nonce is remembered, in seconds. The tolerance window either
@@ -86,6 +111,12 @@ export type ExchangeResult =
       readonly assessmentId: string;
       /** The application needs the slug, not the id: the readiness page is addressed by slug. */
       readonly assessmentSlug: string;
+      /**
+       * The session this sitting's window holds. Returned ONCE, like the
+       * launch token it was traded for, and stored only as a digest.
+       */
+      readonly sessionToken: string;
+      readonly sessionExpiresAt: Date;
     }
   | { readonly ok: false; readonly reason: "unknown" | "expired" | "already_used"; readonly message: string };
 
@@ -109,7 +140,14 @@ const EXCHANGE_MESSAGES: Readonly<Record<"unknown" | "expired" | "already_used",
 export async function exchangeLaunchToken(token: string): Promise<ExchangeResult> {
   const row = await db.examBrowserSitting.findUnique({
     where: { launchTokenHash: sha256(token) },
-    select: { id: true, assessmentId: true, expiresAt: true, boundAt: true, assessment: { select: { slug: true } } },
+    select: {
+      id: true,
+      userId: true,
+      assessmentId: true,
+      expiresAt: true,
+      boundAt: true,
+      assessment: { select: { slug: true, durationSec: true } },
+    },
   });
   if (!row) return { ok: false, reason: "unknown", message: EXCHANGE_MESSAGES.unknown };
   if (row.boundAt !== null) return { ok: false, reason: "already_used", message: EXCHANGE_MESSAGES.already_used };
@@ -117,11 +155,49 @@ export async function exchangeLaunchToken(token: string): Promise<ExchangeResult
     return { ok: false, reason: "expired", message: EXCHANGE_MESSAGES.expired };
   }
 
-  const claimed = await db.examBrowserSitting.updateMany({
-    where: { id: row.id, boundAt: null, expiresAt: { gt: new Date() } },
-    data: { boundAt: new Date(), ipHashBound: await requestIpHash() },
+  // Read outside the transaction: it reads request headers, which a
+  // transaction callback has no business doing, and a hash computed a
+  // millisecond early is the same hash.
+  const ipHash = await requestIpHash();
+  const sessionToken = randomBytes(32).toString("base64url");
+  const sessionExpiresAt = new Date(Date.now() + row.assessment.durationSec * 1000 + EXAM_BROWSER_SESSION_SLACK_MS);
+
+  /**
+   * All three writes or none (Phase 14g).
+   *
+   * Spending the token, issuing the session and recording which session was
+   * issued are one fact. Done as three statements, a failure in the middle
+   * leaves a token spent with no session to show for it: the candidate
+   * cannot launch again, because the token is gone, and cannot sit, because
+   * the window has no cookie. Inside a transaction the single-use guarantee
+   * is unchanged -- `updateMany` filtered on `boundAt: null` either claims
+   * the row or claims nothing, and two applications racing one token still
+   * cannot both win.
+   */
+  const claimed = await db.$transaction(async (tx) => {
+    const spent = await tx.examBrowserSitting.updateMany({
+      where: { id: row.id, boundAt: null, expiresAt: { gt: new Date() } },
+      data: { boundAt: new Date(), ipHashBound: ipHash },
+    });
+    if (spent.count !== 1) return false;
+
+    const session = await tx.session.create({
+      data: {
+        tokenHash: hashSessionToken(sessionToken),
+        userId: row.userId,
+        expiresAt: sessionExpiresAt,
+        userAgent: EXAM_BROWSER_SESSION_AGENT,
+        ipHash,
+      },
+      select: { id: true },
+    });
+    await tx.examBrowserSitting.update({
+      where: { id: row.id },
+      data: { sessionId: session.id, sessionIssuedAt: new Date() },
+    });
+    return true;
   });
-  if (claimed.count !== 1) return { ok: false, reason: "already_used", message: EXCHANGE_MESSAGES.already_used };
+  if (!claimed) return { ok: false, reason: "already_used", message: EXCHANGE_MESSAGES.already_used };
 
   return {
     ok: true,
@@ -129,6 +205,8 @@ export async function exchangeLaunchToken(token: string): Promise<ExchangeResult
     sittingKey: deriveSittingKey(row.id),
     assessmentId: row.assessmentId,
     assessmentSlug: row.assessment.slug,
+    sessionToken,
+    sessionExpiresAt,
   };
 }
 
@@ -246,16 +324,31 @@ export async function noteExamBrowserSeen(sittingId: string, version: string): P
  * because the attempt no longer names it.
  */
 export async function endExamBrowserSitting(sittingId: string): Promise<void> {
+  const sitting = await db.examBrowserSitting.findUnique({
+    where: { id: sittingId },
+    select: { sessionId: true },
+  });
+
   /**
-   * Both halves, in this order. The attempt's column is what the hot path
-   * compares -- the containment check never loads this row, which is how a
-   * heartbeat every fifteen seconds stays one query lighter -- so clearing
-   * it is the act that actually stops the key working. Stamping `endedAt`
-   * after is the record of when.
+   * Three writes now, in this order, and the order is the design.
+   *
+   * The attempt's column is what the hot path compares -- the containment
+   * check never loads this row, which is how a heartbeat every fifteen
+   * seconds stays one query lighter -- so clearing it is the act that
+   * actually stops the key working. Then the session, because a window that
+   * can no longer attest must not still be signed in: without this the
+   * cookie would outlive the paper by up to an hour, on a machine the
+   * candidate owns. Then `endedAt`, which is the record of when.
+   *
+   * Deleting the session nulls `sessionId` through the foreign key.
+   * `sessionIssuedAt` stays, so the row still answers whether there was one.
    */
   await db.assessmentAttempt.updateMany({
     where: { examBrowserSittingId: sittingId },
     data: { examBrowserSittingId: null },
   });
+  if (sitting?.sessionId) {
+    await db.session.deleteMany({ where: { id: sitting.sessionId } });
+  }
   await db.examBrowserSitting.updateMany({ where: { id: sittingId, endedAt: null }, data: { endedAt: new Date() } });
 }

@@ -28,6 +28,14 @@ export interface Sitting {
   readonly origin: string;
   readonly assessmentId: string;
   readonly assessmentSlug: string;
+  /**
+   * The session this window is signed in with (Phase 14g). Set as a cookie
+   * once, before the first navigation, and held here for no other reason
+   * than that `releaseSitting()` is then the single place where every
+   * credential this process holds is forgotten.
+   */
+  readonly sessionToken: string;
+  readonly sessionExpiresAtMs: number;
 }
 
 let current: Sitting | null = null;
@@ -41,8 +49,9 @@ export function heldSitting(): Sitting | null {
 }
 
 /**
- * Forget the key. Called when the sitting ends and on the way out, so a
- * window that somehow outlives its paper cannot sign anything.
+ * Forget the key and the session token. Called when the sitting ends and on
+ * the way out, so a window that somehow outlives its paper cannot sign
+ * anything -- and so there is one line to read to know that nothing is kept.
  */
 export function releaseSitting(): void {
   current = null;

@@ -65,7 +65,15 @@ export async function exchange(args: {
     });
 
     const body = (await response.json().catch(() => null)) as
-      | { sittingId?: unknown; sittingKey?: unknown; assessmentId?: unknown; assessmentSlug?: unknown; error?: unknown }
+      | {
+          sittingId?: unknown;
+          sittingKey?: unknown;
+          assessmentId?: unknown;
+          assessmentSlug?: unknown;
+          sessionToken?: unknown;
+          sessionExpiresAt?: unknown;
+          error?: unknown;
+        }
       | null;
 
     if (!response.ok) {
@@ -75,10 +83,23 @@ export async function exchange(args: {
       typeof body?.sittingId !== "string" ||
       typeof body.sittingKey !== "string" ||
       typeof body.assessmentId !== "string" ||
-      typeof body.assessmentSlug !== "string"
+      typeof body.assessmentSlug !== "string" ||
+      typeof body.sessionToken !== "string" ||
+      typeof body.sessionExpiresAt !== "string"
     ) {
       return { ok: false, reason: "exchange_malformed" };
     }
+
+    /**
+     * Required, not optional (Phase 14g). An older server that answered
+     * without a session would hand this window a paper it cannot open: the
+     * first navigation would be redirected to the sign-in form, inside a
+     * frame with no address bar. `exchange_malformed` sends the candidate to
+     * their invigilator instead, which is the right person to tell that the
+     * deployment and the installed build do not match.
+     */
+    const sessionExpiresAtMs = Date.parse(body.sessionExpiresAt);
+    if (!Number.isFinite(sessionExpiresAtMs)) return { ok: false, reason: "exchange_malformed" };
 
     return {
       ok: true,
@@ -88,6 +109,8 @@ export async function exchange(args: {
         origin: parsed.origin,
         assessmentId: body.assessmentId,
         assessmentSlug: body.assessmentSlug,
+        sessionToken: body.sessionToken,
+        sessionExpiresAtMs,
       },
     };
   } catch (error) {

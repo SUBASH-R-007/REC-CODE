@@ -1,4 +1,4 @@
-import { refusedSwitches } from "@recx/shared/exam-browser";
+import { RECX_SESSION_COOKIE, refusedSwitches } from "@recx/shared/exam-browser";
 import { DEV_ORIGIN_VARIABLE, RELEASE_ORIGINS } from "./config";
 
 /**
@@ -41,6 +41,86 @@ export function isExamOrigin(url: string, origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The partition the sitting's window runs in (Phase 14g).
+ *
+ * No `persist:` prefix, and that is the whole point: in Electron a
+ * partition without it is an IN-MEMORY session. Its cookies, its cache, its
+ * local storage and its service workers live in this process and die with
+ * it, so nothing the sitting touches is written beside the executable or
+ * into the user data directory.
+ *
+ * That matters more here than it would in an ordinary application, because
+ * from this slice on the window holds a real session cookie for the
+ * candidate's account. On the default session that cookie would be written
+ * to disk and would still be there tomorrow, which would turn
+ * `docs/EXAM-BROWSER.md` §4's "leaves nothing behind" into a sentence that
+ * was no longer true -- and would leave a credential on a shared machine.
+ *
+ * `tests/repo/exam-browser-posture.test.ts` checks that no `persist:`
+ * partition and no use of the default session ever appears in this
+ * application.
+ */
+export const EXAM_PARTITION = "recx-sitting";
+
+/**
+ * The cookie that carries the sitting's session, as a plain object.
+ *
+ * Built here rather than inline in `main.ts` so the parts that matter can
+ * be tested without an Electron runtime: that it is `httpOnly`, that
+ * `secure` follows the scheme rather than being hardcoded either way, and
+ * that an expiry which is not a future moment is left off entirely instead
+ * of being passed through.
+ *
+ * `secure` cannot simply be true: Chromium refuses a Secure cookie on an
+ * `http://` URL, and this repository's own development origin is
+ * `http://localhost:3000`. Hardcoding it false would be worse -- a release
+ * build talks to https and a session cookie without Secure is one that
+ * leaks over a downgrade -- so it follows the origin, and the origin is
+ * already checked against this build's allowlist before anything reaches
+ * here (`parseExamBrowserLaunchUrl`).
+ */
+export interface SessionCookieSpec {
+  readonly url: string;
+  readonly name: string;
+  readonly value: string;
+  readonly httpOnly: true;
+  readonly secure: boolean;
+  readonly sameSite: "lax";
+  readonly path: "/";
+  readonly expirationDate?: number;
+}
+
+export function sessionCookieFor(args: {
+  readonly origin: string;
+  readonly token: string;
+  readonly expiresAtMs: number;
+}): SessionCookieSpec {
+  const base = {
+    url: args.origin,
+    name: RECX_SESSION_COOKIE,
+    value: args.token,
+    // Never readable by page script. The page inside this window is the one
+    // place a candidate can run their own JavaScript, and the sitting's
+    // session is not something it should be able to read out and carry
+    // somewhere else.
+    httpOnly: true as const,
+    secure: args.origin.startsWith("https://"),
+    sameSite: "lax" as const,
+    path: "/" as const,
+  };
+  const seconds = args.expiresAtMs / 1000;
+  /**
+   * A cookie with no expiry is a session cookie, which in an in-memory
+   * partition dies with the process. So an unusable expiry is left off
+   * rather than passed on: the server's own session row is the real bound,
+   * and a date in the past would make Chromium drop the cookie instantly
+   * and send the candidate to the sign-in form.
+   */
+  if (!Number.isFinite(seconds) || seconds <= Date.now() / 1000) return base;
+  return { ...base, expirationDate: Math.floor(seconds) };
 }
 
 export type NavigationDecision =
