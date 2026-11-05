@@ -153,8 +153,12 @@ Recommended for any assessment whose result matters:
    why this is the only place "no extensions" can be made true.
 2. **An `ExamSession` CIDR allowlist re-verified on every heartbeat**, so a
    machine that leaves the lab network is flagged at once.
-3. **Safe Exam Browser in kiosk mode, with server-side verification of its
-   configuration key** on every request.
+3. **A kiosk browser, with server-side verification on every request.**
+   Either Safe Exam Browser, checked against its configuration key, or
+   **REC Exam Browser** (`docs/EXAM-BROWSER.md`), checked against a key
+   minted for that one sitting. Both are offered; a paper is set to one of
+   them. Server-side verification is the part most deployments skip and the
+   part that matters, and §2 still applies to both.
 4. **Seat mapping:** each candidate's machine is recorded against a seat, so
    a reviewer can see who sat where.
 5. **A physical invigilator in the room.** The only control that addresses
@@ -167,7 +171,14 @@ Recommended for any assessment whose result matters:
 The engine will never include, enable by default, or quietly add:
 
 * webcam, microphone or screen recording by default;
-* desktop agents (installed software on the student's machine);
+* desktop agents — software that is installed on the student's machine and
+  **keeps running**: a service, a scheduled task, an autostart entry, a tray
+  process, anything watching the machine when no paper is being sat.
+  A kiosk browser the candidate launches for one sitting and quits
+  afterwards is **not** one of these, and never was: §4 recommends Safe
+  Exam Browser by name, and `docs/EXAM-BROWSER.md` is our own. The line is
+  persistence, not installation, and it is the first fence that document
+  lists;
 * content keylogging — keystroke *timing* metadata at most, never what was
   typed outside the editor;
 * clipboard content capture — paste events and sizes only;
