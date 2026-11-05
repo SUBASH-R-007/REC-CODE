@@ -31,6 +31,8 @@ const SECRET = "a-test-exam-browser-secret-of-32-chars-plus";
 const h = vi.hoisted(() => ({
   sitting: null as null | { id: string; assessmentId: string; expiresAt: Date; boundAt: Date | null },
   findUnique: vi.fn(),
+  findFirst: vi.fn(),
+  findMany: vi.fn(),
   updateMany: vi.fn(),
   update: vi.fn(),
   attemptUpdateMany: vi.fn(),
@@ -49,6 +51,8 @@ vi.mock("@/lib/db", () => {
   const client = {
     examBrowserSitting: {
       findUnique: h.findUnique,
+      findFirst: h.findFirst,
+      findMany: h.findMany,
       updateMany: h.updateMany,
       update: h.update,
       create: vi.fn(),
@@ -68,6 +72,7 @@ const {
   exchangeLaunchToken,
   verifyExamBrowserRequest,
   endExamBrowserSitting,
+  examBrowserSittingClaimedBy,
   EXAM_BROWSER_SESSION_SLACK_MS,
 } = await import("@/lib/exam/exam-browser");
 
@@ -77,6 +82,8 @@ const URL_UNDER_TEST = "https://code.rec.edu.in/api/exam/att_1/hb";
 beforeEach(() => {
   vi.clearAllMocks();
   h.findUnique.mockResolvedValue(null);
+  h.findFirst.mockResolvedValue(null);
+  h.findMany.mockResolvedValue([]);
   h.updateMany.mockResolvedValue({ count: 1 });
   h.update.mockResolvedValue({});
   h.attemptUpdateMany.mockResolvedValue({ count: 0 });
@@ -302,7 +309,7 @@ describe("the session the sitting is issued (Phase 14g)", () => {
   });
 
   it("is deleted when the sitting ends, in that order", async () => {
-    h.findUnique.mockResolvedValue({ sessionId: "ses_1" });
+    h.findMany.mockResolvedValue([{ id: SITTING, sessionId: "ses_1" }]);
     await endExamBrowserSitting(SITTING);
 
     // The attempt's column first: that is what the hot path compares, so
@@ -310,16 +317,68 @@ describe("the session the sitting is issued (Phase 14g)", () => {
     expect(h.attemptUpdateMany.mock.invocationCallOrder[0]!).toBeLessThan(
       h.sessionDeleteMany.mock.invocationCallOrder[0]!,
     );
-    expect(h.sessionDeleteMany).toHaveBeenCalledWith({ where: { id: "ses_1" } });
+    expect(h.sessionDeleteMany).toHaveBeenCalledWith({ where: { id: { in: ["ses_1"] } } });
     // And `endedAt` last, which is only the record of when.
     expect(h.sessionDeleteMany.mock.invocationCallOrder[0]!).toBeLessThan(h.updateMany.mock.invocationCallOrder[0]!);
   });
 
   it("ends a sitting that never held one without touching any session", async () => {
-    h.findUnique.mockResolvedValue({ sessionId: null });
+    h.findMany.mockResolvedValue([{ id: SITTING, sessionId: null }]);
     await endExamBrowserSitting(SITTING);
     expect(h.sessionDeleteMany).not.toHaveBeenCalled();
     expect(h.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("which sitting a start request names (Phase 14h)", () => {
+  /**
+   * The lookup that made a `KIOSK_RECX` paper startable at all. It performs
+   * no cryptography and proves nothing on its own -- the signature, verified
+   * once by `checkContainment` on the same request, is what proves the
+   * browser holds the key. What this decides is whose sitting it is.
+   */
+  const claim = (headers: Headers) =>
+    examBrowserSittingClaimedBy({
+      request: request(headers),
+      userId: "usr_1",
+      assessmentId: "asm_1",
+    });
+
+  it("is null when nothing names a sitting, so an ordinary browser is refused", async () => {
+    expect(await claim(new Headers())).toBeNull();
+    expect(h.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("never sends something absurd to the database", async () => {
+    expect(await claim(new Headers({ [RECX_SITTING_HEADER]: "x".repeat(65) }))).toBeNull();
+    expect(await claim(new Headers({ [RECX_SITTING_HEADER]: "   " }))).toBeNull();
+    expect(h.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("asks only for a live sitting of this candidate and this paper", async () => {
+    h.findFirst.mockResolvedValue({ id: SITTING });
+    expect(await claim(new Headers({ [RECX_SITTING_HEADER]: SITTING }))).toBe(SITTING);
+
+    const where = h.findFirst.mock.calls[0]![0]!.where as Record<string, unknown>;
+    expect(where).toMatchObject({
+      id: SITTING,
+      userId: "usr_1",
+      assessmentId: "asm_1",
+      // Bound: a launch token was spent for it, so a key exists.
+      boundAt: { not: null },
+      // And not one that has already been ended.
+      endedAt: null,
+    });
+  });
+
+  it("is null when the database has no such sitting for this candidate", async () => {
+    /**
+     * Which is the case that matters: a header naming the candidate at the
+     * next desk finds nothing, so it never reaches the comparison, and the
+     * attempt cannot be bound to somebody else's browser.
+     */
+    h.findFirst.mockResolvedValue(null);
+    expect(await claim(new Headers({ [RECX_SITTING_HEADER]: "sit_someone_else" }))).toBeNull();
   });
 });
 
@@ -388,10 +447,14 @@ describe("verifying a request against the attempt's own sitting", () => {
 });
 
 describe("ending a sitting", () => {
+  beforeEach(() => {
+    h.findMany.mockResolvedValue([{ id: SITTING, sessionId: null }]);
+  });
+
   it("releases the attempts first, because that is what the hot path reads", async () => {
     await endExamBrowserSitting(SITTING);
     expect(h.attemptUpdateMany).toHaveBeenCalledWith({
-      where: { examBrowserSittingId: SITTING },
+      where: { examBrowserSittingId: { in: [SITTING] } },
       data: { examBrowserSittingId: null },
     });
     expect(h.updateMany).toHaveBeenCalled();

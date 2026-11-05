@@ -2,7 +2,7 @@
 
 > **Status:** written before any code existed, in the same way
 > `docs/PROCTORING.md` was written before the proctoring engine. Slices 14a
-> to 14g have shipped, each on the repository gate; §9 says what each one
+> to 14h have shipped, each on the repository gate; §9 says what each one
 > was and what is left. Where the implementation taught us something the
 > design had wrong, this document says so rather than being quietly
 > corrected — §5's body hash and §3's paste block are both retractions.
@@ -248,6 +248,46 @@ it.
    request is the nonce.
 6. The server verifies it in `containment.ts` beside the SEB branch, and
    refuses the sitting with `recx_browser_required` when it does not hold.
+7. **The attempt records which sitting it is being sat in**, and the sitting
+   ends when the paper does.
+
+   This is step 7 because the design stopped at step 6, and stopping there
+   made the whole thing unusable. `checkContainment` reads the expected
+   sitting off `AssessmentAttempt.examBrowserSittingId` — deliberately, so
+   the heartbeat path loads no extra row, and so clearing that column is
+   what revokes a sitting. But nothing wrote it. A candidate pressing Start
+   in a correctly signed exam browser was refused `unknown_sitting` by the
+   very request trying to create the attempt, because the attempt that would
+   have named the sitting did not exist yet. Every unit test passed a sitting
+   id as a fixture and was green throughout; the function was right and
+   nobody had written the column it reads.
+
+   So `examBrowserSittingClaimedBy` resolves the sitting a start request
+   names, and the split of work between it and the signature is the part
+   worth understanding. The header is attacker-supplied, so the lookup asks
+   the database one question — is there a live sitting with that id, launched
+   by THIS candidate, for THIS paper — which is what stops a request naming
+   the candidate at the next desk. What stops a request naming this
+   candidate's own sitting without holding its key is the signature, which
+   `checkContainment` verifies once on the same request, before anything is
+   written. Once, because verifying spends the nonce: a second verification
+   of the same request would refuse it as a replay.
+
+   A resume re-points the attempt at whichever sitting is resuming it, and
+   ends the one left behind. An exam browser that crashed is relaunched,
+   which mints a new sitting, and the attempt has to follow — the old
+   sitting's key is held by a process that no longer exists, and the window
+   it was signed into should not stay signed in.
+
+   Ending happens in three places, and only the first is in the request the
+   candidate made: `submitAttempt`'s `finalise`, the focus-limit
+   auto-submit, and the scheduler's deadline sweep. The sweep matters most
+   for being easy to forget: it closes an attempt with no request from the
+   browser at all, so without it the candidate who ran out of time and
+   walked away would keep a signed-in kiosk window until the clock caught
+   up. The implementation is shared (`packages/db/src/exam-browser.ts`) so
+   the order of the three writes cannot drift between the web app and the
+   scheduler.
 
 **What this buys, exactly:** a key extracted from one sitting is worth that
 one sitting, which the server is already watching, rather than every paper
@@ -350,5 +390,5 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14d | The measures of §3, each with its fence, and the proctor events they emit. |
 | 14e | Readiness and admin surfaces: launching, installing, the version floor, what the examiner chooses. |
 | 14g | The sitting carries its own session, so the window never meets a sign-in form — what launching the real application found (§5). |
-| 14h | The sitting is bound to the attempt at start, and ends with it. Until this lands a `KIOSK_RECX` paper cannot be sat: the containment check reads the expected sitting off the attempt, and nothing writes it. |
+| 14h | The sitting is bound to the attempt at start and resume, and ends on submit, auto-submit and the deadline sweep (§5 step 7). Before this, a `KIOSK_RECX` paper could not be sat at all. |
 | 14f | Packaging, signing, the installer path in `deploy/`, and the runbook for a hall. |

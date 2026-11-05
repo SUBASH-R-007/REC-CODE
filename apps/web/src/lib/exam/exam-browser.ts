@@ -12,6 +12,7 @@ import {
   verifyExamBrowser,
   type ExamBrowserVerdict,
 } from "@recx/shared";
+import { endExamBrowserSittings } from "@recx/db/exam-browser";
 import { hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
@@ -232,6 +233,50 @@ export async function exchangeLaunchToken(token: string): Promise<ExchangeResult
 }
 
 /**
+ * Which sitting is this request being made from (Phase 14h)?
+ *
+ * For the one request that cannot read the answer off the attempt, because
+ * it is the request that creates it. `checkContainment` compares the
+ * presented sitting against `AssessmentAttempt.examBrowserSittingId`, and at
+ * Start there is no attempt yet -- which is why, before this existed, a
+ * `KIOSK_RECX` paper was refused by the very request trying to begin it.
+ *
+ * **This performs no cryptography and proves nothing on its own.** It reads
+ * an attacker-supplied header and asks the database one question: is there a
+ * live sitting with that id, launched by THIS candidate, for THIS paper?
+ * That is what stops a request naming somebody else's sitting. What stops a
+ * request naming this candidate's own sitting without holding its key is the
+ * signature, verified once by `checkContainment` on the same request, before
+ * anything is written. Doing it in one place rather than two matters: the
+ * nonce is spent by verification, so a second verification of the same
+ * request would refuse it as a replay.
+ */
+export async function examBrowserSittingClaimedBy(args: {
+  readonly request: Request;
+  readonly userId: string;
+  readonly assessmentId: string;
+}): Promise<string | null> {
+  const claimed = args.request.headers.get(RECX_SITTING_HEADER)?.trim() ?? "";
+  // A cuid is 25 characters; this is only to keep something absurd out of a
+  // query, since the lookup below is what actually decides.
+  if (claimed === "" || claimed.length > 64) return null;
+
+  const row = await db.examBrowserSitting.findFirst({
+    where: {
+      id: claimed,
+      userId: args.userId,
+      assessmentId: args.assessmentId,
+      // Bound means the launch token was spent for it, so a key exists.
+      boundAt: { not: null },
+      // And not one that has already been ended.
+      endedAt: null,
+    },
+    select: { id: true },
+  });
+  return row?.id ?? null;
+}
+
+/**
  * Verify one request's attestation headers against an expected sitting.
  *
  * `expectedSittingId` comes from the attempt, not from the request: a
@@ -345,31 +390,13 @@ export async function noteExamBrowserSeen(sittingId: string, version: string): P
  * because the attempt no longer names it.
  */
 export async function endExamBrowserSitting(sittingId: string): Promise<void> {
-  const sitting = await db.examBrowserSitting.findUnique({
-    where: { id: sittingId },
-    select: { sessionId: true },
-  });
-
   /**
-   * Three writes now, in this order, and the order is the design.
-   *
-   * The attempt's column is what the hot path compares -- the containment
-   * check never loads this row, which is how a heartbeat every fifteen
-   * seconds stays one query lighter -- so clearing it is the act that
-   * actually stops the key working. Then the session, because a window that
-   * can no longer attest must not still be signed in: without this the
-   * cookie would outlive the paper by up to an hour, on a machine the
-   * candidate owns. Then `endedAt`, which is the record of when.
-   *
-   * Deleting the session nulls `sessionId` through the foreign key.
-   * `sessionIssuedAt` stays, so the row still answers whether there was one.
+   * The work is in `packages/db` (Phase 14h), because the scheduler ends
+   * sittings too: `autoSubmitExpired` closes an attempt at its deadline
+   * without any request from the browser that was sitting it. One
+   * implementation, so the order of the three writes -- release the
+   * attempts, revoke the session, stamp `endedAt` -- cannot drift between
+   * the two processes that do it.
    */
-  await db.assessmentAttempt.updateMany({
-    where: { examBrowserSittingId: sittingId },
-    data: { examBrowserSittingId: null },
-  });
-  if (sitting?.sessionId) {
-    await db.session.deleteMany({ where: { id: sitting.sessionId } });
-  }
-  await db.examBrowserSitting.updateMany({ where: { id: sittingId, endedAt: null }, data: { endedAt: new Date() } });
+  await endExamBrowserSittings(db, [sittingId]);
 }

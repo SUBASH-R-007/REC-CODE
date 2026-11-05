@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
 import { flagAttemptIfNeeded } from "@/lib/integrity/flag";
+import { endExamBrowserSitting } from "@/lib/exam/exam-browser";
 import { deriveSnapshotJumps } from "@/lib/exam/snapshot-jump";
 import { languagesOfSitting } from "@/lib/exam/language";
 import { markAttemptMcqs } from "@/lib/exam/mcq";
@@ -139,7 +140,7 @@ export async function submitAttempt(
     // No code to judge — an all-multiple-choice paper, or a blank one.
     // Still finalise, so the sitting closes, and still record what the
     // questions came to.
-    const moved = await finalise(attempt.id, now);
+    const moved = await finalise(attempt.id, now, attempt.examBrowserSittingId);
     if (moved) await record(attempt.id, attempt.userId, [], answers.length, now, mcqTotals);
     return { submitted: moved, submissionIds: [], blank: layout.questions.length };
   }
@@ -236,7 +237,7 @@ export async function submitAttempt(
   }
 
   // ── 3. The status, last ────────────────────────────────────────────────
-  const moved = await finalise(attempt.id, now);
+  const moved = await finalise(attempt.id, now, attempt.examBrowserSittingId);
   if (!moved) return { submitted: false, submissionIds, blank, reason: "already_finished" };
   await record(attempt.id, attempt.userId, submissionIds, blank, now, mcqTotals);
 
@@ -310,12 +311,34 @@ export async function submitAttempt(
  * work — so the deadline sweeper, the focus-limit auto-submit and a
  * candidate's own button cannot finalise the same sitting twice.
  */
-async function finalise(attemptId: string, now: Date): Promise<boolean> {
+async function finalise(attemptId: string, now: Date, examBrowserSittingId: string | null): Promise<boolean> {
   const moved = await db.assessmentAttempt.updateMany({
     where: { id: attemptId, status: { in: ["IN_PROGRESS", "DISCONNECTED"] } },
     data: { status: "SUBMITTED", submittedAt: now, version: { increment: 1 } },
   });
-  return moved.count === 1;
+  if (moved.count !== 1) return false;
+
+  /**
+   * The paper is in, so the sitting is over (Phase 14h).
+   *
+   * Here rather than at the two call sites because this is the one place a
+   * candidate's own submit closes an attempt, and a sitting left open is a
+   * signed-in kiosk window on a machine the candidate owns, for as long as
+   * the slack lasts.
+   *
+   * Behind a catch, and the catch is deliberate: the submission is already
+   * recorded and the judge is about to run, so a failure here must cost a
+   * session that lives a few hours longer rather than a candidate their
+   * exam. The scheduler's deadline sweep ends it in that case.
+   */
+  if (examBrowserSittingId !== null) {
+    try {
+      await endExamBrowserSitting(examBrowserSittingId);
+    } catch (error) {
+      console.error(`[exam] attempt ${attemptId}: could not end its exam browser sitting:`, error);
+    }
+  }
+  return true;
 }
 
 async function record(

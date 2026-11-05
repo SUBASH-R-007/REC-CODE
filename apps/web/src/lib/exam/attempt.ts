@@ -14,6 +14,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { attemptTokenMatches, clearAttemptCookie, presentedAttemptToken } from "@/lib/exam/attempt-token";
 import { checkContainment } from "@/lib/exam/containment";
+import { endExamBrowserSitting } from "@/lib/exam/exam-browser";
 
 /**
  * The attempt guard (Phase 6b): what every exam request goes through before
@@ -284,6 +285,8 @@ export async function autoSubmitOnFocusLimit(args: {
   readonly warnings: number;
   readonly maxWarnings: number;
   readonly now: Date;
+  /** The REC Exam Browser sitting to end with it, if there is one (Phase 14h). */
+  readonly examBrowserSittingId?: string | null;
 }): Promise<boolean> {
   const moved = await db.assessmentAttempt.updateMany({
     // Conditional on a status that still accepts work, so a sitting the
@@ -292,6 +295,21 @@ export async function autoSubmitOnFocusLimit(args: {
     data: { status: "AUTO_SUBMITTED", submittedAt: args.now, version: { increment: 1 } },
   });
   if (moved.count !== 1) return false;
+
+  /**
+   * The sitting is over, so the exam browser's session goes with it
+   * (Phase 14h). Same rule as a candidate's own submit, and the same catch:
+   * the attempt has already moved, so a failure here must cost a session
+   * that lives a few hours longer rather than leave the attempt in a state
+   * nobody recorded.
+   */
+  if (args.examBrowserSittingId) {
+    try {
+      await endExamBrowserSitting(args.examBrowserSittingId);
+    } catch (error) {
+      console.error(`[exam] attempt ${args.attemptId}: could not end its exam browser sitting:`, error);
+    }
+  }
 
   await audit({
     actorId: null,

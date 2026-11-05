@@ -11,6 +11,7 @@
     "./audit": "./src/audit.ts",
     "./audit-chain": "./src/audit-chain.ts",
     "./attempt": "./src/attempt.ts",
+    "./exam-browser": "./src/exam-browser.ts",
     "./mock": "./src/mock.ts",
     "./inactivity": "./src/inactivity.ts",
     "./readiness": "./src/readiness.ts"

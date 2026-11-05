@@ -1,6 +1,7 @@
 import type { Db } from "@recx/db";
 import { appendAuditEntries } from "@recx/db/audit";
 import { autoSubmitExpired, markDisconnectedAttempts } from "@recx/db/attempt";
+import { endExamBrowserSittings, examBrowserSittingsOfAttempts } from "@recx/db/exam-browser";
 import {
   ATTEMPT_AUTO_SUBMIT_BATCH,
   ATTEMPT_AUTO_SUBMIT_INTERVAL_MS,
@@ -37,6 +38,8 @@ import type { Logger } from "pino";
  */
 
 export interface AttemptSweepReport {
+  /** REC Exam Browser sittings ended with them (Phase 14h). */
+  examBrowserSittingsEnded?: number;
   /** Sittings force-submitted at their deadline. */
   autoSubmitted: number;
   /** Sittings moved to DISCONNECTED for going quiet. */
@@ -75,6 +78,7 @@ export class AttemptSweepJob {
   async tick(now: Date): Promise<AttemptSweepReport> {
     const report: AttemptSweepReport = {
       autoSubmitted: 0,
+      examBrowserSittingsEnded: 0,
       disconnected: 0,
       worstLateMs: 0,
       capped: false,
@@ -93,6 +97,39 @@ export class AttemptSweepJob {
       report.autoSubmitted = submitted.length;
       report.capped = submitted.length >= ATTEMPT_AUTO_SUBMIT_BATCH;
       for (const row of submitted) report.worstLateMs = Math.max(report.worstLateMs, row.lateMs);
+
+      /**
+       * The exam browsers that were sitting them (Phase 14h).
+       *
+       * This path closes an attempt with no request from the browser at all,
+       * so nothing else would ever end these sittings: the candidate who ran
+       * out of time and walked away would be left with a signed-in kiosk
+       * window on their own machine until its session expired on the clock.
+       *
+       * Asked BEFORE the sittings are ended, because ending one clears the
+       * column this reads. Behind a catch because a sweeper that throws here
+       * would stop the presence pass below, and a sitting whose session
+       * outlives it by a few hours is a smaller problem than a hall whose
+       * invigilator dashboard stops updating.
+       */
+      if (submitted.length > 0 && !this.dryRun) {
+        try {
+          const sittingIds = await examBrowserSittingsOfAttempts(
+            this.db,
+            submitted.map((row) => row.id),
+          );
+          const ended = await endExamBrowserSittings(this.db, sittingIds);
+          report.examBrowserSittingsEnded = ended.sittingsEnded;
+          if (ended.sittingsEnded > 0) {
+            this.log.info(
+              { sittings: ended.sittingsEnded, sessions: ended.sessionsRevoked },
+              "exam browser sittings ended with the attempts they were sitting",
+            );
+          }
+        } catch (error) {
+          this.log.error({ err: error }, "could not end the exam browser sittings of auto-submitted attempts");
+        }
+      }
 
       if (submitted.length > 0 && !this.dryRun) {
         // One audit row per sitting. Auto-submit is the one thing the server

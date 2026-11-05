@@ -129,6 +129,8 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
       warnings: result.focusWarning?.warningNumber ?? 0,
       maxWarnings: result.focusWarning?.maxWarnings ?? 0,
       now: guard.now,
+      // The sitting ends with the attempt it was opened for (Phase 14h).
+      examBrowserSittingId: guard.attempt.examBrowserSittingId,
     });
     if (submitted) await endAttemptSession(attemptId, "submitted");
   }

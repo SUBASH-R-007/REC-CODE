@@ -19,6 +19,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
 import { checkContainment } from "@/lib/exam/containment";
+import { endExamBrowserSitting, examBrowserSittingClaimedBy } from "@/lib/exam/exam-browser";
 import { acceptedLanguagesFor } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 import { consumeLoaner, freshAssertionFor } from "@/lib/exam/webauthn";
@@ -322,6 +323,32 @@ export async function startOrResumeAttempt(args: {
    * audited refusals happen on the paths that have an attempt.
    */
   const hall = await pickHall({ assessmentId: assessment.id, now });
+
+  /**
+   * Which REC Exam Browser sitting this request is being made from
+   * (Phase 14h).
+   *
+   * The other proctor modes need nothing here: SEB's key is shared and the
+   * hall's allowlist is about the network. `KIOSK_RECX` is per sitting, and
+   * `checkContainment` reads the expected sitting off the attempt -- which
+   * at Start does not exist yet. Until this line, that made a `KIOSK_RECX`
+   * paper impossible to begin: the request trying to create the attempt was
+   * refused for not naming a sitting the attempt could not yet hold.
+   *
+   * The lookup proves ownership (this candidate, this paper, bound, not
+   * ended) and nothing else. The SIGNATURE is what proves the browser holds
+   * the key, and `checkContainment` on the next line does that once -- once,
+   * because verifying spends the nonce.
+   */
+  const examBrowserSittingId =
+    assessment.proctorMode === "KIOSK_RECX"
+      ? await examBrowserSittingClaimedBy({
+          request: args.request,
+          userId: args.userId,
+          assessmentId: assessment.id,
+        })
+      : null;
+
   const containment = await checkContainment({
     request: args.request,
     attempt: {
@@ -330,6 +357,7 @@ export async function startOrResumeAttempt(args: {
       assessmentId: assessment.id,
       examSessionId: hall?.id ?? null,
       proctorMode: assessment.proctorMode,
+      examBrowserSittingId,
     },
     audited: false,
   });
@@ -359,9 +387,37 @@ export async function startOrResumeAttempt(args: {
          * whose allowlist admits anyone.
          */
         ...(existing.examSessionId === null && hall ? { examSessionId: hall.id } : {}),
+        /**
+         * Re-pointed at the sitting that is resuming it (Phase 14h).
+         *
+         * Unlike the hall above, this one CAN move from sitting to sitting,
+         * and has to. An exam browser that crashed is relaunched, which
+         * spends a new launch token and mints a new sitting, and the attempt
+         * must follow -- the old sitting's key is on a process that no
+         * longer exists. It is not a loosening: `examBrowserSittingClaimedBy`
+         * only returns a sitting belonging to this candidate and this paper,
+         * and containment has already verified a signature under its key on
+         * this very request.
+         */
+        ...(examBrowserSittingId !== null && examBrowserSittingId !== existing.examBrowserSittingId
+          ? { examBrowserSittingId }
+          : {}),
         version: { increment: 1 },
       },
     });
+
+    /**
+     * And the one it left behind is ended, which revokes its session too.
+     * A candidate whose exam browser crashed has a signed-in window on
+     * their machine that nothing is watching any more.
+     */
+    if (
+      existing.examBrowserSittingId !== null &&
+      existing.examBrowserSittingId !== examBrowserSittingId
+    ) {
+      await endExamBrowserSitting(existing.examBrowserSittingId);
+    }
+
     await setAttemptCookie(existing.id, token.token, secondsLeft);
     return { ok: true, attempt: existing, layout: attemptLayoutOf(existing), resumed: true };
   }
@@ -468,6 +524,12 @@ export async function startOrResumeAttempt(args: {
       // assertion cookie is gone.
       deviceRegistrationId: device?.deviceId ?? null,
       seatLabel: args.seatLabel ?? null,
+      /**
+       * The sitting this paper is being sat in (Phase 14h). Null for every
+       * mode but `KIOSK_RECX`, which the database also insists on:
+       * `AssessmentAttempt_browser_sitting_needs_kiosk_recx`.
+       */
+      examBrowserSittingId,
       /**
        * The hall this sitting belongs to — and the whole reason the
        * allowlist works at all (Phase 12s).
