@@ -91,6 +91,7 @@ export async function POST(request: Request): Promise<Response> {
       sittingId: result.sittingId,
       sittingKey: result.sittingKey,
       assessmentId: result.assessmentId,
+      assessmentSlug: result.assessmentSlug,
     },
     200,
   );

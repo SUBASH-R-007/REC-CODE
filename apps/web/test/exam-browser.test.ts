@@ -122,6 +122,9 @@ describe("spending a launch token", () => {
   const live = () => ({
     id: SITTING,
     assessmentId: "asm_1",
+    // The application needs the slug, because the readiness page is
+    // addressed by slug and the id would 404.
+    assessment: { slug: "mid-term-ds" },
     expiresAt: new Date(Date.now() + 60_000),
     boundAt: null as Date | null,
   });
@@ -134,6 +137,7 @@ describe("spending a launch token", () => {
       sittingId: SITTING,
       sittingKey: deriveSittingKey(SITTING),
       assessmentId: "asm_1",
+      assessmentSlug: "mid-term-ds",
     });
   });
 

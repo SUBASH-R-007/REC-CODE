@@ -1,0 +1,24 @@
+{
+  "name": "@recx/exam-browser",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "REC Exam Browser. A kiosk browser a candidate launches for one paper and quits afterwards. Holds NO database URL and NO college secret: the only credential it ever sees is a launch token for one sitting, exchanged for a key it keeps in memory. Installs no service, no scheduled task and no autostart entry, and leaves nothing running when the sitting ends (docs/EXAM-BROWSER.md).",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsup && electron dist/main.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@recx/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "electron": "45.2.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

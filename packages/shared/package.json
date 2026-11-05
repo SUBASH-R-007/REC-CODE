@@ -8,6 +8,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./exam-browser": "./src/exam-browser.ts",
     "./harness": "./src/harness/index.ts",
     "./authoring": "./src/authoring/index.ts",
     "./samples/two-sum": "./src/samples/two-sum.ts",

@@ -245,10 +245,32 @@ describe("forbidden by name (PROCTORING.md §5)", () => {
     ["clipboard reading", /navigator\.clipboard\.readText/],
   ];
 
-  const web = findFiles({ under: [WEB], extensions: [".ts", ".tsx"] }).filter((rel) => !rel.includes(".test."));
+  /**
+   * The exam browser is scanned by the same list (Phase 14c).
+   *
+   * It needs this more than the web app does, not less: an Electron main
+   * process can reach the camera, the screen and the filesystem directly,
+   * where a page has to ask a browser that mostly says no. Extending the
+   * scan rather than writing a second one is the point — the charter is
+   * one charter, and `docs/EXAM-BROWSER.md` §2 gives this as the second
+   * reason the application lives in this repository at all.
+   *
+   * The desktop spellings of the same prohibitions (`desktopCapturer`,
+   * `globalShortcut`, a login item, a tray) are in
+   * `tests/repo/exam-browser-posture.test.ts`, because they have no
+   * meaning for a web page.
+   */
+  const EXAM_BROWSER = "apps/exam-browser/src";
+  const scanned = findFiles({ under: [WEB, EXAM_BROWSER], extensions: [".ts", ".tsx"] }).filter(
+    (rel) => !rel.includes(".test."),
+  );
 
-  it.each(FORBIDDEN)("%s appears nowhere in apps/web/src", (_what, pattern) => {
-    const offenders = web.filter((rel) => pattern.test(readRepoFile(rel)));
+  it("scans the exam browser too (sanity)", () => {
+    expect(scanned.some((rel) => rel.startsWith(EXAM_BROWSER))).toBe(true);
+  });
+
+  it.each(FORBIDDEN)("%s appears nowhere in the web app or the exam browser", (_what, pattern) => {
+    const offenders = scanned.filter((rel) => pattern.test(readRepoFile(rel)));
     expect(offenders, `docs/PROCTORING.md §5 forbids this by name`).toEqual([]);
   });
 

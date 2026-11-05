@@ -79,7 +79,14 @@ export async function mintLaunchToken(args: {
 }
 
 export type ExchangeResult =
-  | { readonly ok: true; readonly sittingId: string; readonly sittingKey: string; readonly assessmentId: string }
+  | {
+      readonly ok: true;
+      readonly sittingId: string;
+      readonly sittingKey: string;
+      readonly assessmentId: string;
+      /** The application needs the slug, not the id: the readiness page is addressed by slug. */
+      readonly assessmentSlug: string;
+    }
   | { readonly ok: false; readonly reason: "unknown" | "expired" | "already_used"; readonly message: string };
 
 const EXCHANGE_MESSAGES: Readonly<Record<"unknown" | "expired" | "already_used", string>> = Object.freeze({
@@ -102,7 +109,7 @@ const EXCHANGE_MESSAGES: Readonly<Record<"unknown" | "expired" | "already_used",
 export async function exchangeLaunchToken(token: string): Promise<ExchangeResult> {
   const row = await db.examBrowserSitting.findUnique({
     where: { launchTokenHash: sha256(token) },
-    select: { id: true, assessmentId: true, expiresAt: true, boundAt: true },
+    select: { id: true, assessmentId: true, expiresAt: true, boundAt: true, assessment: { select: { slug: true } } },
   });
   if (!row) return { ok: false, reason: "unknown", message: EXCHANGE_MESSAGES.unknown };
   if (row.boundAt !== null) return { ok: false, reason: "already_used", message: EXCHANGE_MESSAGES.already_used };
@@ -116,7 +123,13 @@ export async function exchangeLaunchToken(token: string): Promise<ExchangeResult
   });
   if (claimed.count !== 1) return { ok: false, reason: "already_used", message: EXCHANGE_MESSAGES.already_used };
 
-  return { ok: true, sittingId: row.id, sittingKey: deriveSittingKey(row.id), assessmentId: row.assessmentId };
+  return {
+    ok: true,
+    sittingId: row.id,
+    sittingKey: deriveSittingKey(row.id),
+    assessmentId: row.assessmentId,
+    assessmentSlug: row.assessment.slug,
+  };
 }
 
 /**
