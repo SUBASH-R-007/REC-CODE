@@ -157,8 +157,19 @@ it.
    for a **sitting key** it holds in memory only. The token is spent; a
    second exchange fails and is audited.
 5. Every subsequent request carries a signature over the method, the URL, a
-   hash of the body, a nonce and a timestamp, under that sitting key, plus
-   the application's version.
+   nonce, a timestamp and the sitting id, under that sitting key, plus the
+   application's version.
+
+   The body is deliberately **not** signed, and the first draft got this
+   wrong. Three exam routes parse the body before the attempt guard runs,
+   and a parsed body does not re-serialise to the bytes the client hashed —
+   so the server could not have checked it without reading raw text in
+   every exam route. More to the point it would have been guarding nothing:
+   a body hash defends against a request altered in flight, TLS already
+   does that, and the adversary here holds the key and can sign whatever
+   body they like. A signed field the server cannot check reads like
+   protection that is not there. What makes a captured signature worth one
+   request is the nonce.
 6. The server verifies it in `containment.ts` beside the SEB branch, and
    refuses the sitting with `recx_browser_required` when it does not hold.
 

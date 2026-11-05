@@ -13,6 +13,7 @@ import {
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { noteExamBrowserSeen, verifyExamBrowserRequest } from "@/lib/exam/exam-browser";
 import { requestIp } from "@/lib/ip";
 
 /**
@@ -40,7 +41,7 @@ import { requestIp } from "@/lib/ip";
 
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
-export type ContainmentRefusal = "outside_allowlist" | "seb_required";
+export type ContainmentRefusal = "outside_allowlist" | "seb_required" | "recx_browser_required";
 
 export interface ContainmentResult {
   readonly ok: boolean;
@@ -79,6 +80,8 @@ export async function checkContainment(args: {
     readonly assessmentId: string;
     readonly examSessionId: string | null;
     readonly proctorMode: string;
+    /** The REC Exam Browser sitting, for KIOSK_RECX. Null for every other mode. */
+    readonly examBrowserSittingId?: string | null;
   };
   /** False on the heartbeat path, so a refusal is not audited 360 times an hour. */
   readonly audited?: boolean;
@@ -150,7 +153,66 @@ export async function checkContainment(args: {
     }
   }
 
+  // ── REC Exam Browser ───────────────────────────────────────────────────
+  if (mode === "KIOSK_RECX") {
+    /**
+     * The expected sitting comes from the ATTEMPT, never from the request.
+     * A signature that verifies under some sitting proves only that a
+     * holder of some key signed it; the question is whether this attempt's
+     * browser did. Reading it off the attempt also means the hot path
+     * loads no extra row — `guardAttempt` already has this one — and that
+     * clearing the column is what revokes a sitting, which is how
+     * `endExamBrowserSitting` ends one.
+     */
+    const verdict = await verifyExamBrowserRequest({
+      request: args.request,
+      absoluteUrl: args.request.url,
+      expectedSittingId: args.attempt.examBrowserSittingId ?? null,
+      versionFloor: await examBrowserVersionFloor(),
+    });
+    if (!verdict.ok) {
+      if (args.audited !== false) {
+        await audit({
+          actorId: null,
+          action: "assessment.attempt.exam_browser_refused",
+          entityType: "AssessmentAttempt",
+          entityId: args.attempt.id,
+          targetUserId: args.attempt.userId,
+          sensitivity: "SECURITY",
+          metadata: { refusal: verdict.refusal, examSessionId: args.attempt.examSessionId },
+        });
+      }
+      return {
+        ok: false,
+        refusal: "recx_browser_required",
+        message: verdict.message,
+        invalidCidrs,
+        networkUnrestricted,
+      };
+    }
+    /**
+     * Only on an audited call. The heartbeat runs every fifteen seconds and
+     * a write per heartbeat to say "still the same version" buys a line on
+     * a screen at the cost of a row lock on every sitting in the hall.
+     */
+    if (args.audited !== false) await noteExamBrowserSeen(verdict.sittingId, verdict.version);
+  }
+
   return ok({ invalidCidrs, networkUnrestricted });
+}
+
+/**
+ * The lowest REC Exam Browser version this deployment accepts, or null for
+ * any.
+ *
+ * A `PlatformSetting` rather than an environment variable, because cutting
+ * off a known-bad build is a thing somebody does at 9am from a screen, and
+ * a redeploy is not available then (docs/EXAM-BROWSER.md §8).
+ */
+export async function examBrowserVersionFloor(): Promise<string | null> {
+  const row = await db.platformSetting.findUnique({ where: { key: "exam-browser" }, select: { value: true } });
+  const value = row?.value as { minVersion?: unknown } | null;
+  return typeof value?.minVersion === "string" && value.minVersion !== "" ? value.minVersion : null;
 }
 
 /**
@@ -249,6 +311,8 @@ export async function checkPageContainment(args: {
     readonly assessmentId: string;
     readonly examSessionId: string | null;
     readonly proctorMode: string;
+    /** The REC Exam Browser sitting, for KIOSK_RECX. Null for every other mode. */
+    readonly examBrowserSittingId?: string | null;
   };
 }): Promise<ContainmentResult> {
   return checkContainment({ request: await pageRequest(args.pathname), attempt: args.attempt, audited: true });

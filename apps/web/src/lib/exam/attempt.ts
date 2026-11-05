@@ -240,7 +240,8 @@ export async function guardAttempt(args: {
 export async function endAttemptSession(attemptId: string, reason: AttemptRevokeReason): Promise<void> {
   // Resumable: the candidate rejoins the hall network, or reopens the exam
   // in the kiosk build, and carries on with the same sitting.
-  if (reason === "session_revoked" || reason === "outside_allowlist" || reason === "seb_required") return;
+  if (reason === "session_revoked" || reason === "outside_allowlist" || reason === "seb_required" || reason === "recx_browser_required")
+    return;
   await clearAttemptCookie(attemptId);
 }
 

@@ -149,12 +149,29 @@ function normalise(value: string | null): string | null {
  * one field absorbing another's content. The tag carries the protocol
  * version, so a signature made under one wire format can never verify under
  * the next.
+ *
+ * **The body is deliberately not signed**, and the reason is worth keeping
+ * because the first draft did sign it. Two things killed it.
+ *
+ * The practical one: three exam routes parse the body before the attempt
+ * guard runs, and a parsed body cannot be re-serialised into the bytes the
+ * client hashed — `JSON.stringify` of a parsed object is not the text that
+ * arrived. The server would have had to read raw text in every exam route
+ * to verify it.
+ *
+ * The real one: it would not have been protecting anything. A body hash
+ * defends against someone altering a request in flight, and the adversary
+ * here is the candidate, who holds the key and can sign whatever body they
+ * like. Transport integrity is TLS's job and TLS is doing it. A signed
+ * field the server cannot check is worse than no field, because it reads
+ * like protection that is not there.
+ *
+ * What makes a captured signature worth one request is the nonce, not the
+ * body.
  */
 export function examBrowserSigningInput(args: {
   readonly method: string;
   readonly url: string;
-  /** Hex digest of the request body, or null for a request without one. */
-  readonly bodyHash: string | null;
   readonly nonce: string;
   readonly timestamp: number;
   readonly sittingId: string;
@@ -163,7 +180,6 @@ export function examBrowserSigningInput(args: {
     `${EXAM_BROWSER_SCHEME}/v${EXAM_BROWSER_PROTOCOL_VERSION}`,
     args.method.toUpperCase(),
     examBrowserUrlFor(args.url),
-    args.bodyHash ?? "-",
     args.nonce,
     String(args.timestamp),
     args.sittingId,
@@ -208,7 +224,6 @@ export function examBrowserUrlFor(url: string): string {
 export function verifyExamBrowser(args: {
   readonly method: string;
   readonly url: string;
-  readonly bodyHash: string | null;
   readonly presented: ExamBrowserPresented;
   /** The key for the presented sitting, or null when there is no such sitting. */
   readonly sittingKey: string | null;
@@ -255,7 +270,6 @@ export function verifyExamBrowser(args: {
     examBrowserSigningInput({
       method: args.method,
       url: args.url,
-      bodyHash: args.bodyHash,
       nonce,
       timestamp: sent,
       sittingId,

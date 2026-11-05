@@ -21,8 +21,28 @@ import { z } from "zod";
  * action, script, psql session or future UI can get round it.
  */
 
-export const PROCTOR_MODES = ["NONE", "ADVISORY", "REMOTE_MONITORED", "KIOSK_SEB", "LAB_SUPERVISED"] as const;
+/**
+ * Ordered by how closely the sitting is watched, loosest first. The two
+ * kiosk modes sit together because they answer the same question — which
+ * browser the paper may be sat in — and differ only in whose browser it is
+ * and how its key is minted (`docs/EXAM-BROWSER.md` §1).
+ */
+export const PROCTOR_MODES = [
+  "NONE",
+  "ADVISORY",
+  "REMOTE_MONITORED",
+  "KIOSK_SEB",
+  "KIOSK_RECX",
+  "LAB_SUPERVISED",
+] as const;
 export type ProctorMode = (typeof PROCTOR_MODES)[number];
+
+/** The modes sat inside a kiosk browser, each verified on every request. */
+export const KIOSK_PROCTOR_MODES: readonly ProctorMode[] = Object.freeze(["KIOSK_SEB", "KIOSK_RECX"]);
+
+export function isKioskProctorMode(mode: ProctorMode): boolean {
+  return KIOSK_PROCTOR_MODES.includes(mode);
+}
 
 /**
  * The modes an ASSESSMENT may be set to (Phase 12a). Every one of them, in
@@ -58,8 +78,11 @@ export function isAssessmentProctorMode(mode: ProctorMode): mode is AssessmentPr
 /**
  * The ONE mode a placement-bearing assessment may use. Not a list: the spec
  * names exactly one, and a list invites a well-meaning addition later.
- * KIOSK_SEB is deliberately not here — Safe Exam Browser is the strongest
- * software lockdown and still not enough (docs/PROCTORING.md).
+ * Neither kiosk mode is here, and REC Exam Browser does not earn a place by
+ * being ours — a kiosk browser is the strongest thing software can do and
+ * is still not enough, because the machine belongs to the candidate and the
+ * phone beside it belongs to nobody we can see (docs/PROCTORING.md §2,
+ * docs/EXAM-BROWSER.md §6).
  */
 export const PLACEMENT_PROCTOR_MODE: ProctorMode = "LAB_SUPERVISED";
 

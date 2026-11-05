@@ -36,6 +36,7 @@ const PRODUCTION = {
   APP_URL: "https://code.example.invalid",
   REDIS_URL: "redis://redis:6379",
   EXPORT_SIGNING_SECRET: "an-export-signing-secret-of-32-chars-or-more",
+  EXAM_BROWSER_SECRET: "an-exam-browser-secret-of-32-characters-or-more",
 } as const;
 
 async function loadEnv(source: Record<string, string>) {
@@ -82,6 +83,20 @@ describe("production refuses a variable it would otherwise default", () => {
       EXPORT_SIGNING_SECRET: "dev-only-export-signing-secret-change-me",
     });
     expect(() => withDevSecret()).toThrow(/EXPORT_SIGNING_SECRET/);
+
+    /**
+     * Phase 14b: the same rule for the exam browser's root secret, and the
+     * same reason. Every sitting key is derived from it, so a deployment
+     * that never set it would derive them all from a string published in
+     * this repository -- which is the shared-key flaw the design exists to
+     * avoid, reintroduced by leaving a box empty.
+     */
+    const { env: withDevBrowserSecret } = await loadEnv({
+      ...MINIMUM,
+      ...PRODUCTION,
+      EXAM_BROWSER_SECRET: "dev-only-exam-browser-secret-change-me",
+    });
+    expect(() => withDevBrowserSecret()).toThrow(/EXAM_BROWSER_SECRET/);
 
     const { env: withOverride } = await loadEnv({
       ...MINIMUM,

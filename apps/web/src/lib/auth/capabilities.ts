@@ -1196,6 +1196,18 @@ export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
   "app/api/health/route.ts#GET",
   "app/api/metrics/route.ts#GET",
   "app/api/vitals/route.ts#POST",
+  /**
+   * Phase 14b: REC Exam Browser spends its launch token here and receives
+   * the sitting key. Unauthenticated by nature, like the two above it: the
+   * application is a fresh Chromium that has just been handed a URL by the
+   * operating system and holds no cookie. The launch token IS the
+   * credential — minted for a signed-in candidate on the readiness page,
+   * single-use, five minutes. Putting a session in front of it would mean
+   * asking for a college password inside a window with no address bar,
+   * which is the habit docs/EXAM-BROWSER.md §5 is written to avoid
+   * teaching.
+   */
+  "app/api/exam/browser/exchange/route.ts#POST",
 ] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];

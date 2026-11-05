@@ -1117,6 +1117,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       status: [200],
     },
     /**
+     * Phase 14b. The REC Exam Browser launch exchange, swept with a token
+     * that was never issued — which is the case worth sweeping. The 404 it
+     * answers with must say nothing about which tokens exist, and the body
+     * must carry no canary: this route is the one place a sitting key is
+     * ever returned, so a refusal that leaked anything at all about the
+     * sitting it refused would be leaking it to an unauthenticated caller.
+     */
+    "api/exam/browser/exchange/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/exam/browser/exchange", { method: "POST", json: { token: "n".repeat(64) } }),
+      ),
+      status: [404],
+    },
+    /**
      * Phase 12a. Starting or resuming a sitting. The slug is one that does
      * not exist, deliberately: the fixture's own attempt is still live and
      * the heartbeat and snapshot recipes above depend on its token, and a

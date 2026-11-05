@@ -52,6 +52,19 @@ describe("requiresDeviceAssertion", () => {
     // exam the kiosk was supposed to make safe.
     expect(requiresDeviceAssertion("KIOSK_SEB")).toBe(false);
     expect(DEVICE_BOUND_PROCTOR_MODES).not.toContain("KIOSK_SEB");
+
+    /**
+     * KIOSK_RECX is out for a different reason, and it is worth writing
+     * down because the obvious argument runs the other way. REC Exam
+     * Browser is Chromium, so it does expose WebAuthn and a security key
+     * would work inside it — the reason SEB is exempt does not apply.
+     * It stays out anyway: whether a candidate must present a key is a
+     * decision about lockouts on exam morning, not a consequence of which
+     * browser they were told to use, and bundling it into the mode would
+     * make that decision by accident.
+     */
+    expect(requiresDeviceAssertion("KIOSK_RECX")).toBe(false);
+    expect(DEVICE_BOUND_PROCTOR_MODES).not.toContain("KIOSK_RECX");
   });
 
   it("decides for every proctor mode, so a new one cannot be silently unbound", () => {

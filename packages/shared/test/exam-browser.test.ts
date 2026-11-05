@@ -48,7 +48,6 @@ const signed = (over: Partial<ExamBrowserPresented> = {}, at = NOW): ExamBrowser
       examBrowserSigningInput({
         method: "POST",
         url: "https://exam.test/api/exam/heartbeat",
-        bodyHash: "deadbeef",
         nonce,
         timestamp: at,
         sittingId: SITTING,
@@ -62,7 +61,6 @@ const verify = (presented: ExamBrowserPresented, over: Partial<Parameters<typeof
   verifyExamBrowser({
     method: "POST",
     url: "https://exam.test/api/exam/heartbeat",
-    bodyHash: "deadbeef",
     presented,
     sittingKey: KEY,
     versionFloor: null,
@@ -77,31 +75,45 @@ describe("the string both ends sign", () => {
       examBrowserSigningInput({
         method: "get",
         url: "https://exam.test/a",
-        bodyHash: null,
-        nonce: "n",
+               nonce: "n",
         timestamp: 10,
         sittingId: "s",
       }),
-    ).toBe(["recx-exam/v1", "GET", "https://exam.test/a", "-", "n", "10", "s"].join("\n"));
+    ).toBe(["recx-exam/v1", "GET", "https://exam.test/a", "n", "10", "s"].join("\n"));
   });
 
   it("upper-cases the method, so a request cannot be replayed as a different verb", () => {
-    const get = examBrowserSigningInput({ method: "get", url: "https://e.test/a", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" });
-    const post = examBrowserSigningInput({ method: "POST", url: "https://e.test/a", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" });
+    const get = examBrowserSigningInput({ method: "get", url: "https://e.test/a", nonce: "n", timestamp: 1, sittingId: "s" });
+    const post = examBrowserSigningInput({ method: "POST", url: "https://e.test/a", nonce: "n", timestamp: 1, sittingId: "s" });
     expect(get).not.toBe(post);
-    expect(get).toBe(examBrowserSigningInput({ method: "GET", url: "https://e.test/a", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" }));
+    expect(get).toBe(examBrowserSigningInput({ method: "GET", url: "https://e.test/a", nonce: "n", timestamp: 1, sittingId: "s" }));
   });
 
-  it("gives an empty body its own marker rather than an empty line", () => {
-    // An empty field could be absorbed by the one beside it; "-" cannot.
-    const none = examBrowserSigningInput({ method: "GET", url: "https://e.test/a", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" });
-    expect(none.split("\n")[3]).toBe("-");
-    expect(none).not.toContain("\n\n");
+  it("leaves no empty line, so no field can absorb the one beside it", () => {
+    const line = examBrowserSigningInput({ method: "GET", url: "https://e.test/a", nonce: "n", timestamp: 1, sittingId: "s" });
+    expect(line).not.toContain("\n\n");
+    expect(line.split("\n")).toHaveLength(6);
+  });
+
+  it("does not sign the body, and the nonce is what makes a signature single-use", () => {
+    /**
+     * The first draft signed a hash of the body. It came out for two
+     * reasons worth keeping. The server cannot reproduce the bytes the
+     * client hashed — three exam routes parse the body before the attempt
+     * guard runs, and a parsed body does not re-serialise to the text that
+     * arrived. And it was defending against nobody: the adversary holds
+     * the key and can sign whatever body they like, while altering a
+     * request in flight is TLS's problem. A signed field the server cannot
+     * check reads like protection that is not there.
+     */
+    const a = examBrowserSigningInput({ method: "POST", url: "https://e.test/a", nonce: "n1", timestamp: 1, sittingId: "s" });
+    const b = examBrowserSigningInput({ method: "POST", url: "https://e.test/a", nonce: "n2", timestamp: 1, sittingId: "s" });
+    expect(a).not.toBe(b);
   });
 
   it("signs the query, unlike SEB, because we write both ends", () => {
-    const a = examBrowserSigningInput({ method: "GET", url: "https://e.test/a?page=1", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" });
-    const b = examBrowserSigningInput({ method: "GET", url: "https://e.test/a?page=2", bodyHash: null, nonce: "n", timestamp: 1, sittingId: "s" });
+    const a = examBrowserSigningInput({ method: "GET", url: "https://e.test/a?page=1", nonce: "n", timestamp: 1, sittingId: "s" });
+    const b = examBrowserSigningInput({ method: "GET", url: "https://e.test/a?page=2", nonce: "n", timestamp: 1, sittingId: "s" });
     expect(a).not.toBe(b);
   });
 });
@@ -172,7 +184,6 @@ describe("verifying a request", () => {
     // Everything the signature covers, one field at a time.
     expect(verify(signed(), { method: "GET" })).toMatchObject({ refusal: "mismatch" });
     expect(verify(signed(), { url: "https://exam.test/api/exam/submit" })).toMatchObject({ refusal: "mismatch" });
-    expect(verify(signed(), { bodyHash: "cafe" })).toMatchObject({ refusal: "mismatch" });
     expect(verify(signed({ nonce: "n-0002" }))).toMatchObject({ refusal: "mismatch" });
     expect(verify(signed({ sittingId: "sitting_other" }))).toMatchObject({ refusal: "mismatch" });
     expect(verify(signed(), { sittingKey: "k-someone-else" })).toMatchObject({ refusal: "mismatch" });

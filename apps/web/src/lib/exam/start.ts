@@ -58,7 +58,8 @@ export type StartRefusal =
    * sitting is created rather than only on the request after it.
    */
   | "outside_allowlist"
-  | "seb_required";
+  | "seb_required"
+  | "recx_browser_required";
 
 export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Object.freeze({
   not_found: "That assessment does not exist.",
@@ -82,6 +83,8 @@ export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Ob
     "This assessment can only be sat from the exam hall network. Tell your invigilator — if you are in the hall, the network has changed.",
   seb_required:
     "This assessment is sat in Safe Exam Browser. Open it from the configuration file your invigilator gave you, not in a normal browser.",
+  recx_browser_required:
+    "This assessment is sat in REC Exam Browser. Launch it from the readiness check — the button there installs it if this machine does not have it yet.",
 });
 
 /**

@@ -94,6 +94,24 @@ const ROUTE_EXEMPT_PREFIXES = [
    */
   "apps/web/src/app/api/auth/forgot-password/",
   "apps/web/src/app/api/auth/reset-password/",
+  /**
+   * Phase 14b: REC Exam Browser spends its launch token here. There is no
+   * actor to authenticate, for the same reason as reset-password above —
+   * the token IS the credential. The application is a fresh Chromium that
+   * has just been handed a URL by the operating system and holds no
+   * cookie, and asking for a college password inside a window with no
+   * address bar is the habit `docs/EXAM-BROWSER.md` §5 exists to avoid
+   * teaching.
+   *
+   * What stands in for a guard: the token is 64 characters of base64url
+   * checked against a shape before any lookup, single-use (claimed by an
+   * UPDATE filtered on `boundAt: null`, so two applications racing it
+   * cannot both win), valid for five minutes, minted only for a signed-in
+   * candidate on the readiness page, and rate-limited per hashed address.
+   * A second attempt to spend one is refused and audited.
+   * `apps/web/test/exam-browser.test.ts` asserts each of those.
+   */
+  "apps/web/src/app/api/exam/browser/",
 ];
 
 const actionFiles = findFiles({ under: [ACTIONS_DIR], extensions: [".ts"] }).filter(

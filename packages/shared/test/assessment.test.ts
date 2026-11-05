@@ -89,7 +89,13 @@ describe("the hard rule", () => {
  */
 describe("an assessment is always proctored", () => {
   it("offers every mode but NONE", () => {
-    expect([...ASSESSMENT_PROCTOR_MODES]).toEqual(["ADVISORY", "REMOTE_MONITORED", "KIOSK_SEB", "LAB_SUPERVISED"]);
+    expect([...ASSESSMENT_PROCTOR_MODES]).toEqual([
+      "ADVISORY",
+      "REMOTE_MONITORED",
+      "KIOSK_SEB",
+      "KIOSK_RECX",
+      "LAB_SUPERVISED",
+    ]);
     expect(PROCTOR_MODES).toContain("NONE");
     expect(isAssessmentProctorMode("NONE")).toBe(false);
   });

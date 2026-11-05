@@ -31,6 +31,24 @@ const shape = {
     .min(32, "EXPORT_SIGNING_SECRET must be at least 32 characters.")
     .default("dev-only-export-signing-secret-change-me"),
   /**
+   * The root secret every REC Exam Browser sitting key is derived from
+   * (Phase 14b). Its OWN secret, like the export key above and for a
+   * sharper reason: a sitting key is what tells the server a request came
+   * from inside the exam browser, so a secret that could also sign a
+   * profile export or mint a session would turn one leak into both.
+   *
+   * Derivation is the point — `hmac(EXAM_BROWSER_SECRET, sittingId)` is
+   * recomputed per request and no sitting key is ever written down, so a
+   * dump of the database contains nothing that can sign anything
+   * (docs/EXAM-BROWSER.md §5). Rotating this ends every live sitting at
+   * once, which is the intended emergency control and a thing to know
+   * before doing it mid-exam.
+   */
+  EXAM_BROWSER_SECRET: z
+    .string()
+    .min(32, "EXAM_BROWSER_SECRET must be at least 32 characters.")
+    .default("dev-only-exam-browser-secret-change-me"),
+  /**
    * Bearer token for GET /api/metrics (Phase 10a). UNSET DISABLES the
    * endpoint, which is the safe default on the one host with a public
    * listener — "no token means no check" is how a metrics endpoint ends up
@@ -96,6 +114,19 @@ const schema = z.object(shape).superRefine((value, ctx) => {
       code: z.ZodIssueCode.custom,
       path: ["EXPORT_SIGNING_SECRET"],
       message: "EXPORT_SIGNING_SECRET is still the development default; set a real secret in production.",
+    });
+  }
+  /**
+   * Same rule, same reason: the dev default is a known string published in
+   * this repository, and a deployment that never set it would be deriving
+   * every sitting key from it — which is the shared-key flaw
+   * `docs/EXAM-BROWSER.md` §5 exists to avoid, reintroduced by omission.
+   */
+  if (value.NODE_ENV === "production" && value.EXAM_BROWSER_SECRET.startsWith("dev-only-")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["EXAM_BROWSER_SECRET"],
+      message: "EXAM_BROWSER_SECRET is still the development default; set a real secret in production.",
     });
   }
   if (value.NODE_ENV === "production" && value.JUDGE_ALLOW_UNHARDENED_NODES) {
