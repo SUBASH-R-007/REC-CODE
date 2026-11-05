@@ -41,16 +41,26 @@ export const LAUNCH_TOKEN_TTL_MS = 5 * 60_000;
 /**
  * How much longer than the paper the sitting's own session lasts.
  *
- * The session exists so the application never meets a sign-in form, and it
- * should outlive nothing but the paper. An hour past the clock covers a
- * reading-time allowance, an accommodation, a pause an invigilator granted
- * and the minutes between the readiness page and pressing Start. It is
- * deliberately not capped from above: a paper that runs four hours needs a
- * session that runs four hours, and a session that expired mid-answer would
- * put the candidate in front of the login form this whole slice exists to
- * prevent.
+ * The session exists so the application never meets a sign-in form, and the
+ * one thing it must not do is expire while a candidate is still answering:
+ * `liveSession` deletes an expired row, and the next render inside the
+ * kiosk window would be the sign-in form -- the precise outcome this slice
+ * exists to remove.
+ *
+ * So the slack is four hours rather than the one this was first written
+ * with. An hour looked generous until the arithmetic was done against what
+ * actually extends a sitting: `computeExpiresAt` applies an accommodation's
+ * extra time, and 25% on a four-hour paper is already sixty minutes, before
+ * any pause an invigilator grants. Four hours covers those with room, and
+ * it is deliberately not capped from above -- a paper that runs four hours
+ * needs a session that runs four hours.
+ *
+ * What makes that cheap rather than careless is that the real bound is not
+ * the clock: `endExamBrowserSitting` deletes the session when the paper is
+ * handed in, so the slack is only what happens to a sitting nobody ever
+ * finished.
  */
-export const EXAM_BROWSER_SESSION_SLACK_MS = 60 * 60_000;
+export const EXAM_BROWSER_SESSION_SLACK_MS = 4 * 60 * 60_000;
 
 /**
  * What the sitting's session calls itself.
@@ -188,6 +198,17 @@ export async function exchangeLaunchToken(token: string): Promise<ExchangeResult
         expiresAt: sessionExpiresAt,
         userAgent: EXAM_BROWSER_SESSION_AGENT,
         ipHash,
+        /**
+         * The line the real application taught us (Phase 14g, second pass).
+         *
+         * Without it, `currentSession()` renewed this session on its very
+         * first request -- `needsRenew` is true for anything expiring
+         * inside seven days -- so the expiry computed just above became
+         * fourteen days and every sentence written about this session's
+         * lifetime was false. A session issued for one paper does not get
+         * to extend itself.
+         */
+        renewable: false,
       },
       select: { id: true },
     });

@@ -196,8 +196,8 @@ it.
 
    **What this costs, stated plainly.** A launch token was worth one
    sitting's attestation for five minutes; it is now worth that plus a
-   session on the candidate's account for the length of the paper and an
-   hour. Four things bound it, and none of them is "the token is hard to
+   session on the candidate's account for the length of the paper and four
+   hours. Four things bound it, and none of them is "the token is hard to
    guess":
 
    * it only exists because the candidate was already signed in, in their
@@ -207,9 +207,27 @@ it.
      refused and audited;
    * the session dies when the sitting ends — `endExamBrowserSitting`
      deletes the row, which is why the pointer's foreign key is `SET NULL`
-     and a separate `sessionIssuedAt` records that there was one;
+     and a separate `sessionIssuedAt` records that there was one. That, and
+     not the clock, is the real bound: the four hours are only what happens
+     to a sitting nobody ever handed in;
    * it is `httpOnly` in an in-memory partition, so neither the page the
-     candidate can script nor the disk ever holds it.
+     candidate can script nor the disk ever holds it;
+   * **it cannot renew itself.** `Session.renewable` is false on it, which
+     is the second thing running the real application found. Every session
+     expiring inside seven days is renewed to fourteen on use, so the expiry
+     computed at the exchange became a fortnight on the kiosk window's first
+     request — silently, with every test green, and with every sentence
+     written here about this session's lifetime false. The renewal rule now
+     lives in `apps/web/src/lib/auth/session-refresh.ts`, as a function over
+     plain values with tests, rather than as three lines inside a function
+     nothing could reach.
+
+   Why four hours and not one: a session that expires while a candidate is
+   still answering produces exactly the sign-in form this slice exists to
+   remove, and `computeExpiresAt` applies an accommodation's extra time —
+   25% on a four-hour paper is already sixty minutes, before any pause an
+   invigilator grants. One hour was the first number written here and the
+   arithmetic did not survive being done.
 
    It is also visible: the session calls itself "REC Exam Browser" on the
    candidate's own devices screen, so a sitting they did not start is

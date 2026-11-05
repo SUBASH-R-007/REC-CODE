@@ -8,13 +8,10 @@ import { isProduction } from "@/lib/env";
 import { isFeatureEnabled } from "@/lib/flags";
 import { requestIpHash } from "@/lib/ip";
 import { closeImpersonation, closeImpersonationsOf } from "@/lib/auth/impersonation";
+import { SESSION_DAYS, sessionRefresh } from "@/lib/auth/session-refresh";
 import { SESSION_COOKIE, hashSessionToken, liveSession } from "@/lib/auth/session-token";
 
 export { SESSION_COOKIE, hashSessionToken };
-const SESSION_DAYS = 14;
-const RENEW_THRESHOLD_DAYS = 7;
-/** lastSeenAt is refreshed at most this often (avoid a write per request). */
-const TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 /** Account states that may hold a session (same set as session-token.ts). */
 const SIGN_IN_STATUSES = new Set(["ACTIVE", "SOFT_RESTRICTED"]);
 
@@ -108,14 +105,17 @@ const currentSession = cache(async () => {
   if (!session) return null;
   const now = Date.now();
 
-  const needsRenew = session.expiresAt.getTime() - now < RENEW_THRESHOLD_DAYS * 86_400_000;
-  const needsTouch = now - session.lastSeenAt.getTime() > TOUCH_INTERVAL_MS;
-  if (needsRenew || needsTouch) {
-    const expiresAt = needsRenew ? new Date(now + SESSION_DAYS * 86_400_000) : session.expiresAt;
+  const { renew, touch, expiresAt } = sessionRefresh({
+    expiresAt: session.expiresAt,
+    lastSeenAt: session.lastSeenAt,
+    renewable: session.renewable,
+    now,
+  });
+  if (renew || touch) {
     await db.session
       .update({ where: { id: session.id }, data: { lastSeenAt: new Date(now), expiresAt } })
       .catch(() => undefined);
-    if (needsRenew) {
+    if (renew) {
       try {
         store.set(SESSION_COOKIE, token, cookieOptions(expiresAt));
       } catch {

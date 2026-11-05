@@ -63,9 +63,13 @@ vi.mock("@/lib/env", () => ({ env: () => ({ EXAM_BROWSER_SECRET: SECRET }) }));
 vi.mock("@/lib/ip", () => ({ requestIpHash: async () => "f".repeat(64) }));
 vi.mock("@/lib/redis", () => ({ redis: () => ({ set: h.redisSet }) }));
 
-const { deriveSittingKey, exchangeLaunchToken, verifyExamBrowserRequest, endExamBrowserSitting } = await import(
-  "@/lib/exam/exam-browser"
-);
+const {
+  deriveSittingKey,
+  exchangeLaunchToken,
+  verifyExamBrowserRequest,
+  endExamBrowserSitting,
+  EXAM_BROWSER_SESSION_SLACK_MS,
+} = await import("@/lib/exam/exam-browser");
 
 const SITTING = "sit_abc";
 const URL_UNDER_TEST = "https://code.rec.edu.in/api/exam/att_1/hb";
@@ -241,14 +245,35 @@ describe("the session the sitting is issued (Phase 14g)", () => {
     expect((h.sessionCreate.mock.calls[0]![0]!.data as { userId: string }).userId).toBe("usr_1");
   });
 
-  it("lasts the paper plus an hour, so it outlives nothing but the sitting", async () => {
+  it("lasts the paper plus the slack, so it cannot expire mid-answer", async () => {
+    /**
+     * Four hours of slack, not one. `computeExpiresAt` applies an
+     * accommodation's extra time, and 25% on a four-hour paper is already
+     * sixty minutes before any pause an invigilator grants -- and a session
+     * that expires while a candidate is answering puts the sign-in form in
+     * front of them, which is the outcome this slice removes.
+     */
     h.findUnique.mockResolvedValue(live());
     const before = Date.now();
     const result = await exchangeLaunchToken("t".repeat(43));
     const expiresAt = result.ok === true ? result.sessionExpiresAt.getTime() : 0;
+    const expected = 3_600_000 + EXAM_BROWSER_SESSION_SLACK_MS;
 
-    expect(expiresAt - before).toBeGreaterThanOrEqual(3_600_000 + 3_600_000 - 1_000);
-    expect(expiresAt - before).toBeLessThanOrEqual(3_600_000 + 3_600_000 + 5_000);
+    expect(expiresAt - before).toBeGreaterThanOrEqual(expected - 1_000);
+    expect(expiresAt - before).toBeLessThanOrEqual(expected + 5_000);
+  });
+
+  it("may not renew itself, which is what made every claim about its lifetime false", async () => {
+    /**
+     * Found by running the real application. `currentSession()` renews any
+     * session expiring inside seven days, so the expiry computed above
+     * became fourteen days on the kiosk window's very first request --
+     * silently, with every test still green. `renewable: false` is the fix
+     * and `session-refresh.test.ts` holds the other half of it.
+     */
+    h.findUnique.mockResolvedValue(live());
+    await exchangeLaunchToken("t".repeat(43));
+    expect((h.sessionCreate.mock.calls[0]![0]!.data as { renewable: boolean }).renewable).toBe(false);
   });
 
   it("names itself, so the candidate can see it on their own devices screen", async () => {

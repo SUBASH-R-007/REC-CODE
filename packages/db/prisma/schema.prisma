@@ -694,6 +694,13 @@ model Session {
   createdAt  DateTime @default(now())
   lastSeenAt DateTime @default(now())
   expiresAt  DateTime
+  /// May this session extend its own expiry when it is used (Phase 14g)?
+  /// True for every session created by signing in. False for the one a REC
+  /// Exam Browser sitting holds, whose expiry is the paper plus slack and
+  /// must not be pushed out by the ordinary renewal rule -- which, before
+  /// this column existed, turned a two-hour session into a fourteen-day one
+  /// on its very first request.
+  renewable  Boolean  @default(true)
 
   /// Set on the SUPER_ADMIN's own session while it views as another user
   /// (read-only). The foreign key is SetNull, but an ImpersonationSession row
