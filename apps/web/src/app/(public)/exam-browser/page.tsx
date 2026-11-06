@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Card } from "@recx/design";
 import { EXAM_BROWSER_PROTOCOL_VERSION } from "@recx/shared";
 import { examBrowserVersionFloor } from "@/lib/exam/containment";
+import { examBrowserDownloads, likelyPlatform } from "@/lib/exam/exam-browser-downloads";
 
 export const metadata: Metadata = {
   title: "REC Exam Browser",
@@ -25,8 +27,24 @@ export const dynamic = "force-dynamic";
  * fail the build if it tried. `docs/PROCTORING.md` §1 is the posture:
  * detection, evidence and deterrence — never prevention.
  */
+/** Bytes a person can read, for a file they are about to wait for. */
+function megabytes(bytes: number | null): string | null {
+  return bytes === null ? null : `${(bytes / 1_000_000).toFixed(0)} MB`;
+}
+
 export default async function ExamBrowserPage() {
-  const floor = await examBrowserVersionFloor();
+  const [floor, downloads, userAgent] = await Promise.all([
+    examBrowserVersionFloor(),
+    examBrowserDownloads(),
+    headers().then((all) => all.get("user-agent")),
+  ]);
+  // A guess at which button to put first, never a gate: every build stays
+  // listed, because a candidate downloading on one machine for another is
+  // ordinary the evening before a paper.
+  const mine = likelyPlatform(userAgent);
+  const offers = downloads.available
+    ? [...downloads.offers].sort((a, b) => Number(b.platform === mine) - Number(a.platform === mine))
+    : [];
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
@@ -79,10 +97,65 @@ export default async function ExamBrowserPage() {
 
       <Card className="mt-6 p-5">
         <h2 className="font-display text-lg font-semibold text-text">Installing it</h2>
-        <p className="mt-2 text-sm text-text-secondary">
-          Installers are published by your college rather than downloaded from here, so that the copy you install is
-          one your department can vouch for. Ask your department or your invigilator for the current build; the
-          readiness check will tell you if the copy you have is too old to sit a paper with.
+
+        {downloads.available ? (
+          <>
+            <p className="mt-2 text-sm text-text-secondary">
+              Download it here. This is your college&apos;s own copy, served from the same address you sign in to, so
+              the build you install is one your department can vouch for — never install an exam browser from a link
+              somebody sent you.
+            </p>
+            <ul className="mt-4 space-y-2">
+              {offers.map((offer) => (
+                <li key={offer.platform}>
+                  <a
+                    href={`/api/exam-browser/download/${offer.platform}`}
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-xl border border-border px-4 py-3 text-sm hover:border-accent"
+                    download
+                  >
+                    <span className="font-medium text-text">
+                      {offer.label}
+                      {offer.platform === mine ? (
+                        <span className="ml-2 text-xs text-text-secondary">(this machine, probably)</span>
+                      ) : null}
+                    </span>
+                    <span className="text-xs text-text-secondary tabular-nums">
+                      {[`Version ${downloads.version}`, megabytes(offer.bytes), offer.signed ? null : "unsigned"]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {offers.some((offer) => offer.sha256) ? (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs text-text-secondary">
+                  Checksums, if you want to verify the download yourself
+                </summary>
+                <dl className="mt-2 space-y-1 text-xs">
+                  {offers
+                    .filter((offer) => offer.sha256)
+                    .map((offer) => (
+                      <div key={offer.platform}>
+                        <dt className="text-text-secondary">{offer.file}</dt>
+                        <dd className="break-all font-mono text-text">{offer.sha256}</dd>
+                      </div>
+                    ))}
+                </dl>
+              </details>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-text-secondary">
+            {downloads.reason === "switched_off"
+              ? "Your college is not handing out the installer from this page. Ask your department or your invigilator for the current build — and ask them, rather than taking a copy from anywhere else."
+              : "No build is published here yet. Ask your department or your invigilator for the current one."}
+          </p>
+        )}
+
+        <p className="mt-3 text-sm text-text-secondary">
+          The readiness check will tell you if the copy you have is too old to sit a paper with.
         </p>
         <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-text-secondary">Lowest version accepted</dt>

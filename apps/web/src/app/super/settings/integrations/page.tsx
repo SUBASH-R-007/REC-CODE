@@ -9,6 +9,11 @@ import { redis } from "@/lib/redis";
 import { loadMailHealth } from "@/server/queries/super-dashboard";
 import { examBrowserVersionFloor } from "@/lib/exam/containment";
 import { EXAM_BROWSER_PROTOCOL_VERSION } from "@recx/shared";
+import { downloadsSwitchedOn, examBrowserBuilds } from "@/lib/exam/exam-browser-downloads";
+import {
+  ExamBrowserDownloadsForm,
+  type DownloadsStatus,
+} from "@/components/super/exam-browser-downloads-form";
 import { ExamBrowserFloorForm } from "@/components/super/exam-browser-floor-form";
 import { SebKeysForm } from "@/components/admin/assessments/seb-keys-form";
 import { TestEmailButton } from "@/components/super/test-email-button";
@@ -44,7 +49,7 @@ function Status({ ok, label }: { ok: boolean; label: string }) {
  */
 export default async function SuperIntegrationsPage() {
   await requireSuperAdminPage();
-  const [mail, outbox, lastSent, redisOk, sebRow, examBrowserFloor] = await Promise.all([
+  const [mail, outbox, lastSent, redisOk, sebRow, examBrowserFloor, downloadsOn, builds] = await Promise.all([
     loadMailHealth(),
     db.schedulerJobStatus.findUnique({ where: { job: "outbox" }, select: { lastStartedAt: true, lastOk: true } }),
     db.emailOutbox.findFirst({ where: { status: "SENT" }, orderBy: { sentAt: "desc" }, select: { sentAt: true } }),
@@ -53,7 +58,25 @@ export default async function SuperIntegrationsPage() {
     // Phase 14f. Read through the same function the containment check
     // uses, so the screen cannot show a floor the check would not apply.
     examBrowserVersionFloor(),
+    // Phase 14i. The switch, and what is on the disk behind it: "on" and
+    // "working" are different states and the gap between them is where a
+    // hall finds out the morning of a paper.
+    downloadsSwitchedOn(),
+    examBrowserBuilds(),
   ]);
+
+  /**
+   * The disk, with the switch ignored (`examBrowserBuilds`), because this
+   * screen has to answer a question the public page never asks: would
+   * turning the switch ON offer anything at all? Read through
+   * `examBrowserDownloads()` it could not, since that reports
+   * "switched_off" and stops.
+   */
+  const downloadStatus: DownloadsStatus = builds.available
+    ? { kind: "ready", version: builds.version, builds: builds.offers.length }
+    : builds.reason === "no_build"
+      ? { kind: "no_build" }
+      : { kind: "not_configured" };
   // Booleans, never the keys themselves.
   const sebValue = sebRow?.value as { configKey?: unknown; browserExamKey?: unknown } | null | undefined;
   const collegeSeb = {
@@ -149,6 +172,7 @@ export default async function SuperIntegrationsPage() {
             What there is instead is a floor — the lowest build this deployment will accept, which is how a copy found
             to have a flaw stops being usable the day it is known rather than at the next release.
           </p>
+          <ExamBrowserDownloadsForm enabled={downloadsOn} status={downloadStatus} />
           <ExamBrowserFloorForm current={examBrowserFloor} />
           <p className="text-xs text-muted">
             Handshake version {EXAM_BROWSER_PROTOCOL_VERSION}. Candidates read what the application does, and what it

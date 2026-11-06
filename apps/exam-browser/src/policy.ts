@@ -200,6 +200,64 @@ export function shouldAttest(url: string, origin: string): boolean {
   return isExamOrigin(url, origin);
 }
 
+/**
+ * Keys the window swallows (Phase 14j).
+ *
+ * Window-scoped, through `before-input-event`, and that distinction is the
+ * rule rather than an implementation detail: `docs/EXAM-BROWSER.md` §7
+ * forbids a global input hook, because a kiosk browser that reads the
+ * keyboard while it does not have focus is a keylogger whatever it is
+ * called. These fire only for key presses Chromium is delivering to our
+ * own focused window, and nothing is recorded — the key is dropped, not
+ * written down.
+ *
+ * What is here, and why each one:
+ *
+ *   * **devtools** — the window is built with `devTools: false`, so these
+ *     already do nothing. Swallowed anyway, because the next person to
+ *     relax one option should have to delete two things;
+ *   * **new window, new tab, close** — there is one window and it belongs
+ *     to one sitting;
+ *   * **print and save** — both write the paper somewhere the sitting does
+ *     not reach. The questions are the college's;
+ *   * **open file** — a file picker is another application's window on top
+ *     of the paper;
+ *   * **view source** — not a leak, but it opens a second view of the
+ *     page that none of the rules above apply to;
+ *   * **fullscreen toggle** — the window chooses its own, and a candidate
+ *     who leaves fullscreen by accident has to be put back by hand.
+ *
+ * What is deliberately NOT here:
+ *
+ *   * **reload.** A candidate whose page has wedged needs it, and the exam
+ *     page snapshots answers continuously, so a reload costs nothing. A
+ *     kiosk that cannot recover is a kiosk that ends somebody's paper;
+ *   * **copy, cut, paste.** `docs/PROCTORING.md` §2 settled this before
+ *     this application existed: paste is instrumented, not blocked;
+ *   * **zoom.** It is an accessibility control;
+ *   * **Escape.** The editor uses it.
+ */
+export interface KeyChord {
+  readonly key: string;
+  readonly control: boolean;
+  readonly meta: boolean;
+  readonly alt: boolean;
+  readonly shift: boolean;
+}
+
+export function blockedChord(input: KeyChord): boolean {
+  const key = input.key.toLowerCase();
+  // Control on Windows and Linux, Command on macOS: one flag, because
+  // every entry below is the same shortcut on both.
+  const mod = input.control || input.meta;
+
+  if (key === "f12" || key === "f11") return true;
+  if (mod && input.shift && ["i", "j", "c"].includes(key)) return true;
+  if (mod && ["n", "t", "w", "p", "s", "o", "u"].includes(key)) return true;
+  if (mod && input.shift && ["n", "t", "w"].includes(key)) return true;
+  return false;
+}
+
 export type StartupRefusal =
   | { readonly ok: true }
   | { readonly ok: false; readonly reason: "refused_switches"; readonly switches: readonly string[] };

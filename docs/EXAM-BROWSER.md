@@ -2,7 +2,7 @@
 
 > **Status:** written before any code existed, in the same way
 > `docs/PROCTORING.md` was written before the proctoring engine. Slices 14a
-> to 14h have shipped, each on the repository gate; §9 says what each one
+> to 14j have shipped, each on the repository gate; §9 says what each one
 > was and what is left. Where the implementation taught us something the
 > design had wrong, this document says so rather than being quietly
 > corrected — §5's body hash and §3's paste block are both retractions.
@@ -97,6 +97,28 @@ because the rest of that list is unchanged.
 * **The clipboard can be emptied**, at the start of a sitting and at the
   end of it. Emptying is not reading, and nothing here ever asks what was
   in it (§4).
+* **The window can hold the front of the screen** (Phase 14j). Kiosk as
+  well as fullscreen, always-on-top at the highest level Electron offers,
+  visible on every virtual desktop, not minimisable or resizable, put back
+  in front when something takes focus, and back to fullscreen if it leaves
+  it. The shortcuts that open a second window, print, save, open a file or
+  view source are swallowed before the page sees them — through
+  `before-input-event`, which fires only for keys Chromium is delivering
+  to our own focused window, because a hook that read the keyboard while
+  the application did not have focus would be a keylogger whatever it was
+  called (§7). Closing mid-paper asks first, with a way through, because a
+  candidate must always be able to walk out of an exam.
+
+  **What none of that is.** It does not make other applications
+  unreachable, and nothing in this repository can. Alt-tab, the Windows
+  key, a second monitor, a phone — the operating system owns window
+  switching and the candidate owns the machine. What this buys is that
+  leaving the paper is deliberate and visible instead of accidental, and
+  that a notification or another window cannot land on top of a paper by
+  itself. A hall where other applications must genuinely be unreachable is
+  a `LAB_SUPERVISED` hall on college machines with
+  `deploy/lab-policy/` applied, which is what `docs/PROCTORING.md` §4
+  lists first and why it does.
 
   What this deliberately does **not** do is block paste. The first draft
   of this document said it would, and that was wrong on the product's own
@@ -348,7 +370,12 @@ Written here so they are built with the application rather than after it.
   `getDisplayMedia`, `MediaRecorder` and
   `systemPreferences.askForMediaAccess` appear nowhere in the application.
 * **No global input hooks.** No native keyboard or mouse hook; the only
-  accelerators are the ones registered on our own focused window.
+  accelerators are the ones registered on our own focused window. Phase
+  14j made that concrete: the shortcut list is `blockedChord` in
+  `policy.ts`, applied through `before-input-event` on our own
+  `webContents`, and the fence asserts the handler records nothing — a
+  shortcut blocker that wrote down what it swallowed would be the thing
+  §5 forbids.
 * **Renderer privileges.** `contextIsolation: true`, `nodeIntegration:
   false`, `sandbox: true`, `webSecurity: true` and `devTools: false`,
   proved by the fence rather than by review.
@@ -387,11 +414,32 @@ Written here so they are built with the application rather than after it.
   entry, no service, no tray icon, **and no update feed**: electron-builder
   is configured `publish: null`, because a background updater is the
   desktop agent `PROCTORING.md` §5 refuses.
-* The deployment serves the installers and a `latest.json` naming the
-  current build per platform, as FILES from the edge rather than through
-  the application — `deploy/Caddyfile` gains one static path, and
-  `deploy/exam-browser/README.md` is how a release gets there. A 90 MB
-  download has no business occupying a worker a hall is sitting on.
+* **The deployment hands the installer to the candidate** (Phase 14i),
+  from `/exam-browser`, which is public. 14f served the files from the
+  edge as a static path, which was right about the bytes and wrong about
+  the control: a static path cannot be turned off from a screen, so the
+  super-admin's switch would have governed the link on the page and not
+  the download, and anybody who kept the URL would have kept the file. So
+  the application serves them at
+  `/api/exam-browser/download/<platform>` and reads the switch on every
+  request. One door, one switch.
+
+  The cost is accepted rather than hidden: a download occupies a worker
+  for as long as it takes. It is streamed rather than read into memory, an
+  installer is already compressed, and `docs/RUNBOOK.md` §2.20 says to
+  have a hall install the day before — which is the actual answer.
+
+  Nothing from a request reaches a path. The platform key is matched
+  against a fixed list, the filename comes out of the manifest the college
+  published, and the resolved path is checked to be inside the directory
+  before anything is opened. `deploy/exam-browser/README.md` is how a
+  release gets there.
+* **The download is off until somebody turns it on**, on
+  `/super/settings/integrations`, audited at SECURITY. Off is the default
+  and an unreadable setting means off — the opposite direction from the
+  version floor beside it, and right for the same reason: a floor that
+  cannot be read must not lock a hall out, and a switch that cannot be
+  read must not publish an executable nobody chose to publish.
 * The version floor is a platform setting with a screen
   (`/super/settings/integrations`), so a bad build is cut off in the
   morning without a redeploy. It was a row with no screen until 14f, which
@@ -418,3 +466,5 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14g | The sitting carries its own session, so the window never meets a sign-in form — what launching the real application found (§5). |
 | 14h | The sitting is bound to the attempt at start and resume, and ends on submit, auto-submit and the deadline sweep (§5 step 7). Before this, a `KIOSK_RECX` paper could not be sat at all. |
 | 14f | Packaging (`electron-builder.yml`, icon, entitlements), the installer path in `deploy/`, the version floor's screen, and `RUNBOOK.md` §2.20 for a hall. Signing is configured but cannot be done here. |
+| 14i | The installer is downloaded from the site, through the application, behind a super-admin switch that governs the download rather than the link (§8). |
+| 14j | The window holds the front of the screen and swallows the shortcuts that leave it — and §3 says plainly what that is not. |

@@ -8,7 +8,11 @@ import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { ValidationError, runAction, type ActionResult } from "@/lib/errors";
-import { EXAM_BROWSER_SETTING_KEY, examBrowserSettingSchema } from "@/lib/exam/exam-browser-setting";
+import {
+  EXAM_BROWSER_SETTING_KEY,
+  examBrowserSettingSchema,
+  type ExamBrowserSetting,
+} from "@/lib/exam/exam-browser-setting";
 import { requestIpHash } from "@/lib/ip";
 
 /**
@@ -172,6 +176,41 @@ export async function setCollegeSebKeys(
  * value and the new one, and why clearing it is one obvious action rather
  * than a field somebody has to blank.
  */
+/**
+ * Read, change and write the exam-browser setting under one lock
+ * (Phase 14i).
+ *
+ * It became necessary the moment the setting had two fields. The floor's
+ * action used to replace the whole stored value with `{ minVersion }`,
+ * which was correct while that was the only field and would have silently
+ * cleared the download switch the first time somebody edited the floor.
+ * Two controls on one JSON row have to merge, and they have to merge
+ * inside the advisory lock, or two super-admins on the same screen lose
+ * one of the two changes.
+ *
+ * An unreadable stored value is REPLACED rather than merged into, the same
+ * way the retention setting above does it: merging into something that
+ * does not parse means carrying its mistake forward for ever.
+ */
+async function changeExamBrowserSetting(
+  change: (current: ExamBrowserSetting) => ExamBrowserSetting,
+): Promise<{ previous: ExamBrowserSetting; next: ExamBrowserSetting }> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"setting:" + EXAM_BROWSER_SETTING_KEY}))`;
+    const row = await tx.platformSetting.findUnique({ where: { key: EXAM_BROWSER_SETTING_KEY } });
+    const parsed = row ? examBrowserSettingSchema.safeParse(row.value) : null;
+    const previous: ExamBrowserSetting = parsed?.success ? parsed.data : {};
+    const next = change(previous);
+    const value = next as Prisma.InputJsonValue;
+    await tx.platformSetting.upsert({
+      where: { key: EXAM_BROWSER_SETTING_KEY },
+      create: { key: EXAM_BROWSER_SETTING_KEY, value },
+      update: { value },
+    });
+    return { previous, next };
+  });
+}
+
 const versionFloorSchema = z.object({
   /** Empty clears the floor, which is how a hall gets unstuck in a hurry. */
   minVersion: z.string().trim().max(32, "That is not a version."),
@@ -184,20 +223,15 @@ export async function setExamBrowserVersionFloor(
   return runAction(async () => {
     const actor = await requireSuperAdmin();
     const { minVersion } = versionFloorSchema.parse(input);
+    // Validated before the lock is taken: a bad version should be a message
+    // on the screen, not a transaction that opens and rolls back.
+    const checked = minVersion === "" ? undefined : examBrowserSettingSchema.parse({ minVersion }).minVersion;
 
-    const next = minVersion === "" ? {} : examBrowserSettingSchema.parse({ minVersion });
-    const value = next as Prisma.InputJsonValue;
-
-    const previous = await db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"setting:" + EXAM_BROWSER_SETTING_KEY}))`;
-      const row = await tx.platformSetting.findUnique({ where: { key: EXAM_BROWSER_SETTING_KEY } });
-      const current = row ? examBrowserSettingSchema.safeParse(row.value) : null;
-      await tx.platformSetting.upsert({
-        where: { key: EXAM_BROWSER_SETTING_KEY },
-        create: { key: EXAM_BROWSER_SETTING_KEY, value },
-        update: { value },
-      });
-      return current?.success ? (current.data.minVersion ?? null) : null;
+    const { previous, next } = await changeExamBrowserSetting((current) => {
+      const merged = { ...current };
+      if (checked === undefined) delete merged.minVersion;
+      else merged.minVersion = checked;
+      return merged;
     });
 
     await audit({
@@ -212,11 +246,61 @@ export async function setExamBrowserVersionFloor(
        * asks when it does. Neither is a secret: a version number is
        * printed on the public page at /exam-browser.
        */
-      metadata: { previous, minVersion: next.minVersion ?? null, ipHash: await requestIpHash() },
+      metadata: {
+        previous: previous.minVersion ?? null,
+        minVersion: next.minVersion ?? null,
+        ipHash: await requestIpHash(),
+      },
     });
 
     revalidatePath("/super/settings/integrations");
     revalidatePath("/exam-browser");
     return { minVersion: next.minVersion ?? null };
   }, "setExamBrowserVersionFloor");
+}
+
+const downloadsSchema = z.object({ enabled: z.boolean() });
+export type SetExamBrowserDownloadsInput = z.input<typeof downloadsSchema>;
+
+/**
+ * Whether `/exam-browser` hands out the installer (Phase 14i).
+ *
+ * A switch over the DOWNLOAD and not over the button: the route reads this
+ * on every request, so turning it off takes the file away from anybody who
+ * kept the link, which is the only version of this control worth having.
+ *
+ * Audited at SECURITY, like the floor beside it, for a different reason.
+ * The floor can stop a hall sitting; this one decides whether a college is
+ * publishing an executable from its own hostname, and "who turned that on"
+ * is a question somebody will eventually ask.
+ */
+export async function setExamBrowserDownloads(
+  input: SetExamBrowserDownloadsInput,
+): Promise<ActionResult<{ enabled: boolean }>> {
+  return runAction(async () => {
+    const actor = await requireSuperAdmin();
+    const { enabled } = downloadsSchema.parse(input);
+
+    const { previous, next } = await changeExamBrowserSetting((current) => ({
+      ...current,
+      downloadsEnabled: enabled,
+    }));
+
+    await audit({
+      actorId: actor.id,
+      action: "settings.exam_browser_downloads_set",
+      entityType: "PlatformSetting",
+      entityId: EXAM_BROWSER_SETTING_KEY,
+      sensitivity: "SECURITY",
+      metadata: {
+        previous: previous.downloadsEnabled ?? false,
+        enabled: next.downloadsEnabled ?? false,
+        ipHash: await requestIpHash(),
+      },
+    });
+
+    revalidatePath("/super/settings/integrations");
+    revalidatePath("/exam-browser");
+    return { enabled: next.downloadsEnabled ?? false };
+  }, "setExamBrowserDownloads");
 }

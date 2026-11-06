@@ -56,11 +56,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-      # The exam browser's installers and latest.json (Phase 14f). Read
-      # only, and outside the application entirely: Caddy serves these as
-      # files so a 90 MB download never occupies a web worker that a hall
-      # is using. deploy/exam-browser/README.md is how a release gets here.
-      - ${RECX_EXAM_BROWSER_DIR:-./exam-browser/public}:/srv/exam-browser:ro
     networks: [edge, app]
     logging: *logging
 
@@ -113,6 +108,19 @@ services:
       # For a college-hosted, OpenAI-compatible endpoint, also:
       #   AI_BASE_URL: https://ai.rajalakshmi.edu.in/v1
       #   AI_MODEL: rec-coder
+      # The published REC Exam Browser installers (Phase 14i). Unset means
+      # no downloads, which is the right default for a deployment that has
+      # published no build: /exam-browser then tells a candidate to ask
+      # their department, exactly as it did before downloads existed.
+      EXAM_BROWSER_DOWNLOAD_DIR: /srv/exam-browser
+      EXAM_BROWSER_SECRET_FILE: /run/secrets/exam_browser_secret
+    volumes:
+      # Read only, and into the WEB containers rather than the edge: the
+      # super-admin's switch is read per request by the route that serves
+      # these, which is what makes it a switch over the download instead of
+      # over a link. deploy/exam-browser/README.md is how a release gets
+      # here. Both replicas mount the same directory.
+      - ${RECX_EXAM_BROWSER_DIR:-./exam-browser/public}:/srv/exam-browser:ro
     secrets:
       - database_url
       - ip_hash_pepper
@@ -120,6 +128,7 @@ services:
       - metrics_token
       - minio_access_key
       - minio_secret_key
+      - exam_browser_secret
     # The one endpoint that answers while things are broken: 200 with
     # `ok:false` in the body rather than a 5xx, so this check tells compose
     # "the process is up" and the deploy script reads the body for the rest.
@@ -251,6 +260,13 @@ secrets:
     file: /run/recx/secrets/minio_secret_key
   smtp_url:
     file: /run/recx/secrets/smtp_url
+  # Phase 14i. Every REC Exam Browser sitting key is derived from this, and
+  # the application REFUSES TO START in production holding the development
+  # default -- so a deployment that skipped it would have found out the
+  # first time a candidate pressed Launch. Generate once and keep it:
+  # rotating it ends every live sitting at the moment it is replaced.
+  exam_browser_secret:
+    file: /run/recx/secrets/exam_browser_secret
   # Uncomment together with AI_API_KEY_FILE above (docs/RUNBOOK.md §2.16).
   #  ai_api_key:
   #    file: /run/recx/secrets/ai_api_key

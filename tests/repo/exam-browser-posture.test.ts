@@ -486,3 +486,82 @@ describe("what a college actually installs (Phase 14f)", () => {
     );
   });
 });
+
+describe("the window a candidate cannot wander out of (Phase 14j)", () => {
+  /**
+   * How far this goes, and where it stops, is the thing to keep straight.
+   * The window can hold the front of the screen, take the shortcuts that
+   * leave it, and refuse to be minimised. It cannot make another
+   * application unreachable: the operating system owns window switching
+   * and the candidate owns the machine (`docs/EXAM-BROWSER.md` §6). These
+   * fences hold the part that is ours.
+   */
+
+  it("opens as a kiosk, not merely fullscreen", () => {
+    // They are different: fullscreen is a window state a candidate can
+    // leave, kiosk asks the platform to take the usual ways out away.
+    // Both, because kiosk is unimplemented on some Linux window managers.
+    expect(main()).toMatch(/kiosk: true/);
+    expect(main()).toMatch(/fullscreen: true/);
+  });
+
+  it("cannot be minimised, maximised or resized out of the way", () => {
+    for (const option of [/minimizable: false/, /maximizable: false/, /resizable: false/]) {
+      expect(main(), String(option)).toMatch(option);
+    }
+  });
+
+  it("holds the front of the screen, on every desktop", () => {
+    expect(main()).toMatch(/setAlwaysOnTop\(true, "screen-saver"\)/);
+    expect(main()).toMatch(/setVisibleOnAllWorkspaces\(true, \{ visibleOnFullScreen: true \}\)/);
+  });
+
+  it("puts itself back in front, and goes back to fullscreen, when something takes over", () => {
+    expect(main()).toMatch(/window\.on\("blur"/);
+    expect(main()).toMatch(/window\.on\("leave-full-screen"/);
+  });
+
+  it("takes the shortcuts through the window, never through a global hook", () => {
+    /**
+     * `before-input-event` fires only for keys Chromium is delivering to
+     * our own focused window. A global hook would read the keyboard while
+     * the application does not have focus, which is a keylogger whatever
+     * it is called -- and `docs/PROCTORING.md` §5 forbids it by name. The
+     * scan above keeps `globalShortcut` out; this says what replaced it.
+     */
+    expect(main()).toMatch(/before-input-event/);
+    expect(main()).toMatch(/blockedChord\(/);
+  });
+
+  it("records nothing about the keys it swallows", () => {
+    /**
+     * The one way a shortcut blocker becomes the thing the charter
+     * forbids. The handler drops the key; it must not write it anywhere.
+     */
+    const text = main();
+    const start = text.indexOf("before-input-event");
+    const handler = text.slice(start, start + 700);
+    expect(handler).not.toMatch(/console\.|log\(|record|event\.sender\.send/);
+  });
+
+  it("has no context menu, whose entries are the same shortcuts with a mouse", () => {
+    expect(main()).toMatch(/"context-menu"/);
+  });
+
+  it("asks before closing mid-paper, and still lets a candidate leave", () => {
+    /**
+     * Not a trap, and this is the fence that keeps it from becoming one.
+     * Somebody has to be able to walk out of an exam; software that would
+     * not let them is software no college should install. So the close
+     * handler must offer a way through, and the cancelling answer is the
+     * default so Enter keeps the paper open.
+     */
+    const text = main();
+    const start = text.indexOf('window.on("close"');
+    expect(start, 'a close guard exists').toBeGreaterThan(-1);
+    const handler = text.slice(start, start + 1200);
+    expect(handler).toMatch(/showMessageBoxSync/);
+    expect(handler, "a way out of the dialog").toMatch(/window\.close\(\)/);
+    expect(handler, "cancelling is the default").toMatch(/defaultId: 0/);
+  });
+});

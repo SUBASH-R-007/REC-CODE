@@ -358,6 +358,14 @@ describe("route handlers are bound and guarded", () => {
      * declaring, it is this one.
      */
     "app/api/mock/[interviewId]/live/route.ts#GET",
+    /**
+     * Phase 14i. A GET under `app/api`, so the rule above would not have
+     * asked for it either -- and it is unauthenticated and reads a file
+     * off the disk, which is the combination most worth writing down.
+     * Declaring it here is what makes the fence below check that
+     * PUBLIC_ROUTES is the thing that owns it.
+     */
+    "app/api/exam-browser/download/[platform]/route.ts#GET",
   ];
 
   /** Route methods that must be bound: admin and super trees, plus every mutating API route except judge-node ones. */

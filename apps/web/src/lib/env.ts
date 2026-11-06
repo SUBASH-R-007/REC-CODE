@@ -49,6 +49,17 @@ const shape = {
     .min(32, "EXAM_BROWSER_SECRET must be at least 32 characters.")
     .default("dev-only-exam-browser-secret-change-me"),
   /**
+   * Where the published REC Exam Browser installers live (Phase 14i).
+   *
+   * UNSET MEANS NO DOWNLOADS, which is the right default for a deployment
+   * that has not published a build: `/exam-browser` then says to ask the
+   * department, exactly as it did before this existed. It is a path and
+   * not a URL because the application serves the bytes itself -- that is
+   * what makes the super-admin's switch a switch over the download rather
+   * than over a link beside it (lib/exam/exam-browser-downloads.ts).
+   */
+  EXAM_BROWSER_DOWNLOAD_DIR: z.string().optional(),
+  /**
    * Bearer token for GET /api/metrics (Phase 10a). UNSET DISABLES the
    * endpoint, which is the safe default on the one host with a public
    * listener — "no token means no check" is how a metrics endpoint ends up

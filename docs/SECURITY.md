@@ -224,7 +224,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | Capability | Tier | STUDENT | TA_MENTOR | ADMIN | PLACEMENT_OFFICER | SUPER_ADMIN | Bound to |
 | --- | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `roles.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
-| `settings.write` | super-admin | - | - | - | - | yes | 11 actions, 5 pages |
+| `settings.write` | super-admin | - | - | - | - | yes | 12 actions, 5 pages |
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 5 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
@@ -291,7 +291,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 
-Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/auth/forgot-password/route.ts#POST`, `app/api/auth/reset-password/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`, `app/api/exam/browser/exchange/route.ts#POST`.
+Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/auth/forgot-password/route.ts#POST`, `app/api/auth/reset-password/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`, `app/api/exam/browser/exchange/route.ts#POST`, `app/api/exam-browser/download/[platform]/route.ts#GET`.
 <!-- capability-matrix:end -->
 
 ## 5. Browser hardening

@@ -1145,6 +1145,23 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       status: [404],
     },
     /**
+     * Phase 14i. The installer. Public by design -- a candidate setting up
+     * a laptop the evening before a paper has often not signed in on it --
+     * so what the sweep checks is the refusal, which is what this
+     * deployment answers with the super-admin's switch off and no build
+     * published. A 404 carrying nothing: the difference between "switched
+     * off", "nothing published" and "no such platform" is deliberately
+     * indistinguishable to a caller, and `/exam-browser` says which in
+     * words above the button.
+     */
+    "api/exam-browser/download/[platform]/route.ts#GET": {
+      call: call(
+        () => studentRequest("/api/exam-browser/download/win-x64"),
+        () => params({ platform: "win-x64" }),
+      ),
+      status: [404],
+    },
+    /**
      * Phase 12a. Starting or resuming a sitting. The slug is one that does
      * not exist, deliberately: the fixture's own attempt is still live and
      * the heartbeat and snapshot recipes above depend on its token, and a

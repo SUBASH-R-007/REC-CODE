@@ -132,6 +132,11 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       // without a redeploy -- and, set wrongly, the one that locks a hall
       // out of its exam.
       "super-settings#setExamBrowserVersionFloor",
+      // Phase 14i: whether /exam-browser hands out the installer. A switch
+      // over the download rather than over the link -- the route reads it
+      // on every request, so turning it off takes the file away from
+      // anybody who kept the URL.
+      "super-settings#setExamBrowserDownloads",
       "super-flags#setFeatureFlag",
       "super-branding#saveBrandTheme",
       // Phase 8b. The inactivity thresholds are settings, not constants —
@@ -1218,6 +1223,18 @@ export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
    * teaching.
    */
   "app/api/exam/browser/exchange/route.ts#POST",
+  /**
+   * Phase 14i: the REC Exam Browser installer. Unauthenticated for the
+   * same reason the page that links to it is: a candidate setting up a
+   * laptop the evening before a paper may be on a machine they have never
+   * signed in from, and an installer behind a sign-in is an installer
+   * fetched from somewhere else instead -- which defeats the only thing
+   * publishing it was for, that the copy installed is one the department
+   * can vouch for. What stands in for a session is the super-admin's
+   * switch, read per request; a fixed list of platform keys, so nothing
+   * from the request reaches a path; and a rate limit.
+   */
+  "app/api/exam-browser/download/[platform]/route.ts#GET",
 ] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];

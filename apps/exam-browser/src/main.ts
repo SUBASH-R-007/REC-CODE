@@ -7,6 +7,7 @@ import { LAUNCH_FAILURE_MESSAGES, exchange, launchUrlIn } from "./launch";
 import {
   EXAM_PARTITION,
   allowedOrigins,
+  blockedChord,
   displayReport,
   navigationDecision,
   permissionDecision,
@@ -84,6 +85,8 @@ app.setAsDefaultProtocolClient(EXAM_BROWSER_SCHEME);
 const examSession = () => session.fromPartition(EXAM_PARTITION, { cache: false });
 
 let mainWindow: BrowserWindow | null = null;
+/** Set once the candidate has confirmed they are leaving, so the close guard stands aside. */
+let closing = false;
 /** Set once, by the first launch URL we successfully exchange. */
 let origins: readonly string[] = [];
 
@@ -103,8 +106,19 @@ function createWindow(origin: string): BrowserWindow {
   const window = new BrowserWindow({
     show: false,
     fullscreen: true,
+    // Kiosk as well as fullscreen (Phase 14j). They are not the same
+    // thing: fullscreen is a window state a candidate can leave, kiosk
+    // asks the platform to keep the window in front and take the usual
+    // ways out away. Both, because kiosk is unimplemented on some Linux
+    // window managers and fullscreen is what is left there.
+    kiosk: true,
     frame: false,
     autoHideMenuBar: true,
+    // No minimise, no restore-down, no resize to uncover what is behind.
+    minimizable: false,
+    maximizable: false,
+    resizable: false,
+    fullscreenable: true,
     backgroundColor: WINDOW.backgroundColor,
     minWidth: WINDOW.minWidth,
     minHeight: WINDOW.minHeight,
@@ -136,6 +150,69 @@ function createWindow(origin: string): BrowserWindow {
   window.setContentProtection(true);
   window.setMenuBarVisibility(false);
 
+  /**
+   * Above everything, on every desktop (Phase 14j).
+   *
+   * "screen-saver" is the highest level Electron offers, which is what
+   * keeps a notification toast or another application's window from
+   * landing on top of a paper. `setVisibleOnAllWorkspaces` stops a
+   * candidate moving to another virtual desktop and leaving the window
+   * behind on the first one.
+   *
+   * None of this makes another application unreachable, and §6 of
+   * `docs/EXAM-BROWSER.md` says so plainly: the operating system owns
+   * window switching and a candidate owns the machine. What it does is
+   * make leaving deliberate and visible rather than accidental.
+   */
+  window.setAlwaysOnTop(true, "screen-saver");
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  /**
+   * Keys the window swallows. `policy.ts` holds the list and the
+   * reasoning; this is window-scoped, so nothing is seen while another
+   * application has focus and nothing is written down either way.
+   */
+  window.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    if (
+      blockedChord({
+        key: input.key,
+        control: input.control,
+        meta: input.meta,
+        alt: input.alt,
+        shift: input.shift,
+      })
+    ) {
+      event.preventDefault();
+    }
+  });
+
+  /**
+   * No context menu. Its entries are the shortcuts above with a mouse:
+   * open in a new window, save as, view source, inspect.
+   */
+  window.webContents.on("context-menu", (event) => event.preventDefault());
+
+  /**
+   * Put back in front when something takes focus (Phase 14j).
+   *
+   * Once per event, never in a loop: a window that fights the operating
+   * system for focus is a window a candidate cannot escape to answer the
+   * door, and `docs/PROCTORING.md` §3 is clear that nothing here gets to
+   * act against a person. The exam page already records focus loss as a
+   * proctor event through its own listener, so this is the deterrent half
+   * -- alt-tabbing away does not leave the paper sitting quietly behind
+   * somebody else's window.
+   */
+  window.on("blur", () => {
+    if (window.isDestroyed()) return;
+    window.showInactive();
+    window.setAlwaysOnTop(true, "screen-saver");
+  });
+  window.on("leave-full-screen", () => {
+    if (!window.isDestroyed()) window.setFullScreen(true);
+  });
+
   // Nothing opens a second window. Not target=_blank, not window.open.
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
@@ -155,6 +232,38 @@ function createWindow(origin: string): BrowserWindow {
    */
   window.webContents.on("certificate-error", (event, _url, _error, _certificate, callback) => {
     callback(false);
+  });
+
+  /**
+   * Closing the window mid-paper asks first (Phase 14j).
+   *
+   * Not a trap. A candidate must always be able to leave -- somebody has
+   * to be able to walk out of an exam, and software that would not let
+   * them is software no college should install. What this prevents is the
+   * accident: Alt+F4 or a stray click ending a sitting that the candidate
+   * meant to hand in from inside the paper.
+   *
+   * The dialog is modal to this window and has the cancelling answer as
+   * its default, so Enter keeps the paper open.
+   */
+  window.on("close", (event) => {
+    if (!heldSitting() || closing) return;
+    event.preventDefault();
+    const choice = dialog.showMessageBoxSync(window, {
+      type: "question",
+      title: "REC Exam Browser",
+      message: "Leave the exam?",
+      detail:
+        "Your paper is still open. Hand it in from inside the paper to submit your answers. Closing this window now does not submit anything.",
+      buttons: ["Keep sitting", "Close without submitting"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice === 1) {
+      closing = true;
+      window.close();
+    }
   });
 
   window.once("ready-to-show", () => window.show());

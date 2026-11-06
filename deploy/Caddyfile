@@ -83,43 +83,23 @@
 		}
 	}
 
-	# ── The exam browser's installers (Phase 14f) ────────────────────────
+	# ── The exam browser's installers ────────────────────────────────────
 	#
-	# Served as files by the edge, not by the application. A candidate
-	# downloading a 90 MB installer should not occupy a Next.js worker that
-	# a hall full of people is using to sit a paper, and an installer has no
-	# reason to touch the application at all.
+	# NOT served from here, and the reason is Phase 14i. This was a
+	# `file_server` on /downloads/exam-browser/*, which was right about the
+	# bytes and wrong about the control: a static path cannot be turned off
+	# from a screen, so the super-admin's switch would have governed the
+	# link on the page and not the download. Anybody who kept the URL would
+	# have kept the file.
 	#
-	# `docs/EXAM-BROWSER.md` §8: the college publishes the installers
-	# itself, so the copy a candidate installs is one their department can
-	# vouch for, and /exam-browser tells them to ask their department rather
-	# than offering a download from a third party.
-	@installers path /downloads/exam-browser/*
-	handle @installers {
-		root * /srv/exam-browser
-		header {
-			# Immutable: every artefact name carries its version
-			# (REC-Exam-Browser-1.0.0-win-x64.exe), so a name never points at
-			# different bytes and a year is safe.
-			Cache-Control "public, max-age=31536000, immutable"
-			# An installer is not a page; nothing about it should be guessed.
-			X-Content-Type-Options "nosniff"
-			Content-Disposition "attachment"
-		}
-		# latest.json is the exception: it is the thing that CHANGES when a
-		# release is published, and a cached copy would send a hall to the
-		# build it was meant to replace.
-		@manifest path /downloads/exam-browser/latest.json
-		header @manifest {
-			Cache-Control "no-store"
-			Content-Disposition "inline"
-		}
-		file_server {
-			# No directory listing: what exists is named by latest.json, and
-			# an index invites installing last term's build.
-			browse off
-		}
-	}
+	# So the application serves it, at /api/exam-browser/download/<platform>,
+	# and reads the switch on every request. One door, one switch. The cost
+	# is that a download occupies a worker -- it is streamed, and an
+	# installer is already compressed -- and docs/RUNBOOK.md §2.20 says to
+	# have a hall install the day before, which is the real answer.
+	#
+	# The installers are mounted into the web containers instead; see
+	# compose.app.yml and deploy/exam-browser/README.md.
 
 	# ── Never proxied ────────────────────────────────────────────────────
 	#

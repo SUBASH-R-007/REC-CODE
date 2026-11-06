@@ -6,6 +6,7 @@ import { RELEASE_ORIGINS, APP_VERSION, DEV_ORIGIN_VARIABLE } from "../src/config
 import {
   REFUSED_PERMISSIONS,
   allowedOrigins,
+  blockedChord,
   displayReport,
   isExamOrigin,
   navigationDecision,
@@ -174,5 +175,68 @@ describe("the version this build reports", () => {
     // be cut off when it turned out to be bad.
     const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version: string };
     expect(APP_VERSION).toBe(pkg.version);
+  });
+});
+
+describe("the keys the window swallows (Phase 14j)", () => {
+  const chord = (over: Partial<Parameters<typeof blockedChord>[0]>) =>
+    blockedChord({ key: "a", control: false, meta: false, alt: false, shift: false, ...over });
+
+  it("swallows the ways out of one window", () => {
+    for (const key of ["n", "t", "w", "o"]) {
+      expect(chord({ key, control: true }), `ctrl+${key}`).toBe(true);
+      expect(chord({ key, meta: true }), `cmd+${key}`).toBe(true);
+    }
+  });
+
+  it("swallows the ways to take the paper somewhere else", () => {
+    // Print and save both write the questions somewhere the sitting does
+    // not reach; view source opens a second view of the page that none of
+    // the window's rules apply to.
+    for (const key of ["p", "s", "u"]) expect(chord({ key, control: true }), key).toBe(true);
+  });
+
+  it("swallows the developer tools, which are already off", () => {
+    expect(chord({ key: "F12" })).toBe(true);
+    for (const key of ["i", "j", "c"]) {
+      expect(chord({ key, control: true, shift: true }), `ctrl+shift+${key}`).toBe(true);
+    }
+  });
+
+  it("swallows the fullscreen toggle, because the window chooses its own", () => {
+    expect(chord({ key: "F11" })).toBe(true);
+  });
+
+  it("lets a candidate reload, because a kiosk that cannot recover ends a paper", () => {
+    /**
+     * Deliberately absent. The exam page snapshots answers continuously,
+     * so a reload costs nothing, and a candidate whose page has wedged
+     * has no other way out of it.
+     */
+    expect(chord({ key: "r", control: true })).toBe(false);
+    expect(chord({ key: "F5" })).toBe(false);
+    expect(chord({ key: "r", control: true, shift: true })).toBe(false);
+  });
+
+  it("lets copy, cut and paste through, which the charter settled first", () => {
+    // docs/PROCTORING.md §2: paste is instrumented, not blocked.
+    for (const key of ["c", "x", "v"]) expect(chord({ key, control: true }), key).toBe(false);
+  });
+
+  it("lets zoom and Escape through", () => {
+    for (const key of ["+", "-", "0"]) expect(chord({ key, control: true }), key).toBe(false);
+    expect(chord({ key: "Escape" })).toBe(false);
+  });
+
+  it("ignores case, because Chromium reports the shifted key", () => {
+    expect(chord({ key: "W", control: true })).toBe(true);
+    expect(chord({ key: "f12" })).toBe(true);
+  });
+
+  it("does not swallow an ordinary letter a candidate is typing", () => {
+    for (const key of ["a", "w", "p", "s", "n", "u", "o"]) {
+      expect(chord({ key }), key).toBe(false);
+      expect(chord({ key, shift: true }), `shift+${key}`).toBe(false);
+    }
   });
 });

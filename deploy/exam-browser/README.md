@@ -26,9 +26,17 @@ the candidate installed a build somebody else published.
 
 ## The layout
 
-Everything under `public/` is served by Caddy at
-`/downloads/exam-browser/`, as files, outside the application (see the
-`@installers` block in `../Caddyfile`). Nothing here is read by REC Code.
+Everything under `public/` is read by the **application**, which serves it
+at `/api/exam-browser/download/<platform>` and checks the super-admin's
+switch on every request.
+
+It was a Caddy `file_server` in 14f, and that was wrong about the control
+even though it was right about the bytes: a static path cannot be turned
+off from a screen, so the switch would have governed the link on
+`/exam-browser` and not the download, and anybody who kept the URL would
+have kept the file. One door, one switch. `compose.app.yml` mounts this
+directory read-only into both web replicas as `/srv/exam-browser`, and
+`EXAM_BROWSER_DOWNLOAD_DIR` points at it.
 
 ```
 deploy/exam-browser/
@@ -63,9 +71,14 @@ bytes — which is why Caddy serves them `immutable` for a year.
    installing, or a hall that has not updated yet, still needs it.
 3. **Write `latest.json`** (see `latest.json.example`). This is what tells
    a candidate's readiness check which build is current.
-4. **Check one download** from outside the college network, on each
+4. **Turn the switch on**, on `/super/settings/integrations` → REC Exam
+   Browser → "Hand it out". It is off until somebody turns it on. The
+   screen says whether there is a build behind it, so a switch turned on
+   over an empty directory tells you so rather than waiting for a
+   candidate to find out.
+5. **Check one download** from outside the college network, on each
    platform you published. A 404 here is a hall that cannot sit.
-5. **Only then** consider raising the version floor.
+6. **Only then** consider raising the version floor.
 
 ## Raising the floor, which is a different decision
 
@@ -82,6 +95,13 @@ So raise it when a build is known to be bad, not as housekeeping, and not
 during a sitting. The audit row records the previous value and the new one,
 because "what was it before" is the first question anybody asks when a hall
 cannot start.
+
+## Taking the download away
+
+Turn the switch off. It is read per request, so the file stops being served
+to everybody immediately, including anybody holding the link. The page then
+tells candidates to ask their department, which is what it said before
+downloads existed.
 
 ## Taking a build out of service
 

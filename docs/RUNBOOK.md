@@ -1705,16 +1705,31 @@ of any software. You are still the control that matters most.
 1. **Publish a build.** `deploy/exam-browser/README.md`. Check one download
    per platform from outside the college network; a 404 here is a hall that
    cannot sit.
-2. **Tell candidates where it comes from.** `/exam-browser` is public and
-   says what the application does and what it cannot do. Point at that
-   page, not at a file in a chat message: a candidate who learns to install
-   exam software from a link somebody sent them has learnt the wrong thing.
-3. **Set the paper to REC Exam Browser.** A published paper's proctor mode
+2. **Turn the download on**, on `/super/settings/integrations` → REC Exam
+   Browser → "Hand it out". It is off until somebody turns it on, and the
+   switch governs the download itself, not just the button: turning it off
+   refuses the file to anybody who kept the link. The screen warns you if
+   the switch would publish nothing, which happens when
+   `EXAM_BROWSER_DOWNLOAD_DIR` is unset on the deployment or the directory
+   holds no build the manifest names.
+3. **Tell candidates where it comes from.** `/exam-browser` is public, says
+   what the application does and what it cannot do, and offers the
+   installer for each platform. Point at that page, not at a file in a chat
+   message: a candidate who learns to install exam software from a link
+   somebody sent them has learnt the wrong thing, and that habit is the one
+   this whole design is least able to protect them from.
+4. **Have them install the day before.** Two hundred candidates downloading
+   ninety megabytes at nine in the morning is the deployment serving
+   eighteen gigabytes through the same processes that are running the
+   exam.
+5. **Set the paper to REC Exam Browser.** A published paper's proctor mode
    is fixed by a trigger, so this is chosen when the paper is created. A
    paper already published in another mode cannot be flipped — which is the
    rule working: a paper's meaning must not change under the candidates
    sitting it.
-4. **Check `EXAM_BROWSER_SECRET` is set** in the deployment's environment.
+6. **Check `EXAM_BROWSER_SECRET` is set** in the deployment's environment
+   (`/run/recx/secrets/exam_browser_secret`, wired in
+   `deploy/compose.app.yml`).
    Every sitting key is derived from it. The application refuses to start in
    production with the development default, so a missing one is a hall that
    cannot sit rather than a hall sitting with a known key — but find out
@@ -1742,6 +1757,7 @@ of any software. You are still the control that matters most.
 | "That launch has already been used" | The token was spent twice | Press Launch again — a fresh token costs nothing. **If they only pressed it once, tell someone:** two copies holding one sitting's key is the event worth seeing, and it is in the audit log as `exam.browser.launch_reused`. |
 | "This launch pointed somewhere this exam browser is not allowed to go" | Something tried to point the college's application at a server it was not shipped to talk to | **Do not let them enter a password.** This is not the candidate's fault. Record the machine and tell whoever runs the platform. |
 | "Your exam browser is too old" | The installed copy is below the version floor | Install the current build. If a whole hall sees it, the floor is wrong, not the hall — see below. |
+| The download link does nothing, or 404s | The switch is off, or no build is published for that platform | `/super/settings/integrations` says which. Both are the same 404 to a candidate on purpose; the page above the button says which in words. |
 | A sign-in form inside the exam browser | The sitting's session is gone: expired, revoked, or the paper was already handed in | Close it and launch again from the readiness check. A candidate should never type a password into that window. |
 | The window shows an extra-screen warning | A second display is attached | Ask them to unplug it before the clock starts. It is reported, never refused: `docs/PROCTORING.md` §3 governs it like every other signal. |
 
@@ -1777,6 +1793,15 @@ claim something:
   keystrokes walks past any block.
 * It does not survive the sitting. No service, no scheduled task, no
   autostart entry, nothing in the system tray.
+* **It does not make other applications unreachable.** The window holds
+  the front of the screen, cannot be minimised, and swallows the shortcuts
+  that open a second window, print, save or view source — so leaving the
+  paper is deliberate rather than accidental, and nothing lands on top of
+  it by itself. Alt-tab, the Windows key and the taskbar still belong to
+  the operating system, and the candidate still owns the machine. If a
+  hall genuinely needs other applications to be unreachable, that is a
+  `LAB_SUPERVISED` sitting on college machines with `deploy/lab-policy/`
+  applied, and §2.14 is how.
 * It cannot see a second machine, a phone, or a person in the room. Those
   are yours.
 * A `KIOSK_RECX` result is still not a credential. Only `LAB_SUPERVISED`
@@ -2484,3 +2509,15 @@ coordinator from actual runs — never in advance.
 | 14f | 2026-11-05 | What could NOT be verified, and why | NOTED. The new super-admin screen was not opened in a browser. Doing so needs a signed-in SUPER_ADMIN, and materialising a session token into the agent's own context was refused by this environment's credential classifier -- correctly, and not worked around. What stands in for it: the page typechecks, the capability matrix invokes the action as every role through its real guard, the component is rendered to HTML and asserted above, and the public `/exam-browser` page WAS opened against the production build and read | Claude |
 | 14f | 2026-11-05 | The forbidden-words fence failed the gate on my own test | FIXED, and it was the fence working. The render test asserted that the rendered markup contains none of the five banned phrases -- which required writing the five banned phrases, in a file the repository-wide scan reads. The assertion is removed rather than exempted, because it was buying nothing: the component builds its text from literals in its own source, and that source is already inside the scan. A phrase assembled at render time was a case I invented and none exists | Claude |
 | 14f | 2026-11-05 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm size` -- Windows 11, with the render test | PASS (lint 0 warnings; typecheck clean; **9,422 tests passed, 0 failed**; build compiled; every size budget met). The run before it failed on `forbidden-words`, which read the five banned phrases out of the new test file that was asserting their absence | Claude |
+| 14i | 2026-11-06 | The installer is downloaded from the site | DONE. `/exam-browser` offers a build per platform, served by the application at `/api/exam-browser/download/<platform>`. Public, like the page: a candidate setting up a laptop the evening before a paper has often never signed in on it, and an installer behind a sign-in is one they fetch from somewhere else instead -- which defeats the only thing publishing it was for | Claude |
+| 14i | 2026-11-06 | And the static path it replaced had to go | FIXED. 14f served the installers from Caddy as `/downloads/exam-browser/*`, which was right about the bytes and wrong about the control: a static path cannot be turned off from a screen, so the super-admin's switch would have governed the link on the page and not the download -- anybody who kept the URL would have kept the file. The `file_server` block is gone, the directory mounts into the web replicas instead, and the cost is accepted in the open: a download occupies a worker, it is streamed, and the runbook says to have a hall install the day before | Claude |
+| 14i | 2026-11-06 | Nothing from a request reaches a path | DONE. The platform key is matched against a fixed list of four; the filename comes out of the manifest the college published and must match `[A-Za-z0-9][A-Za-z0-9._-]*`, so a separator in it rejects the whole manifest; and the resolved path is checked to be inside the directory before anything is opened. Fifteen tests, including a manifest naming `../latest.json`, `/etc/passwd` and a subdirectory, and every refusal answering the same 404 as a platform with no build | Claude |
+| 14i | 2026-11-06 | The switch, and which way it fails | DONE. `/super/settings/integrations`, audited at SECURITY with the previous value. Off by default, and an unreadable setting means OFF -- the opposite direction from the version floor beside it, and right for the same reason: a floor that cannot be read must not lock a hall out, and a switch that cannot be read must not publish an executable nobody chose to publish. The screen also reports what is on the disk, because "on" and "working" are different states and the gap is where a hall finds out on the morning | Claude |
+| 14i | 2026-11-06 | A bug the second field would have caused | FIXED before it shipped. The floor's action replaced the whole stored value with `{ minVersion }`, which was correct while that was the only field and would have silently cleared the download switch the first time anybody edited the floor. Both actions now merge into the stored value inside the same advisory lock | Claude |
+| 14i | 2026-11-06 | The switch, exercised against a running server | PASS, with a real 116 MB NSIS installer built by `pnpm --filter @recx/exam-browser release` and published exactly as `deploy/exam-browser/README.md` describes. Switch OFF: `GET /api/exam-browser/download/win-x64` -> **404**, nine bytes. Switch ON: **200**, 121,221,117 bytes, and the downloaded file's sha256 equals the one published in `latest.json`. Headers: `attachment` with the manifest's filename, `no-store`, `nosniff`, a correct `content-length`. Refused with the switch on: an unpublished platform, `../../etc/passwd`, `win-x64%2f..` and `WIN-X64`, all 404. The page showed the buttons with the switch on and "ask your department" with it off | Claude |
+| 14j | 2026-11-06 | The window holds the front of the screen | DONE. Kiosk as well as fullscreen (they are not the same: fullscreen is a state a candidate can leave, and kiosk is unimplemented on some Linux window managers, so both); always-on-top at the highest level Electron offers; visible on every virtual desktop; not minimisable, maximisable or resizable; put back in front on blur and back to fullscreen if it leaves it. Verified by launching the real binary against a stand-in origin: it started clean, placed the cookie before navigating and signed both the navigation and a page fetch, so none of the new platform calls throws | Claude |
+| 14j | 2026-11-06 | The shortcuts that leave the window | DONE, through `before-input-event` on our own `webContents` and NOT a global hook -- a hook reads the keyboard while the application does not have focus, which is a keylogger whatever it is called, and `PROCTORING.md` section 5 forbids it. Swallowed: devtools, new window, new tab, close, print, save, open file, view source, fullscreen toggle. Deliberately NOT swallowed: reload (a kiosk that cannot recover ends somebody's paper, and answers are snapshotted continuously), copy/cut/paste (section 2 settled that before this application existed), zoom (accessibility) and Escape (the editor uses it). A fence asserts the handler records nothing | Claude |
+| 14j | 2026-11-06 | Closing mid-paper asks, and still lets a candidate leave | DONE. Somebody has to be able to walk out of an exam; software that would not let them is software no college should install. So the close handler is a dialog with the cancelling answer as its default, not a refusal, and the fence checks there is a way through it | Claude |
+| 14j | 2026-11-06 | What the lockdown is NOT, said in three places | NOTED, because the request was that no other application be reachable and that is not a thing this or any userland application can do. The operating system owns window switching and the candidate owns the machine: alt-tab, the Windows key and the taskbar are all still theirs, and a phone on the desk is outside the reach of any software. What the window buys is that leaving the paper is deliberate and visible rather than accidental, and that nothing lands on top of it by itself. `EXAM-BROWSER.md` section 3, `RUNBOOK.md` section 2.20's "what is not true of it", and the public page all say so. A hall where other applications must genuinely be unreachable is a LAB_SUPERVISED sitting on college machines with `deploy/lab-policy/` applied, which is what `PROCTORING.md` section 4 lists first and why | Claude |
+| 14i | 2026-11-06 | Two fences caught the new route, both correctly | NOTED. `capabilities` refuses a GET under `app/api` that nothing declares, so an unauthenticated route that reads a file off the disk had to be written into REQUIRED_GETS before PUBLIC_ROUTES could own it; and `exposure-catalogue` wanted it in the student sweep, where it now asserts the 404 this deployment answers with the switch off | Claude |
+| 14i | 2026-11-06 | `pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm size` -- Windows 11 | PASS (lint 0 warnings; typecheck clean; **9,472 tests passed, 0 failed** -- 50 new over 14f; build compiled; every size budget met). Two earlier runs failed on the two fences above | Claude |

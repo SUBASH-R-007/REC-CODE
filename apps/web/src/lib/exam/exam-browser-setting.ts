@@ -32,6 +32,17 @@ export const examBrowserSettingSchema = z.object({
     .trim()
     .refine((value) => parseVersion(value) !== null, "Give a version like 1.2.0.")
     .optional(),
+  /**
+   * Whether `/exam-browser` offers the installer for download (Phase 14i).
+   *
+   * Absent means OFF, and the direction is deliberate -- the opposite of
+   * the floor above it. A floor that cannot be read must not lock a hall
+   * out, so an unreadable setting means no floor; a download switch that
+   * cannot be read must not publish files nobody chose to publish, so an
+   * unreadable setting means off. Both fail towards the state that cannot
+   * surprise anybody.
+   */
+  downloadsEnabled: z.boolean().optional(),
 });
 
 export type ExamBrowserSetting = z.infer<typeof examBrowserSettingSchema>;
