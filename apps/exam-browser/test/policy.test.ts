@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { RELEASE_ORIGINS, APP_VERSION, DEV_ORIGIN_VARIABLE } from "../src/config";
+import {
+  RELEASE_BUILD,
+  RELEASE_ORIGINS,
+  APP_VERSION,
+  DEV_ORIGIN_VARIABLE,
+  buildIdentity,
+  readBakedBuild,
+} from "../src/config";
 import {
   REFUSED_PERMISSIONS,
   allowedOrigins,
@@ -25,6 +32,8 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+const DEV_BUILD = { channel: "development" as const, origins: ["http://localhost:3000"] };
+
 describe("which origins this build may be pointed at", () => {
   it("uses the compiled list and nothing else once packaged", () => {
     /**
@@ -39,10 +48,60 @@ describe("which origins this build may be pointed at", () => {
     ).toEqual(RELEASE_ORIGINS);
   });
 
-  it("lets a development build add one, because this repository runs on localhost", () => {
+  it("ignores the environment even in a packaged DEVELOPMENT build", () => {
+    /**
+     * The rule is about packaging, not about the channel. A development
+     * build is still an installed application that the operating system
+     * starts from a URL any page can open, so the only thing that widens
+     * it is what was compiled in -- and that took a deliberate build.
+     */
+    expect(
+      allowedOrigins({
+        packaged: true,
+        build: DEV_BUILD,
+        environment: { [DEV_ORIGIN_VARIABLE]: "https://evil.test" },
+      }),
+    ).toEqual(["http://localhost:3000", ...RELEASE_ORIGINS]);
+  });
+
+  it("lets a packaged development build reach what it was built for", () => {
+    expect(allowedOrigins({ packaged: true, build: DEV_BUILD })).toEqual([
+      "http://localhost:3000",
+      ...RELEASE_ORIGINS,
+    ]);
+  });
+
+  it("ignores origins baked into a RELEASE build, which should never have any", () => {
+    // Belt and braces: the channel decides, so a release artifact built
+    // from a tampered bundler config still refuses everything new.
+    expect(
+      allowedOrigins({ packaged: true, build: { channel: "release", origins: ["https://evil.test"] } }),
+    ).toEqual(RELEASE_ORIGINS);
+  });
+
+  it("keeps the release origins in a development build, never replacing them", () => {
+    // A build that could reach a laptop but not the real deployment is one
+    // nobody could rehearse a real launch with.
+    for (const origin of RELEASE_ORIGINS) {
+      expect(allowedOrigins({ packaged: true, build: DEV_BUILD })).toContain(origin);
+    }
+  });
+
+  it("does not list an origin twice when the two lists overlap", () => {
+    const list = allowedOrigins({ packaged: true, build: { channel: "development", origins: RELEASE_ORIGINS.slice(0, 1) } });
+    expect(list).toEqual(RELEASE_ORIGINS);
+  });
+
+  it("lets an unpackaged run add one, because this repository runs on localhost", () => {
     expect(allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://localhost:3000" } })).toEqual(
       ["http://localhost:3000", ...RELEASE_ORIGINS],
     );
+  });
+
+  it("takes the origin alone from a development value, not a path on it", () => {
+    expect(
+      allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://localhost:3000/anything" } }),
+    ).toEqual(["http://localhost:3000", ...RELEASE_ORIGINS]);
   });
 
   it("ignores a development value that is not a URL rather than failing to start", () => {
@@ -55,6 +114,33 @@ describe("which origins this build may be pointed at", () => {
   it("ships with at least one origin, so a build is never pointable anywhere", () => {
     expect(RELEASE_ORIGINS.length).toBeGreaterThan(0);
     for (const origin of RELEASE_ORIGINS) expect(new URL(origin).protocol).toBe("https:");
+  });
+});
+
+describe("what kind of build this is", () => {
+  it("is a release when nothing was baked in, which is how the tests run", () => {
+    // The constant only exists in a bundle. Unbundled -- here -- the
+    // reader must fall to the safe side rather than throwing.
+    expect(buildIdentity()).toEqual(RELEASE_BUILD);
+    expect(RELEASE_BUILD.origins).toEqual([]);
+  });
+
+  it("falls to a release for anything it cannot read", () => {
+    for (const value of [undefined, null, "development", 7, [], {}, { channel: "dev" }, { channel: "release" }]) {
+      expect(readBakedBuild(value), JSON.stringify(value) ?? "undefined").toEqual(RELEASE_BUILD);
+    }
+  });
+
+  it("reads a development bake, keeping only the origins it can parse", () => {
+    expect(
+      readBakedBuild({ channel: "development", origins: ["http://localhost:3000/x", "not a url", 7, null] }),
+    ).toEqual({ channel: "development", origins: ["http://localhost:3000"] });
+  });
+
+  it("accepts a development bake with no usable origin, which then reaches only the release origins", () => {
+    const build = readBakedBuild({ channel: "development", origins: ["not a url"] });
+    expect(build.origins).toEqual([]);
+    expect(allowedOrigins({ packaged: true, build })).toEqual(RELEASE_ORIGINS);
   });
 });
 

@@ -1,5 +1,5 @@
 import { RECX_SESSION_COOKIE, refusedSwitches } from "@recx/shared/exam-browser";
-import { DEV_ORIGIN_VARIABLE, RELEASE_ORIGINS } from "./config";
+import { DEV_ORIGIN_VARIABLE, RELEASE_BUILD, RELEASE_ORIGINS, type BuildIdentity } from "./config";
 
 /**
  * Every decision the application makes, as functions over plain values.
@@ -15,22 +15,56 @@ import { DEV_ORIGIN_VARIABLE, RELEASE_ORIGINS } from "./config";
 /**
  * The origins this build may be launched against.
  *
- * A packaged build uses the compiled list and nothing else. Development
- * may add one from the environment, because this repository's own laptops
- * point at `http://localhost:3000` and rebuilding for that would mean the
- * developer build and the release build differed in more than one place.
+ * Two rules, and the first one is the one that must never regress:
+ *
+ *   1. **A packaged build never reads the environment.** A custom scheme
+ *      is registered system-wide, so any page the candidate visits can
+ *      open `recx-exam://launch?origin=...`. If a packaged build honoured
+ *      a variable, anyone who could set one -- a script, an installer, a
+ *      shortcut -- could point the college's own signed application at
+ *      their own server: a fullscreen window with no address bar, wearing
+ *      the college's name, asking for a college password. So a packaged
+ *      build uses what was compiled into it, full stop.
+ *   2. **What was compiled into it depends on the channel.** A release
+ *      build has `RELEASE_ORIGINS` and nothing else. A development build
+ *      -- a separate artifact, with its own application id, its own name
+ *      and a dialog saying what it is -- also carries the origins it was
+ *      built for, which is how this repository points one at a laptop.
+ *
+ * An unpackaged run (`pnpm dev`) is a developer at a terminal, so it reads
+ * `RECX_EXAM_DEV_ORIGIN` and saves them a rebuild.
+ *
+ * `RELEASE_ORIGINS` is always in the list. A development build is a
+ * superset, never a replacement: a build that could reach a laptop but not
+ * the real deployment would be one nobody could test a real launch with.
  */
 export function allowedOrigins(args: {
   readonly packaged: boolean;
+  readonly build?: BuildIdentity;
   readonly environment?: Readonly<Record<string, string | undefined>>;
 }): readonly string[] {
-  if (args.packaged) return RELEASE_ORIGINS;
-  const extra = args.environment?.[DEV_ORIGIN_VARIABLE]?.trim();
-  if (!extra) return RELEASE_ORIGINS;
+  const build = args.build ?? RELEASE_BUILD;
+  const extra = args.packaged
+    ? build.channel === "development"
+      ? build.origins
+      : []
+    : originIn(args.environment?.[DEV_ORIGIN_VARIABLE]);
+
+  if (extra.length === 0) return RELEASE_ORIGINS;
+  // Deduplicated so a development origin that is already a release origin
+  // does not appear twice in a message a candidate might be shown.
+  const seen = new Set(RELEASE_ORIGINS);
+  return Object.freeze([...extra.filter((origin) => !seen.has(origin)), ...RELEASE_ORIGINS]);
+}
+
+/** One origin from an environment value, or none. Unreadable is none, never a throw. */
+function originIn(value: string | undefined): readonly string[] {
+  const trimmed = value?.trim();
+  if (!trimmed) return [];
   try {
-    return Object.freeze([new URL(extra).origin, ...RELEASE_ORIGINS]);
+    return [new URL(trimmed).origin];
   } catch {
-    return RELEASE_ORIGINS;
+    return [];
   }
 }
 

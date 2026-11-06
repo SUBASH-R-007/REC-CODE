@@ -565,3 +565,69 @@ describe("the window a candidate cannot wander out of (Phase 14j)", () => {
     expect(handler, "cancelling is the default").toMatch(/defaultId: 0/);
   });
 });
+
+describe("the development build cannot be mistaken for a release one (Phase 14k)", () => {
+  /**
+   * A development build accepts origins a release build refuses, so it is
+   * a phishing kit if it ever looks like the real thing. The separation is
+   * not a convention: it is four mechanical differences, and this is where
+   * somebody removing one has to come and delete a test.
+   */
+  const tsup = () => withoutComments(readRepoFile("apps/exam-browser/tsup.config.ts"));
+  const script = () => withoutComments(readRepoFile("apps/exam-browser/scripts/build-dev.mjs"));
+  const config = () => withoutComments(readRepoFile("apps/exam-browser/src/config.ts"));
+
+  it("builds a release unless a development build was asked for", () => {
+    /**
+     * The default is the whole fence. A bundler that produced a
+     * development build when an environment variable happened to be set
+     * would turn every CI runner with a stray variable into a publisher of
+     * installers that trust a laptop.
+     */
+    const text = tsup();
+    expect(text, "the channel is decided by an explicit equality, not truthiness").toMatch(
+      /RECX_EXAM_BUILD_CHANNEL\s*===\s*"development"\s*\?\s*"development"\s*:\s*"release"/,
+    );
+    expect(text, "a release bakes no extra origins").toMatch(/channel === "development"\s*\?/);
+    expect(text, "the constant is always defined, or the bundle throws on first use").toMatch(
+      /define:\s*\{[\s\S]*__RECX_BUILD__/,
+    );
+  });
+
+  it("reads the baked value defensively, failing towards the release list", () => {
+    const text = config();
+    expect(text, "a missing constant is a release").toMatch(/typeof __RECX_BUILD__ === "undefined"/);
+    expect(text, "only an explicit development channel widens anything").toMatch(
+      /channel !== "development"[\s\S]{0,80}return RELEASE_BUILD/,
+    );
+  });
+
+  it("gives the development build its own id, name and filename", () => {
+    const text = script();
+    expect(text, "its own application id, so it installs beside a release build").toMatch(/-c\.appId=\S+\.dev/);
+    expect(text, "its own name in the Start menu and the uninstall list").toMatch(
+      /-c\.productName=REC Exam Browser \(development\)/,
+    );
+    expect(text, "its own filename on disk").toMatch(/-c\.artifactName=[^\n]*-dev-/);
+  });
+
+  it("says what it is before the window opens, every launch", () => {
+    const text = main();
+    expect(text).toMatch(/buildIdentity\(\)\.channel === "development"/);
+    expect(text, "a dialog, not a log line").toMatch(
+      /channel === "development"[\s\S]{0,400}dialog\.showMessageBox/,
+    );
+    expect(config(), "and it says not to sit an exam with it").toMatch(/not for sitting a real exam/i);
+  });
+
+  it("is never published: nothing in the deployment reaches for a development artifact", () => {
+    /**
+     * `deploy/exam-browser/README.md` publishes what CI built. A
+     * development installer carries `-dev-` in its filename, and nothing
+     * under deploy/ should ever name one.
+     */
+    for (const rel of findFiles({ under: ["deploy/exam-browser"], extensions: [".md", ".yml", ".json", ".example"] })) {
+      expect(readRepoFile(rel), rel).not.toMatch(/REC-Exam-Browser-[^\s"']*-dev-/);
+    }
+  });
+});

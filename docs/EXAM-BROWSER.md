@@ -396,6 +396,51 @@ Written here so they are built with the application rather than after it.
   whose budgets are about what a candidate downloads over the hall's
   network, and from the default build: `pnpm build` compiles the two source
   files, and producing installers is a separate command.
+* **A college cutting its own build changes `RELEASE_ORIGINS` in
+  `apps/exam-browser/src/config.ts`, and that is the only thing it
+  changes.** The list is compiled in rather than read from a file beside
+  the executable, which is the security property and not a convenience:
+  the scheme is registered system-wide, so any page a candidate visits can
+  open `recx-exam://launch?origin=...`, and a build that took the origin
+  from the launch URL could be started by that page pointed at a server
+  the page controls — a fullscreen window with no address bar, wearing the
+  college's name, asking for a college password. Changing where the exam
+  browser may point should require a signed release.
+
+  Leaving the list at another college's hostname produces a build that
+  refuses every launch in the hall with *"this launch pointed somewhere
+  this exam browser is not allowed to go"*. That is the fence working, and
+  it is a miserable way to find out an hour before a paper, so it is step
+  one of a release rather than a footnote.
+* **Development builds are a separate channel** (Phase 14k), because
+  "allow localhost" must never mean "a release build allows localhost".
+  There are two ways to point the application at a laptop and neither
+  touches what a candidate installs:
+
+  * `RECX_EXAM_DEV_ORIGIN=http://localhost:3000 pnpm --filter
+    @recx/exam-browser dev` — an unpackaged run. It registers the scheme
+    to itself while it runs, so pressing **Launch** on a development
+    server opens *it* rather than any installed copy. This is the one to
+    reach for.
+  * `pnpm --filter @recx/exam-browser release:dev` — a real installer, for
+    when the thing being tested *is* the install: the NSIS package, the
+    system-wide registration, a cold start from a Launch button.
+
+  The rule the fences hold is one sentence: **a packaged build never reads
+  the environment.** What a packaged build accepts is what was compiled
+  into it, and only a build asked for the development channel has anything
+  extra compiled in. A development build is a superset — it keeps the
+  release origins, so a real launch can still be rehearsed with it.
+
+  Four mechanical differences keep the two apart, because a development
+  build that looked like a release build would be a phishing kit: its own
+  `appId` (so it installs beside a release build and uninstalls on its
+  own), its own `productName` — *REC Exam Browser (development)* — in the
+  Start menu and the uninstall list, `-dev-` in the installer's filename,
+  and a modal dialog before the first window saying it is not for sitting
+  a real exam. It is never signed and never published;
+  `deploy/exam-browser/README.md` publishes what CI built, and a fence
+  checks nothing under `deploy/` names a `-dev-` artifact.
 * Windows and macOS installers, code-signed in CI from secrets that are not
   in this repository. Linux is an AppImage, unsigned, for lab machines that
   already run a managed image. **Nothing in this repository can produce a
@@ -468,3 +513,4 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14f | Packaging (`electron-builder.yml`, icon, entitlements), the installer path in `deploy/`, the version floor's screen, and `RUNBOOK.md` §2.20 for a hall. Signing is configured but cannot be done here. |
 | 14i | The installer is downloaded from the site, through the application, behind a super-admin switch that governs the download rather than the link (§8). |
 | 14j | The window holds the front of the screen and swallows the shortcuts that leave it — and §3 says plainly what that is not. |
+| 14k | A development build channel, so a laptop can be pointed at without a release build ever accepting anything new (§8). |

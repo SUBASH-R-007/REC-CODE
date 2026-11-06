@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { BrowserWindow, app, clipboard, dialog, ipcMain, screen, session } from "electron";
 import { EXAM_BROWSER_SCHEME } from "@recx/shared/exam-browser";
-import { APP_VERSION, WINDOW, readinessPath } from "./config";
+import { APP_VERSION, DEVELOPMENT_BUILD_WARNING, WINDOW, buildIdentity, readinessPath } from "./config";
 import { LAUNCH_FAILURE_MESSAGES, exchange, launchUrlIn } from "./launch";
 import {
   EXAM_PARTITION,
@@ -71,7 +71,23 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-app.setAsDefaultProtocolClient(EXAM_BROWSER_SCHEME);
+/**
+ * Own the scheme the readiness page opens.
+ *
+ * A packaged build is its own executable and needs no more than the name.
+ * An unpackaged run is `electron dist/main.js`, where registering the
+ * executable alone would point the scheme at a bare Electron with no
+ * application to run -- so the script goes in too. Without this, pressing
+ * Launch on a development server wakes whatever packaged copy is
+ * installed, which then refuses the localhost origin and shows the
+ * candidate dialog, and the developer concludes the origin list is broken
+ * when it is doing its job.
+ */
+if (app.isPackaged) {
+  app.setAsDefaultProtocolClient(EXAM_BROWSER_SCHEME);
+} else {
+  app.setAsDefaultProtocolClient(EXAM_BROWSER_SCHEME, process.execPath, [path.resolve(process.argv[1] ?? "")]);
+}
 
 /**
  * The session every request in this application goes through.
@@ -91,7 +107,9 @@ let closing = false;
 let origins: readonly string[] = [];
 
 function originsForThisBuild(): readonly string[] {
-  if (origins.length === 0) origins = allowedOrigins({ packaged: app.isPackaged, environment: process.env });
+  if (origins.length === 0) {
+    origins = allowedOrigins({ packaged: app.isPackaged, build: buildIdentity(), environment: process.env });
+  }
   return origins;
 }
 
@@ -424,6 +442,21 @@ ipcMain.on("recx:finish", () => {
 
 app.whenReady().then(async () => {
   attachAttestation();
+  /**
+   * A development build says so before it shows anything, every launch.
+   * It is modal and it is first: by the time a window is up it is wearing
+   * the college's name full screen, and a person who installed this by
+   * accident has already been given a reason to trust it.
+   */
+  if (buildIdentity().channel === "development") {
+    await dialog.showMessageBox({
+      type: "warning",
+      title: DEVELOPMENT_BUILD_WARNING.title,
+      message: DEVELOPMENT_BUILD_WARNING.message,
+      detail: DEVELOPMENT_BUILD_WARNING.detail,
+      buttons: ["Continue"],
+    });
+  }
   const url = launchUrlIn(process.argv);
   if (!url) {
     await dialog.showMessageBox({
