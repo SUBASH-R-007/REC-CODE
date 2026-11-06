@@ -207,19 +207,109 @@ function resolveInside(dir: string, file: string): string | null {
   return resolved.startsWith(root) ? resolved : null;
 }
 
-export interface DownloadFile {
-  readonly stream: ReadableStream<Uint8Array>;
-  readonly bytes: number;
-  readonly filename: string;
+/** A closed byte interval, the way HTTP means it: both ends included. */
+export interface ByteRange {
+  readonly start: number;
+  readonly end: number;
 }
+
+export type RangeRequest =
+  | { readonly kind: "whole" }
+  | { readonly kind: "partial"; readonly range: ByteRange }
+  | { readonly kind: "unsatisfiable" };
+
+/**
+ * What a `Range` header asks for (Phase 14l).
+ *
+ * This matters more here than it would on most routes. The installer is
+ * 116 MB, the candidate who most needs it is on a hall's network or a
+ * phone tether, and without this a connection that drops at 80 MB means
+ * starting again — which is the thing that makes somebody give up and
+ * install a copy from wherever else they can find one, the single outcome
+ * `docs/EXAM-BROWSER.md` is written to avoid.
+ *
+ * Deliberately narrow. A single range is honoured; anything else falls
+ * back to the whole file, which RFC 9110 section 14.2 explicitly allows a
+ * server to do and which keeps this function small enough to read:
+ *
+ *   * an unknown unit (`items=0-9`) is ignored, as the RFC requires;
+ *   * a multi-range request is declined rather than answered with a
+ *     multipart body nobody here would otherwise write or test;
+ *   * a range that starts past the end is `unsatisfiable`, which the
+ *     route answers with 416 and the real length, so the client can ask
+ *     again sensibly instead of guessing.
+ *
+ * Pure, so the awkward cases are tested rather than reasoned about.
+ */
+export function parseRangeHeader(header: string | null | undefined, total: number): RangeRequest {
+  if (!header) return { kind: "whole" };
+  const match = /^bytes=(.*)$/i.exec(header.trim());
+  if (!match) return { kind: "whole" };
+  const spec = (match[1] ?? "").trim();
+  if (spec === "" || spec.includes(",")) return { kind: "whole" };
+
+  const parts = /^(\d*)-(\d*)$/.exec(spec);
+  if (!parts) return { kind: "whole" };
+  const [, rawStart = "", rawEnd = ""] = parts;
+  if (rawStart === "" && rawEnd === "") return { kind: "whole" };
+
+  // An empty file can satisfy no range at all, not even `bytes=0-`.
+  if (total <= 0) return { kind: "unsatisfiable" };
+
+  if (rawStart === "") {
+    // A suffix range: the LAST n bytes. `bytes=-0` asks for nothing.
+    const suffix = Number(rawEnd);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return { kind: "unsatisfiable" };
+    const start = Math.max(0, total - suffix);
+    return { kind: "partial", range: { start, end: total - 1 } };
+  }
+
+  const start = Number(rawStart);
+  if (!Number.isSafeInteger(start) || start < 0 || start >= total) return { kind: "unsatisfiable" };
+  if (rawEnd === "") return { kind: "partial", range: { start, end: total - 1 } };
+
+  const asked = Number(rawEnd);
+  if (!Number.isSafeInteger(asked) || asked < start) return { kind: "unsatisfiable" };
+  // An end past the file is clamped rather than refused: a client that
+  // asks for more than there is gets what there is.
+  return { kind: "partial", range: { start, end: Math.min(asked, total - 1) } };
+}
+
+export type DownloadFile =
+  | {
+      readonly kind: "whole";
+      readonly stream: ReadableStream<Uint8Array>;
+      /** Bytes in THIS response. For a whole file, the file's length. */
+      readonly bytes: number;
+      readonly total: number;
+      readonly filename: string;
+    }
+  | {
+      readonly kind: "partial";
+      readonly stream: ReadableStream<Uint8Array>;
+      readonly bytes: number;
+      readonly total: number;
+      readonly filename: string;
+      readonly range: ByteRange;
+    }
+  | { readonly kind: "unsatisfiable"; readonly total: number };
 
 /**
  * Open the installer for a platform, or null for every reason there is not
  * one — the route turns all of them into the same 404 on purpose, because
  * the difference between "switched off" and "not published" is not a
  * candidate's business and is on the page above the button anyway.
+ *
+ * The `Range` header is read HERE rather than in the route, because the
+ * length it is resolved against is this function's `stat` and nothing
+ * else: a route that parsed the header against a length it got from
+ * somewhere else would be a route that could be argued into reading past
+ * the end of the file.
  */
-export async function openExamBrowserDownload(platform: ExamBrowserPlatform): Promise<DownloadFile | null> {
+export async function openExamBrowserDownload(
+  platform: ExamBrowserPlatform,
+  rangeHeader?: string | null,
+): Promise<DownloadFile | null> {
   const state = await examBrowserDownloads();
   if (!state.available) return null;
   const offer = state.offers.find((candidate) => candidate.platform === platform);
@@ -230,6 +320,10 @@ export async function openExamBrowserDownload(platform: ExamBrowserPlatform): Pr
   const size = await stat(resolved).catch(() => null);
   if (!size?.isFile()) return null;
 
+  const total = size.size;
+  const asked = parseRangeHeader(rangeHeader, total);
+  if (asked.kind === "unsatisfiable") return { kind: "unsatisfiable", total };
+
   /**
    * Streamed, never read into memory: these are tens of megabytes and a
    * hall downloads them at the same time. `Readable.toWeb` rather than a
@@ -237,6 +331,22 @@ export async function openExamBrowserDownload(platform: ExamBrowserPlatform): Pr
    * wrong object fails at run time on the one path nothing here exercises
    * until a candidate is standing in front of it.
    */
-  const stream = Readable.toWeb(createReadStream(resolved)) as ReadableStream<Uint8Array>;
-  return { stream, bytes: size.size, filename: offer.file };
+  const open = (options?: { start: number; end: number }) =>
+    Readable.toWeb(createReadStream(resolved, options)) as ReadableStream<Uint8Array>;
+
+  if (asked.kind === "whole") {
+    return { kind: "whole", stream: open(), bytes: total, total, filename: offer.file };
+  }
+
+  const { start, end } = asked.range;
+  return {
+    kind: "partial",
+    // `createReadStream`'s `end` is inclusive, which is the same end HTTP
+    // means. They agree, and this comment is here so nobody "fixes" it.
+    stream: open({ start, end }),
+    bytes: end - start + 1,
+    total,
+    filename: offer.file,
+    range: asked.range,
+  };
 }

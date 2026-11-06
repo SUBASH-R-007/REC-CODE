@@ -30,7 +30,20 @@ const {
   isExamBrowserPlatform,
   likelyPlatform,
   openExamBrowserDownload,
+  parseRangeHeader,
 } = await import("@/lib/exam/exam-browser-downloads");
+
+/** Drain a download's stream into one buffer. */
+async function bodyOf(file: { stream: ReadableStream<Uint8Array> }): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  const reader = file.stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
 
 const root = await mkdtemp(path.join(tmpdir(), "recx-downloads-"));
 const INSTALLER = "REC-Exam-Browser-1.0.0-win-x64.exe";
@@ -172,17 +185,11 @@ describe("nothing from a request, or a manifest, reaches a path", () => {
     state.dir = await publish(manifest());
     const open = await openExamBrowserDownload("win-x64");
     expect(open).not.toBeNull();
-    expect(open?.filename).toBe(INSTALLER);
-    expect(open?.bytes).toBe(BYTES.length);
-
-    const chunks: Uint8Array[] = [];
-    const reader = open!.stream.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) chunks.push(value);
-    }
-    expect(Buffer.concat(chunks).toString("utf8")).toBe(BYTES.toString("utf8"));
+    if (open?.kind !== "whole") throw new Error("expected the whole file");
+    expect(open.filename).toBe(INSTALLER);
+    expect(open.bytes).toBe(BYTES.length);
+    expect(open.total).toBe(BYTES.length);
+    expect((await bodyOf(open)).toString("utf8")).toBe(BYTES.toString("utf8"));
   });
 
   it("returns nothing for a platform with no build, even when others have one", async () => {
@@ -219,5 +226,132 @@ describe("which build to put first", () => {
     expect(likelyPlatform("Mozilla/5.0 (Linux; Android 14)")).toBeNull();
     expect(likelyPlatform(null)).toBeNull();
     expect(likelyPlatform("curl/8.5.0")).toBeNull();
+  });
+});
+
+describe("what a Range header asks for (Phase 14l)", () => {
+  /**
+   * The installer is 116 MB and the candidate who most needs it is on the
+   * worst network in the hall. Without resume, a drop at 80 MB means
+   * starting again -- and a candidate who gives up fetches a copy from
+   * somewhere the college cannot vouch for, which is the one outcome the
+   * whole download exists to prevent.
+   */
+  const TOTAL = 100;
+
+  it("asks for the whole file when there is no header", () => {
+    expect(parseRangeHeader(null, TOTAL)).toEqual({ kind: "whole" });
+    expect(parseRangeHeader(undefined, TOTAL)).toEqual({ kind: "whole" });
+    expect(parseRangeHeader("", TOTAL)).toEqual({ kind: "whole" });
+  });
+
+  it("reads an open-ended range, which is what a resume sends", () => {
+    expect(parseRangeHeader("bytes=40-", TOTAL)).toEqual({ kind: "partial", range: { start: 40, end: 99 } });
+  });
+
+  it("reads a closed range, which is what a download manager sends", () => {
+    expect(parseRangeHeader("bytes=10-19", TOTAL)).toEqual({ kind: "partial", range: { start: 10, end: 19 } });
+    expect(parseRangeHeader("bytes=0-0", TOTAL)).toEqual({ kind: "partial", range: { start: 0, end: 0 } });
+  });
+
+  it("reads a suffix range as the LAST n bytes", () => {
+    expect(parseRangeHeader("bytes=-10", TOTAL)).toEqual({ kind: "partial", range: { start: 90, end: 99 } });
+  });
+
+  it("gives the whole file when a suffix asks for more than there is", () => {
+    expect(parseRangeHeader("bytes=-500", TOTAL)).toEqual({ kind: "partial", range: { start: 0, end: 99 } });
+  });
+
+  it("clamps an end past the file rather than refusing it", () => {
+    // A client that asks for more than there is gets what there is. This
+    // is the common case for a resume against a build that was replaced
+    // by a shorter one, and refusing would be unhelpful.
+    expect(parseRangeHeader("bytes=90-500", TOTAL)).toEqual({ kind: "partial", range: { start: 90, end: 99 } });
+  });
+
+  it("refuses a start past the end, so the route can answer with the real length", () => {
+    expect(parseRangeHeader("bytes=100-", TOTAL)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=500-600", TOTAL)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=-0", TOTAL)).toEqual({ kind: "unsatisfiable" });
+    expect(parseRangeHeader("bytes=20-10", TOTAL)).toEqual({ kind: "unsatisfiable" });
+  });
+
+  it("satisfies no range at all against an empty file", () => {
+    expect(parseRangeHeader("bytes=0-", 0)).toEqual({ kind: "unsatisfiable" });
+  });
+
+  it("ignores a unit it does not speak, as the RFC requires", () => {
+    expect(parseRangeHeader("items=0-9", TOTAL)).toEqual({ kind: "whole" });
+    expect(parseRangeHeader("bytes", TOTAL)).toEqual({ kind: "whole" });
+    expect(parseRangeHeader("bytes=", TOTAL)).toEqual({ kind: "whole" });
+    expect(parseRangeHeader("bytes=abc-def", TOTAL)).toEqual({ kind: "whole" });
+  });
+
+  it("declines a multi-range request rather than answering it badly", () => {
+    // Allowed: a server may answer a multi-range request with the whole
+    // representation. Writing a multipart/byteranges body nobody here
+    // would otherwise test is the worse of the two.
+    expect(parseRangeHeader("bytes=0-9,20-29", TOTAL)).toEqual({ kind: "whole" });
+  });
+
+  it("is case-insensitive about the unit and tolerant of spaces, as clients are", () => {
+    expect(parseRangeHeader("  BYTES=10-19 ", TOTAL)).toEqual({ kind: "partial", range: { start: 10, end: 19 } });
+  });
+});
+
+describe("resuming a download (Phase 14l)", () => {
+  it("hands back exactly the slice asked for, and says how big the file is", async () => {
+    state.dir = await publish(manifest());
+    const open = await openExamBrowserDownload("win-x64", "bytes=4-8");
+    if (open?.kind !== "partial") throw new Error("expected a slice");
+    expect(open.range).toEqual({ start: 4, end: 8 });
+    // Inclusive at both ends: five bytes, not four.
+    expect(open.bytes).toBe(5);
+    expect(open.total).toBe(BYTES.length);
+    expect((await bodyOf(open)).toString("utf8")).toBe(BYTES.subarray(4, 9).toString("utf8"));
+  });
+
+  it("resumes to the end of the file from an open-ended range", async () => {
+    state.dir = await publish(manifest());
+    const open = await openExamBrowserDownload("win-x64", `bytes=${BYTES.length - 3}-`);
+    if (open?.kind !== "partial") throw new Error("expected a slice");
+    expect((await bodyOf(open)).toString("utf8")).toBe(BYTES.subarray(BYTES.length - 3).toString("utf8"));
+  });
+
+  it("the slices of a resumed download reassemble into the original file", async () => {
+    /**
+     * The point of the whole feature, asserted end to end rather than
+     * per-part: a candidate whose connection drops twice must end up with
+     * the same bytes as one whose connection held.
+     */
+    state.dir = await publish(manifest());
+    const cuts: Array<[number, number]> = [
+      [0, 9],
+      [10, 24],
+      [25, BYTES.length - 1],
+    ];
+    const parts: Buffer[] = [];
+    for (const [start, end] of cuts) {
+      const open = await openExamBrowserDownload("win-x64", `bytes=${start}-${end}`);
+      if (open?.kind !== "partial") throw new Error("expected a slice");
+      parts.push(await bodyOf(open));
+    }
+    expect(Buffer.concat(parts).equals(BYTES)).toBe(true);
+  });
+
+  it("answers an impossible range with the real length rather than bytes", async () => {
+    state.dir = await publish(manifest());
+    const open = await openExamBrowserDownload("win-x64", "bytes=9999-");
+    expect(open).toEqual({ kind: "unsatisfiable", total: BYTES.length });
+  });
+
+  it("still refuses everything it refused before, whatever the Range header says", async () => {
+    // A range header must not become a way around the switch, a missing
+    // build or an unpublished platform.
+    state.dir = await publish(manifest());
+    expect(await openExamBrowserDownload("linux-x64", "bytes=0-1")).toBeNull();
+
+    state.setting = { downloadsEnabled: false };
+    expect(await openExamBrowserDownload("win-x64", "bytes=0-1")).toBeNull();
   });
 });

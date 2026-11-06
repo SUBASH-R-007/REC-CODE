@@ -52,11 +52,25 @@ deploy/exam-browser/
 `public/` is deliberately absent from this repository. Installers are build
 output, they are tens of megabytes, and the signed ones are produced by CI
 from secrets that are not here. Point `RECX_EXAM_BROWSER_DIR` at wherever
-the host keeps them if `./exam-browser/public` is not it.
+the host keeps them if `./exam-browser/public` is not it: that is the
+source of the bind mount in `compose.app.yml`, which lands inside the web
+replicas at `/srv/exam-browser`, which is what `EXAM_BROWSER_DOWNLOAD_DIR`
+names. One directory, three names, because the host, the container and the
+application each need their own.
 
-Artefact names carry their version, so a name never points at different
-bytes — which is why Caddy serves them `immutable` for a year.
-`latest.json` is the one thing that changes, and it is served `no-store`.
+Nothing is cached, anywhere. Artefact names carry their version, so a name
+never points at different bytes and caching them would be safe — but the
+super-admin's switch is read on every request, and a proxy holding
+yesterday's copy would go on handing out a build the college has stopped
+offering. A control that something in the middle can ignore is not a
+control, so both the installers and `latest.json` are served `no-store`.
+Resuming an interrupted download works through `Range` rather than through
+a cache: the route answers `206` for a slice and advertises
+`accept-ranges: bytes`.
+
+A development build is never published here. It carries `-dev-` in its
+filename, it accepts origins a release build refuses, and a repository
+fence checks that nothing under `deploy/` names one.
 
 ---
 

@@ -479,6 +479,27 @@ Written here so they are built with the application rather than after it.
   published, and the resolved path is checked to be inside the directory
   before anything is opened. `deploy/exam-browser/README.md` is how a
   release gets there.
+
+  **An interrupted download resumes** (Phase 14l). The route answers
+  `Range` with `206` and a `Content-Range`, advertises `accept-ranges:
+  bytes`, and answers an impossible range with `416` and the real length
+  rather than with bytes. This is not a nicety: the file is 116 MB and the
+  candidate who most needs it is the one on the hall's network or a phone
+  tether, so without it a drop at 80 MB means starting again — and a
+  candidate who gives up installs a copy from wherever else they can find
+  one, which is the single outcome this whole arrangement exists to
+  prevent. A single range is honoured; a multi-range request is answered
+  with the whole file, which RFC 9110 allows and which keeps the parser
+  small enough to read. Resumes are rate limited separately and more
+  generously than whole downloads, because one resumed download is several
+  requests and a download manager opens a handful at once — but a range
+  that covers the whole file is charged to the stricter limit, so it
+  cannot be used to dodge it.
+
+  `HEAD` is written out rather than left to the framework, which would
+  answer it by streaming 116 MB off the disk and discarding it. Checking
+  whether a build exists, or how big it is before committing a candidate's
+  data allowance to it, costs a `stat`.
 * **The download is off until somebody turns it on**, on
   `/super/settings/integrations`, audited at SECURITY. Off is the default
   and an unreadable setting means off — the opposite direction from the
@@ -514,3 +535,4 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14i | The installer is downloaded from the site, through the application, behind a super-admin switch that governs the download rather than the link (§8). |
 | 14j | The window holds the front of the screen and swallows the shortcuts that leave it — and §3 says plainly what that is not. |
 | 14k | A development build channel, so a laptop can be pointed at without a release build ever accepting anything new (§8). |
+| 14l | The installer download resumes: `Range`, `206`, `416` and a `HEAD` that costs a `stat` (§8). |

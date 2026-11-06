@@ -1162,6 +1162,20 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       status: [404],
     },
     /**
+     * Phase 14l. The same route answering a HEAD, which exists so that a
+     * client checking whether a build exists costs a `stat` rather than
+     * 116 MB streamed off the disk and thrown away. It refuses in exactly
+     * the same way and for the same reasons: this deployment has the
+     * download switched off, so both are 404.
+     */
+    "api/exam-browser/download/[platform]/route.ts#HEAD": {
+      call: call(
+        () => studentRequest("/api/exam-browser/download/win-x64", { method: "HEAD" }),
+        () => params({ platform: "win-x64" }),
+      ),
+      status: [404],
+    },
+    /**
      * Phase 12a. Starting or resuming a sitting. The slug is one that does
      * not exist, deliberately: the fixture's own attempt is still live and
      * the heartbeat and snapshot recipes above depend on its token, and a
@@ -1656,6 +1670,17 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
   /** `<file under src/app>` → its params and searchParams. */
   const PAGE_CALLS: Record<string, () => { params?: Record<string, string>; searchParams?: Record<string, string> }> = {
     "(public)/judge/page.tsx": () => ({}),
+    /**
+     * Phase 14i, added to this sweep in 14l after the Linux gate caught
+     * that it had never been in it. The page is public and signed out,
+     * and it renders whatever the deployment has published: a version, a
+     * file size and a sha256 per platform. None of that is a canary, but
+     * the page also reads a platform setting and the version floor, and a
+     * page that reads settings is exactly the kind that grows a field
+     * nobody meant to publish. This deployment has the switch off, so
+     * what it renders here is the "ask your department" state.
+     */
+    "(public)/exam-browser/page.tsx": () => ({}),
     // Phase 9f. The public verification page, with a code that matches
     // nothing: the "no record" render is the one a student (or anybody)
     // reaches without a link, and it must carry no canary either.

@@ -71,6 +71,38 @@ describe.skipIf(!ENABLED)("outbox drain against recx_test", () => {
         .catch(() => undefined);
     }
 
+    /**
+     * And everything ELSE that is already due, pushed out of the way.
+     *
+     * The sweep above can only clear this suite's own rows; it has no
+     * business deleting another suite's. But the drain does not care
+     * whose a row is -- it claims `LIMIT batch` rows across the whole
+     * table `ORDER BY "nextAttemptAt", id`, so anything left in
+     * `recx_test` by `password-reset`, `privileged` or `inactivity-apply`
+     * sorts AHEAD of rows this suite is about to write and both crowds
+     * them out of the batch and takes the first slot when a test allows
+     * only one send.
+     *
+     * So they are parked rather than deleted: their next attempt moves a
+     * day out and an expired lease with it. Nothing is destroyed, and no
+     * suite depends on another's outbox rows surviving -- those files run
+     * in other packages, which `pnpm -r --workspace-concurrency=1` runs
+     * one at a time, so anything visible here has already finished with
+     * them.
+     *
+     * Found when the SECOND Linux gate of one evening turned the first
+     * assertion below red with `status: PENDING`, which reads exactly
+     * like a defect in the job rather than silt in the database.
+     */
+    await db.$executeRaw`
+      UPDATE "EmailOutbox"
+         SET "nextAttemptAt" = (now() AT TIME ZONE 'UTC') + interval '1 day',
+             "lockedUntil" = CASE WHEN status = 'SENDING'
+                                  THEN (now() AT TIME ZONE 'UTC') + interval '1 day'
+                                  ELSE "lockedUntil" END
+       WHERE (status = 'PENDING' AND "nextAttemptAt" <= (now() AT TIME ZONE 'UTC'))
+          OR (status = 'SENDING' AND "lockedUntil" < (now() AT TIME ZONE 'UTC'))`;
+
     const user = await db.user.create({
       data: { collegeId: tag.toUpperCase(), email: `${tag}@example.test`, handle: tag, firstName: "Out", lastName: "Box", role: "SUPER_ADMIN" },
     });
