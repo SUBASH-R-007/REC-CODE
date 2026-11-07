@@ -76,6 +76,40 @@ int main(int argc, char* argv[]) {
 }
 `;
 
+/**
+ * Correct, but slow to notice that the contestant has gone (Phase 15f).
+ *
+ * The same guessing game, except that when the conversation ends from the
+ * other side it takes 2.5 s -- longer than `LIMITS.interactive.idleMs` --
+ * to say so. That is what a loaded node does to an ordinary interactor for
+ * free, and it is the thing that turned a segfault into TLE: the silence
+ * after the solution died was counted as a deadlock, and a deadlock
+ * outranks the crash. Here the delay is deliberate, so the window is not a
+ * matter of luck.
+ */
+const SLOW_FINISH_INTERACTOR = `#include "testlib.h"
+#include <unistd.h>
+
+int main(int argc, char* argv[]) {
+    registerInteraction(argc, argv);
+    int secret = inf.readInt();
+    int budget = inf.readInt();
+    for (int asked = 1; asked <= budget; asked++) {
+        if (ouf.seekEof()) {                    // the contestant has gone
+            usleep(2500000);                    // ... and we are slow about it
+            quitf(_wa, "the contestant stopped talking after %d queries", asked - 1);
+        }
+        int guess = ouf.readInt(1, 1000000000, "guess");
+        if (guess == secret) {
+            std::cout << "correct" << std::endl;
+            quitf(_ok, "found %d after %d queries", secret, asked);
+        }
+        std::cout << (guess > secret ? "lower" : "higher") << std::endl;
+    }
+    quitf(_wa, "did not find %d within %d queries", secret, budget);
+}
+`;
+
 /** An interactor that is itself broken: never the student's wrong answer. */
 const BROKEN_INTERACTOR = `#include "testlib.h"
 int main(int argc, char* argv[]) {
@@ -247,6 +281,25 @@ describe.skipIf(!enabled || !ready)("interactive problems on real isolate", () =
   it("a crash mid-conversation → RE", async () => {
     const result = await judge(CRASH);
     expect(result.verdict).toBe("RE");
+  });
+
+  /**
+   * The same crash, with the interactor slow to react to it (Phase 15f).
+   *
+   * This is the gate failure that started the phase, made deterministic.
+   * The solution segfaults; the interactor then needs 2.5 s to finish,
+   * which is longer than the 2 s idle deadline. Before the fix the relay
+   * read that silence as a deadlock -- `stopped: "idle"` -- and the
+   * deadlock rule outranks the crash rule, so the student got TLE and the
+   * sentence advising a flush for a program that had segfaulted. Nobody is
+   * blocked reading here: one of them is dead.
+   */
+  it("a crash is still RE when the interactor is slow to notice it", async () => {
+    const result = await judge(CRASH, { interactor: SLOW_FINISH_INTERACTOR });
+    expect(result.verdict).toBe("RE");
+    // Not the deadlock sentence, and not the interactor's WA either: the
+    // crash is the student's own and it is what they are told about.
+    expect(result.tests[0]!.message ?? "").not.toMatch(/flush|stopped talking/);
   });
 
   it("the interactor's CPU is not the student's", async () => {

@@ -7,6 +7,7 @@ import { InfraError, errorMessage } from "../errors";
 import { sandboxInitFailed } from "../metrics";
 import { watchdogMs } from "../judge/limits";
 import type { Logger } from "../logger";
+import { conversationDeadlocked } from "./conversation";
 import { isMetaEmpty, parseIsolateMeta } from "./meta";
 import { watchOutputSize } from "./output-watch";
 import {
@@ -505,6 +506,14 @@ export class IsolateSandbox implements Sandbox {
       let lastActivity = Date.now();
       let alive = 2;
       let settled = false;
+      /**
+       * Whether each side is still running. The idle deadline below means
+       * "both are blocked reading", which stops being true the moment
+       * either program exits; see ./conversation.ts for what reading it any
+       * other way cost.
+       */
+      let solutionRunning = true;
+      let interactorRunning = true;
 
       const note = (chunk: string) => {
         if (diagnostics.length < 16_384) diagnostics += chunk;
@@ -540,7 +549,13 @@ export class IsolateSandbox implements Sandbox {
       pipe(interactor, solution, input.interactor.side, (n) => (interactorBytes += n));
 
       const idle = setInterval(() => {
-        if (Date.now() - lastActivity >= input.idleMs) stop("idle");
+        const deadlocked = conversationDeadlocked({
+          solutionRunning,
+          interactorRunning,
+          silentMs: Date.now() - lastActivity,
+          idleMs: input.idleMs,
+        });
+        if (deadlocked) stop("idle");
       }, Math.max(50, Math.min(250, Math.floor(input.idleMs / 4))));
 
       const watchdog = setTimeout(() => {
@@ -565,12 +580,22 @@ export class IsolateSandbox implements Sandbox {
         [solution, interactor],
         [interactor, solution],
       ] as const) {
+        // `exit` rather than `close`: the program is already gone while its
+        // stdio is still draining, and from that moment it is not waiting
+        // for anything the other side could say.
+        const gone = () => {
+          if (child === solution) solutionRunning = false;
+          else interactorRunning = false;
+        };
+        child.once("exit", gone);
         child.once("error", (error) => {
           note(`isolate spawn error: ${error.message}\n`);
+          gone();
           stop("none");
           if (--alive === 0) finish();
         });
         child.once("close", () => {
+          gone();
           // The other side learns the conversation is over.
           other.stdin?.end(() => undefined);
           if (--alive === 0) finish();

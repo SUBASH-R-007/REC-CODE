@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "@recx/shared";
 import { PermanentJudgeError } from "../src/errors";
@@ -5,6 +8,7 @@ import { silentLogger } from "../src/logger";
 import { DEADLOCK_MESSAGE, interpretInteractive, type SolutionRunFacts } from "../src/judge/interactive";
 import { effectiveCompareMode } from "../src/judge/plan";
 import { runJob } from "../src/judge/run-job";
+import { conversationDeadlocked } from "../src/sandbox/conversation";
 import type { IsolateMeta } from "../src/sandbox/types";
 import { FakeSandbox, OK_META, type FakePair, type FakeRun } from "./support/fake-sandbox";
 import { buildJob } from "./support/jobs";
@@ -177,6 +181,79 @@ describe("what an interactive case is judged as", () => {
     // The one mistake that would silently mark correct students wrong.
     const outcome = judge({ interactorMeta: { exitCode: 3 }, report: "assertion failed" });
     expect(outcome.kind).toBe("fail");
+  });
+});
+
+/**
+ * The idle deadline (Phase 15f).
+ *
+ * `LIMITS.interactive.idleMs` of silence is read as a deadlock, and a
+ * deadlock is TLE with the sentence about a missing flush — a verdict that
+ * outranks the solution's own crash (rule 3 before rule 5 above), on
+ * purpose. That precedence is only safe while "idle" means what it says, so
+ * what it means is tested here rather than left to the relay.
+ */
+describe("when silence in a conversation is a deadlock", () => {
+  const silence = {
+    solutionRunning: true,
+    interactorRunning: true,
+    silentMs: 2_000,
+    idleMs: LIMITS.interactive.idleMs,
+  };
+
+  it("is a deadlock when both are running and the deadline has passed", () => {
+    expect(conversationDeadlocked(silence)).toBe(true);
+    expect(conversationDeadlocked({ ...silence, silentMs: 60_000 })).toBe(true);
+  });
+
+  it("is not a deadlock before the deadline", () => {
+    expect(conversationDeadlocked({ ...silence, silentMs: LIMITS.interactive.idleMs - 1 })).toBe(false);
+    expect(conversationDeadlocked({ ...silence, silentMs: 0 })).toBe(false);
+  });
+
+  it("is exactly the deadline, not a tick past it", () => {
+    expect(conversationDeadlocked({ ...silence, silentMs: LIMITS.interactive.idleMs })).toBe(true);
+  });
+
+  /**
+   * The defect this exists for. A solution that segfaults mid-conversation
+   * leaves the interactor reacting to an EOF; on a loaded node that reaction
+   * can take longer than the deadline. Counting that silence as a deadlock
+   * reported RE as TLE — and with it the advice to add a flush, to a student
+   * whose program had crashed.
+   */
+  it("is never a deadlock once the solution has gone, however long the silence", () => {
+    expect(conversationDeadlocked({ ...silence, solutionRunning: false })).toBe(false);
+    expect(conversationDeadlocked({ ...silence, solutionRunning: false, silentMs: 600_000 })).toBe(false);
+  });
+
+  it("is never a deadlock once the interactor has gone either", () => {
+    // The mirror image: the interactor has decided and exited, and the
+    // solution is still being torn down. Nothing is waiting for a byte.
+    expect(conversationDeadlocked({ ...silence, interactorRunning: false })).toBe(false);
+    expect(conversationDeadlocked({ ...silence, solutionRunning: false, interactorRunning: false })).toBe(false);
+  });
+
+  /**
+   * The relay cannot be run on this platform — it spawns isolate — so the
+   * one thing a unit test can hold is that it asks this question instead of
+   * asking the clock directly. The regression that is the point of the
+   * phase is covered on real boxes by `interactive.isolate.test.ts`.
+   */
+  it("is the question the relay asks, not the clock", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const relay = readFileSync(path.join(here, "..", "src", "sandbox", "isolate.ts"), "utf8");
+    const interval = relay.slice(relay.indexOf("const idle = setInterval("));
+    const body = interval.slice(0, interval.indexOf("}, Math.max("));
+    expect(body).toContain("conversationDeadlocked(");
+    expect(body).toContain("solutionRunning");
+    expect(body).toContain("interactorRunning");
+    // A bare comparison against the deadline is what was wrong.
+    expect(body).not.toMatch(/>=\s*input\.idleMs/);
+    // And both sides must actually be marked as gone when they exit.
+    expect(relay).toMatch(/child\.once\("exit", gone\)/);
+    expect(relay).toMatch(/solutionRunning = false/);
+    expect(relay).toMatch(/interactorRunning = false/);
   });
 });
 

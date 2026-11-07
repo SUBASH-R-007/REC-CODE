@@ -530,6 +530,19 @@ would have been wrong — a C++ program that forgets to flush still works,
 because `std::cin` is TIED to `std::cout` and a read flushes the pending
 write, so the deadlock a student actually hits comes from C stdio.
 
+**And only while both programs are running** (Phase 15f). Silence is a
+deadlock when each side is waiting for the other; once either has exited
+nobody is waiting, and the silence that follows is ordinary — a crashed
+solution whose interactor has not finished reacting to the EOF, an
+interactor that has decided while the other box is torn down, a slow
+cgroup. The relay used to time the silence alone, so on a loaded node a
+segfault came back as TLE *with the advice to add a flush*: the deadlock
+sits above the student's crash in the precedence below, deliberately, which
+is exactly what made a wrong idle stop outrank the real verdict. The
+deadline is now asked as a question about the pair
+(`sandbox/conversation.ts`), and the gate failure that found it is a test
+with a deliberately slow interactor rather than a matter of luck.
+
 **The precedence is the whole design**, because in a conversation both
 programs fail together and the second failure is usually caused by the
 first: infrastructure, then the student's own time / memory / output
