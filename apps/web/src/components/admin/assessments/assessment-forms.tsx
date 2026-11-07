@@ -41,6 +41,27 @@ function Problem({ error }: { error: string | null }) {
   );
 }
 
+/**
+ * Each form on this page says which one it is (Phase 15p).
+ *
+ * An assessment's page carries four of them — create, add a coding
+ * question, add an MCQ, schedule a hall — and a copy form arrived later
+ * besides. Until now every one was a bare `<form>`: no accessible name, so
+ * no `form` landmark, so a screen-reader user moving by landmark found
+ * nothing to move between and a reader of the page's structure could not
+ * tell the four apart. They share field names too — "Opens" and "Closes"
+ * belong to the assessment, to the hall and to the copy.
+ *
+ * That cost something measurable. `invigilate-journey` reached for the
+ * hall's dates with `.last()`, which was true when it was written and
+ * stopped being true the day the copy form was added below: the dates went
+ * into the copy, the hall's own fields stayed empty, and the browser
+ * refused the submit with "Please fill out this field" — a journey that
+ * had silently stopped covering anything.
+ *
+ * A name is the fix for both. The names are distinct, because two
+ * landmarks with the same name are worse than none.
+ */
 export function CreateAssessmentForm() {
   const router = useRouter();
   const { toast } = useToast();
@@ -51,6 +72,7 @@ export function CreateAssessmentForm() {
 
   return (
     <form
+      aria-label="New assessment"
       className="space-y-4"
       action={(data) =>
         start(async () => {
@@ -239,6 +261,7 @@ export function AddQuestionForm({ assessmentId, nextPosition }: { assessmentId: 
 
   return (
     <form
+      aria-label="Add a coding question"
       className="flex flex-wrap items-end gap-3"
       action={(data) =>
         start(async () => {
@@ -298,6 +321,7 @@ export function AddMcqForm({ assessmentId, nextPosition }: { assessmentId: strin
 
   return (
     <form
+      aria-label="Add a multiple-choice question"
       className="space-y-3"
       action={(data) =>
         start(async () => {
@@ -409,6 +433,7 @@ export function ScheduleHallForm({ assessmentId, needsAllowlist }: { assessmentI
 
   return (
     <form
+      aria-label="Schedule a hall"
       className="space-y-3"
       action={(data) =>
         start(async () => {

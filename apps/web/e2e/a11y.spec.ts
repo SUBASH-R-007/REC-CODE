@@ -201,8 +201,10 @@ const TARGETS: readonly Target[] = [
   { path: "/mentor/mock-interviews", as: "admin", gating: false },
   { path: "/mentor/written", as: "admin", gating: false },
   { path: "/admin/judge", as: "admin", gating: false },
-  // Public (signed out): the judge transparency page (Phase 4).
-  { path: "/judge", as: null, gating: false },
+  // /judge is scanned signed out and GATING, with the Phase 4 block below:
+  // it was listed here as reported-only as well until Phase 15o, which is
+  // four scans of the same page under the same rules and a classification
+  // that read both ways in the README.
   /**
    * Phase 9f, GATING, and signed out because that is how it is read. This is
    * the only page in the product whose audience has never seen the product:

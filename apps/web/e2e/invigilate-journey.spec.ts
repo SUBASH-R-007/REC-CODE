@@ -52,19 +52,23 @@ test.describe("invigilator journey", () => {
     const admin = await staffContext.newPage();
     const paper = await authorPaper(admin, { runId, codingQuestion: false });
 
-    // The hall is scheduled from the assessment's own page, which is where
-    // the author already is.
-    await admin.getByRole("textbox", { name: "Label" }).fill(HALL);
-    await admin.getByRole("textbox", { name: "Room (optional)" }).fill(ROOM);
-    await admin
-      .getByRole("textbox", { name: "Opens", exact: true })
-      .last()
-      .fill(istInput(new Date(Date.now() - 5 * 60_000)));
-    await admin
+    /**
+     * The hall is scheduled from the assessment's own page, which is where
+     * the author already is — and three other forms live on that page, two
+     * of which also have "Opens" and "Closes". This used to reach for
+     * `.last()`, which was true until a copy form was added BELOW the hall:
+     * the dates then went into the copy, the hall's own fields stayed
+     * empty, and the browser refused the submit. Phase 15p gave every form
+     * on that page a name; this asks the hall for its own fields.
+     */
+    const hall = admin.getByRole("form", { name: "Schedule a hall" });
+    await hall.getByRole("textbox", { name: "Label" }).fill(HALL);
+    await hall.getByRole("textbox", { name: "Room (optional)" }).fill(ROOM);
+    await hall.getByRole("textbox", { name: "Opens", exact: true }).fill(istInput(new Date(Date.now() - 5 * 60_000)));
+    await hall
       .getByRole("textbox", { name: "Closes", exact: true })
-      .last()
       .fill(istInput(new Date(Date.now() + 4 * 60 * 60_000)));
-    await admin.getByRole("button", { name: "Schedule the hall" }).click();
+    await hall.getByRole("button", { name: "Schedule the hall" }).click();
     await expect(admin.getByText(HALL).first()).toBeVisible({ timeout: 60_000 });
 
     // ── 2. A candidate sits it ──

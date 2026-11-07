@@ -5,12 +5,34 @@ no `webServer` block). Configuration: `apps/web/playwright.config.ts`.
 
 | Project | Spec | Judge? | What it gates |
 |---|---|---|---|
-| `a11y` | `a11y.spec.ts` | no | axe-core, WCAG 2.0/2.1/2.2 A + AA tags: **zero serious or critical** violations, light and dark theme × 1366×768 and 375×812, on `/login`, `/dashboard`, `/problems`, `/problems/two-sum`, `/leaderboard`; the Phase 4 admin pages `/admin`, `/admin/students`, `/admin/students/import`, `/admin/cohorts`, `/admin/reports`, `/admin/announcements/new`, `/admin/accommodations`, `/admin/problems`, `/admin/problems/new`, `/admin/judge` (as RECADMIN02); the `/super` pages `/super`, `/super/users`, `/super/roles`, `/super/settings/branding`, `/super/settings/policy`, `/super/settings/judge`, `/super/audit`, `/super/impersonate`, `/super/flags`, `/super/jobs`, `/super/data` (as RECADMIN01); and `/judge` signed out. `/sheets`, `/learn`, `/profile`, `/notes`, `/bookmarks`, `/help`, `/admin/judge` (as RECADMIN01) and `/judge` are also scanned and **reported only**. |
+| `a11y` | `a11y.spec.ts` | no | axe-core, WCAG 2.0/2.1/2.2 A + AA tags: **zero serious or critical** violations, in the light and the dark theme × 1366×768 and 375×812, over the pages listed under [The pages the axe gate scans](#the-pages-the-axe-gate-scans). No axe rule is disabled. |
 | `keyboard` | `keyboard-journey.spec.ts` | steps 7–9 | the keyboard-only solving journey (below), with a visible focus indicator asserted at every stop. |
 | `perf` | `perf-workspace.spec.ts` | last test | throttled workspace timings; the console overlay never hides the caret (Monaco, and the plain-textarea fallback with Monaco blocked); with `E2E_JUDGE=1`, a throttled solve from start to finish (Run and Submit Accepted, the caret checked against the console throughout). See that file's header. |
 | `rbac` | `rbac.spec.ts` | no | Phase 4 RBAC at the HTTP surface (below). |
 | `authoring` | `authoring-journey.spec.ts` | **yes** (skipped without `E2E_JUDGE=1`) | the Phase 4 authoring journey (below), serial, up to 20 minutes. |
 | `judge` | `judge-page.spec.ts` | no | `/judge` answers 200 signed out and lists the enabled languages under their anchors; the workspace footer links the active language to its `/judge` section. |
+
+## The pages the axe gate scans
+
+Generated from `TARGETS` in `a11y.spec.ts` and checked by
+`tests/repo/e2e-a11y-pages.test.ts`, because the two drifted: this list
+named about thirty pages while the spec scanned sixty-five, so a reader
+checking whether their new surface was covered got the wrong answer. Run the
+repository fences with `RECX_UPDATE_DOCS=1` to rewrite it.
+
+Each page is scanned in both themes at both viewports, and the coding
+workspace is scanned again with its console open (wide) and on its Code and
+Result tabs (narrow).
+
+<!-- axe-pages:start -->
+**Gated** (41 scans — a serious or critical violation fails the run):
+
+`/login` (signed out), `/forgot-password` (signed out), `/reset-password` (signed out), `/dashboard` (student), `/assessments` (student), `/problems` (student), `/problems/two-sum` (student), `/leaderboard` (student), `/aptitude` (student), `/account/leave` (student), `/account/reactivate` (student), `/account/new-password` (student), `/placement` (student), `/placement-cell/heatmap` (admin), `/verify/aaaaaaaaaaaaaaaaaaaaaaaa` (signed out), `/admin` (staffAdmin), `/admin/students` (staffAdmin), `/admin/students/import` (staffAdmin), `/admin/cohorts` (staffAdmin), `/admin/reports` (staffAdmin), `/admin/announcements/new` (staffAdmin), `/admin/accommodations` (staffAdmin), `/admin/problems` (staffAdmin), `/admin/problems/new` (staffAdmin), `/admin/assessments` (staffAdmin), `/admin/assessments/new` (staffAdmin), `/admin/judge` (staffAdmin), `/super` (admin), `/super/users` (admin), `/super/roles` (admin), `/super/settings/branding` (admin), `/super/settings/policy` (admin), `/super/settings/judge` (admin), `/super/settings/ai` (admin), `/super/settings/integrations` (admin), `/super/audit` (admin), `/super/impersonate` (admin), `/super/flags` (admin), `/super/jobs` (admin), `/super/data` (admin), `/judge` (signed out)
+
+**Reported only** (23 scans — scanned the same way, annotated and attached, never failing):
+
+`/revision` (student), `/interviews` (student), `/mock-interviews` (student), `/written` (student), `/sheets` (student), `/learn` (student), `/profile` (student), `/notes` (student), `/bookmarks` (student), `/help` (student), `/placement-cell` (admin), `/placement-cell/at-risk` (admin), `/placement-cell/aptitude` (admin), `/placement-cell/drives` (admin), `/placement-cell/drives/new` (admin), `/placement-cell/export` (admin), `/mentor` (admin), `/mentor/doubts` (admin), `/mentor/moderation` (admin), `/mentor/experiences` (admin), `/mentor/mock-interviews` (admin), `/mentor/written` (admin), `/admin/judge` (admin)
+<!-- axe-pages:end -->
 
 ## Accounts
 
