@@ -2,18 +2,26 @@ import { describe, expect, it } from "vitest";
 import {
   AI_DAILY_LIMIT,
   AI_HELPER_DEFAULT,
-  AI_MODELS,
-  AI_MODEL_IDS,
+  AI_MODEL_ID_MAX,
+  AI_MODEL_ID_PATTERN,
+  AI_MODEL_PRESETS,
   AI_OUTPUT_MAX_TOKENS,
+  AI_PROVIDERS,
+  AI_PROVIDER_LABEL,
+  AI_PROVIDER_NOTE,
   AI_REFUSALS,
   AI_SOURCE_MAX_CHARS,
   AI_STATEMENT_MAX_CHARS,
   AI_SYSTEM_PROMPT,
   HELP_CONTEXTS,
   HINT_POLICY,
+  aiAllowedEndpoints,
   aiHelperAccess,
   aiHelperSettingSchema,
-  aiModel,
+  aiModelIdSchema,
+  aiModelLabel,
+  aiModelPreset,
+  aiProviderNeedsEndpoint,
   buildAiPrompt,
   clipForModel,
   effectiveAiHelperSetting,
@@ -43,32 +51,149 @@ function input(over: Partial<Parameters<typeof aiHelperAccess>[0]> = {}) {
 describe("the setting", () => {
   it("defaults to off, and so does anything unreadable", () => {
     expect(AI_HELPER_DEFAULT.enabled).toBe(false);
-    for (const value of [undefined, null, {}, 42, "on", { enabled: true }, { ...AI_HELPER_DEFAULT, modelId: "gpt-x" }]) {
+    for (const value of [
+      undefined,
+      null,
+      {},
+      42,
+      "on",
+      { enabled: true },
+      // A provider there is no code for, and a model id that is not one.
+      { ...AI_HELPER_DEFAULT, provider: "gemini" },
+      { ...AI_HELPER_DEFAULT, modelId: "gpt 4 turbo" },
+    ]) {
       expect(effectiveAiHelperSetting(value)).toEqual(AI_HELPER_DEFAULT);
     }
   });
 
   it("round-trips a valid value", () => {
-    const value = { enabled: true, modelId: "claude-haiku-5-5", dailyPerStudent: 3, maxOutputTokens: 400 };
+    const value = {
+      enabled: true,
+      provider: "anthropic",
+      modelId: "claude-haiku-5-5",
+      baseUrl: "",
+      dailyPerStudent: 3,
+      maxOutputTokens: 400,
+    };
     expect(effectiveAiHelperSetting(value)).toEqual(value);
   });
 
-  it("refuses an unknown key, an unknown model and a cap out of range", () => {
-    const base = { enabled: true, modelId: "claude-sonnet-5-5", dailyPerStudent: 5, maxOutputTokens: 700 };
+  it("refuses an unknown key and a cap out of range", () => {
+    const base = { ...AI_HELPER_DEFAULT };
     expect(aiHelperSettingSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
-    expect(aiHelperSettingSchema.safeParse({ ...base, modelId: "../../etc/passwd" }).success).toBe(false);
     expect(aiHelperSettingSchema.safeParse({ ...base, dailyPerStudent: AI_DAILY_LIMIT.max + 1 }).success).toBe(false);
     expect(aiHelperSettingSchema.safeParse({ ...base, dailyPerStudent: 0 }).success).toBe(false);
     expect(aiHelperSettingSchema.safeParse({ ...base, maxOutputTokens: AI_OUTPUT_MAX_TOKENS.max + 1 }).success).toBe(false);
     expect(aiHelperSettingSchema.safeParse({ ...base, dailyPerStudent: 2.5 }).success).toBe(false);
   });
 
-  it("the catalogue is closed, unique, and the default model is in it", () => {
-    expect(new Set(AI_MODEL_IDS).size).toBe(AI_MODELS.length);
-    expect(AI_MODEL_IDS).toContain(AI_HELPER_DEFAULT.modelId);
-    expect(aiModel("claude-opus-5-5")?.provider).toBe("anthropic");
-    expect(aiModel("custom")?.provider).toBe("openai-compatible");
-    expect(aiModel("nope")).toBeNull();
+  /**
+   * Phase 15g. The model is the super-admin's to name, so the test is no
+   * longer "is it one of ours" but "could this be sent to an API at all".
+   */
+  it("takes any model id the shape allows, including ones this build has never heard of", () => {
+    for (const modelId of [
+      "claude-sonnet-5-5",
+      "gpt-5.1-2026-02-01",
+      "meta-llama/Llama-3.3-70B-Instruct",
+      "qwen2.5-coder:32b",
+      "o4",
+      "deepseek-ai/DeepSeek-V3.2",
+    ]) {
+      expect(aiModelIdSchema.safeParse(modelId).success, modelId).toBe(true);
+      expect(AI_MODEL_ID_PATTERN.test(modelId), modelId).toBe(true);
+    }
+  });
+
+  it("refuses a model id that is not one", () => {
+    for (const modelId of [
+      "../../etc/passwd",
+      "gpt 4 turbo",
+      "http://evil.invalid/v1",
+      "model\nx-api-key: stolen",
+      '"); drop',
+      "/leading",
+      "trailing/",
+      ".hidden",
+      "a",
+      "x".repeat(AI_MODEL_ID_MAX + 1),
+      "",
+    ]) {
+      expect(aiModelIdSchema.safeParse(modelId).success, JSON.stringify(modelId)).toBe(false);
+    }
+  });
+
+  it("names every provider it offers, and only one needs an address", () => {
+    for (const provider of AI_PROVIDERS) {
+      expect(AI_PROVIDER_LABEL[provider]).toBeTruthy();
+      expect(AI_PROVIDER_NOTE[provider]).toBeTruthy();
+    }
+    expect(AI_PROVIDERS.filter(aiProviderNeedsEndpoint)).toEqual(["openai-compatible"]);
+  });
+
+  it("suggests only presets it can name, and labels anything else by its id", () => {
+    for (const preset of AI_MODEL_PRESETS) {
+      expect(AI_PROVIDERS).toContain(preset.provider);
+      expect(aiModelIdSchema.safeParse(preset.modelId).success, preset.modelId).toBe(true);
+      expect(aiModelPreset(preset.provider, preset.modelId)).toEqual(preset);
+    }
+    expect(aiModelPreset("openai", "claude-sonnet-5-5")).toBeNull();
+    expect(aiModelLabel({ provider: "anthropic", modelId: "claude-sonnet-5-5" })).toBe("Claude Sonnet 5.5");
+    expect(aiModelLabel({ provider: "openai", modelId: "some-new-model" })).toBe("some-new-model");
+    // Nothing named here: the deployment's AI_MODEL decides, and the label says so.
+    expect(aiModelLabel({ provider: "openai-compatible", modelId: "" })).toContain("deployment");
+    expect(AI_MODEL_PRESETS.some((p) => p.modelId === AI_HELPER_DEFAULT.modelId)).toBe(true);
+  });
+
+  it("reads the addresses a deployment allows, and drops what it cannot use", () => {
+    expect(aiAllowedEndpoints(undefined)).toEqual([]);
+    expect(aiAllowedEndpoints("")).toEqual([]);
+    expect(aiAllowedEndpoints("https://ai.rec.invalid/v1/")).toEqual(["https://ai.rec.invalid/v1"]);
+    expect(aiAllowedEndpoints(" https://a.invalid/v1 , https://b.invalid/v1 ")).toEqual([
+      "https://a.invalid/v1",
+      "https://b.invalid/v1",
+    ]);
+    // Same address twice is one address.
+    expect(aiAllowedEndpoints("https://a.invalid/v1,https://a.invalid/v1/")).toEqual(["https://a.invalid/v1"]);
+    // Plain http only on this machine, where a college-hosted model and this
+    // project's own integration test live.
+    expect(aiAllowedEndpoints("http://127.0.0.1:8000/v1")).toEqual(["http://127.0.0.1:8000/v1"]);
+    expect(aiAllowedEndpoints("http://ai.rec.invalid/v1")).toEqual([]);
+    // A typo in a list does not break the addresses either side of it.
+    expect(aiAllowedEndpoints("https://a.invalid/v1,not a url,https://b.invalid/v1")).toEqual([
+      "https://a.invalid/v1",
+      "https://b.invalid/v1",
+    ]);
+  });
+
+  /**
+   * A row written before Phase 15g names one of four ids and no provider.
+   * Reading it forward matters more than it looks: the alternative is a
+   * deploy that silently switches the assistant off and shows a super-admin
+   * settings they never chose.
+   */
+  it("reads a setting written before the model was theirs to choose", () => {
+    expect(effectiveAiHelperSetting({ enabled: true, modelId: "claude-opus-5-5", dailyPerStudent: 4, maxOutputTokens: 500 })).toEqual({
+      enabled: true,
+      provider: "anthropic",
+      modelId: "claude-opus-5-5",
+      baseUrl: "",
+      dailyPerStudent: 4,
+      maxOutputTokens: 500,
+    });
+    // `custom` named no model of its own: the deployment's AI_MODEL did.
+    expect(effectiveAiHelperSetting({ enabled: true, modelId: "custom", dailyPerStudent: 4, maxOutputTokens: 500 })).toEqual({
+      enabled: true,
+      provider: "openai-compatible",
+      modelId: "",
+      baseUrl: "",
+      dailyPerStudent: 4,
+      maxOutputTokens: 500,
+    });
+    // And a legacy row that is not even that falls back to off.
+    expect(effectiveAiHelperSetting({ enabled: true, modelId: "../..", dailyPerStudent: 4, maxOutputTokens: 500 })).toEqual(
+      AI_HELPER_DEFAULT,
+    );
   });
 });
 

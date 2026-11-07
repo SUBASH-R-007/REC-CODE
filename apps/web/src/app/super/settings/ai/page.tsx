@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
-import { Badge, Card, CardBody, CardHeader } from "@recx/design";
-import { AI_DAILY_LIMIT, AI_HELPER_SETTING_KEY, AI_MODELS, HINT_POLICY, formatCampusTime } from "@recx/shared";
+import { Card, CardBody, CardHeader } from "@recx/design";
+import {
+  AI_DAILY_LIMIT,
+  AI_HELPER_SETTING_KEY,
+  AI_MODEL_PRESETS,
+  AI_PROVIDER_LABEL,
+  AI_PROVIDER_NOTE,
+  HINT_POLICY,
+  formatCampusTime,
+} from "@recx/shared";
 import { getAiRuntime } from "@/lib/ai/settings";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -18,6 +26,11 @@ export const metadata: Metadata = { title: "AI helper · Super-admin" };
  * student's draft code leaves the college when this is on, and a solve that
  * followed an answer stops counting as unassisted evidence of readiness.
  */
+const AI_PROVIDERS_NOTE_LIST = (Object.keys(AI_PROVIDER_NOTE) as (keyof typeof AI_PROVIDER_NOTE)[]).map((provider) => ({
+  provider,
+  note: AI_PROVIDER_NOTE[provider],
+}));
+
 export default async function SuperAiPage() {
   await requireSuperAdminPage();
   const [runtime, row] = await Promise.all([
@@ -89,23 +102,59 @@ export default async function SuperAiPage() {
           }
         />
         <CardBody>
-          <AiHelperForm initial={runtime.setting} />
+          <AiHelperForm initial={runtime.setting} endpoints={runtime.endpoints} />
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="Models" subtitle="A closed list. A model id is what reaches an external API, so it is not free text." />
-        <CardBody>
-          <ul className="space-y-2 text-sm">
-            {AI_MODELS.map((model) => (
-              <li key={model.id} className="flex flex-wrap items-baseline gap-2">
-                <span className="font-medium">{model.label}</span>
-                {model.id === runtime.setting.modelId ? <Badge tone="success">in use</Badge> : null}
-                <span className="font-mono text-xs text-muted">{model.id}</span>
-                <span className="w-full text-text-secondary">{model.description}</span>
+        <CardHeader
+          title="The model"
+          subtitle="Any model the provider publishes. The familiar ones are one click away; the field is free underneath."
+        />
+        <CardBody className="space-y-3 text-sm">
+          <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
+            <dt className="font-medium">In use</dt>
+            <dd>
+              {runtime.model ? (
+                <>
+                  <span className="font-mono text-xs">{runtime.model.id}</span>{" "}
+                  <span className="text-text-secondary">via {AI_PROVIDER_LABEL[runtime.setting.provider]}</span>
+                  {runtime.model.baseUrl ? (
+                    <span className="text-text-secondary"> at {runtime.model.baseUrl}</span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="text-text-secondary">Nothing this deployment can reach — see above.</span>
+              )}
+            </dd>
+            <dt className="font-medium">Addresses allowed</dt>
+            <dd className="text-text-secondary">
+              {runtime.endpoints.length > 0 ? (
+                <span className="font-mono text-xs">{runtime.endpoints.join(", ")}</span>
+              ) : (
+                "None. An OpenAI-compatible endpoint needs AI_BASE_URL set on the server, which can name several, separated by commas."
+              )}
+            </dd>
+          </dl>
+          <p className="text-text-secondary">
+            Two things are not set from this page, and both for the same reason — they are where the key and a
+            student&apos;s draft would go. The API key lives in the server environment and cannot be set, read or
+            cleared from this page. The addresses that may be reached are{" "}
+            <code className="font-mono text-xs">AI_BASE_URL</code>; a super-admin chooses among them and cannot add
+            one, so a stolen session cannot point the assistant at itself.
+          </p>
+          <ul className="space-y-2">
+            {AI_PROVIDERS_NOTE_LIST.map(({ provider, note }) => (
+              <li key={provider}>
+                <span className="font-medium">{AI_PROVIDER_LABEL[provider]}</span>{" "}
+                <span className="text-text-secondary">{note}</span>
               </li>
             ))}
           </ul>
+          <p className="text-text-secondary">
+            Suggested, not required:{" "}
+            {AI_MODEL_PRESETS.map((preset) => preset.label).join(", ")}.
+          </p>
         </CardBody>
       </Card>
 

@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { aiAllowedEndpoints } from "@recx/shared";
 import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
 
 /**
@@ -95,13 +96,37 @@ const shape = {
    */
   AI_API_KEY: z.string().min(8, "AI_API_KEY looks too short to be a key.").optional(),
   /**
-   * Base URL for the chosen provider. Only read when the super-admin picked
-   * the college-hosted model; Anthropic's own endpoint is not configurable,
-   * because a configurable one is an exfiltration setting wearing a
-   * deployment hat.
+   * The addresses an OpenAI-compatible model may be reached at: one URL, or
+   * SEVERAL separated by commas (Phase 15g). A super-admin picks among them
+   * on /super/settings/ai and cannot add one.
+   *
+   * It is a deployment setting and not a super-admin's field for the same
+   * reason the key is: an address chosen from a settings page is where the
+   * college's key and a student's draft would be sent, so a free-text one
+   * is an exfiltration setting wearing a deployment hat. A list makes
+   * adding a vendor a line of config rather than a code change, which is
+   * what that reasoning was costing.
+   *
+   * `aiAllowedEndpoints` is what reads it, and it drops what it cannot use
+   * — so the refinement here is only that SOMETHING usable is left, which
+   * catches the single mistyped URL that would otherwise look like "no
+   * endpoint configured" much later and somewhere else. https, or loopback
+   * for a model on the same box.
    */
-  AI_BASE_URL: z.string().url().optional(),
-  /** The model name the college-hosted endpoint expects. */
+  AI_BASE_URL: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((value) => aiAllowedEndpoints(value).length > 0, {
+      message:
+        "AI_BASE_URL must be one https URL, or several separated by commas (http is allowed only on localhost).",
+    })
+    .optional(),
+  /**
+   * The model an OpenAI-compatible deployment falls back to when the
+   * super-admin has named none of its own. Before Phase 15g this was the
+   * only way to name that model at all.
+   */
   AI_MODEL: z.string().min(1).max(200).optional(),
   /**
    * Development only: let judge nodes whose kernel hardening check fails

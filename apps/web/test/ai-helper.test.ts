@@ -57,7 +57,7 @@ vi.mock("@/lib/env", () => ({ env: () => h.env, isProduction: () => false }));
 const { askAiHelperFor, AiUnavailableError } = await import("@/lib/ai/ask");
 const { getAiPanelState } = await import("@/lib/ai/panel");
 const { askProvider, AiProviderError } = await import("@/lib/ai/provider");
-const { getAiHelperSetting } = await import("@/lib/ai/settings");
+const { getAiHelperSetting, resolveAiRuntime } = await import("@/lib/ai/settings");
 
 const USER = "user_1";
 const PROBLEM = "prob_1";
@@ -209,6 +209,27 @@ describe("an answered ask", () => {
     expect(typeof row.latencyMs).toBe("number");
   });
 
+  /**
+   * Phase 15g, end to end: a model id this build has never heard of is what
+   * the student's question is actually sent to, and what the record says
+   * answered it. Nothing in between may substitute a model it recognises.
+   */
+  it("asks the model the super-admin named, even one this build does not know", async () => {
+    on({ provider: "openai", modelId: "some-new-model-2026" });
+    tried();
+    const fetchImpl = vi.fn(async () =>
+      Response.json({ choices: [{ message: { content: "Look at line 4." } }], usage: { prompt_tokens: 7, completion_tokens: 9 } }),
+    );
+    globalThis.fetch = fetchImpl as unknown as typeof fetch;
+
+    const answer = await askAiHelperFor(USER, { problemId: PROBLEM, kind: "MISTAKE" }, "PRACTICE");
+    expect(answer.html).toContain("Look at line 4.");
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.openai.com/v1/chat/completions");
+    expect((JSON.parse(String(init.body)) as { model: string }).model).toBe("some-new-model-2026");
+    expect(h.created[0]?.modelId).toBe("some-new-model-2026");
+  });
+
   it("stores the answer and not the student's code", async () => {
     on();
     tried();
@@ -303,8 +324,13 @@ describe("a failed ask", () => {
 });
 
 describe("the provider", () => {
-  const model = { id: "claude-sonnet-5-5", provider: "anthropic" as const, label: "x", description: "y" };
-  const custom = { id: "custom", provider: "openai-compatible" as const, label: "x", description: "y" };
+  const model = { id: "claude-sonnet-5-5", provider: "anthropic" as const, baseUrl: null, label: "x" };
+  const custom = {
+    id: "rec-coder-7b",
+    provider: "openai-compatible" as const,
+    baseUrl: "https://ai.rec.invalid/v1/",
+    label: "x",
+  };
 
   it("reads an Anthropic answer and its usage", async () => {
     const fetchImpl = answers("hello") as unknown as typeof fetch;
@@ -313,8 +339,6 @@ describe("the provider", () => {
   });
 
   it("posts an OpenAI-compatible request when the college hosts the model", async () => {
-    h.env.AI_BASE_URL = "https://ai.rec.invalid/v1/";
-    h.env.AI_MODEL = "rec-coder-7b";
     const fetchImpl = vi.fn(async () =>
       Response.json({ choices: [{ message: { content: " use two pointers " } }], usage: { prompt_tokens: 5 } }),
     );
@@ -334,11 +358,65 @@ describe("the provider", () => {
     expect((init.headers as Record<string, string>).authorization).toBe("Bearer test-key-123456");
   });
 
-  it("refuses the college-hosted model when the deployment did not finish configuring it", async () => {
-    h.env.AI_BASE_URL = undefined;
+  it("refuses an OpenAI-compatible target with no address, rather than guessing one", async () => {
     await expect(
-      askProvider({ model: custom, system: "s", prompt: "p", maxOutputTokens: 300, fetchImpl: answers("x") as unknown as typeof fetch }),
+      askProvider({
+        model: { ...custom, baseUrl: null },
+        system: "s",
+        prompt: "p",
+        maxOutputTokens: 300,
+        fetchImpl: answers("x") as unknown as typeof fetch,
+      }),
     ).rejects.toBeInstanceOf(AiProviderError);
+  });
+
+  /**
+   * Phase 15g. The field that caps the answer is not the same on OpenAI's
+   * own API as on the servers that imitate it, and sending the wrong one is
+   * a 400 rather than a long answer: api.openai.com refuses `max_tokens`
+   * for its current models, and vLLM, Ollama and llama.cpp have mostly
+   * never heard of `max_completion_tokens`. So the field follows the host.
+   */
+  it("caps the answer with the field the host understands", async () => {
+    const posted = async (target: Parameters<typeof askProvider>[0]["model"]) => {
+      const fetchImpl = vi.fn(async () => Response.json({ choices: [{ message: { content: "ok" } }] }));
+      await askProvider({
+        model: target,
+        system: "s",
+        prompt: "p",
+        maxOutputTokens: 321,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+      const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+      return { url, body: JSON.parse(String(init.body)) as Record<string, unknown> };
+    };
+
+    const openai = await posted({ id: "gpt-5.1-2026-02-01", provider: "openai", baseUrl: null, label: "x" });
+    expect(openai.url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(openai.body.max_completion_tokens).toBe(321);
+    expect(openai.body.max_tokens).toBeUndefined();
+    expect(openai.body.model).toBe("gpt-5.1-2026-02-01");
+
+    const hosted = await posted(custom);
+    expect(hosted.url).toBe("https://ai.rec.invalid/v1/chat/completions");
+    expect(hosted.body.max_tokens).toBe(321);
+    expect(hosted.body.max_completion_tokens).toBeUndefined();
+  });
+
+  it("reads a reply that arrives as content parts rather than a string", async () => {
+    // Some gateways answer this way. Telling a student the assistant is
+    // broken when it answered is the worst of the available mistakes.
+    const out = await askProvider({
+      model: custom,
+      system: "s",
+      prompt: "p",
+      maxOutputTokens: 300,
+      fetchImpl: (async () =>
+        Response.json({
+          choices: [{ message: { content: [{ type: "text", text: " use two " }, { type: "text", text: "pointers " }] } }],
+        })) as unknown as typeof fetch,
+    });
+    expect(out.text).toBe("use two pointers");
   });
 
   it("reports a timeout as a timeout and an error status as a status", async () => {
@@ -376,6 +454,95 @@ describe("the provider", () => {
         fetchImpl: (async () => Response.json({ content: [{ type: "text", text: "   " }] })) as unknown as typeof fetch,
       }),
     ).rejects.toThrow("empty");
+  });
+});
+
+/**
+ * Phase 15g: the super-admin names the model, the deployment owns the key
+ * and the addresses, and this is where the two have to add up to something
+ * askable. Every way they fail to ends in one sentence and a null model, so
+ * a helper that cannot answer reads as off rather than failing at a student.
+ */
+describe("what the chosen model resolves to", () => {
+  const setting = (over: Record<string, unknown> = {}) => ({ ...AI_HELPER_DEFAULT, enabled: true, ...over });
+  const deployment = (over: Record<string, unknown> = {}) => ({
+    hasKey: true,
+    endpoints: [] as readonly string[],
+    defaultModelId: "",
+    ...over,
+  });
+
+  it("sends a named model straight to its provider", () => {
+    const runtime = resolveAiRuntime(setting({ provider: "openai", modelId: "gpt-5.1-2026-02-01" }), deployment());
+    expect(runtime.misconfiguration).toBeNull();
+    expect(runtime.model).toEqual({
+      provider: "openai",
+      id: "gpt-5.1-2026-02-01",
+      baseUrl: null,
+      label: "gpt-5.1-2026-02-01",
+    });
+  });
+
+  it("uses the deployment's first address when the super-admin picked none", () => {
+    const runtime = resolveAiRuntime(
+      setting({ provider: "openai-compatible", modelId: "rec-coder-7b" }),
+      deployment({ endpoints: ["https://a.invalid/v1", "https://b.invalid/v1"] }),
+    );
+    expect(runtime.model?.baseUrl).toBe("https://a.invalid/v1");
+  });
+
+  it("uses the address they picked, when it is one the deployment allows", () => {
+    const runtime = resolveAiRuntime(
+      setting({ provider: "openai-compatible", modelId: "rec-coder-7b", baseUrl: "https://b.invalid/v1" }),
+      deployment({ endpoints: ["https://a.invalid/v1", "https://b.invalid/v1"] }),
+    );
+    expect(runtime.model?.baseUrl).toBe("https://b.invalid/v1");
+  });
+
+  /**
+   * The security line, and the reason the address is not a text field: a
+   * stolen super-admin session must not be able to point the assistant —
+   * and with it the college's key and five thousand students' drafts — at a
+   * host nobody named.
+   */
+  it("refuses an address the deployment never named", () => {
+    const runtime = resolveAiRuntime(
+      setting({ provider: "openai-compatible", modelId: "x-1", baseUrl: "https://evil.invalid/v1" }),
+      deployment({ endpoints: ["https://a.invalid/v1"] }),
+    );
+    expect(runtime.model).toBeNull();
+    expect(runtime.misconfiguration).toContain("not one this deployment allows");
+  });
+
+  it("says so when an OpenAI-compatible endpoint has no address at all", () => {
+    const runtime = resolveAiRuntime(setting({ provider: "openai-compatible", modelId: "x-1" }), deployment());
+    expect(runtime.model).toBeNull();
+    expect(runtime.misconfiguration).toContain("AI_BASE_URL");
+  });
+
+  it("falls back to the deployment's model only where the deployment names the host", () => {
+    const hosted = resolveAiRuntime(
+      setting({ provider: "openai-compatible", modelId: "" }),
+      deployment({ endpoints: ["https://a.invalid/v1"], defaultModelId: "rec-coder-7b" }),
+    );
+    expect(hosted.model?.id).toBe("rec-coder-7b");
+
+    const nothing = resolveAiRuntime(
+      setting({ provider: "openai-compatible", modelId: "" }),
+      deployment({ endpoints: ["https://a.invalid/v1"] }),
+    );
+    expect(nothing.model).toBeNull();
+    expect(nothing.misconfiguration).toContain("AI_MODEL");
+
+    const named = resolveAiRuntime(setting({ provider: "anthropic", modelId: "" }), deployment({ defaultModelId: "rec-coder-7b" }));
+    expect(named.model).toBeNull();
+    expect(named.misconfiguration).toContain("No model is named");
+  });
+
+  it("reads as unanswerable without a key, whatever else is right", () => {
+    const runtime = resolveAiRuntime(setting(), deployment({ hasKey: false }));
+    expect(runtime.model).toBeNull();
+    expect(runtime.misconfiguration).toContain("No API key");
   });
 });
 

@@ -105,18 +105,52 @@ describe("the AI helper cannot be reached from a proctored or rated sitting", ()
   });
 });
 
-describe("the provider has exactly one caller", () => {
+describe("the provider has exactly two callers, and one of them carries nothing", () => {
   const PROVIDER = "apps/web/src/lib/ai/provider.ts";
+  /** The student's question. The only path that may carry a student's work. */
   const CALLER = "apps/web/src/lib/ai/ask.ts";
+  /**
+   * The super-admin's reachability check (Phase 15g). A free-text model id
+   * is only a kindness if it can be tried before five thousand students
+   * meet it, so the settings page may ask a model one FIXED question — and
+   * the tests below hold it to exactly that, because a second caller of
+   * this module is the one place a second way to send student code could
+   * appear.
+   */
+  const PROBE = "apps/web/src/server/actions/super-ai.ts";
   const files = findFiles({ under: ["apps", "packages", "scripts"], extensions: [...CODE_EXTENSIONS], exclude: isTestPath });
 
-  it("is imported only by lib/ai/ask.ts", () => {
+  it("is imported only by the student's path and the super-admin's check", () => {
     const importers = files.filter((f) => {
       if (f === PROVIDER) return false;
       const { code } = lexSource(readRepoFile(f));
       return importSpecifiers(code).some(({ spec }) => /(^|[/@])lib\/ai\/provider$/.test(spec));
     });
-    expect(importers).toEqual([CALLER]);
+    expect([...importers].sort()).toEqual([CALLER, PROBE].sort());
+  });
+
+  it("the check sends the two fixed strings and cannot reach a real prompt", () => {
+    const probe = readRepoFile(PROBE);
+    const { code } = lexSource(probe);
+    // What it sends.
+    expect(code).toContain("AI_PROBE_SYSTEM");
+    expect(code).toContain("AI_PROBE_PROMPT");
+    // And what it has no way of sending: the builder, the student's draft,
+    // or the module that puts the two together.
+    for (const forbidden of ["buildAiPrompt", "codeDraft", "loadMaterial", "aiAssist"]) {
+      expect(code, forbidden).not.toContain(forbidden);
+    }
+    expect(importSpecifiers(code).map((i) => i.spec)).not.toContain("@/lib/ai/ask");
+  });
+
+  it("the two fixed strings interpolate nothing", () => {
+    // A template hole in either of them would be a way to smuggle a
+    // student's code into a path that is exempt from every check above.
+    const shared = readRepoFile("packages/shared/src/ai-helper.ts");
+    const section = shared.slice(shared.indexOf("export const AI_PROBE_SYSTEM"), shared.indexOf("AI_PROBE_REPLY_CHARS"));
+    expect(section).toContain("AI_PROBE_PROMPT");
+    expect(section).not.toContain("${");
+    expect(section).not.toContain("`");
   });
 
   it("is the only module that posts to an AI endpoint", () => {

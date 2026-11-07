@@ -56,6 +56,39 @@ describe("the development defaults", () => {
   });
 });
 
+/**
+ * Phase 15g: `AI_BASE_URL` may name several addresses, because a
+ * super-admin picks among them and cannot add one. It is read by
+ * `aiAllowedEndpoints`, which drops what it cannot use — so the point of
+ * the refinement here is the deployment that mistypes its ONLY address and
+ * would otherwise find out as "no endpoint configured" much later and
+ * somewhere else.
+ */
+describe("the addresses an OpenAI-compatible model may be reached at", () => {
+  it("takes one, or several separated by commas", async () => {
+    const one = await loadEnv({ ...MINIMUM, AI_BASE_URL: "https://ai.example.invalid/v1" });
+    expect(one.env().AI_BASE_URL).toBe("https://ai.example.invalid/v1");
+    const many = await loadEnv({
+      ...MINIMUM,
+      AI_BASE_URL: "https://a.example.invalid/v1, https://b.example.invalid/v1",
+    });
+    expect(many.env().AI_BASE_URL).toContain("b.example.invalid");
+    // A model on this box, which is how a college hosts one to begin with.
+    const local = await loadEnv({ ...MINIMUM, AI_BASE_URL: "http://127.0.0.1:8000/v1" });
+    expect(local.env().AI_BASE_URL).toBe("http://127.0.0.1:8000/v1");
+  });
+
+  it("refuses a deployment whose only address is not usable", async () => {
+    // `env()` parses on first call, so that is where a refusal lands.
+    const { env: notAUrl } = await loadEnv({ ...MINIMUM, AI_BASE_URL: "ai.example.invalid/v1" });
+    expect(() => notAUrl()).toThrow(/AI_BASE_URL/);
+    // Plain http anywhere but this machine: the key would cross the network
+    // in the clear.
+    const { env: plainHttp } = await loadEnv({ ...MINIMUM, AI_BASE_URL: "http://ai.example.invalid/v1" });
+    expect(() => plainHttp()).toThrow(/AI_BASE_URL/);
+  });
+});
+
 describe("production refuses a variable it would otherwise default", () => {
   it("names APP_URL and REDIS_URL together, so one deploy fixes both", async () => {
     const { env } = await loadEnv({ ...MINIMUM, NODE_ENV: "production", EXPORT_SIGNING_SECRET: PRODUCTION.EXPORT_SIGNING_SECRET });

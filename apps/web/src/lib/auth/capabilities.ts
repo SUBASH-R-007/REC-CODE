@@ -153,6 +153,12 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       // at SECURITY, because turning it on starts sending students' draft
       // code to a third party.
       "super-ai#updateAiHelper",
+      // Phase 15g. "Does this model answer?" — the same capability, because
+      // it reaches the same third party with the same key, and the same
+      // person decides. It carries no student's work: the question it asks
+      // is a constant, and tests/repo/ai-helper-posture.test.ts holds it to
+      // that.
+      "super-ai#testAiModel",
     ],
     pages: [
       "app/super/settings/policy/page.tsx",

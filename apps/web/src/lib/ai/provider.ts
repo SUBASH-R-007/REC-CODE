@@ -1,19 +1,27 @@
 import "server-only";
-import { AI_TIMEOUT_MS, type AiModelChoice } from "@recx/shared";
+import { AI_TIMEOUT_MS, type AiModelTarget } from "@recx/shared";
 import { env } from "@/lib/env";
 
 /**
  * The one place a student's code leaves this server.
  *
- * Deliberately a hand-written fetch rather than a vendor SDK: this is two
- * POSTs, and a dependency that can read the environment, retry on its own
+ * Deliberately a hand-written fetch rather than a vendor SDK: this is one
+ * POST, and a dependency that can read the environment, retry on its own
  * schedule and phone home with telemetry is a poor trade for saving twenty
  * lines — on the one call in the product that carries a student's work to a
- * third party.
+ * third party. Three wire formats are three small functions here; three
+ * SDKs would be three supply chains.
  *
  * Nothing here logs the prompt, the answer or the key. A failure is reported
  * by shape (`timeout`, `http 429`), never by body: a provider error body can
  * echo the request, and the request is the student's program.
+ *
+ * WHICH model and WHICH host are not decided here. `lib/ai/settings.ts`
+ * resolves both from the super-admin's setting and the deployment's
+ * environment, and hands this an `AiModelTarget`; this module can only post
+ * where it is told. That split is what lets a super-admin name any model
+ * freely (Phase 15g) while the set of reachable hosts stays the
+ * deployment's.
  */
 
 export interface AiCompletion {
@@ -31,9 +39,10 @@ export class AiProviderError extends Error {
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 
-interface AskOptions {
-  readonly model: AiModelChoice;
+export interface AskOptions {
+  readonly model: AiModelTarget;
   readonly system: string;
   readonly prompt: string;
   readonly maxOutputTokens: number;
@@ -47,10 +56,7 @@ export async function askProvider(options: AskOptions): Promise<AiCompletion> {
   if (!key) throw new AiProviderError("no API key is configured");
 
   const doFetch = options.fetchImpl ?? fetch;
-  const request =
-    options.model.provider === "anthropic"
-      ? anthropicRequest(options, key)
-      : openAiCompatibleRequest(options, key, e.AI_BASE_URL, e.AI_MODEL);
+  const request = buildRequest(options, key);
 
   let response: Response;
   try {
@@ -90,6 +96,28 @@ interface ProviderRequest {
   readonly parse: (payload: unknown) => AiCompletion;
 }
 
+function buildRequest(options: AskOptions, key: string): ProviderRequest {
+  switch (options.model.provider) {
+    case "anthropic":
+      return anthropicRequest(options, key);
+    /**
+     * OpenAI's own API and anything that imitates it differ on one field,
+     * and it is not cosmetic: api.openai.com refuses `max_tokens` for its
+     * current models and wants `max_completion_tokens`, while the servers a
+     * college actually runs — vLLM, Ollama, llama.cpp, most gateways — know
+     * `max_tokens` and many have never heard of the other. Sending both
+     * would 400 on the stricter of them. So the field follows the host.
+     */
+    case "openai":
+      return chatCompletionsRequest(options, key, OPENAI_ENDPOINT, "max_completion_tokens");
+    case "openai-compatible": {
+      const base = options.model.baseUrl;
+      if (!base) throw new AiProviderError("the OpenAI-compatible endpoint has no address");
+      return chatCompletionsRequest(options, key, `${base.replace(/\/+$/, "")}/chat/completions`, "max_tokens");
+    }
+  }
+}
+
 function anthropicRequest(options: AskOptions, key: string): ProviderRequest {
   return {
     url: ANTHROPIC_ENDPOINT,
@@ -119,19 +147,18 @@ function anthropicRequest(options: AskOptions, key: string): ProviderRequest {
   };
 }
 
-function openAiCompatibleRequest(
+function chatCompletionsRequest(
   options: AskOptions,
   key: string,
-  baseUrl: string | undefined,
-  modelName: string | undefined,
+  url: string,
+  tokenField: "max_tokens" | "max_completion_tokens",
 ): ProviderRequest {
-  if (!baseUrl || !modelName) throw new AiProviderError("the college-hosted model is not configured");
   return {
-    url: `${baseUrl.replace(/\/+$/, "")}/chat/completions`,
+    url,
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: {
-      model: modelName,
-      max_tokens: options.maxOutputTokens,
+      model: options.model.id,
+      [tokenField]: options.maxOutputTokens,
       messages: [
         { role: "system", content: options.system },
         { role: "user", content: options.prompt },
@@ -142,14 +169,30 @@ function openAiCompatibleRequest(
         choices?: { message?: { content?: unknown } }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
-      const raw = body.choices?.[0]?.message?.content;
       return {
-        text: typeof raw === "string" ? raw.trim() : "",
+        text: contentText(body.choices?.[0]?.message?.content),
         tokensIn: intOrNull(body.usage?.prompt_tokens),
         tokensOut: intOrNull(body.usage?.completion_tokens),
       };
     },
   };
+}
+
+/**
+ * A chat message's content. A string on OpenAI and on most of what imitates
+ * it, and an array of parts on some gateways — which is worth reading rather
+ * than discarding, because the alternative is telling a student the
+ * assistant is broken when it answered.
+ */
+function contentText(raw: unknown): string {
+  if (typeof raw === "string") return raw.trim();
+  if (Array.isArray(raw)) {
+    return raw
+      .map((part) => (typeof part === "string" ? part : typeof (part as { text?: unknown })?.text === "string" ? ((part as { text: string }).text) : ""))
+      .join("")
+      .trim();
+  }
+  return "";
 }
 
 function intOrNull(value: unknown): number | null {

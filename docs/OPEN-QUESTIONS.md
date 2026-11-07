@@ -4001,3 +4001,77 @@ the whole of it:
 So the four refusals are no longer blocked on the engine; they are blocked
 on one surface each, and each is its own slice. Said here so the next
 reader does not re-derive the engine change that is already done.
+
+## The model is the super-admin's to name (Phase 15g)
+
+Phase 12b gave a super-admin a dropdown of four models and wrote down why it
+was closed: "the id reaches an external API, and *whatever somebody typed* is
+not a thing to send to one." The reasoning was about the wrong noun. A list
+of model names is stale the week after it ships — a college that buys a newer
+model, or stands one up on its own hardware, had to wait for a deploy to use
+it, and the one escape hatch could not even name its model without an
+environment variable.
+
+**What a free-text id can actually do, and what it cannot.** The id is
+interpolated into a JSON body and posted to an endpoint that was already
+chosen. It cannot choose a different host, add a header or end a line: those
+are the things worth refusing, and they are refused by SHAPE rather than by
+membership — alphanumeric segments joined by `.`, `_`, `-`, `:` or `/`, which
+takes `claude-sonnet-5-5`, `gpt-5.1-2026-02-01`,
+`meta-llama/Llama-3.3-70B-Instruct` and `qwen2.5-coder:32b`, and refuses a
+space, a newline, a URL, a quote and `../..`. A wrong-but-well-shaped id
+costs one failed ask and a sentence on the settings page — the same thing a
+retired model in a closed catalogue would have cost, and easier to fix.
+
+**What stays the deployment's, and why that is not timidity.** Two things,
+and they are the two that decide where the college's key and a student's
+draft go:
+
+* the key (`AI_API_KEY`), as before;
+* the set of reachable HOSTS. `AI_BASE_URL` may now name several, separated
+  by commas, and a super-admin picks among them. So adding a vendor or a
+  gateway is one line of deployment config instead of a code change — and a
+  stolen super-admin session still cannot point the assistant, the key and
+  five thousand students' drafts at a host nobody named. A free-text address
+  on a settings page would have been one-click exfiltration of exactly the
+  data this feature exists to be careful with. The page says so rather than
+  hiding the limit.
+
+**Three wire formats, not three SDKs.** `anthropic`, `openai` and
+`openai-compatible` are the choices, because there has to be code that
+speaks the format. The third covers what a college actually runs — vLLM,
+Ollama, llama.cpp — and most gateways and other vendors' compatible
+surfaces. One difference between the second and the third is not cosmetic
+and is worth recording: OpenAI's own API wants `max_completion_tokens` and
+refuses `max_tokens` for its current models, while the servers that imitate
+it mostly know only `max_tokens`. Sending both would 400 on the stricter of
+them, so the field follows the host.
+
+**The Test button is what makes free text kind rather than a trap.** A
+super-admin can now type an id no build has heard of, so they must be able
+to find out whether it answers before five thousand students do. The page
+asks the model IN THE FORM — not the saved one — one fixed question, and
+reports the latency, the token count and the model's own sentence, or the
+failure by shape. The two strings it sends are constants, and the posture
+fence holds the check to sending exactly them: a second caller of the
+provider is the one place a second way to send a student's code could
+appear, so it is fenced rather than trusted.
+
+**And a socket, at last.** Phase 12b recorded NOT RUN — "no model has ever
+answered" — because every test drove a fake `fetch`. `apps/web/test/
+ai-provider-http.test.ts` now starts a server on loopback that answers in an
+OpenAI-compatible shape and drives the real `fetch` through it, asserting
+from OUTSIDE the process what went onto the wire: the model id the
+super-admin typed, the token-cap field, two message turns, a bearer scheme.
+It also walks the ways an endpoint fails for real — 429, HTML from something
+in the way, an empty answer, a refused connection — and each comes back as
+the one sentence the product shows. No key and no network, so it runs in
+every gate rather than by hand.
+
+What is still unproven is narrower, and worth keeping in these words: the
+`anthropic` and `openai` endpoints are fixed in code and nobody here has a
+key for either, so no LIVE vendor response has been parsed by this code —
+and whether a real model obeys "never a complete solution" under pressure
+from a student's half-written program is still a judgement that needs a week
+of reading real answers.
+
