@@ -456,12 +456,39 @@ export interface TrimmedAnswer {
 const FENCE_OPEN = /^[ \t]{0,3}(`{3,}|~{3,})/;
 
 /**
+ * The OTHER way markdown writes code: four spaces, or a tab (Phase 15m).
+ *
+ * The first version of this guard understood fences only, which is what a
+ * model emits nine times in ten — and it left the tenth as a published way
+ * round the rule. Measured, not guessed: a twelve-line program indented
+ * four spaces came through whole, every line of it.
+ *
+ * A line that LOOKS like a list item or a quotation is not treated as code
+ * even when it is indented far enough, because four spaces is also how
+ * markdown nests a list, and an answer is mostly prose. That trade is
+ * deliberate and it runs one way: withholding part of an explanation is an
+ * annoyance with a sentence attached, and handing over a finished program
+ * is the thing this feature promises not to do.
+ */
+const INDENTED_CODE = /^(?: {4,}|\t)/;
+const LIST_OR_QUOTE = /^(?:[-*+]\s|\d+[.)]\s|>)/;
+
+function isIndentedCode(line: string): boolean {
+  return INDENTED_CODE.test(line) && !LIST_OR_QUOTE.test(line.trim());
+}
+
+/**
  * Take the over-long code out of a model's answer and leave the teaching in.
  *
  * Per block, and then in total: a block of more than
  * `AI_ANSWER_MAX_CODE_LINES` non-empty lines goes, and once
  * `AI_ANSWER_TOTAL_CODE_LINES` have been kept the rest go too — otherwise a
  * model that writes a program three lines at a time has written a program.
+ *
+ * Both ways of writing a block count (Phase 15m): a fence, and four spaces
+ * of indent. Understanding only the first left the second as a way round
+ * the rule, and a twelve-line program indented four spaces came through
+ * whole until this knew about it.
  *
  * Prose is never touched. A student who asked what was wrong with their
  * loop still gets the sentence naming the line; what they do not get is the
@@ -475,12 +502,51 @@ export function trimOversizedCode(markdown: string, maxLines: number = AI_ANSWER
   let kept = 0;
   let i = 0;
 
+  /** Keep a block of code, or put the note in its place. */
+  const settle = (body: readonly string[], head: readonly string[] = [], tail: readonly string[] = []) => {
+    const codeLines = body.filter((l) => l.trim().length > 0).length;
+    if (codeLines <= maxLines && kept + codeLines <= AI_ANSWER_TOTAL_CODE_LINES) {
+      kept += codeLines;
+      out.push(...head, ...body, ...tail);
+      return;
+    }
+    withheld += 1;
+    out.push(AI_CODE_WITHHELD_NOTE);
+  };
+
   while (i < lines.length) {
     const line = lines[i] ?? "";
     const open = FENCE_OPEN.exec(line);
     if (!open) {
-      out.push(line);
-      i += 1;
+      if (!isIndentedCode(line)) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
+      /**
+       * An indented block, which has no closing marker: it runs until a
+       * line that is neither indented nor blank. A blank line inside one
+       * belongs to it (markdown says so), so the run continues across a
+       * gap when indented code follows it.
+       */
+      const body: string[] = [];
+      let end = i;
+      while (end < lines.length) {
+        const candidate = lines[end] ?? "";
+        if (candidate.trim() === "") {
+          let look = end + 1;
+          while (look < lines.length && (lines[look] ?? "").trim() === "") look += 1;
+          if (look >= lines.length || !isIndentedCode(lines[look] ?? "")) break;
+          for (let k = end; k < look; k += 1) body.push(lines[k] ?? "");
+          end = look;
+          continue;
+        }
+        if (!isIndentedCode(candidate)) break;
+        body.push(candidate);
+        end += 1;
+      }
+      settle(body);
+      i = end;
       continue;
     }
 
@@ -500,15 +566,7 @@ export function trimOversizedCode(markdown: string, maxLines: number = AI_ANSWER
       body.push(candidate);
     }
 
-    const codeLines = body.filter((l) => l.trim().length > 0).length;
-    if (codeLines <= maxLines && kept + codeLines <= AI_ANSWER_TOTAL_CODE_LINES) {
-      kept += codeLines;
-      out.push(line, ...body);
-      if (closed) out.push(lines[end] ?? marker);
-    } else {
-      withheld += 1;
-      out.push(AI_CODE_WITHHELD_NOTE);
-    }
+    settle(body, [line], closed ? [lines[end] ?? marker] : []);
     i = closed ? end + 1 : end;
   }
 

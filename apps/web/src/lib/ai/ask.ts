@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import {
   AI_REFUSALS,
   AI_SYSTEM_PROMPT,
@@ -152,9 +153,29 @@ export async function countAsksToday(userId: string, now: Date): Promise<number>
  * table of its own. `docs/OPEN-QUESTIONS.md` records what that table would
  * be for, and why a ceiling that can be overshot by a handful is still a
  * ceiling where none existed.
+ *
+ * Counted once per request (Phase 15m). The panel and the ask both want
+ * this number, and a request that draws the workspace would otherwise read
+ * the college's day twice. Nothing is cached ACROSS requests: a ceiling
+ * read from a cache is not a ceiling, which is the same reason the setting
+ * itself is read per request.
+ *
+ * The KEY is the day, not the `Date`. `cache()` compares arguments by
+ * identity, and `getHelpState` is not memoised — so the panel and the ask
+ * build their own `now` and would have missed each other's entry every
+ * time, leaving a memoisation that memoised nothing. The IST day start as a
+ * number is all the query uses and is the same value in both callers.
+ *
+ * It is also the query Phase 15m indexed. Filtering `askedAt` with no
+ * `userId` matched neither of this table's indexes, so it scanned — on
+ * every practice problem page that draws the panel, not only on an ask.
  */
+const countCollegeDay = cache(async (dayStartMs: number): Promise<number> => {
+  return db.aiAssist.count({ where: { failed: false, askedAt: { gte: new Date(dayStartMs) } } });
+});
+
 export async function countCollegeAsksToday(now: Date): Promise<number> {
-  return db.aiAssist.count({ where: { failed: false, askedAt: { gte: istDayStart(now) } } });
+  return countCollegeDay(istDayStart(now).getTime());
 }
 
 interface Material {

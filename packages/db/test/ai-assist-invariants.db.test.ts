@@ -97,6 +97,45 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     }
   });
 
+  /**
+   * Phase 15m. Phase 15j gave the college a daily allowance, so something
+   * now counts answered asks across EVERY user — and does it on every
+   * practice problem page that draws the assistant panel, not only on an
+   * ask. This table carried `(userId, problemId)` and `(userId, askedAt)`,
+   * both led by the column that query does not filter on, so it read the
+   * whole table: free in a seeded development database, and "the problem
+   * pages got slow" in March.
+   */
+  describe("the college's day can be counted without reading the table", () => {
+    it("has an index on askedAt alone", async () => {
+      const rows = await db.$queryRawUnsafe<Array<{ indexdef: string }>>(
+        `SELECT indexdef FROM pg_indexes
+          WHERE schemaname = 'public' AND tablename = 'AiAssist' AND indexname = 'AiAssist_askedAt_idx'`,
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.indexdef).toContain('"askedAt"');
+    });
+
+    it("and the planner can use it for the query the budget asks", async () => {
+      /**
+       * `enable_seqscan = off` makes a sequential scan expensive rather
+       * than impossible, so this is not a claim about the cost model on a
+       * near-empty test table — it is the question that matters: does the
+       * index COVER this predicate at all. On a table with a day's rows in
+       * it the planner picks the range scan on its own.
+       */
+      const plan = await db.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL enable_seqscan = off");
+        const rows = await tx.$queryRawUnsafe<Array<Record<string, string>>>(
+          `EXPLAIN SELECT count(*) FROM "AiAssist"
+            WHERE failed = false AND "askedAt" >= now() - interval '1 day'`,
+        );
+        return rows.map((row) => Object.values(row).join(" ")).join("\n");
+      });
+      expect(plan).toContain("AiAssist_askedAt_idx");
+    });
+  });
+
   describe("practice only", () => {
     it("accepts an answered ask in practice", async () => {
       const row = await assist();

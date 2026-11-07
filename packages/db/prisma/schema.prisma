@@ -1836,6 +1836,10 @@ model AiAssist {
 
   @@index([userId, problemId])
   @@index([userId, askedAt])
+  /// The college's day (Phase 15j/15m): counted across every user, so no
+  /// index led by userId can serve it. Also serves the 30-day groupBy on
+  /// /super/settings/ai.
+  @@index([askedAt])
 }
 
 /// Active (focused, recently typing) workspace time per user per problem:

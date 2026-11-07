@@ -291,6 +291,61 @@ describe("how much code an answer may show", () => {
 });
 
 /**
+ * The shapes a model actually uses (Phase 15m).
+ *
+ * The trimmer was built around a fenced block, which is what a model emits
+ * nine times in ten. Markdown has another way to write code — four spaces
+ * of indent — and a fence inside a list item is indented too. A guard that
+ * understands only one of those has a published way round it, so each shape
+ * is measured here rather than assumed.
+ */
+describe("every way a model can show a program", () => {
+  const program = Array.from({ length: 12 }, (_, i) => `int x${i} = ${i};`);
+  const survivors = (markdown: string) =>
+    trimOversizedCode(markdown)
+      .text.split("\n")
+      .filter((line) => /int x\d+ =/.test(line)).length;
+
+  it("a fenced block", () => {
+    expect(survivors(["Here:", "```cpp", ...program, "```"].join("\n"))).toBe(0);
+  });
+
+  it("a fence indented inside a list item", () => {
+    const nested = ["1. Try this:", "", "   ```cpp", ...program.map((l) => `   ${l}`), "   ```"].join("\n");
+    expect(survivors(nested)).toBe(0);
+  });
+
+  it("four spaces of indent, which is a code block with no fence at all", () => {
+    expect(survivors(["Here:", "", ...program.map((l) => `    ${l}`)].join("\n"))).toBe(0);
+  });
+
+  it("a tab, which markdown reads the same way", () => {
+    expect(survivors(["Here:", "", ...program.map((l) => `\t${l}`)].join("\n"))).toBe(0);
+  });
+
+  it("and three indented lines are still fine, like three fenced ones", () => {
+    const short = ["Try:", "", "    for (int i = 0; i <= n; i++) {", "      sum += a[i];", "    }"].join("\n");
+    const trimmed = trimOversizedCode(short);
+    expect(trimmed.withheld).toBe(0);
+    expect(trimmed.text).toContain("sum += a[i];");
+  });
+
+  it("does not mistake prose or a nested list for code", () => {
+    const prose = [
+      "Two things to check:",
+      "",
+      "- the loop bound, which is off by one",
+      "  - compare it with the sample",
+      "  - then with n = 3",
+      "- the accumulator, which starts at one",
+      "",
+      "Walk through it on paper.",
+    ].join("\n");
+    expect(trimOversizedCode(prose)).toEqual({ text: prose, withheld: 0 });
+  });
+});
+
+/**
  * And the other half: a student's own file cannot give the model orders
  * (Phase 15i). The draft used to be wrapped in three backticks, which a
  * draft containing three backticks ends — and after it ends, what they
