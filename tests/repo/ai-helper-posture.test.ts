@@ -222,6 +222,42 @@ describe("the API key stays in the environment", () => {
   });
 });
 
+describe("an answer is checked rather than trusted", () => {
+  /**
+   * Phase 15i. "Never a complete solution" is rule 1 of the system prompt,
+   * and a prompt is a request. The ASSISTED rule, the XP it pays and every
+   * readiness number built on unassisted solves rest on the assistant not
+   * finishing the work — so the one thing that must not quietly come back
+   * is the raw text going straight into the record and the panel.
+   */
+  it("the student's path trims the answer before it is stored or shown", () => {
+    const ask = readRepoFile("apps/web/src/lib/ai/ask.ts");
+    expect(ask).toContain("trimOversizedCode");
+    // Neither the row nor the HTML may be built from what arrived.
+    expect(ask).not.toMatch(/answer:\s*completion\.text/);
+    expect(ask).not.toMatch(/renderUntrustedMarkdown\(\s*completion\.text\s*\)/);
+  });
+
+  it("the record and the student see the same text", () => {
+    // One trim, used twice: an answer stored in a form nobody saw would
+    // make the append-only record a record of something else.
+    const ask = readRepoFile("apps/web/src/lib/ai/ask.ts");
+    expect(ask).toMatch(/const answer = trimOversizedCode\(completion\.text\)/);
+    expect(ask).toMatch(/answer:\s*answer\.text/);
+    expect(ask).toMatch(/renderUntrustedMarkdown\(answer\.text\)/);
+  });
+
+  it("the draft is quoted in a fence it cannot close", () => {
+    const shared = readRepoFile("packages/shared/src/ai-helper.ts");
+    expect(shared).toContain("function fenceFor(");
+    // A literal three-backtick fence around the draft is what let a
+    // comment in it address the model directly.
+    const builder = shared.slice(shared.indexOf("export function buildAiPrompt"));
+    expect(builder).toContain("fence,");
+    expect(builder).not.toMatch(/"```"/);
+  });
+});
+
 describe("an AI answer makes a solve assisted", () => {
   it("the finaliser reads AiAssist, and the policy says yes", () => {
     const apply = readRepoFile("apps/web/src/lib/progress/apply.ts");

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AI_HELPER_DEFAULT, AI_REFUSALS, type HelpContext } from "@recx/shared";
+import { AI_CODE_WITHHELD_NOTE, AI_HELPER_DEFAULT, AI_REFUSALS, type HelpContext } from "@recx/shared";
 
 /**
  * The AI helper's server path with a fake database and a fake provider:
@@ -228,6 +228,30 @@ describe("an answered ask", () => {
     expect(url).toBe("https://api.openai.com/v1/chat/completions");
     expect((JSON.parse(String(init.body)) as { model: string }).model).toBe("some-new-model-2026");
     expect(h.created[0]?.modelId).toBe("some-new-model-2026");
+  });
+
+  /**
+   * Phase 15i, end to end. A model that answers with a program must not be
+   * able to hand it over — and the row must say what the student was told,
+   * not what arrived, or the append-only record is a record of something
+   * else.
+   */
+  it("hands over an explanation and never a program, in the row and on the screen", async () => {
+    on();
+    tried();
+    const program = ["```cpp", "int main() {", ...Array.from({ length: 15 }, (_, i) => `  int x${i} = ${i};`), "}", "```"];
+    globalThis.fetch = answers(["Your loop is off by one. Here it is:", ...program].join("\n")) as unknown as typeof fetch;
+
+    const answer = await askAiHelperFor(USER, { problemId: PROBLEM, kind: "MISTAKE" }, "PRACTICE");
+    expect(answer.html).toContain("off by one");
+    expect(answer.html).not.toContain("int main()");
+    expect(answer.html).not.toContain("x14");
+
+    const row = h.created[0]!;
+    expect(String(row.answer)).toContain(AI_CODE_WITHHELD_NOTE);
+    expect(String(row.answer)).not.toContain("int main()");
+    // The record and the screen are the same text.
+    expect(answer.html).toContain("not shown");
   });
 
   it("stores the answer and not the student's code", async () => {

@@ -3,6 +3,7 @@ import {
   AI_REFUSALS,
   AI_SYSTEM_PROMPT,
   buildAiPrompt,
+  trimOversizedCode,
   type AiAskKind,
   type HelpContext,
 } from "@recx/shared";
@@ -95,6 +96,16 @@ export async function askAiHelperFor(userId: string, input: unknown, context: He
     throw error;
   }
 
+  /**
+   * What the model said, minus any program it decided to write (Phase 15i).
+   *
+   * Applied HERE, before the row and before the HTML, so that the record is
+   * what the student was actually told — the two can never disagree, and an
+   * answer cannot be stored in a form nobody saw. The system prompt asks
+   * for at most three lines of code; this is the same rule, enforced.
+   */
+  const answer = trimOversizedCode(completion.text);
+
   await db.aiAssist.create({
     data: {
       userId,
@@ -102,7 +113,7 @@ export async function askAiHelperFor(userId: string, input: unknown, context: He
       context: state.context,
       kind,
       modelId: runtime.model.id,
-      answer: completion.text,
+      answer: answer.text,
       failed: false,
       tokensIn: completion.tokensIn,
       tokensOut: completion.tokensOut,
@@ -112,7 +123,7 @@ export async function askAiHelperFor(userId: string, input: unknown, context: He
 
   return {
     kind,
-    html: renderUntrustedMarkdown(completion.text),
+    html: renderUntrustedMarkdown(answer.text),
     remainingToday: Math.max(0, runtime.setting.dailyPerStudent - (askedToday + 1)),
     marksAssisted: access.marksAssisted,
   };

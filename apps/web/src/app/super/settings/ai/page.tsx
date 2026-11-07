@@ -97,7 +97,9 @@ export default async function SuperAiPage() {
           <p>
             The assistant teaches; it does not finish the work. It is told, every time, never to write a complete
             solution and never more than three lines of code at once — to name the bug, or the idea the student is
-            missing, and let them write it.
+            missing, and let them write it. <strong>And it is held to that rather than asked.</strong> Every answer is
+            measured before anybody sees it: a code block longer than three lines, or a program written three lines at
+            a time, is taken out and the student is told that it was. The explanation around it is left alone.
           </p>
           <p>
             <strong>A student&apos;s own draft code leaves the college when this is on.</strong> Each question sends
