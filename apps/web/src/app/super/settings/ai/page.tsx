@@ -10,6 +10,7 @@ import {
   formatCampusTime,
 } from "@recx/shared";
 import { getAiRuntime } from "@/lib/ai/settings";
+import { foldAiUsage } from "@/lib/ai/usage";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { AiHelperForm } from "@/components/super/ai-helper-form";
@@ -41,7 +42,7 @@ export default async function SuperAiPage() {
     }),
   ]);
   const since = new Date(Date.now() - 30 * 86_400_000);
-  const [asked, failed, students] = await Promise.all([
+  const [asked, failed, students, usage] = await Promise.all([
     db.aiAssist.count({ where: { failed: false, askedAt: { gte: since } } }),
     db.aiAssist.count({ where: { failed: true, askedAt: { gte: since } } }),
     db.aiAssist.findMany({
@@ -49,7 +50,33 @@ export default async function SuperAiPage() {
       distinct: ["userId"],
       select: { userId: true },
     }),
+    /**
+     * Which models answered, and which failed (Phase 15g).
+     *
+     * A super-admin may now name any model, which is only half a decision
+     * without a way to see what the last one did. `AiAssist.modelId` has
+     * recorded the model that answered since Phase 12b and nothing read it
+     * back; with a closed catalogue of four that was almost information,
+     * and with a free field it is the feedback loop. It also survives the
+     * switch: the row from the model that was in use last week is still
+     * here next to the new one.
+     */
+    db.aiAssist.groupBy({
+      by: ["modelId", "failed"],
+      where: { askedAt: { gte: since } },
+      _count: { _all: true },
+      _max: { askedAt: true },
+    }),
   ]);
+
+  const models = foldAiUsage(
+    usage.map((row) => ({
+      modelId: row.modelId,
+      failed: row.failed,
+      count: row._count._all,
+      lastAt: row._max.askedAt,
+    })),
+  );
 
   return (
     <div className="space-y-6">
@@ -159,7 +186,7 @@ export default async function SuperAiPage() {
       </Card>
 
       <Card>
-        <CardHeader title="The last 30 days" subtitle="Questions answered, not the questions themselves." />
+        <CardHeader title="The last 30 days" subtitle="Questions answered, and by which model. Never the questions themselves." />
         <CardBody>
           <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
             <div>
@@ -175,6 +202,49 @@ export default async function SuperAiPage() {
               <dd className="inline">{students.length}</dd>
             </div>
           </dl>
+
+          {models.length > 0 ? (
+            <table className="mt-4 w-full text-left text-sm">
+              <caption className="sr-only">
+                Questions answered and failed in the last 30 days, by the model that answered
+              </caption>
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted">
+                  <th scope="col" className="py-1 pr-4 font-medium">
+                    Model
+                  </th>
+                  <th scope="col" className="py-1 pr-4 font-medium">
+                    Answered
+                  </th>
+                  <th scope="col" className="py-1 pr-4 font-medium">
+                    Failed
+                  </th>
+                  <th scope="col" className="py-1 font-medium">
+                    Last asked
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((model) => (
+                  <tr key={model.modelId} className="border-b border-border/50 last:border-0">
+                    <th scope="row" className="py-1 pr-4 font-mono text-xs font-normal">
+                      {model.modelId}
+                    </th>
+                    <td className="py-1 pr-4">{model.answered}</td>
+                    <td className="py-1 pr-4">{model.failed}</td>
+                    <td className="py-1 text-text-secondary">
+                      {model.lastAt ? formatCampusTime(model.lastAt) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="mt-4 text-text-secondary">
+              Nobody has asked yet, so there is nothing to compare. Once they have, this says which model answered and
+              how often it did not — which is the only way to tell whether a change of model was an improvement.
+            </p>
+          )}
         </CardBody>
       </Card>
     </div>
