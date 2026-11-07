@@ -67,9 +67,27 @@ export async function saveServerDraft(userId: string, input: DraftSave, now: Dat
     });
 
   if ((await update()).count > 0) return { saved: true };
-  // Nothing updated: either the stored draft is newer (a no-op), or there is none yet.
+  /**
+   * Nothing updated, and there are THREE reasons rather than two: the
+   * stored draft is newer (a no-op), there is none yet — or a concurrent
+   * first save created one in the moment since that statement began
+   * (Phase 15k).
+   *
+   * Reading a row here used to be taken as proof of the first reason, and
+   * that is how a student's newest keystrokes were dropped: two beacons
+   * race on a first save, the older one commits inside this window, and the
+   * newer one finds a row, concludes it must be newer than itself and
+   * returns a no-op without writing. Found by the Linux gate under load,
+   * never reproducible on its own, and now forced deterministically in
+   * `test/drafts-concurrency.test.ts`.
+   *
+   * So the conditional update is simply tried again — the same retry the
+   * unique-violation path below already does, and for the same reason. If
+   * the stored draft really is newer it matches nothing and the no-op
+   * stands; if it is older, this save wins, which is the rule.
+   */
   const existing = await db.codeDraft.findUnique({ where: { userId_problemId_language: key }, select: { userId: true } });
-  if (existing) return { saved: false };
+  if (existing) return { saved: (await update()).count > 0 };
   try {
     await db.codeDraft.create({ data: { ...key, source: input.source, clientUpdatedAt } });
     return { saved: true };
