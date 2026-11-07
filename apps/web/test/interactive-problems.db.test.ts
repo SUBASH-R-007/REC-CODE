@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -127,7 +128,7 @@ describe.skipIf(!ENABLED)("interactive problems against recx_test", () => {
     const problem = await db.problem.create({
       data: {
         slug: `${tag}-guess`,
-        displayCode: `REC-${Math.floor(1000 + Math.random() * 8999)}`,
+        displayCode: await freeDisplayCode(db),
         title: "Guess the number",
         difficulty: "EASY",
         status: "DRAFT",

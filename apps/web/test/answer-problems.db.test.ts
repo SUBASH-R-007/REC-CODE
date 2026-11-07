@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -104,7 +105,7 @@ describe.skipIf(!ENABLED)("output-only problems against recx_test", () => {
     const problem = await db.problem.create({
       data: {
         slug: `${tag}-hard`,
-        displayCode: `REC-${Math.floor(1000 + Math.random() * 8999)}`,
+        displayCode: await freeDisplayCode(db),
         title: "The hard instance",
         difficulty: "HARD",
         status: "DRAFT",

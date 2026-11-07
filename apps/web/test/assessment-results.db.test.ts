@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -94,7 +95,7 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
     const problem = await db.problem.create({
       data: {
         slug: `${tag}-sum`,
-        displayCode: `REC-${(Date.now() % 9000) + 1000}`,
+        displayCode: await freeDisplayCode(db),
         title: "Add them up",
         status: "PUBLISHED",
         difficulty: "EASY",

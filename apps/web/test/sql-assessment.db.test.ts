@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -77,7 +78,7 @@ describe.skipIf(!ENABLED)("a SQL problem's assessment pin, against recx_test", (
     const problem = await db.problem.create({
       data: {
         slug: `${tag}-orders`,
-        displayCode: `REC-${Math.floor(1000 + Math.random() * 8999)}`,
+        displayCode: await freeDisplayCode(db),
         title: "Who ordered the most",
         difficulty: "MEDIUM",
         status: "PUBLISHED",

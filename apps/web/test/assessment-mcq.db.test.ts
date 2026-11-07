@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -109,7 +110,7 @@ describe.skipIf(!ENABLED)("an assessment's multiple-choice questions, against re
     const problem = await db.problem.create({
       data: {
         slug: `${tag}-add`,
-        displayCode: `REC-${Math.floor(1000 + Math.random() * 8999)}`,
+        displayCode: await freeDisplayCode(db),
         title: "Add them up",
         difficulty: "EASY",
         status: "PUBLISHED",

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { JUDGE_PROTOCOL_VERSION, type ResultRequest, type TestResult, type Verdict } from "@recx/shared";
 
@@ -229,12 +230,14 @@ describe.skipIf(!ENABLED)("authoring end to end (recx_test)", () => {
 
   it("authors, fails validation on purpose, fixes, reviews, publishes r1 and r2, and keeps the old submission on r1", async () => {
     // 1. Create the draft (admin "author").
+    // Allocated before the call, which is not async (Phase 15l).
+    const displayCode = await freeDisplayCode(m.db);
     const created = ok(
       await as(author, () =>
         m.problems.createProblem({
           title: "Loud Echo",
           slug,
-          displayCode: `REC-${String(9000 + (Date.now() % 999)).padStart(4, "0")}`,
+          displayCode,
           difficulty: "EASY",
           ioMode: "STDIN",
           compareMode: "TOKEN",
