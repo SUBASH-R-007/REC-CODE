@@ -39,6 +39,56 @@ export interface AiPanelState {
   answers: AiPanelAnswer[];
 }
 
+/**
+ * What the panel says about the allowance, and what it titles the lock
+ * (Phase 15n).
+ *
+ * Two sentences that have to agree with each other. The college's ceiling
+ * (Phase 15j) made them disagree: a student with seven questions left read
+ * "7 questions left today, of 10" directly above a lock saying the
+ * assistant was resting until tomorrow. Both were true and together they
+ * were nonsense.
+ *
+ * Pure, and here rather than in the component, so that what a student is
+ * told is a thing a test can hold.
+ */
+export function aiAllowanceLine(state: Pick<AiPanelState, "refusal" | "remainingToday" | "dailyPerStudent">): string {
+  if (state.refusal === AI_REFUSALS.collegeLimit) {
+    return state.remainingToday > 0
+      ? `Your own ${state.remainingToday} question${state.remainingToday === 1 ? "" : "s"} for today are untouched — it is the college's allowance that has run out.`
+      : "The college's allowance has run out for today.";
+  }
+  return `${state.remainingToday} question${state.remainingToday === 1 ? "" : "s"} left today, of ${state.dailyPerStudent}.`;
+}
+
+/**
+ * The heading over a lock, which is not the same sentence as the lock.
+ *
+ * "Not yet" is right when a student can clear the lock by working. It is
+ * wrong when nothing they do today will open it — their own allowance is
+ * spent, or the college's — and worse when it is the college's, because it
+ * invites them to keep trying something that is not about them at all.
+ */
+export function aiLockTitle(state: Pick<AiPanelState, "refusal" | "remainingToday">): string {
+  if (state.refusal === AI_REFUSALS.collegeLimit) return "Resting until tomorrow";
+  if (state.remainingToday === 0) return "That is today's lot";
+  return "Not yet";
+}
+
+/**
+ * Whether the lock is an allowance that has run out, rather than something
+ * the student can clear by working (Phase 15n).
+ *
+ * It picks the icon, and the two cases read differently on purpose: a
+ * spent allowance comes back tomorrow, and "not yet" comes back as soon as
+ * they have had a go. Deriving it from "is there any refusal at all" would
+ * put the spent-allowance icon over a student who simply has not started —
+ * which is what the first draft of this did.
+ */
+export function aiAllowanceSpent(state: Pick<AiPanelState, "refusal" | "remainingToday">): boolean {
+  return state.remainingToday === 0 || state.refusal === AI_REFUSALS.collegeLimit;
+}
+
 export async function getAiPanelState(
   userId: string,
   problemId: string,

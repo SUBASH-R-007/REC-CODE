@@ -60,7 +60,7 @@ vi.mock("@/lib/db", () => ({ db: h.db }));
 vi.mock("@/lib/env", () => ({ env: () => h.env, isProduction: () => false }));
 
 const { askAiHelperFor, AiUnavailableError } = await import("@/lib/ai/ask");
-const { getAiPanelState } = await import("@/lib/ai/panel");
+const { aiAllowanceLine, aiAllowanceSpent, aiLockTitle, getAiPanelState } = await import("@/lib/ai/panel");
 const { askProvider, AiProviderError } = await import("@/lib/ai/provider");
 const { getAiHelperSetting, resolveAiRuntime } = await import("@/lib/ai/settings");
 
@@ -598,6 +598,60 @@ describe("what the chosen model resolves to", () => {
     const runtime = resolveAiRuntime(setting(), deployment({ hasKey: false }));
     expect(runtime.model).toBeNull();
     expect(runtime.misconfiguration).toContain("No API key");
+  });
+});
+
+/**
+ * What the panel SAYS, which has to agree with itself (Phase 15n).
+ *
+ * The college's ceiling made two true sentences into nonsense: a student
+ * with seven questions left read "7 questions left today, of 10" directly
+ * above a lock saying the assistant was resting until tomorrow.
+ */
+describe("the two sentences over the button", () => {
+  const state = (over: Record<string, unknown> = {}) => ({
+    refusal: null as string | null,
+    remainingToday: 7,
+    dailyPerStudent: 10,
+    ...over,
+  });
+
+  it("counts the student's own allowance when that is what is in play", () => {
+    expect(aiAllowanceLine(state())).toBe("7 questions left today, of 10.");
+    expect(aiAllowanceLine(state({ remainingToday: 1 }))).toBe("1 question left today, of 10.");
+    expect(aiLockTitle(state())).toBe("Not yet");
+    expect(aiLockTitle(state({ remainingToday: 0, refusal: AI_REFUSALS.dailyLimit }))).toBe("That is today's lot");
+  });
+
+  it("says whose allowance ran out when it was the college's", () => {
+    const resting = state({ refusal: AI_REFUSALS.collegeLimit });
+    const line = aiAllowanceLine(resting);
+    expect(line).toContain("untouched");
+    expect(line).toContain("the college's allowance");
+    // And never the figure that reads as a contradiction next to the lock.
+    expect(line).not.toContain("left today, of 10");
+    expect(aiLockTitle(resting)).toBe("Resting until tomorrow");
+  });
+
+  it("does not claim a student's questions are untouched when they are not", () => {
+    const both = state({ refusal: AI_REFUSALS.collegeLimit, remainingToday: 0 });
+    expect(aiAllowanceLine(both)).toBe("The college's allowance has run out for today.");
+    expect(aiAllowanceLine(both)).not.toContain("untouched");
+  });
+
+  it("marks an allowance as spent, and nothing else", () => {
+    // The icon. A student who has simply not had a go yet is not out of
+    // questions, and must not be shown the icon that says they are.
+    expect(aiAllowanceSpent(state({ refusal: AI_REFUSALS.tooEarly }))).toBe(false);
+    expect(aiAllowanceSpent(state())).toBe(false);
+    expect(aiAllowanceSpent(state({ remainingToday: 0, refusal: AI_REFUSALS.dailyLimit }))).toBe(true);
+    expect(aiAllowanceSpent(state({ refusal: AI_REFUSALS.collegeLimit }))).toBe(true);
+  });
+
+  it("is the same wording the refusal uses, not a second copy of the rule", () => {
+    // The sentence is chosen BY the refusal, so a change to one cannot
+    // leave the other behind.
+    expect(aiLockTitle(state({ refusal: "something else entirely" }))).toBe("Not yet");
   });
 });
 
