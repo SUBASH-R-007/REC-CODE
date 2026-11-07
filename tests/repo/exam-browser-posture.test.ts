@@ -631,3 +631,133 @@ describe("the development build cannot be mistaken for a release one (Phase 14k)
     }
   });
 });
+
+
+describe("what the installer is allowed to carry (Phase 15a)", () => {
+  /**
+   * `packages/shared/src/exam-browser.ts` is compiled into the Electron
+   * main process by tsup, so every import it grows is something a
+   * candidate is asked to install on their own laptop to sit an exam.
+   *
+   * This is not hypothetical. The first packaged build put 4.3 MB inside
+   * the installer -- the whole of zod, its own test suite included --
+   * because `@recx/shared` was listed as a runtime dependency, and
+   * `docs/EXAM-BROWSER.md` section 8 records it. The dependency list was
+   * fixed; nothing stopped the next person adding `import { z }` to the
+   * one shared file the browser actually imports, which would put it back
+   * with no package.json change to notice in review.
+   *
+   * The zod schema that validates the signal payload therefore lives in
+   * the web app, which is the only side that parses anything it did not
+   * write.
+   */
+  it("the protocol module the browser imports has no imports of its own", () => {
+    const text = withoutComments(readRepoFile("packages/shared/src/exam-browser.ts"));
+    const imports = [...text.matchAll(/^\s*import\s[\s\S]*?from\s*"([^"]+)"/gm)].map((m) => m[1]);
+    expect(imports, "keep this file dependency-free; see the comment in this test").toEqual([]);
+    expect(text).not.toMatch(/\brequire\s*\(/);
+  });
+
+  it("and the bundle it produces carries no validator library", () => {
+    /**
+     * The fence above is about the source; this is about what the source
+     * is allowed to mean. A transitive import is as expensive as a direct
+     * one, and `signals.ts` is the newest file to import from it.
+     */
+    const browser = withoutComments(readRepoFile("apps/exam-browser/src/signals.ts"));
+    const imports = [...browser.matchAll(/^\s*import\s[\s\S]*?from\s*"([^"]+)"/gm)].map((m) => m[1] ?? "");
+    for (const specifier of imports) {
+      expect(specifier.startsWith("@recx/shared") || specifier.startsWith("."), specifier).toBe(true);
+    }
+  });
+});
+
+describe("what the browser reports about the window (Phase 15a)", () => {
+  const signals = () => withoutComments(readRepoFile("apps/exam-browser/src/signals.ts"));
+
+  it("reports a count of screens, never anything on them", () => {
+    /**
+     * The distance between "how many screens" and "what is on them" is
+     * the distance between this product and the one `PROCTORING.md`
+     * section 5 refuses to be. A fence, because a plausible-sounding
+     * improvement is how that line gets crossed.
+     */
+    const text = signals() + main();
+    for (const forbidden of [/capturePage/, /desktopCapturer/, /getSources/, /thumbnail/i, /screenshot/i]) {
+      expect(text, String(forbidden)).not.toMatch(forbidden);
+    }
+  });
+
+  it("records nothing about which application took the focus", () => {
+    // A window title or an owning process is a record of what else the
+    // candidate was doing, which is not this application's business and
+    // is not what a focus signal is for.
+    for (const forbidden of [/getWindowTitle/, /activeWindow/i, /foregroundWindow/i, /processName/i]) {
+      expect(signals() + main(), String(forbidden)).not.toMatch(forbidden);
+    }
+  });
+
+  it("sends the signals signed, to the exam origin's fixed path", () => {
+    const text = main();
+    expect(text, "signed by this process, not by the page").toMatch(
+      /attestationHeaders\(\{\s*method: "POST"/,
+    );
+    expect(text, "no cookie is sent: the signature is the credential").toMatch(/credentials: "omit"/);
+    expect(signals()).toMatch(/EXAM_BROWSER_SIGNALS_PATH/);
+  });
+
+  it("holds a batch that failed rather than dropping it", () => {
+    // A signal lost to a flaky network is a line missing from a
+    // reviewer's timeline, and the reviewer has no way to know it is
+    // missing.
+    expect(signals()).toMatch(/unshift\(\.\.\.batch\)/);
+  });
+});
+/**
+ * The one wildcard the allowlist understands, kept where it belongs
+ * (Phase 15c).
+ *
+ * `http://localhost:*` exists because the operating system launches the
+ * registered scheme handler with none of the shell environment that
+ * `RECX_EXAM_DEV_ORIGIN` lives in, so an unpackaged run had no way to
+ * name the dev server it was started for. Loopback needs no environment.
+ *
+ * It is also the only soft edge in a file whose entire job is to be hard,
+ * so these hold the shape of it rather than trusting a comment: the
+ * release list is exact origins, the wildcards are reachable only from
+ * the unpackaged branch, and every one of them is loopback.
+ */
+describe("the loopback wildcard stays on the development side", () => {
+  const policy = () => withoutComments(readRepoFile("apps/exam-browser/src/policy.ts"));
+  const config = () => withoutComments(readRepoFile("apps/exam-browser/src/config.ts"));
+
+  it("keeps every wildcard out of the release origins", () => {
+    const list = config().slice(config().indexOf("RELEASE_ORIGINS"));
+    const end = list.indexOf("]);");
+    expect(end, "RELEASE_ORIGINS should be a closed literal").toBeGreaterThan(0);
+    expect(list.slice(0, end)).not.toContain("*");
+  });
+
+  it("declares only loopback hosts as wildcards", () => {
+    const text = policy();
+    const start = text.indexOf("LOOPBACK_DEV_ORIGINS");
+    const entries = text.slice(start, text.indexOf("]);", start)).match(/"[^"]+"/g) ?? [];
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const origin = entry.slice(1, -1);
+      expect(origin, entry).toMatch(/^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\*$/);
+    }
+  });
+
+  it("adds them on the unpackaged branch only", () => {
+    // `args.packaged ? … : […LOOPBACK_DEV_ORIGINS]`: the constant must not
+    // appear anywhere a packaged build can reach.
+    const text = policy();
+    const fn = text.slice(text.indexOf("export function allowedOrigins"));
+    const opened = fn.indexOf("): readonly string[] {");
+    const body = fn.slice(opened, fn.indexOf("\n}", opened));
+    const packagedBranch = body.slice(body.indexOf("args.packaged"), body.indexOf(":", body.indexOf("build.origins")));
+    expect(packagedBranch).not.toContain("LOOPBACK_DEV_ORIGINS");
+    expect(body).toContain("LOOPBACK_DEV_ORIGINS");
+  });
+});

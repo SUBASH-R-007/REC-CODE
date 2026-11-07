@@ -112,6 +112,32 @@ const ROUTE_EXEMPT_PREFIXES = [
    * `apps/web/test/exam-browser.test.ts` asserts each of those.
    */
   "apps/web/src/app/api/exam/browser/exchange/",
+  /**
+   * Phase 15a. The exam browser reporting what its own window did, and
+   * the SIGNATURE is the credential -- a stronger one than a session
+   * here, not a weaker one.
+   *
+   * An action guard asks "which signed-in user is this?". The honest
+   * answer on this route is that it does not matter: the question is
+   * whether the request came from the application holding the sitting
+   * key for an attempt that is still running, and only that application
+   * can answer it. Requiring a cookie as well would mean a candidate
+   * whose session expired mid-paper stopped being observed, which is
+   * exactly backwards.
+   *
+   * What stands in for a guard: the attempt is resolved from its own
+   * binding and must be IN_PROGRESS with a sitting that has not ended;
+   * the HMAC is verified over the method and the full URL under a key
+   * derived server-side from that binding; the nonce is single-use
+   * within the window and the timestamp must be inside it; the payload
+   * is a closed list of three kinds, so the route cannot write a signal
+   * a human is supposed to write; every time is clamped into the
+   * attempt; there is a ceiling per sitting; and no counter moves, so
+   * nothing here can end a candidate's paper. Every refusal is the same
+   * 204. `apps/web/test/exam-browser-signals.test.ts` asserts each of
+   * those.
+   */
+  "apps/web/src/app/api/exam/browser/signals/",
 ];
 
 const actionFiles = findFiles({ under: [ACTIONS_DIR], extensions: [".ts"] }).filter(

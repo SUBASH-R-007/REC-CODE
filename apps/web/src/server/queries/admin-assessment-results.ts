@@ -12,6 +12,7 @@ import {
   type QuestionModeration,
   type Verdict,
 } from "@recx/shared";
+import { EXAM_BROWSER_SIGNAL_KINDS } from "@recx/shared/exam-browser";
 import type { AccountStatus } from "@recx/db";
 import { scopedStudentWhere, type StudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
@@ -555,6 +556,28 @@ export interface AttemptAudit {
   };
   /** Every kind that fired, with how many times. The shape of the sitting. */
   readonly byKind: ReadonlyArray<{ readonly kind: string; readonly label: string; readonly count: number }>;
+  /**
+   * The two witnesses, side by side (Phase 15a).
+   *
+   * For the three things both the exam page and the exam browser can see,
+   * how many times each of them said so. A page's account of its own
+   * focus, fullscreen state and monitor count is falsifiable -- it is the
+   * one place a candidate can run their own JavaScript
+   * (`docs/PROCTORING.md` §2) -- and the browser's main process signs
+   * with a key the page never sees.
+   *
+   * The useful thing is not either number. It is the DIFFERENCE: a paper
+   * where the browser saw seven focus losses and the page reported none
+   * is a paper whose instrumentation was interfered with, and nothing
+   * before this could show that. Empty when the paper was not sat in the
+   * exam browser, which is most of them.
+   */
+  readonly witnesses: ReadonlyArray<{
+    readonly kind: string;
+    readonly label: string;
+    readonly page: number;
+    readonly browser: number;
+  }>;
   readonly events: readonly AuditEventRow[];
   /** True when the list below is the cap rather than everything stored. */
   readonly truncated: boolean;
@@ -562,6 +585,34 @@ export interface AttemptAudit {
 
 /** At most this many events on one page; a noisy sitting can store thousands. */
 export const AUDIT_EVENT_LIMIT = 500;
+
+/**
+ * What each witness saw, for the kinds both of them can see (Phase 15a).
+ *
+ * Only rows where at least one of the two said something, and only when
+ * the browser was there at all -- a paper sat in an ordinary browser has
+ * one witness, and a table with an empty column beside every number
+ * invites a reviewer to read "0" as a finding rather than as "not
+ * applicable".
+ */
+function witnessRows(
+  grouped: ReadonlyArray<{ kind: string; source: string; _count: { _all: number } }>,
+  label: (kind: string) => string,
+): ReadonlyArray<{ kind: string; label: string; page: number; browser: number }> {
+  const attested = grouped.some((row) => row.source === "EXAM_BROWSER");
+  if (!attested) return [];
+  const rows = new Map<string, { kind: string; label: string; page: number; browser: number }>();
+  for (const kind of EXAM_BROWSER_SIGNAL_KINDS) {
+    rows.set(kind, { kind, label: label(kind), page: 0, browser: 0 });
+  }
+  for (const row of grouped) {
+    const entry = rows.get(row.kind);
+    if (!entry) continue;
+    if (row.source === "EXAM_BROWSER") entry.browser += row._count._all;
+    else if (row.source === "CLIENT") entry.page += row._count._all;
+  }
+  return [...rows.values()];
+}
 
 /**
  * Everything recorded about one sitting (Phase 12y.4).
@@ -603,7 +654,9 @@ export async function getAttemptAudit(scope: StudentScope, attemptId: string): P
 
   const [grouped, events] = await Promise.all([
     db.proctorEvent.groupBy({
-      by: ["kind"],
+      // By source as well as kind, so the two witnesses can be compared
+      // (Phase 15a). `byKind` sums across sources, as it always did.
+      by: ["kind", "source"],
       where: { attemptId: attempt.id },
       _count: { _all: true },
     }),
@@ -644,9 +697,15 @@ export async function getAttemptAudit(scope: StudentScope, attemptId: string): P
       pastes: attempt.pasteEventCount,
       longestGapSeconds: attempt.maxHeartbeatGapSeconds,
     },
-    byKind: grouped
-      .map((row) => ({ kind: row.kind, label: label(row.kind), count: row._count._all }))
+    byKind: Object.entries(
+      grouped.reduce<Record<string, number>>((totals, row) => {
+        totals[row.kind] = (totals[row.kind] ?? 0) + row._count._all;
+        return totals;
+      }, {}),
+    )
+      .map(([kind, count]) => ({ kind, label: label(kind), count }))
       .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
+    witnesses: witnessRows(grouped, label),
     events: events.slice(0, AUDIT_EVENT_LIMIT).map((event) => ({
       kind: event.kind,
       label: label(event.kind),

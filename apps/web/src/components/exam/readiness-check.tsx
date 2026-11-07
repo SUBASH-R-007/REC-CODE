@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { DeviceCheck } from "@/components/exam/device-check";
 import { MONITORED_SIGNALS } from "@/components/exam/monitored-chip";
+import { MachineNotices } from "@/components/exam/machine-notices";
+import { clockSkew, powerState, type ClockSkew, type PowerState } from "@/lib/exam/machine-readiness";
 
 /**
  * The pre-exam readiness check (Phase 6c).
@@ -79,6 +81,9 @@ export function ReadinessCheck({
   const [scratch, setScratch] = useState("");
   const [answer, setAnswer] = useState("");
   const [networkError, setNetworkError] = useState<string | null>(null);
+  /** Phase 15b: two things about the machine, read here and sent nowhere. */
+  const [skew, setSkew] = useState<ClockSkew>({ kind: "unknown" });
+  const [power, setPower] = useState<PowerState>({ kind: "unknown" });
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
   const pass = useCallback((id: CheckId) => setPassed((state) => ({ ...state, [id]: true })), []);
@@ -112,11 +117,40 @@ export function ReadinessCheck({
         credentials: "same-origin",
       });
       if (!response.ok) throw new Error(String(response.status));
+      /**
+       * The server's clock, free, from a round trip that was happening
+       * anyway. A machine more than two minutes out cannot sit a
+       * KIOSK_RECX paper at all -- every attested request is refused on
+       * its timestamp -- and the message it would get is about a
+       * signature, which tells a candidate nothing they can act on.
+       */
+      setSkew(clockSkew(response.headers.get("date"), Date.now()));
       pass("network");
     } catch {
       setNetworkError("Could not reach the exam server. Check the network with your invigilator.");
     }
   }, [pass]);
+
+  /**
+   * The battery, if the browser will say. Read once, on mount, and never
+   * sent anywhere: a laptop at 11% is not evidence of anything, it is a
+   * reason to find a charger before the clock starts rather than after.
+   */
+  useEffect(() => {
+    let live = true;
+    const navigatorWithBattery = navigator as Navigator & {
+      getBattery?: () => Promise<{ charging: boolean; level: number }>;
+    };
+    navigatorWithBattery
+      .getBattery?.()
+      .then((battery) => {
+        if (live) setPower(powerState(battery));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const ready = Object.values(passed).every(Boolean) && consented;
 
@@ -188,6 +222,7 @@ export function ReadinessCheck({
             Test the connection
           </button>
           {networkError ? <p className="mt-2 text-xs text-danger">{networkError}</p> : null}
+          <MachineNotices skew={skew} power={power} />
         </li>
 
         {/* 4. A one-line question, answered. */}

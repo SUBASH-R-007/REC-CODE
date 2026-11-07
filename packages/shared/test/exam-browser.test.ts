@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  EXAM_BROWSER_LOOPBACK_HOSTS,
   EXAM_BROWSER_PROTOCOL_VERSION,
   EXAM_BROWSER_REFUSALS,
   EXAM_BROWSER_REFUSAL_MESSAGES,
@@ -344,6 +345,100 @@ describe("the command line the application refuses to start with", () => {
   it("covers the categories the posture document names", () => {
     for (const expected of ["remote-debugging-port", "load-extension", "disable-web-security", "inspect", "user-data-dir"]) {
       expect(EXAM_BROWSER_REFUSED_SWITCHES).toContain(expected);
+    }
+  });
+});
+/**
+ * The one wildcard the allowlist understands (Phase 15c).
+ *
+ * `http://localhost:*` means any port on this machine, and it exists
+ * because the operating system launches the registered handler with none
+ * of the environment that `RECX_EXAM_DEV_ORIGIN` lives in. Loopback is the
+ * only thing a run can know about itself without being told.
+ *
+ * A wildcard in a parser that stands between a signed binary and a phishing
+ * window is worth being paranoid about, so what is tested here is mostly
+ * what it REFUSES: a wildcard on any host that is not loopback, a scheme
+ * that does not match, and a host that merely ends in a loopback name.
+ */
+describe("a loopback wildcard in the allowlist", () => {
+  const TOKEN = "t".repeat(48);
+  const launch = (origin: string, allowed: readonly string[]) =>
+    parseExamBrowserLaunchUrl(examBrowserLaunchUrl({ origin, token: TOKEN }), allowed);
+
+  const LOOPBACK = Object.freeze(["http://localhost:*", "http://127.0.0.1:*", "http://[::1]:*"]);
+
+  it("covers any port on this machine", () => {
+    for (const origin of [
+      "http://localhost:3000",
+      "http://localhost:80",
+      "http://127.0.0.1:5173",
+      "http://[::1]:8080",
+    ]) {
+      // Through `URL`, so a default port normalises away: :80 is
+      // `http://localhost`, which is the comparison the parser makes too.
+      expect(launch(origin, LOOPBACK), origin).toEqual({
+        ok: true,
+        origin: new URL(origin).origin,
+        token: TOKEN,
+      });
+    }
+  });
+
+  it("refuses a wildcard on a host that is not loopback, however it is spelled", () => {
+    // The restriction is in the parser rather than only in the caller, so
+    // a list assembled somewhere else cannot widen anything either.
+    for (const entry of [
+      "https://code.rec.edu.in:*",
+      "http://evil.test:*",
+      "http://notlocalhost:*",
+      "http://localhost.evil.test:*",
+      "http://0.0.0.0:*",
+      "http://10.0.0.1:*",
+    ]) {
+      expect(launch("https://code.rec.edu.in", [entry]), entry).toEqual({ ok: false, reason: "bad_origin" });
+      expect(launch("http://evil.test:3000", [entry]), entry).toEqual({ ok: false, reason: "bad_origin" });
+    }
+  });
+
+  it("does not let a loopback wildcard reach anything but loopback", () => {
+    for (const origin of [
+      "https://code.rec.edu.in",
+      "http://localhost.evil.test:3000",
+      "http://evil.test:3000",
+      "http://127.0.0.2:3000",
+    ]) {
+      expect(launch(origin, LOOPBACK), origin).toEqual({ ok: false, reason: "bad_origin" });
+    }
+  });
+
+  it("holds the scheme, so an https page cannot borrow an http wildcard", () => {
+    expect(launch("https://localhost:3000", LOOPBACK)).toEqual({ ok: false, reason: "bad_origin" });
+  });
+
+  it("leaves an ordinary entry an exact origin comparison", () => {
+    // The `:*` suffix is the whole trigger: without it nothing changes,
+    // including for a loopback host.
+    expect(launch("http://localhost:3001", ["http://localhost:3000"])).toEqual({ ok: false, reason: "bad_origin" });
+    expect(launch("http://localhost:3000", ["http://localhost:3000"])).toEqual({
+      ok: true,
+      origin: "http://localhost:3000",
+      token: TOKEN,
+    });
+  });
+
+  it("still refuses a bad token on a loopback origin", () => {
+    expect(parseExamBrowserLaunchUrl("recx-exam://launch?origin=http://localhost:3000&token=x", LOOPBACK)).toEqual({
+      ok: false,
+      reason: "bad_token",
+    });
+  });
+
+  it("spells the loopback hosts the way URL spells them", () => {
+    // An IPv6 literal keeps its brackets in `hostname`; a list written
+    // without them would silently match nothing.
+    for (const host of EXAM_BROWSER_LOOPBACK_HOSTS) {
+      expect(new URL(`http://${host}:3000`).hostname, host).toBe(host);
     }
   });
 });

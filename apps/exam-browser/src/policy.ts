@@ -1,4 +1,8 @@
-import { RECX_SESSION_COOKIE, refusedSwitches } from "@recx/shared/exam-browser";
+import {
+  EXAM_BROWSER_LOOPBACK_HOSTS,
+  RECX_SESSION_COOKIE,
+  refusedSwitches,
+} from "@recx/shared/exam-browser";
 import { DEV_ORIGIN_VARIABLE, RELEASE_BUILD, RELEASE_ORIGINS, type BuildIdentity } from "./config";
 
 /**
@@ -11,6 +15,18 @@ import { DEV_ORIGIN_VARIABLE, RELEASE_BUILD, RELEASE_ORIGINS, type BuildIdentity
  * what a permission request gets. `main.ts` is wiring that calls into this
  * and does nothing else of consequence.
  */
+
+/**
+ * What an unpackaged run accepts with no environment at all: a server on
+ * this machine, on any port. Written as entries rather than as a special
+ * case in the caller so the whole allowlist stays one list of strings that
+ * a refusal dialog can print and a test can read.
+ */
+export const LOOPBACK_DEV_ORIGINS: readonly string[] = Object.freeze([
+  "http://localhost:*",
+  "http://127.0.0.1:*",
+  "http://[::1]:*",
+]);
 
 /**
  * The origins this build may be launched against.
@@ -34,6 +50,25 @@ import { DEV_ORIGIN_VARIABLE, RELEASE_BUILD, RELEASE_ORIGINS, type BuildIdentity
  * An unpackaged run (`pnpm dev`) is a developer at a terminal, so it reads
  * `RECX_EXAM_DEV_ORIGIN` and saves them a rebuild.
  *
+ *   3. **An unpackaged run also accepts loopback, on any port** (Phase
+ *      15c), and only an unpackaged run does. The scheme is registered
+ *      with the operating system, and an OS launch carries none of the
+ *      developer's shell environment -- so `RECX_EXAM_DEV_ORIGIN` is
+ *      empty in exactly the case it was added for. Pressing Launch on
+ *      one's own dev server produced the candidate's "not allowed to go"
+ *      dialog, from a build that was doing its job. Loopback needs
+ *      nothing to name it.
+ *
+ *      Three things keep this from reaching a packaged build:
+ *      `LOOPBACK_DEV_ORIGINS` is added only on the unpackaged branch; the
+ *      `:*` syntax is refused for any host that is not loopback
+ *      (`parseExamBrowserLaunchUrl`); and a wildcard cannot be compiled
+ *      into a build at all, because `readBakedBuild` puts every baked
+ *      origin through `new URL(...)`, which throws on a `*` port. An
+ *      unpackaged run is a checkout on the machine, and loopback is that
+ *      same machine: there is nothing here an attacker reaches that they
+ *      did not already have.
+ *
  * `RELEASE_ORIGINS` is always in the list. A development build is a
  * superset, never a replacement: a build that could reach a laptop but not
  * the real deployment would be one nobody could test a real launch with.
@@ -48,13 +83,25 @@ export function allowedOrigins(args: {
     ? build.channel === "development"
       ? build.origins
       : []
-    : originIn(args.environment?.[DEV_ORIGIN_VARIABLE]);
+    : [
+        ...originIn(args.environment?.[DEV_ORIGIN_VARIABLE]).filter((origin) => !isLoopbackOrigin(origin)),
+        ...LOOPBACK_DEV_ORIGINS,
+      ];
 
   if (extra.length === 0) return RELEASE_ORIGINS;
   // Deduplicated so a development origin that is already a release origin
   // does not appear twice in a message a candidate might be shown.
   const seen = new Set(RELEASE_ORIGINS);
   return Object.freeze([...extra.filter((origin) => !seen.has(origin)), ...RELEASE_ORIGINS]);
+}
+
+/** Is this origin a server on this machine, and so already covered by `LOOPBACK_DEV_ORIGINS`? */
+function isLoopbackOrigin(value: string): boolean {
+  try {
+    return EXAM_BROWSER_LOOPBACK_HOSTS.includes(new URL(value).hostname);
+  } catch {
+    return false;
+  }
 }
 
 /** One origin from an environment value, or none. Unreadable is none, never a throw. */

@@ -16,6 +16,7 @@ import {
   startupDecision,
 } from "./policy";
 import { attestationHeaders, heldSitting, holdSitting, releaseSitting, type Sitting } from "./sitting";
+import { SignalQueue } from "./signals";
 
 /**
  * REC Exam Browser — the main process (Phase 14c).
@@ -103,6 +104,47 @@ const examSession = () => session.fromPartition(EXAM_PARTITION, { cache: false }
 let mainWindow: BrowserWindow | null = null;
 /** Set once the candidate has confirmed they are leaving, so the close guard stands aside. */
 let closing = false;
+
+/**
+ * What this window saw, on its way to the server (Phase 15a).
+ *
+ * The page reports its own focus, its own fullscreen state and its own
+ * monitor count, and `docs/PROCTORING.md` section 2 says all three are
+ * falsifiable -- the exam page is the one place a candidate can run their
+ * own JavaScript. This process signs with a key the page never sees, so
+ * what it says can be neither forged nor silenced by a script in the
+ * window. Same vocabulary, different witness; `signals.ts` holds the
+ * queue and says what it refuses to record.
+ */
+const signals = new SignalQueue({
+  startedAtMs: Date.now(),
+  now: () => Date.now(),
+  origin: () => heldSitting()?.origin ?? null,
+  onError: (name) => console.error("[exam-browser] could not report what the window saw:", name),
+  sink: {
+    post: async (url, body) => {
+      const sitting = heldSitting();
+      if (!sitting) return false;
+      /**
+       * Signed here rather than through `onBeforeSendHeaders`, which only
+       * sees requests made by the renderer's session. This one is the
+       * main process speaking for itself, which is the whole point of it.
+       */
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...attestationHeaders({ method: "POST", url, sitting }),
+        },
+        body,
+        // No cookies in either direction: the signature is the credential.
+        credentials: "omit",
+        redirect: "error",
+      });
+      return response.ok;
+    },
+  },
+});
 /** Set once, by the first launch URL we successfully exchange. */
 let origins: readonly string[] = [];
 
@@ -223,11 +265,16 @@ function createWindow(origin: string): BrowserWindow {
    * somebody else's window.
    */
   window.on("blur", () => {
+    // Recorded before the window is put back, so the duration is how long
+    // the candidate was actually away rather than how long we took.
+    signals.focusLost();
     if (window.isDestroyed()) return;
     window.showInactive();
     window.setAlwaysOnTop(true, "screen-saver");
   });
+  window.on("focus", () => signals.focusRestored());
   window.on("leave-full-screen", () => {
+    signals.note("FULLSCREEN_EXIT");
     if (!window.isDestroyed()) window.setFullScreen(true);
   });
 
@@ -382,12 +429,35 @@ async function openSitting(launchUrl: string): Promise<void> {
   }
 
   if (!mainWindow) mainWindow = createWindow(outcome.sitting.origin);
-  const displays = displayReport(screen.getAllDisplays().length);
-  if (displays.worthReporting) {
-    // Reported, never refused: PROCTORING.md §3 holds for everything this
-    // application sees, so an extra screen is a line a reviewer reads.
-    console.warn(`[exam-browser] ${displays.extra} display(s) beyond the primary`);
-  }
+
+  /**
+   * The displays, counted now and watched afterwards (Phase 15a).
+   *
+   * Until now this was a line in a console nobody can open. The count
+   * reaching the server matters for two reasons the readiness check
+   * cannot cover: `screen.isExtended` in a page is Chromium-only and easy
+   * to falsify (`docs/EXAM-BROWSER.md` §3), and a monitor plugged in
+   * twenty minutes after the clock started is exactly the case the
+   * readiness check is blind to by construction.
+   *
+   * Reported, never refused. `docs/PROCTORING.md` §3 holds for everything
+   * this application sees: an extra screen is a line a reviewer reads.
+   */
+  const countDisplays = () => screen.getAllDisplays().length;
+  let lastDisplayCount = countDisplays();
+  if (displayReport(lastDisplayCount).worthReporting) signals.displays(lastDisplayCount);
+
+  const watchDisplays = () => {
+    const count = countDisplays();
+    if (count === lastDisplayCount) return;
+    lastDisplayCount = count;
+    // Every change, including going back to one: a reviewer reading "two
+    // screens" without "and then one again" is reading half of it.
+    signals.displays(count);
+  };
+  screen.on("display-added", watchDisplays);
+  screen.on("display-removed", watchDisplays);
+  signals.start();
 
   await mainWindow.loadURL(`${outcome.sitting.origin}${readinessPath(outcome.sitting.assessmentSlug)}`);
 }
@@ -436,8 +506,23 @@ app.on("open-url", (event, url) => {
 ipcMain.handle("recx:version", () => APP_VERSION);
 ipcMain.handle("recx:displays", () => screen.getAllDisplays().length);
 ipcMain.on("recx:finish", () => {
-  releaseSitting();
-  app.quit();
+  /**
+   * The last flush, before the key is forgotten.
+   *
+   * It is awaited rather than fired and forgotten: after `releaseSitting`
+   * there is nothing left to sign with, so a batch still in the queue can
+   * never be sent. A paper handed in while the window was away still
+   * carries the fact that it was away.
+   */
+  signals.closeOpenFocusLoss();
+  void signals
+    .flush()
+    .catch(() => undefined)
+    .finally(() => {
+      signals.stop();
+      releaseSitting();
+      app.quit();
+    });
 });
 
 app.whenReady().then(async () => {
@@ -485,6 +570,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  // Nothing is sent from here: `will-quit` does not wait, and a promise
+  // started now would be cut off mid-flight. The orderly path is
+  // `recx:finish` above; this is the one that guarantees the key is gone.
+  signals.stop();
   releaseSitting();
   clipboard.clear();
 });

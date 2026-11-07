@@ -85,22 +85,26 @@ describe.skipIf(!ENABLED)("a KIOSK_RECX sitting, against recx_test", () => {
     return { sittingId: result.sittingId, sittingKey: result.sittingKey };
   }
 
-  /** A start request carrying the attestation a real exam browser would send. */
-  function signedRequest(sitting: { sittingId: string; sittingKey: string }): Request {
+  /** A request carrying the attestation a real exam browser would send. */
+  function signedFor(
+    sitting: { sittingId: string; sittingKey: string },
+    options: { url?: string; body?: unknown; key?: string } = {},
+  ): Request {
+    const url = options.url ?? START_URL;
     const nonce = randomBytes(16).toString("base64url");
     const timestamp = Date.now();
-    const signature = createHmac("sha256", sitting.sittingKey)
+    const signature = createHmac("sha256", options.key ?? sitting.sittingKey)
       .update(
         shared.examBrowserSigningInput({
           method: "POST",
-          url: START_URL,
+          url,
           nonce,
           timestamp,
           sittingId: sitting.sittingId,
         }),
       )
       .digest("hex");
-    return new Request(START_URL, {
+    return new Request(url, {
       method: "POST",
       headers: {
         [shared.RECX_PROTOCOL_HEADER]: String(shared.EXAM_BROWSER_PROTOCOL_VERSION),
@@ -109,9 +113,13 @@ describe.skipIf(!ENABLED)("a KIOSK_RECX sitting, against recx_test", () => {
         [shared.RECX_NONCE_HEADER]: nonce,
         [shared.RECX_TIMESTAMP_HEADER]: String(timestamp),
         [shared.RECX_SIGNATURE_HEADER]: signature,
+        ...(options.body === undefined ? {} : { "content-type": "application/json" }),
       },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     });
   }
+
+  const signedRequest = (sitting: { sittingId: string; sittingKey: string }) => signedFor(sitting);
 
   async function clearSittings(): Promise<void> {
     await db.$executeRawUnsafe(
@@ -381,6 +389,142 @@ describe.skipIf(!ENABLED)("a KIOSK_RECX sitting, against recx_test", () => {
     // The sitting row itself stays: which browser sat which paper is part
     // of the record of the sitting.
     expect(await db.examBrowserSitting.count({ where: { id: sitting.sittingId } })).toBe(1);
+  });
+
+  // ── What the browser itself reports (Phase 15a) ────────────────────────
+
+  /**
+   * The signals the exam browser sends about its own window, end to end:
+   * the real route, a real signature, a real attempt, and then the rows.
+   *
+   * These exist because the page's account of its own focus, fullscreen
+   * state and monitor count is falsifiable -- the exam page is the one
+   * place a candidate can run their own JavaScript. A unit test can show
+   * the handler parses a payload; only this can show that a correctly
+   * signed request from a bound sitting lands in `ProctorEvent`, that a
+   * wrong one does not, and that neither of them moves a counter that
+   * could end somebody's paper.
+   */
+  const SIGNALS_URL = "https://code.rec.edu.in/api/exam/browser/signals";
+  const BODY = {
+    signals: [
+      { kind: "FOCUS_LOSS", atMs: 1_000, durationMs: 90_000 },
+      { kind: "MULTI_MONITOR", atMs: 2_000, displays: 2 },
+    ],
+  };
+
+  async function startedSitting(): Promise<{ sittingId: string; sittingKey: string; attemptId: string }> {
+    const sitting = await liveSitting(studentId);
+    const result = await start.startOrResumeAttempt({
+      request: signedRequest(sitting),
+      slug: tag,
+      userId: studentId,
+      sessionId: null,
+    });
+    if (!result.ok) throw new Error(`start failed: ${result.message}`);
+    const attempt = await db.assessmentAttempt.findFirstOrThrow({
+      where: { assessmentId, userId: studentId },
+      select: { id: true },
+    });
+    return { ...sitting, attemptId: attempt.id };
+  }
+
+  const attested = (attemptId: string) =>
+    db.proctorEvent.findMany({
+      where: { attemptId, source: "EXAM_BROWSER" },
+      orderBy: { atMs: "asc" },
+      select: { kind: true, source: true, clientSeq: true, severity: true, atMs: true, durationMs: true, meta: true },
+    });
+
+  it("records what a correctly signed browser says about its own window", async () => {
+    const sitting = await startedSitting();
+    const route = await import("@/app/api/exam/browser/signals/route");
+    const response = await route.POST(signedFor(sitting, { url: SIGNALS_URL, body: BODY }));
+
+    expect(response.status).toBe(204);
+    const rows = await attested(sitting.attemptId);
+    expect(rows.map((r) => r.kind)).toEqual(["FOCUS_LOSS", "MULTI_MONITOR"]);
+    expect(rows[0]).toMatchObject({ source: "EXAM_BROWSER", clientSeq: null, severity: "LOW", durationMs: 90_000 });
+    expect(rows[1]).toMatchObject({ severity: "INFO", meta: { displays: 2 } });
+  });
+
+  it("moves no counter on the attempt, so a second witness cannot end a paper", async () => {
+    /**
+     * The page reports the same alt-tab. If the browser's report were
+     * counted as well, every assessment's configured focus limit would
+     * quietly halve -- a candidate allowed three warnings would get one
+     * and a half, in a hall, with nothing on any screen to explain it.
+     */
+    const sitting = await startedSitting();
+    const before = await db.assessmentAttempt.findUniqueOrThrow({
+      where: { id: sitting.attemptId },
+      select: { blurEventCount: true, fullscreenExitCount: true, pasteEventCount: true },
+    });
+    const route = await import("@/app/api/exam/browser/signals/route");
+    await route.POST(
+      signedFor(sitting, {
+        url: SIGNALS_URL,
+        body: { signals: [{ kind: "FOCUS_LOSS", atMs: 1, durationMs: 600_000 }] },
+      }),
+    );
+    const after = await db.assessmentAttempt.findUniqueOrThrow({
+      where: { id: sitting.attemptId },
+      select: { blurEventCount: true, fullscreenExitCount: true, pasteEventCount: true },
+    });
+    expect(after).toEqual(before);
+    expect(await attested(sitting.attemptId)).toHaveLength(1);
+  });
+
+  it("records nothing for a signature made with the wrong key", async () => {
+    // The whole value of these signals is that the page cannot write
+    // them. A page that could reach this route with a guess would be a
+    // page that could forge the one witness it does not control.
+    const sitting = await startedSitting();
+    const route = await import("@/app/api/exam/browser/signals/route");
+    const response = await route.POST(
+      signedFor(sitting, { url: SIGNALS_URL, body: BODY, key: "not-the-sitting-key" }),
+    );
+    expect(response.status, "the refusal looks exactly like the acceptance").toBe(204);
+    expect(await attested(sitting.attemptId)).toHaveLength(0);
+  });
+
+  it("records nothing once the sitting has ended", async () => {
+    const sitting = await startedSitting();
+    await browser.endExamBrowserSitting(sitting.sittingId);
+    const route = await import("@/app/api/exam/browser/signals/route");
+    const response = await route.POST(signedFor(sitting, { url: SIGNALS_URL, body: BODY }));
+    expect(response.status).toBe(204);
+    expect(await attested(sitting.attemptId)).toHaveLength(0);
+  });
+
+  it("records nothing for a payload it does not accept", async () => {
+    const sitting = await startedSitting();
+    const route = await import("@/app/api/exam/browser/signals/route");
+    for (const body of [
+      { signals: [{ kind: "INVIGILATOR_NOTE", atMs: 0 }] },
+      { signals: [{ kind: "EXTERNAL_PASTE", atMs: 0, size: 900 }] },
+      { signals: [] },
+      { nonsense: true },
+    ]) {
+      const response = await route.POST(signedFor(sitting, { url: SIGNALS_URL, body }));
+      expect(response.status, JSON.stringify(body)).toBe(204);
+    }
+    expect(await attested(sitting.attemptId)).toHaveLength(0);
+  });
+
+  it("clamps a time from the candidate's machine into the attempt", async () => {
+    const sitting = await startedSitting();
+    const route = await import("@/app/api/exam/browser/signals/route");
+    await route.POST(
+      signedFor(sitting, {
+        url: SIGNALS_URL,
+        body: { signals: [{ kind: "FULLSCREEN_EXIT", atMs: 23 * 60 * 60_000 }] },
+      }),
+    );
+    const rows = await attested(sitting.attemptId);
+    expect(rows).toHaveLength(1);
+    // The attempt started seconds ago, so a claim of 23 hours cannot survive.
+    expect(rows[0]!.atMs).toBeLessThan(60_000);
   });
 
   it("is idempotent, so two things finishing one sitting keep the first time", async () => {

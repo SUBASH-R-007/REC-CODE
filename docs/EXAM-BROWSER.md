@@ -97,6 +97,45 @@ because the rest of that list is unchanged.
 * **The clipboard can be emptied**, at the start of a sitting and at the
   end of it. Emptying is not reading, and nothing here ever asks what was
   in it (§4).
+* **It is a second witness, and an unsuppressable one** (Phase 15a). This
+  is the one on the list that changes what a reviewer can know rather
+  than what a candidate can do.
+
+  The exam page already reports when it loses focus, when it leaves full
+  screen and how many screens it thinks there are. `PROCTORING.md` §2 is
+  explicit that all three are falsifiable, and the reason is structural:
+  the exam page is the one place in this product a candidate can run
+  their own JavaScript — the console is gone, but a paste into an editor
+  component runs in the same world. A candidate who patches the page's
+  event client silences every one of those signals, and nothing before
+  this would show it.
+
+  The browser's main process signs with a key that lives in the main
+  process and never crosses the preload (§4), so it reports the same
+  three things over a channel the page cannot forge and — the part that
+  matters more — cannot silence. They arrive as ordinary `ProctorEvent`
+  rows with `source` `EXAM_BROWSER`, the same kinds as the page's, and
+  the reviewer's screen puts the two counts side by side.
+
+  **The useful thing is the difference, not either number.** A sitting
+  where the browser saw seven focus losses and the page reported none is
+  a sitting whose instrumentation was interfered with. That is a question
+  for a person, which is the only thing this product ever does with a
+  signal (`PROCTORING.md` §3).
+
+  Three rules keep it safe to add to a pipeline that already works. The
+  kinds are a closed list of three, so the endpoint cannot write a signal
+  a human is supposed to write. Nothing it records moves a counter: the
+  focus-warning policy can end a paper, the page reports the same
+  alt-tab, and counting both would quietly halve every assessment's
+  configured limit. And the rows carry no `clientSeq`, because a gap in
+  the page's monotonic sequence means `SEQUENCE_GAP` and must go on
+  meaning it.
+
+  What it does **not** record, and a fence checks each one: nothing about
+  what is on a screen, nothing about which application took the focus,
+  and nothing about which key was pressed. A count, a duration and a
+  kind.
 * **The window can hold the front of the screen** (Phase 14j). Kiosk as
   well as fullscreen, always-on-top at the highest level Electron offers,
   visible on every virtual desktop, not minimisable or resizable, put back
@@ -311,6 +350,22 @@ it.
    the order of the three writes cannot drift between the web app and the
    scheduler.
 
+**The timestamp has a cost, and the readiness check pays it** (Phase 15b).
+A machine whose clock is more than `EXAM_BROWSER_SKEW_TOLERANCE_MS` out
+cannot sit a `KIOSK_RECX` paper at all: every request it signs is refused
+on its timestamp, and the message the candidate reads is about a
+signature, which tells them nothing they can act on. So the readiness
+check now measures it, from the `Date` header of the round trip it was
+already making, and says so in words — *"this machine's clock is four
+minutes fast"* — with a softer warning well before the limit, because a
+clock drifting towards it during a three-hour paper fails in the middle.
+
+It does not block the Start button, and that is deliberate. A candidate on
+a locked-down lab image may not be able to change the clock, and a
+readiness check that trapped them would be worse than the problem it is
+warning about. It says what will happen and lets them decide, which is the
+stance everywhere else in this product.
+
 **What this buys, exactly:** a key extracted from one sitting is worth that
 one sitting, which the server is already watching, rather than every paper
 the college sets this term. Replay is bounded by the nonce and the
@@ -417,11 +472,27 @@ Written here so they are built with the application rather than after it.
   There are two ways to point the application at a laptop and neither
   touches what a candidate installs:
 
-  * `RECX_EXAM_DEV_ORIGIN=http://localhost:3000 pnpm --filter
-    @recx/exam-browser dev` — an unpackaged run. It registers the scheme
-    to itself while it runs, so pressing **Launch** on a development
-    server opens *it* rather than any installed copy. This is the one to
-    reach for.
+  * `pnpm --filter @recx/exam-browser dev` — an unpackaged run. It
+    registers the scheme to itself while it runs, so pressing **Launch**
+    on a development server opens *it* rather than any installed copy.
+    This is the one to reach for. It accepts **loopback on any port**
+    without being told (Phase 15c), and `RECX_EXAM_DEV_ORIGIN` is still
+    there for a dev server that is not on this machine.
+
+    Loopback is taken without being told because the alternative did not
+    work. The scheme is registered *with the operating system*, and an OS
+    launch carries none of the shell environment the variable lives in —
+    so `RECX_EXAM_DEV_ORIGIN` was empty in exactly the situation it was
+    added for, and pressing Launch gave the candidate's *"this launch
+    pointed somewhere this exam browser is not allowed to go"* from a
+    build that was doing its job. The allowlist understands one wildcard,
+    `http://localhost:*`, and three things keep it on this side of the
+    line: it is added only on the unpackaged branch; the parser refuses
+    `:*` for any host that is not loopback, so `https://anything.test:*`
+    matches nothing; and it cannot be compiled into a build at all,
+    because every baked origin goes through `new URL(...)`, which throws
+    on a `*` port. An unpackaged run is a checkout on the machine, and
+    loopback is that same machine.
   * `pnpm --filter @recx/exam-browser release:dev` — a real installer, for
     when the thing being tested *is* the install: the NSIS package, the
     system-wide registration, a cold start from a Launch button.
@@ -536,3 +607,6 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 14j | The window holds the front of the screen and swallows the shortcuts that leave it — and §3 says plainly what that is not. |
 | 14k | A development build channel, so a laptop can be pointed at without a release build ever accepting anything new (§8). |
 | 14l | The installer download resumes: `Range`, `206`, `416` and a `HEAD` that costs a `stat` (§8). |
+| 15a | The browser becomes a second witness: attested `FOCUS_LOSS`, `FULLSCREEN_EXIT` and `MULTI_MONITOR` the page cannot silence, and a reviewer's screen that compares the two (§3). |
+| 15b | The readiness check measures the two things that end a sitting for reasons unrelated to cheating: a clock outside the attestation's tolerance, and a laptop on battery (§5). |
+| 15c | An unpackaged run reaches loopback on any port with no environment at all, because an OS launch has none — the gap that made §8's development origin unusable through the very path it was for. |

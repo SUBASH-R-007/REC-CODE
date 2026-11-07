@@ -1224,6 +1224,26 @@ export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
    */
   "app/api/exam/browser/exchange/route.ts#POST",
   /**
+   * Phase 15a: REC Exam Browser reporting what its own window did. Not
+   * reachable from the exam page and not opened by a session -- the
+   * SIGNATURE is the credential, and here that is a stronger statement
+   * than a cookie, not a weaker one. A cookie proves somebody is signed
+   * in; an HMAC over this URL under the key of a sitting bound to a live
+   * attempt proves the request came from the application holding that
+   * sitting, which is the only thing worth proving about a signal whose
+   * entire value is that the page cannot forge it. Requiring a session as
+   * well would mean a candidate whose session expired mid-paper stopped
+   * being observed.
+   *
+   * What stands in for a guard: the attempt is resolved from its own
+   * binding and must be IN_PROGRESS with a sitting that has not ended;
+   * the nonce is single-use and the timestamp must be inside the window;
+   * the payload is a closed list of three kinds; every time is clamped
+   * into the attempt; there is a ceiling per sitting; no counter moves,
+   * so nothing here can end a paper; and every refusal is the same 204.
+   */
+  "app/api/exam/browser/signals/route.ts#POST",
+  /**
    * Phase 14i: the REC Exam Browser installer. Unauthenticated for the
    * same reason the page that links to it is: a candidate setting up a
    * laptop the evening before a paper may be on a machine they have never

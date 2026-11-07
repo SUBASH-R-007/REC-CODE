@@ -81,6 +81,25 @@ in the room addresses it.
 candidate's own browser. Flag counts are therefore **not evidence of guilt**,
 and an empty report is **not a clearance**.
 
+*The one qualification, added in Phase 15a, and it is narrow.* On a paper
+sat in REC Exam Browser, three of these signals — focus loss, leaving full
+screen, and the number of screens — arrive twice: once from the page, and
+once from the application's own main process, which signs with a key the
+page never sees (`EXAM-BROWSER.md` §3). The second copy is still self-
+reported in the sense that matters — it comes from a machine the candidate
+owns and could in principle run under a debugger — but it is **not
+suppressible by the page**, which is where the realistic interference
+happens, because the exam page is the one place in this product a candidate
+can run their own JavaScript.
+
+So on those three, and only those three, and only in that browser, a
+**disagreement between the two witnesses is itself evidence**: a sitting
+where the application saw the window leave and the page reported nothing is
+a sitting whose instrumentation did not report what happened. It is still
+evidence for a person. Nothing above changes: the signal does not become a
+verdict by having a better source, an empty report is still not a
+clearance, and §3 holds.
+
 **Typing-cadence analysis cannot tell cheating from legitimate behaviour.**
 Bursts of fast, steady input look the same whether they come from a
 transcribed answer or from fast typing, editor autocomplete, snippets,

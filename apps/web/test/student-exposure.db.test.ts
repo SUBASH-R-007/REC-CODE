@@ -1145,6 +1145,28 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       status: [404],
     },
     /**
+     * Phase 15a. The exam browser reporting what its own window did. The
+     * sweep calls it as a signed-in student with no attestation at all,
+     * which is the case that matters here: the exam page runs in the
+     * candidate's own browser, and if a page script could reach this
+     * route it could forge the one class of signal that exists precisely
+     * because a page cannot forge it.
+     *
+     * 204 and nothing else, whatever happens. The route tells a caller
+     * nothing -- not whether a sitting exists, not whether it is bound,
+     * not whether a signature was wrong -- so there is no canary to leak
+     * and no oracle to probe.
+     */
+    "api/exam/browser/signals/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/exam/browser/signals", {
+          method: "POST",
+          json: { signals: [{ kind: "FOCUS_LOSS", atMs: 0, durationMs: 60_000 }] },
+        }),
+      ),
+      status: [204],
+    },
+    /**
      * Phase 14i. The installer. Public by design -- a candidate setting up
      * a laptop the evening before a paper has often not signed in on it --
      * so what the sweep checks is the refusal, which is what this

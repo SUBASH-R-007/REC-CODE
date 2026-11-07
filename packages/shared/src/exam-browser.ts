@@ -361,6 +361,59 @@ export type LaunchParse =
  * `https://exam.college.edu.evil.test` does not match
  * `https://exam.college.edu`.
  */
+/**
+ * Hostnames that are this machine and cannot be anything else.
+ *
+ * Spelled the way `URL` spells them: an IPv6 literal keeps its brackets in
+ * `hostname`, so `[::1]` is the form a comparison will actually see.
+ */
+export const EXAM_BROWSER_LOOPBACK_HOSTS: readonly string[] = Object.freeze([
+  "localhost",
+  "127.0.0.1",
+  "[::1]",
+]);
+
+/**
+ * Does one allowlist entry cover this origin? (Phase 15c)
+ *
+ * Almost always an exact origin comparison, which is the rule the
+ * allowlist exists for. The one exception is an entry ending `:*`, which
+ * means ANY PORT on that host -- and it is refused unless the host is
+ * loopback, so the widest thing this syntax can ever say is "a server on
+ * the machine the browser is already running on".
+ *
+ * That restriction is what makes the syntax safe to put in a shared
+ * parser. A development build bakes its origins through `new URL(...)`,
+ * which throws on a `*` port, so a wildcard cannot be compiled into any
+ * build; and `allowedOrigins()` only ever produces one for a run that is
+ * not a packaged release. A release build's list is exact origins, full
+ * stop, and `tests/repo/exam-browser-posture.test.ts` holds that.
+ *
+ * Why it is needed at all: the scheme is registered with the operating
+ * system, and an OS launch carries none of the developer's shell
+ * environment -- so `RECX_EXAM_DEV_ORIGIN` is empty in exactly the
+ * situation it was added for. A developer pressing Launch on their own
+ * dev server got the candidate's "not allowed to go" dialog, from a build
+ * that was doing its job. Loopback needs nothing to name it.
+ */
+function originAllows(entry: string, candidate: URL): boolean {
+  if (entry.endsWith(":*")) {
+    let base: URL;
+    try {
+      base = new URL(`${entry.slice(0, -2)}/`);
+    } catch {
+      return false;
+    }
+    if (!EXAM_BROWSER_LOOPBACK_HOSTS.includes(base.hostname)) return false;
+    return base.protocol === candidate.protocol && base.hostname === candidate.hostname;
+  }
+  try {
+    return new URL(entry).origin === candidate.origin;
+  } catch {
+    return false;
+  }
+}
+
 export function parseExamBrowserLaunchUrl(url: string, allowedOrigins: readonly string[]): LaunchParse {
   let parsed: URL;
   try {
@@ -381,13 +434,7 @@ export function parseExamBrowserLaunchUrl(url: string, allowedOrigins: readonly 
   } catch {
     return { ok: false, reason: "bad_origin" };
   }
-  const allowed = allowedOrigins.some((entry) => {
-    try {
-      return new URL(entry).origin === candidate.origin;
-    } catch {
-      return false;
-    }
-  });
+  const allowed = allowedOrigins.some((entry) => originAllows(entry, candidate));
   if (!allowed) return { ok: false, reason: "bad_origin" };
   if (!EXAM_BROWSER_TOKEN_PATTERN.test(token)) return { ok: false, reason: "bad_token" };
 
@@ -444,3 +491,85 @@ export function refusedSwitches(argv: readonly string[]): readonly string[] {
   }
   return found;
 }
+
+
+/**
+ * What the exam browser itself may report (Phase 15a).
+ *
+ * The page already reports its own focus, its own fullscreen state and
+ * its own monitor count, and `docs/PROCTORING.md` section 2 says plainly
+ * that all three are falsifiable: the exam page is the one place in this
+ * product a candidate can run their own JavaScript. The browser's main
+ * process is a different witness. It signs with a key the page never
+ * sees, so what it says about the window cannot be forged by a script in
+ * the window, and -- the part that matters more -- cannot be SUPPRESSED
+ * by one either. A candidate who patches the page's event client silences
+ * every CLIENT signal and none of these.
+ *
+ * It is the same vocabulary deliberately, not a new one. A reviewer
+ * should see "the window lost focus" once, with two sources beside it
+ * when both saw it and one when only one did; inventing parallel kinds
+ * would split that into two timelines nobody can compare.
+ *
+ * The list is short and closed on purpose. These are the three things a
+ * desktop process genuinely knows better than a page
+ * (`docs/EXAM-BROWSER.md` section 3), and an endpoint that accepted any
+ * kind would be an endpoint that could write `INVIGILATOR_NOTE`.
+ *
+ * NOTE for whoever edits this file next: it has no imports and must keep
+ * none. It is bundled into the Electron main process, and the one time a
+ * dependency reached it -- zod, through a package list rather than an
+ * import -- it put 4.3 MB and somebody else's test suite inside the
+ * installer a candidate is asked to run (`docs/EXAM-BROWSER.md` section
+ * 8). The zod schema that validates the payload below lives in the web
+ * app, which is the only side that parses anything it did not write.
+ */
+export const EXAM_BROWSER_SIGNAL_KINDS = ["FOCUS_LOSS", "FULLSCREEN_EXIT", "MULTI_MONITOR"] as const;
+export type ExamBrowserSignalKind = (typeof EXAM_BROWSER_SIGNAL_KINDS)[number];
+
+export function isExamBrowserSignalKind(value: string): value is ExamBrowserSignalKind {
+  return (EXAM_BROWSER_SIGNAL_KINDS as readonly string[]).includes(value);
+}
+
+/** The most signals one request may carry. */
+export const EXAM_BROWSER_SIGNAL_BATCH_MAX = 32;
+
+/**
+ * A ceiling per sitting, so a misbehaving build -- or a candidate's
+ * machine flapping its displays -- cannot fill the table. Reaching it is
+ * itself worth seeing, so the server records that it was reached rather
+ * than dropping the rest in silence.
+ */
+export const EXAM_BROWSER_SIGNAL_SITTING_MAX = 500;
+
+/** The longest a signal's `atMs` or `durationMs` may claim to be. */
+export const EXAM_BROWSER_SIGNAL_MAX_MS = 24 * 60 * 60_000;
+
+/** The most displays a count may claim, so a silly number cannot be stored. */
+export const EXAM_BROWSER_SIGNAL_MAX_DISPLAYS = 64;
+
+export interface ExamBrowserSignal {
+  readonly kind: ExamBrowserSignalKind;
+  /**
+   * Milliseconds since the window opened, by the browser's own clock. The
+   * server clamps it into the attempt rather than trusting it: this is a
+   * number from the candidate's machine and the only honest use for it is
+   * ordering.
+   */
+  readonly atMs: number;
+  /** How long the window was away, where the browser knows. */
+  readonly durationMs?: number;
+  /**
+   * How many displays, for MULTI_MONITOR. A count, never anything about
+   * what is on them: `docs/PROCTORING.md` section 5 forbids screen
+   * capture by name and this must not become a way around it.
+   */
+  readonly displays?: number;
+}
+
+export interface ExamBrowserSignalBatch {
+  readonly signals: readonly ExamBrowserSignal[];
+}
+
+/** Where the browser posts them. Signed like everything else it sends. */
+export const EXAM_BROWSER_SIGNALS_PATH = "/api/exam/browser/signals";

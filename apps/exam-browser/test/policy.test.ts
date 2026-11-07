@@ -10,7 +10,9 @@ import {
   buildIdentity,
   readBakedBuild,
 } from "../src/config";
+import { examBrowserLaunchUrl, parseExamBrowserLaunchUrl } from "@recx/shared/exam-browser";
 import {
+  LOOPBACK_DEV_ORIGINS,
   REFUSED_PERMISSIONS,
   allowedOrigins,
   blockedChord,
@@ -33,6 +35,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const DEV_BUILD = { channel: "development" as const, origins: ["http://localhost:3000"] };
+const TOKEN = "t".repeat(48);
 
 describe("which origins this build may be pointed at", () => {
   it("uses the compiled list and nothing else once packaged", () => {
@@ -93,22 +96,92 @@ describe("which origins this build may be pointed at", () => {
   });
 
   it("lets an unpackaged run add one, because this repository runs on localhost", () => {
-    expect(allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://localhost:3000" } })).toEqual(
-      ["http://localhost:3000", ...RELEASE_ORIGINS],
+    expect(allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://dev.test:3000" } })).toEqual(
+      ["http://dev.test:3000", ...LOOPBACK_DEV_ORIGINS, ...RELEASE_ORIGINS],
     );
   });
 
   it("takes the origin alone from a development value, not a path on it", () => {
     expect(
-      allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://localhost:3000/anything" } }),
-    ).toEqual(["http://localhost:3000", ...RELEASE_ORIGINS]);
+      allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://dev.test:3000/anything" } }),
+    ).toEqual(["http://dev.test:3000", ...LOOPBACK_DEV_ORIGINS, ...RELEASE_ORIGINS]);
   });
 
   it("ignores a development value that is not a URL rather than failing to start", () => {
-    expect(allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "not a url" } })).toEqual(
-      RELEASE_ORIGINS,
-    );
-    expect(allowedOrigins({ packaged: false, environment: {} })).toEqual(RELEASE_ORIGINS);
+    expect(allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "not a url" } })).toEqual([
+      ...LOOPBACK_DEV_ORIGINS,
+      ...RELEASE_ORIGINS,
+    ]);
+    expect(allowedOrigins({ packaged: false, environment: {} })).toEqual([
+      ...LOOPBACK_DEV_ORIGINS,
+      ...RELEASE_ORIGINS,
+    ]);
+  });
+
+  /**
+   * Phase 15c. The hole this closes was not in the allowlist, it was in
+   * where the allowlist got its development origin from.
+   *
+   * `recx-exam://` is registered with the operating system, and an OS
+   * launch carries none of the shell environment of whoever is logged in
+   * -- so `RECX_EXAM_DEV_ORIGIN` is empty in exactly the situation it was
+   * added for. Pressing Launch on one's own dev server opened the
+   * registered handler with no environment at all and produced the
+   * candidate's "this launch pointed somewhere this exam browser is not
+   * allowed to go", from a build that was doing its job.
+   *
+   * Loopback needs nothing to name it, so an unpackaged run takes it
+   * without being told.
+   */
+  it("reaches a dev server on this machine with no environment whatsoever", () => {
+    const list = allowedOrigins({ packaged: false });
+    for (const port of ["3000", "3100", "5173", "8080"]) {
+      for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+        expect(
+          parseExamBrowserLaunchUrl(
+            examBrowserLaunchUrl({ origin: `http://${host}:${port}`, token: TOKEN }),
+            list,
+          ),
+          `${host}:${port}`,
+        ).toEqual({ ok: true, origin: `http://${host}:${port}`, token: TOKEN });
+      }
+    }
+  });
+
+  it("does not list a loopback development value twice", () => {
+    // It is already covered by the wildcards, and this list can end up in
+    // front of a candidate.
+    expect(
+      allowedOrigins({ packaged: false, environment: { [DEV_ORIGIN_VARIABLE]: "http://localhost:3000" } }),
+    ).toEqual([...LOOPBACK_DEV_ORIGINS, ...RELEASE_ORIGINS]);
+  });
+
+  it("gives a PACKAGED build no loopback at all, whatever channel it is", () => {
+    /**
+     * The whole point of the development channel is that what a packaged
+     * build may reach took a deliberate build to put there. A packaged
+     * build that silently accepted loopback would be one a page could
+     * point at a server started on the candidate's own machine.
+     */
+    for (const build of [RELEASE_BUILD, DEV_BUILD, undefined]) {
+      const list = allowedOrigins({ packaged: true, build });
+      expect(list.some((entry) => entry.endsWith(":*")), JSON.stringify(build)).toBe(false);
+      expect(
+        parseExamBrowserLaunchUrl(
+          examBrowserLaunchUrl({ origin: "http://localhost:9999", token: TOKEN }),
+          list,
+        ),
+      ).toEqual({ ok: false, reason: "bad_origin" });
+    }
+  });
+
+  it("cannot have a wildcard compiled into it, because a bake goes through URL", () => {
+    // `new URL("http://localhost:*")` throws, so `readBakedBuild` drops it
+    // -- which is why the syntax is safe to teach the shared parser.
+    expect(readBakedBuild({ channel: "development", origins: LOOPBACK_DEV_ORIGINS })).toEqual({
+      channel: "development",
+      origins: [],
+    });
   });
 
   it("ships with at least one origin, so a build is never pointable anywhere", () => {

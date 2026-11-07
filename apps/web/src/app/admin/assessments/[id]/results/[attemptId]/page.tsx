@@ -8,6 +8,18 @@ import { AUDIT_EVENT_LIMIT, getAttemptAudit } from "@/server/queries/admin-asses
 
 export const metadata: Metadata = { title: "Sitting audit" };
 
+/**
+ * What to call each witness in the record. `exam_browser` is the raw enum
+ * value and reads like a column name; a reviewer is being asked which
+ * account of the sitting they are reading, so it says so in words.
+ */
+const WITNESS: Readonly<Record<string, string>> = Object.freeze({
+  CLIENT: "the exam page",
+  SERVER: "the server",
+  INVIGILATOR: "an invigilator",
+  EXAM_BROWSER: "the exam browser",
+});
+
 const TD = "px-3 py-2";
 
 /**
@@ -108,6 +120,65 @@ export default async function AttemptAuditPage({
         </CardBody>
       </Card>
 
+      {audit.witnesses.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="Two witnesses"
+            subtitle="The same three things, as the exam page saw them and as the exam browser saw them."
+          />
+          <CardBody>
+            <p className="mb-3 text-sm text-text-secondary">
+              The exam page runs in a window the candidate can put their own JavaScript into, so its account of its own
+              focus, full-screen state and monitor count can be edited or silenced. The exam browser signs with a key
+              the page never sees. Where the two agree, that is ordinary. Where the browser saw something the page did
+              not report, the page&rsquo;s instrumentation did not report it — which is worth asking about, and is not
+              by itself an answer.
+            </p>
+            <div role="region" tabIndex={0} aria-label="What each witness saw" className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full min-w-[28rem] text-left text-sm">
+                <caption className="sr-only">
+                  Signals both the exam page and the exam browser can see, counted separately
+                </caption>
+                <thead className="bg-primary-subtle/40 text-xs uppercase tracking-wide text-text-secondary">
+                  <tr>
+                    <th scope="col" className={TD}>Signal</th>
+                    <th scope="col" className={TD}>The page said</th>
+                    <th scope="col" className={TD}>The browser said</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {audit.witnesses.map((row) => {
+                    const unreported = row.browser > row.page;
+                    return (
+                      <tr key={row.kind} className="border-t border-border">
+                        <th scope="row" className={`${TD} font-normal`}>
+                          {row.label}
+                        </th>
+                        <td className={`${TD} tabular-nums`}>{row.page}</td>
+                        <td className={`${TD} tabular-nums`}>
+                          {row.browser}
+                          {unreported ? (
+                            <span className="ml-2">
+                              <Badge tone="warning">
+                                {row.browser - row.page} the page did not report
+                              </Badge>
+                            </span>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Counted differently on purpose: only the page&rsquo;s signals move the focus-warning counters above, so a
+              second witness cannot halve a candidate&rsquo;s allowance. Nothing here decides anything — a person does.
+            </p>
+          </CardBody>
+        </Card>
+      ) : null}
+
       {audit.events.length > 0 ? (
         <Card>
           <CardHeader
@@ -148,7 +219,7 @@ export default async function AttemptAuditPage({
                           <span className="text-xs text-muted">{event.severity.toLowerCase()}</span>
                         )}
                       </td>
-                      <td className={`${TD} text-xs text-muted`}>{event.source.toLowerCase()}</td>
+                      <td className={`${TD} text-xs text-muted`}>{WITNESS[event.source] ?? event.source.toLowerCase()}</td>
                       <td className={`${TD} tabular-nums text-xs`}>
                         {event.durationMs === null ? "—" : `${Math.round(event.durationMs / 1000)}s`}
                       </td>
