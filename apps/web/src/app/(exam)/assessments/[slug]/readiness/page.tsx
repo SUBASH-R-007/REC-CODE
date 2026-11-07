@@ -329,6 +329,15 @@ export default async function ReadinessPage({
            */
           needsDevice={requiresDeviceAssertion(assessment.proctorMode)}
           sitInPopup={assessment.sitInPopup}
+          /**
+           * Phase 15e. Inside REC Exam Browser the fullscreen step is not
+           * a check: the window is already fullscreen and the page is
+           * refused the permission to change it, and a refused request
+           * leaves the promise pending rather than rejecting -- so the
+           * button did nothing, said nothing, and left Start disabled for
+           * ever on the one mode that must be sat in that browser.
+           */
+          fullscreenHeld={inRecxBrowser}
         />
       )}
     </div>

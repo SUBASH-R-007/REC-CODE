@@ -377,3 +377,44 @@ export function displayReport(count: number): { readonly extra: number; readonly
   const extra = Math.max(0, count - 1);
   return { extra, worthReporting: extra > 0 };
 }
+
+/**
+ * Is the window actually covering the screen? (Phase 15d)
+ *
+ * This exists because `BrowserWindow.isFullScreen()` lied. The window was
+ * built with `resizable: false`, which on Windows becomes a pair of SIZE
+ * CONSTRAINTS pinned at the minimum size -- and a fullscreen request is
+ * then clamped by them. The platform reported `fullscreen: true` and
+ * `kiosk: true` while the window sat at 1036x647 on a 1536x960 screen,
+ * with the desktop and everything on it visible around the edges, which
+ * is the one thing a kiosk browser exists to prevent. A candidate's
+ * notes, another browser, a chat window: all of it on screen, beside a
+ * paper the invigilator believed was sealed.
+ *
+ * So the check is pixels rather than a flag. Anything that asks the
+ * window whether it is fullscreen is asking the component that was wrong.
+ *
+ * Tolerance: exact equality is wrong here. A display's bounds and a
+ * window's bounds are both in DIP and both rounded, so a correct
+ * fullscreen window can sit a pixel out on a fractional scale factor.
+ * Two pixels is far below anything a person could see through and far
+ * above rounding.
+ */
+export interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export const COVERAGE_TOLERANCE_PX = 2;
+
+export function coversDisplay(window: Rect, display: Rect): boolean {
+  return (
+    window.x <= display.x + COVERAGE_TOLERANCE_PX &&
+    window.y <= display.y + COVERAGE_TOLERANCE_PX &&
+    window.x + window.width >= display.x + display.width - COVERAGE_TOLERANCE_PX &&
+    window.y + window.height >= display.y + display.height - COVERAGE_TOLERANCE_PX
+  );
+}
+

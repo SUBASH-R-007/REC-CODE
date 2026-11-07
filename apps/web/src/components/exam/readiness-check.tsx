@@ -30,9 +30,15 @@ import { clockSkew, powerState, type ClockSkew, type PowerState } from "@/lib/ex
  */
 
 type CheckId = "fullscreen" | "paste" | "network" | "sample" | "device";
+type LabelId = CheckId | "fullscreenHeld";
 
-const LABELS: Readonly<Record<CheckId, string>> = Object.freeze({
+const LABELS: Readonly<Record<LabelId, string>> = Object.freeze({
   fullscreen: "Full screen works on this machine",
+  /**
+   * Phase 15e. Not a check, because there is nothing a candidate could do
+   * about it and nothing to find out: see `fullscreenHeld` below.
+   */
+  fullscreenHeld: "Full screen is held by REC Exam Browser",
   paste: "Pasting works, and is recorded rather than blocked",
   network: "This machine can reach the exam server",
   sample: "You can type an answer and read a question",
@@ -46,6 +52,13 @@ const LABELS: Readonly<Record<CheckId, string>> = Object.freeze({
  */
 const EXAM_WINDOW_NAME = "recx-sitting";
 
+/**
+ * How long the fullscreen test waits before calling it a refusal (Phase
+ * 15e). A browser that is going to grant it does so in a frame or two;
+ * anything past this is a request nobody is going to answer.
+ */
+const FULLSCREEN_TIMEOUT_MS = 3_000;
+
 export function ReadinessCheck({
   slug,
   durationMinutes,
@@ -53,6 +66,7 @@ export function ReadinessCheck({
   proctorNote,
   needsDevice,
   sitInPopup = false,
+  fullscreenHeld = false,
 }: {
   readonly slug: string;
   readonly durationMinutes: number;
@@ -67,9 +81,32 @@ export function ReadinessCheck({
   readonly needsDevice: boolean;
   /** Phase 12s. Open the sitting in its own window rather than this tab. */
   readonly sitInPopup?: boolean;
+  /**
+   * True when this page is being read inside REC Exam Browser (Phase 15e).
+   *
+   * The fullscreen step is then neither possible nor meaningful, and it
+   * was BLOCKING the paper. The browser refuses every permission to the
+   * page (`policy.ts`, `REFUSED_PERMISSIONS`), and Chromium answers a
+   * refused fullscreen request by leaving the promise PENDING rather than
+   * rejecting it -- measured, not inferred. So `await
+   * requestFullscreen()` never returned, neither the success line nor the
+   * `catch` ever ran, the button did nothing and showed nothing, and
+   * `ready` stayed false for ever: a `KIOSK_RECX` paper could not be
+   * started from inside the browser it must be sat in.
+   *
+   * Removing it loses nothing. The window is already fullscreen and
+   * kiosk, held by the application against the page
+   * (`docs/EXAM-BROWSER.md` §6), and a page that COULD take or drop
+   * fullscreen in there would be the posture problem rather than the
+   * check. What a candidate needs at this moment is to be told that,
+   * which is what the row says.
+   */
+  readonly fullscreenHeld?: boolean;
 }) {
   const [passed, setPassed] = useState<Record<CheckId, boolean>>({
-    fullscreen: false,
+    // Already true inside REC Exam Browser: the application holds the
+    // screen and the page is not allowed to touch it.
+    fullscreen: fullscreenHeld,
     paste: false,
     network: false,
     sample: false,
@@ -91,7 +128,20 @@ export function ReadinessCheck({
   const tryFullscreen = useCallback(async () => {
     setFullscreenError(null);
     try {
-      await document.documentElement.requestFullscreen();
+      /**
+       * Raced with a timer, because a refused request does not always
+       * reject (Phase 15e). Where the embedder denies the fullscreen
+       * permission, Chromium leaves this promise PENDING for ever --
+       * measured inside REC Exam Browser, where it meant the button did
+       * nothing at all and said nothing either. A check that can hang
+       * silently is worse than one that fails: the candidate has no idea
+       * whether to wait or to call somebody.
+       */
+      const entered = await Promise.race([
+        document.documentElement.requestFullscreen().then(() => true),
+        new Promise<false>((resolve) => window.setTimeout(() => resolve(false), FULLSCREEN_TIMEOUT_MS)),
+      ]);
+      if (!entered) throw new Error("timed out");
       // Leave again straight away: the point is to prove both directions work
       // before the sitting, not to hold the candidate in fullscreen now.
       await new Promise((resolve) => window.setTimeout(resolve, 400));
@@ -160,7 +210,7 @@ export function ReadinessCheck({
         <h1 className="font-display text-2xl font-semibold text-text">Before you start</h1>
         <p className="mt-2 text-sm text-text-secondary">
           {questionCount} {questionCount === 1 ? "question" : "questions"} · {durationMinutes} minutes. Work
-          through the four checks below — it takes about two minutes — then read what is recorded and start.
+          through the checks below — it takes about two minutes — then read what is recorded and start.
         </p>
         {proctorNote ? (
           <p className="mt-3 rounded-md border border-info/40 bg-info-subtle px-3 py-2 text-sm text-info">
@@ -181,17 +231,29 @@ export function ReadinessCheck({
       </header>
 
       <ol className="flex flex-col gap-5">
-        {/* 1. Fullscreen, actually entered and left. */}
+        {/* 1. Fullscreen: entered and left for real, unless it is already held. */}
         <li className="rounded-lg border border-border p-4">
-          <Row done={passed.fullscreen} label={LABELS.fullscreen} />
-          <button
-            type="button"
-            onClick={() => void tryFullscreen()}
-            className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          >
-            Test full screen
-          </button>
-          {fullscreenError ? <p className="mt-2 text-xs text-danger">{fullscreenError}</p> : null}
+          <Row
+            done={passed.fullscreen}
+            label={fullscreenHeld ? LABELS.fullscreenHeld : LABELS.fullscreen}
+          />
+          {fullscreenHeld ? (
+            <p className="mt-2 text-xs text-text-secondary">
+              There is nothing to test. This window is already full screen and REC Exam Browser keeps it
+              there — this page cannot turn that off, and neither can you from here.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => void tryFullscreen()}
+                className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                Test full screen
+              </button>
+              {fullscreenError ? <p className="mt-2 text-xs text-danger">{fullscreenError}</p> : null}
+            </>
+          )}
         </li>
 
         {/* 2. A real paste into a real box. */}

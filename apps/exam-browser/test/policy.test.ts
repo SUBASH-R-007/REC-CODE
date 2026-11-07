@@ -12,9 +12,11 @@ import {
 } from "../src/config";
 import { examBrowserLaunchUrl, parseExamBrowserLaunchUrl } from "@recx/shared/exam-browser";
 import {
+  COVERAGE_TOLERANCE_PX,
   LOOPBACK_DEV_ORIGINS,
   REFUSED_PERMISSIONS,
   allowedOrigins,
+  coversDisplay,
   blockedChord,
   displayReport,
   isExamOrigin,
@@ -397,5 +399,66 @@ describe("the keys the window swallows (Phase 14j)", () => {
       expect(chord({ key }), key).toBe(false);
       expect(chord({ key, shift: true }), `shift+${key}`).toBe(false);
     }
+  });
+});
+/**
+ * Is the window actually over the whole screen? (Phase 15d)
+ *
+ * The reason this is a function with tests rather than a call to
+ * `isFullScreen()` is that `isFullScreen()` was wrong. Built with
+ * `resizable: false`, the exam window opened at 1036x647 on a 1536x960
+ * screen -- the minimum size plus an invisible resize border, because on
+ * Windows that option becomes size constraints and the fullscreen
+ * request is clamped by them -- and both `isFullScreen()` and
+ * `isKiosk()` returned true the whole time. The desktop, and anything a
+ * candidate had left on it, was visible around a paper an invigilator
+ * believed was sealed.
+ *
+ * So the question is asked in pixels.
+ */
+describe("whether the window covers its screen", () => {
+  const SCREEN = { x: 0, y: 0, width: 1536, height: 960 };
+
+  it("says yes to a window exactly over the screen", () => {
+    expect(coversDisplay(SCREEN, SCREEN)).toBe(true);
+  });
+
+  it("says no to the window this bug actually produced", () => {
+    // Measured from a real Electron, not invented: 1024 + 12 of invisible
+    // resize border, 640 + 7, parked at the origin.
+    expect(coversDisplay({ x: 0, y: 0, width: 1036, height: 647 }, SCREEN)).toBe(false);
+  });
+
+  it("says no when any one edge leaves the screen uncovered", () => {
+    const short = COVERAGE_TOLERANCE_PX + 1;
+    expect(coversDisplay({ ...SCREEN, width: SCREEN.width - short }, SCREEN), "right edge").toBe(false);
+    expect(coversDisplay({ ...SCREEN, height: SCREEN.height - short }, SCREEN), "bottom edge").toBe(false);
+    expect(coversDisplay({ ...SCREEN, x: short }, SCREEN), "left edge").toBe(false);
+    expect(coversDisplay({ ...SCREEN, y: short }, SCREEN), "top edge").toBe(false);
+  });
+
+  it("tolerates a rounding pixel, because DIP bounds are rounded on both sides", () => {
+    // A correct fullscreen window can sit a pixel out on a fractional
+    // scale factor. A fence that fought that would re-assert fullscreen
+    // in a loop for the whole paper.
+    expect(coversDisplay({ x: 1, y: 1, width: SCREEN.width - 2, height: SCREEN.height - 2 }, SCREEN)).toBe(true);
+  });
+
+  it("says yes to a window larger than the screen", () => {
+    // Which is what a fullscreen window on some window managers is.
+    expect(coversDisplay({ x: -4, y: -4, width: SCREEN.width + 8, height: SCREEN.height + 8 }, SCREEN)).toBe(true);
+  });
+
+  it("works on a display that is not at the origin", () => {
+    // A second monitor to the right. A window still at 0,0 covers the
+    // PRIMARY screen and none of this one.
+    const second = { x: 1536, y: 0, width: 1920, height: 1080 };
+    expect(coversDisplay(second, second)).toBe(true);
+    expect(coversDisplay({ x: 0, y: 0, width: 1536, height: 960 }, second)).toBe(false);
+  });
+
+  it("keeps the tolerance far below anything a person could see through", () => {
+    expect(COVERAGE_TOLERANCE_PX).toBeLessThanOrEqual(4);
+    expect(COVERAGE_TOLERANCE_PX).toBeGreaterThan(0);
   });
 });

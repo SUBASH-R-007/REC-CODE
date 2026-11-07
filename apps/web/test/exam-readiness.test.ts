@@ -87,3 +87,40 @@ describe("the sentence at the end of a sitting", () => {
     expect(before409.slice(before409.indexOf("if (response.status === 409)"))).not.toContain("setHandedIn");
   });
 });
+/**
+ * The fullscreen step and REC Exam Browser (Phase 15e).
+ *
+ * The rendering is tested next door. These are the two lines that carry
+ * the decision, asserted against the source because each could be undone
+ * by somebody who did not know what it cost: a `KIOSK_RECX` paper that
+ * could not be started from the browser it must be sat in.
+ */
+describe("the fullscreen step inside REC Exam Browser", () => {
+  it("is told, by the page that already knows", () => {
+    // The page computes `inRecxBrowser` from the sitting header for its
+    // own refusal screen; this is the same fact, passed down rather than
+    // guessed at in the client.
+    expect(READINESS_PAGE()).toContain("fullscreenHeld={inRecxBrowser}");
+  });
+
+  it("starts the step met rather than leaving it unreachable", () => {
+    const check = read("src/components/exam/readiness-check.tsx");
+    expect(check).toContain("fullscreen: fullscreenHeld,");
+    // And the button is not rendered at all in that case, rather than
+    // rendered and inert.
+    expect(check).toContain("{fullscreenHeld ? (");
+  });
+
+  it("never lets the test hang silently where it IS offered", () => {
+    /**
+     * A refused fullscreen request does not always reject: where the
+     * embedder denies the permission, Chromium leaves the promise
+     * pending. Without the race, the button did nothing and said nothing
+     * — the worst of the three possible outcomes, because the candidate
+     * cannot tell waiting from broken.
+     */
+    const check = read("src/components/exam/readiness-check.tsx");
+    expect(check).toContain("FULLSCREEN_TIMEOUT_MS");
+    expect(check).toContain("Promise.race");
+  });
+});

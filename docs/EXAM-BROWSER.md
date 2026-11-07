@@ -138,9 +138,23 @@ because the rest of that list is unchanged.
   kind.
 * **The window can hold the front of the screen** (Phase 14j). Kiosk as
   well as fullscreen, always-on-top at the highest level Electron offers,
-  visible on every virtual desktop, not minimisable or resizable, put back
-  in front when something takes focus, and back to fullscreen if it leaves
-  it. The shortcuts that open a second window, print, save, open a file or
+  visible on every virtual desktop, not minimisable or maximisable, put
+  back in front when something takes focus, and back over the screen if
+  it leaves it.
+
+  **Held in pixels, not in a flag** (Phase 15d). The window used to be
+  built `resizable: false`, so a candidate could not drag it smaller to
+  uncover what was behind. On Windows that option also becomes a pair of
+  size constraints pinned at the minimum — and the fullscreen request is
+  clamped by them. The window opened at 1036×706 on a 1536×960 screen,
+  with the desktop visible all around a paper an invigilator believed was
+  sealed, while `isFullScreen()` and `isKiosk()` both returned `true`.
+  Nothing could have detected that by asking Electron, so `holdFullScreen`
+  compares the window's bounds against the display's and re-asserts them
+  on show, on leaving fullscreen, on any resize, and when the screen
+  itself changes — a monitor unplugged mid-paper leaves a window sized for
+  a screen that is gone. The option it replaced was buying nothing: a
+  frameless fullscreen window has no edge to drag. The shortcuts that open a second window, print, save, open a file or
   view source are swallowed before the page sees them — through
   `before-input-event`, which fires only for keys Chromium is delivering
   to our own focused window, because a hook that read the keyboard while
@@ -349,6 +363,33 @@ it.
    up. The implementation is shared (`packages/db/src/exam-browser.ts`) so
    the order of the three writes cannot drift between the web app and the
    scheduler.
+
+**The fullscreen step is not asked inside this browser** (Phase 15e).
+`SPEC` §5 puts "fullscreen entry/exit" first in the readiness check, and
+in an ordinary browser it stays exactly that: a real entry and a real
+exit, because a laptop that will not go fullscreen is worth finding out
+about before the clock starts.
+
+Inside REC Exam Browser it is neither possible nor meaningful. The page
+is refused every permission (§7, and `docs/PROCTORING.md` §5 is why), and
+a page that *could* take or drop fullscreen in here would be the posture
+problem rather than the check. What made it urgent is how Chromium
+refuses: a denied fullscreen request leaves the promise **pending**
+rather than rejecting it. Measured against a real Electron —
+
+```
+CASE refuses permissions    NEVER SETTLED (pending after 8s)
+CASE allows permissions     RESOLVED fullscreenElement=true
+```
+
+— so `await requestFullscreen()` never returned, neither the success line
+nor the `catch` ran, and the button did nothing and said nothing. Since
+Start is enabled only when every step has passed, a `KIOSK_RECX` paper
+could not be started from the one browser it may be sat in. The step is
+now a statement: the window is already full screen, this application is
+holding it there, and the page cannot change that. Everywhere the test
+*is* still offered it is raced with a timer, so a request nobody answers
+reads as a refusal instead of as nothing at all.
 
 **The timestamp has a cost, and the readiness check pays it** (Phase 15b).
 A machine whose clock is more than `EXAM_BROWSER_SKEW_TOLERANCE_MS` out
@@ -610,3 +651,5 @@ Each closes on the repository gate, recorded in `docs/RUNBOOK.md` §3.
 | 15a | The browser becomes a second witness: attested `FOCUS_LOSS`, `FULLSCREEN_EXIT` and `MULTI_MONITOR` the page cannot silence, and a reviewer's screen that compares the two (§3). |
 | 15b | The readiness check measures the two things that end a sitting for reasons unrelated to cheating: a clock outside the attestation's tolerance, and a laptop on battery (§5). |
 | 15c | An unpackaged run reaches loopback on any port with no environment at all, because an OS launch has none — the gap that made §8's development origin unusable through the very path it was for. |
+| 15d | The window actually covers the screen. `resizable: false` was clamping the fullscreen request to the minimum size on Windows while `isFullScreen()` reported true, so the hold is now measured in pixels (§6). |
+| 15e | The readiness check's fullscreen step is gone inside the browser, where the page is refused the permission and a refused request never settles — it had left Start disabled for ever on `KIOSK_RECX` (§5). |

@@ -8,6 +8,7 @@ import {
   EXAM_PARTITION,
   allowedOrigins,
   blockedChord,
+  coversDisplay,
   displayReport,
   navigationDecision,
   permissionDecision,
@@ -162,6 +163,29 @@ function originsForThisBuild(): readonly string[] {
  * serves, because a `webPreferences` object is exactly the kind of thing
  * somebody relaxes while debugging and forgets.
  */
+/**
+ * Keep the window over the whole screen, judged in pixels (Phase 15d).
+ *
+ * `isFullScreen()` is not consulted, deliberately: it returned true for a
+ * window covering less than half the screen, which is the bug this
+ * function exists for. What it asks instead is whether the window's
+ * bounds cover the bounds of the display it is on (`coversDisplay` in
+ * `policy.ts`), and if they do not it says so again -- fullscreen first,
+ * then the display's own bounds, because a window whose fullscreen flag
+ * is already set will not act on being told a second time.
+ *
+ * Re-entrancy: `setBounds` fires `resize`, which calls this again. The
+ * second call finds the window covering the display and does nothing, so
+ * it settles in one step rather than looping.
+ */
+function holdFullScreen(window: BrowserWindow): void {
+  if (window.isDestroyed()) return;
+  const display = screen.getDisplayMatching(window.getBounds());
+  if (coversDisplay(window.getBounds(), display.bounds)) return;
+  if (!window.isFullScreen()) window.setFullScreen(true);
+  if (!coversDisplay(window.getBounds(), display.bounds)) window.setBounds(display.bounds);
+}
+
 function createWindow(origin: string): BrowserWindow {
   const window = new BrowserWindow({
     show: false,
@@ -174,10 +198,28 @@ function createWindow(origin: string): BrowserWindow {
     kiosk: true,
     frame: false,
     autoHideMenuBar: true,
-    // No minimise, no restore-down, no resize to uncover what is behind.
+    // No minimise and no restore-down, so the paper cannot be put aside.
     minimizable: false,
     maximizable: false,
-    resizable: false,
+    /**
+     * Resizable, and that is NOT a relaxation (Phase 15d).
+     *
+     * `resizable: false` was here to stop a candidate dragging the window
+     * smaller to uncover what is behind it. On Windows it does something
+     * else as well: it becomes a pair of size constraints pinned at the
+     * minimum, and a fullscreen request is then CLAMPED BY THEM. The
+     * window opened at 1036x647 on a 1536x960 screen -- the desktop and
+     * everything on it visible around a paper the invigilator believed
+     * was sealed -- while `isFullScreen()` and `isKiosk()` both returned
+     * true. Measured, in `scripts/` terms, by building this exact options
+     * object six ways and reading the bounds back.
+     *
+     * Nothing is lost. The window is frameless, fullscreen and always on
+     * top, so there is no edge exposed to drag; `holdFullScreen` below
+     * puts back anything that does get out, and it checks the PIXELS
+     * rather than asking the component that was wrong.
+     */
+    resizable: true,
     fullscreenable: true,
     backgroundColor: WINDOW.backgroundColor,
     minWidth: WINDOW.minWidth,
@@ -275,8 +317,16 @@ function createWindow(origin: string): BrowserWindow {
   window.on("focus", () => signals.focusRestored());
   window.on("leave-full-screen", () => {
     signals.note("FULLSCREEN_EXIT");
-    if (!window.isDestroyed()) window.setFullScreen(true);
+    holdFullScreen(window);
   });
+
+  /**
+   * Re-checked whenever the screen itself changes (Phase 15d). A monitor
+   * unplugged mid-paper, a resolution change, a dock disconnected: each
+   * leaves a window sized for a screen that is no longer there.
+   */
+  screen.on("display-metrics-changed", () => holdFullScreen(window));
+  window.on("resize", () => holdFullScreen(window));
 
   // Nothing opens a second window. Not target=_blank, not window.open.
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -331,7 +381,10 @@ function createWindow(origin: string): BrowserWindow {
     }
   });
 
-  window.once("ready-to-show", () => window.show());
+  window.once("ready-to-show", () => {
+    window.show();
+    holdFullScreen(window);
+  });
   window.on("closed", () => {
     mainWindow = null;
   });

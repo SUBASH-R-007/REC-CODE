@@ -505,10 +505,49 @@ describe("the window a candidate cannot wander out of (Phase 14j)", () => {
     expect(main()).toMatch(/fullscreen: true/);
   });
 
-  it("cannot be minimised, maximised or resized out of the way", () => {
-    for (const option of [/minimizable: false/, /maximizable: false/, /resizable: false/]) {
+  it("cannot be minimised or maximised out of the way", () => {
+    for (const option of [/minimizable: false/, /maximizable: false/]) {
       expect(main(), String(option)).toMatch(option);
     }
+  });
+
+  /**
+   * Phase 15d, and this fence replaces one that was WRONG.
+   *
+   * It used to require `resizable: false`, on the reasoning that a window
+   * a candidate cannot drag smaller is a window they cannot uncover the
+   * desktop behind. On Windows that option does something else as well:
+   * it becomes a pair of size constraints pinned at the minimum, and the
+   * fullscreen request is clamped by them. The exam window opened at
+   * 1036x647 on a 1536x960 screen -- `WINDOW.minWidth` plus an invisible
+   * resize border -- with the desktop visible all around a paper the
+   * invigilator believed was sealed, while `isFullScreen()` and
+   * `isKiosk()` both returned true.
+   *
+   * Measured rather than guessed: the same options object was built six
+   * ways against a real Electron and the bounds read back. `resizable:
+   * true` was the only difference between 1036x647 and 1536x960.
+   *
+   * So the fence now holds the opposite, with the reason attached, and
+   * the protection that option was carrying moves to `holdFullScreen` --
+   * which judges in PIXELS, because the flag was the thing that lied.
+   */
+  it("is not built with the option that silently un-fullscreens it", () => {
+    expect(main(), "resizable: false clamps the fullscreen request on Windows").not.toMatch(/resizable: false/);
+    expect(main()).toMatch(/resizable: true/);
+  });
+
+  it("holds the screen by measuring it, never by asking whether it is fullscreen", () => {
+    const text = main();
+    expect(text, "a pixel check, not a flag").toMatch(/coversDisplay\(/);
+    expect(text).toMatch(/function holdFullScreen\(/);
+    // Everything that can leave the window the wrong size re-asserts it.
+    expect(text, "on show").toMatch(/ready-to-show[\s\S]{0,120}holdFullScreen/);
+    expect(text, "on leaving fullscreen").toMatch(/leave-full-screen[\s\S]{0,160}holdFullScreen/);
+    expect(text, "on a resize").toMatch(/window\.on\("resize"[\s\S]{0,60}holdFullScreen/);
+    expect(text, "when the screen itself changes").toMatch(
+      /display-metrics-changed[\s\S]{0,60}holdFullScreen/,
+    );
   });
 
   it("holds the front of the screen, on every desktop", () => {
