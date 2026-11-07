@@ -60,14 +60,34 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
   const tag = `imp-${Date.now().toString(36)}-${randomBytes(3).toString("hex")}`;
   let m: Modules;
   let dir = "";
-  let base = 0;
+  /**
+   * The display codes this run will use, one per entry: free when the run
+   * started, and NOT consecutive.
+   *
+   * They used to be a window — a random base, then `base + i` — and that is
+   * what wedged the gate three times (Phase 15h). `REC-NNNN` is exactly four
+   * digits, so there are ten thousand codes in all, and this test wants 310
+   * of them in a row; the search tried bases 400 apart and gave up on none
+   * of them, looping for ever at 100% CPU with nothing printed. Once
+   * `recx_test` held 151 scattered `REC-` codes — which it does after
+   * ordinary use — every candidate window contained one, so the loop could
+   * never succeed and never stopped. A run was killed after twelve hours.
+   *
+   * Nothing here needs them adjacent. They are picked lowest-first, which is
+   * deterministic (the db project runs one file at a time, so two runs
+   * cannot race for them) and self-healing after a killed run, whose rows
+   * simply stay taken.
+   */
+  let codes: number[] = [];
+  const codeOf = (i: number) => codes[i] ?? 0;
+  const displayCodeOf = (i: number) => `REC-${String(codeOf(i)).padStart(4, "0")}`;
   let adminId = "";
   const importIds: string[] = [];
   const userIds: string[] = [];
 
   const slugOf = (i: number) => `${tag}-p${i}`;
   const entriesFor = (i: number, overrides: Record<string, string | Buffer | null> = {}): ZipEntry[] =>
-    Object.entries(packageFiles(slugOf(i), base + i, overrides)).map(([name, data]) => ({ name: `${slugOf(i)}/${name}`, data }));
+    Object.entries(packageFiles(slugOf(i), codeOf(i), overrides)).map(([name, data]) => ({ name: `${slugOf(i)}/${name}`, data }));
 
   async function importZip(entries: readonly ZipEntry[]) {
     const file = path.join(dir, `${importIds.length}.zip`);
@@ -98,14 +118,21 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "recx-import-db-"));
     adminId = (await fixtures.createUser(m.db, tag, "importer", "ADMIN")).id;
     userIds.push(adminId);
-    // A window of REC-NNNN codes nobody uses (other tests and the seed own theirs).
+    // Codes nobody uses (other tests and the seed own theirs). One pass over
+    // the whole four-digit space, lowest first: it either finds enough or
+    // says so, and it can no longer run for ever looking.
     const taken = new Set(
-      (await m.db.problem.findMany({ where: { displayCode: { startsWith: "REC-" } }, select: { displayCode: true } })).map((p) => p.displayCode),
+      (await m.db.problem.findMany({ where: { displayCode: { startsWith: "REC-" } }, select: { displayCode: true } }))
+        .map((p) => Number(p.displayCode.slice(4)))
+        .filter((n) => Number.isInteger(n)),
     );
-    for (base = 1000 + Math.floor(Math.random() * 5000); ; base += 400) {
-      const free = Array.from({ length: COUNT + 10 }, (_, i) => `REC-${String(base + i).padStart(4, "0")}`).every((c) => !taken.has(c));
-      if (free && base + COUNT + 10 < 9000) break;
-      if (base > 8500) base = 1000;
+    codes = [];
+    for (let n = 1000; n <= 9999 && codes.length < COUNT + 10; n += 1) if (!taken.has(n)) codes.push(n);
+    if (codes.length < COUNT + 10) {
+      throw new Error(
+        `recx_test has ${taken.size} REC-NNNN display codes in use and only ${codes.length} free; this test needs ${COUNT + 10}. ` +
+          "Drop and re-migrate the test database, or delete the problems a killed run left behind.",
+      );
     }
   }, 60_000);
 
@@ -153,7 +180,7 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
       where: { slug: slugOf(7) },
       include: { tags: true, versions: { include: { testCases: true, referenceSolutions: true, hints: true, editorial: true, starterCodes: true } } },
     });
-    expect(sample).toMatchObject({ status: "DRAFT", liveVersionId: null, displayCode: `REC-${String(base + 7).padStart(4, "0")}` });
+    expect(sample).toMatchObject({ status: "DRAFT", liveVersionId: null, displayCode: displayCodeOf(7) });
     expect(sample.tags.map((t) => t.topic)).toEqual(["STRINGS"]);
     const v = sample.versions[0]!;
     expect(v).toMatchObject({ revision: 1, status: "DRAFT", frozenAt: null, bundleKey: null, origin: "FACULTY", createdById: adminId });
@@ -201,7 +228,7 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
 
     const changed = await importZip(entriesFor(0, { "statement.md": "A clearer statement." }));
     expect(changed.results[0]).toMatchObject({ status: "NEW_REVISION", revision: 2 });
-    const topicsChanged = JSON.parse(packageFiles(slugOf(0), base)["meta.json"] as string) as Record<string, unknown>;
+    const topicsChanged = JSON.parse(packageFiles(slugOf(0), codeOf(0))["meta.json"] as string) as Record<string, unknown>;
     topicsChanged.topics = ["GRAPHS"];
 
     const overDraft = await importZip(entriesFor(0, { "statement.md": "Yet another statement.", "meta.json": JSON.stringify(topicsChanged) }));
@@ -212,9 +239,9 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
     expect(draftAgain.results[0]).toMatchObject({ status: "UNCHANGED", revision: 2 });
 
     // A new slug that reuses p1's display code.
-    const clashMeta = JSON.parse(packageFiles(`${tag}-clash`, base + 1)["meta.json"] as string) as Record<string, unknown>;
+    const clashMeta = JSON.parse(packageFiles(`${tag}-clash`, codeOf(1))["meta.json"] as string) as Record<string, unknown>;
     const clash = await importZip(
-      Object.entries({ ...packageFiles(`${tag}-clash`, base + 1), "meta.json": JSON.stringify(clashMeta) }).map(([name, data]) => ({
+      Object.entries({ ...packageFiles(`${tag}-clash`, codeOf(1)), "meta.json": JSON.stringify(clashMeta) }).map(([name, data]) => ({
         name: `${tag}-clash/${name}`,
         data,
       })),
@@ -223,7 +250,7 @@ describe.skipIf(!ENABLED)("bulk problem import (recx_test)", () => {
     expect(clash.results[0]!.errors[0]!.message).toMatch(/already used by/);
 
     // The same slug with a different display code.
-    const mismatch = await importZip(entriesFor(1).map((e) => (e.name.endsWith("meta.json") ? { ...e, data: String(e.data).replace(`REC-${String(base + 1).padStart(4, "0")}`, "REC-0001") } : e)));
+    const mismatch = await importZip(entriesFor(1).map((e) => (e.name.endsWith("meta.json") ? { ...e, data: String(e.data).replace(displayCodeOf(1), "REC-0001") } : e)));
     expect(mismatch.results[0]).toMatchObject({ status: "FAILED" });
     expect(mismatch.results[0]!.errors[0]!.message).toMatch(/has display code/);
   }, 120_000);
