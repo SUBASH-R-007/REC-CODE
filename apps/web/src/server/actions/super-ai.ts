@@ -63,6 +63,7 @@ export async function updateAiHelper(input: UpdateAiHelperInput): Promise<Action
         current.modelId === wanted.modelId &&
         current.baseUrl === wanted.baseUrl &&
         current.dailyPerStudent === wanted.dailyPerStudent &&
+        current.dailyPerCollege === wanted.dailyPerCollege &&
         current.maxOutputTokens === wanted.maxOutputTokens
       ) {
         throw new ValidationError("Nothing would change. Edit a value first.");

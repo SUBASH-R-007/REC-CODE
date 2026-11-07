@@ -4,6 +4,7 @@ import {
   AI_ANSWER_MAX_CODE_LINES,
   AI_ANSWER_TOTAL_CODE_LINES,
   AI_CODE_WITHHELD_NOTE,
+  AI_COLLEGE_LIMIT,
   AI_HELPER_DEFAULT,
   AI_MODEL_ID_MAX,
   AI_MODEL_ID_PATTERN,
@@ -48,6 +49,8 @@ function input(over: Partial<Parameters<typeof aiHelperAccess>[0]> = {}) {
     enabled: true,
     askedToday: 0,
     dailyPerStudent: 10,
+    askedTodayCollege: 0,
+    dailyPerCollege: AI_COLLEGE_LIMIT.default,
     ...over,
   };
 }
@@ -77,6 +80,7 @@ describe("the setting", () => {
       modelId: "claude-haiku-5-5",
       baseUrl: "",
       dailyPerStudent: 3,
+      dailyPerCollege: 300,
       maxOutputTokens: 400,
     };
     expect(effectiveAiHelperSetting(value)).toEqual(value);
@@ -183,6 +187,8 @@ describe("the setting", () => {
       modelId: "claude-opus-5-5",
       baseUrl: "",
       dailyPerStudent: 4,
+      // Phase 15j: a row this old names no budget, so it gets the ceiling.
+      dailyPerCollege: AI_COLLEGE_LIMIT.default,
       maxOutputTokens: 500,
     });
     // `custom` named no model of its own: the deployment's AI_MODEL did.
@@ -192,6 +198,7 @@ describe("the setting", () => {
       modelId: "",
       baseUrl: "",
       dailyPerStudent: 4,
+      dailyPerCollege: AI_COLLEGE_LIMIT.default,
       maxOutputTokens: 500,
     });
     // And a legacy row that is not even that falls back to off.
@@ -405,6 +412,79 @@ describe("the assisted rule", () => {
     expect(makesSolveAssisted({ hintTier: 3 })).toBe(true);
     expect(makesSolveAssisted({ hintTier: 2 })).toBe(false);
     expect(makesSolveAssisted({ hintTier: 1 })).toBe(false);
+  });
+});
+
+/**
+ * The college's allowance (Phase 15j).
+ *
+ * The per-student number was the only limit there was, and it is not a
+ * budget: five thousand students at ten questions each is fifty thousand
+ * paid calls in a day, and the only way to find out was the invoice.
+ */
+describe("the college's own allowance", () => {
+  it("refuses once the college has spent the day's allowance", () => {
+    const access = aiHelperAccess(input({ askedTodayCollege: 500, dailyPerCollege: 500 }));
+    expect(access.allowed).toBe(false);
+    expect(access.reason).toBe(AI_REFUSALS.collegeLimit);
+    // Not their fault, and the sentence says so.
+    expect(access.reason).toContain("not about your own allowance");
+  });
+
+  it("allows the ask that lands exactly on the last of them", () => {
+    expect(aiHelperAccess(input({ askedTodayCollege: 499, dailyPerCollege: 500 })).allowed).toBe(true);
+  });
+
+  it("tells a student about their own allowance first, when both are gone", () => {
+    // Both come back tomorrow, so the order is about whose fault it is: a
+    // student who has used their ten should hear that rather than hear
+    // about a budget they cannot see and did not spend.
+    const access = aiHelperAccess(input({ askedToday: 10, dailyPerStudent: 10, askedTodayCollege: 9_999, dailyPerCollege: 500 }));
+    expect(access.reason).toBe(AI_REFUSALS.dailyLimit);
+  });
+
+  it("is still a ceiling when the helper is off or the sitting is not practice", () => {
+    // Order: nothing about a budget is said where the assistant does not
+    // exist at all.
+    expect(aiHelperAccess(input({ enabled: false, askedTodayCollege: 9_999 })).reason).toBe(AI_REFUSALS.off);
+    expect(aiHelperAccess(input({ context: "CONTEST", askedTodayCollege: 9_999 })).reason).toBe(AI_REFUSALS.notPractice);
+  });
+
+  it("never marks a solve assisted on a refusal", () => {
+    expect(aiHelperAccess(input({ askedTodayCollege: 500, dailyPerCollege: 500 })).marksAssisted).toBe(false);
+  });
+
+  it("has a default that is a ceiling rather than a target", () => {
+    expect(AI_COLLEGE_LIMIT.default).toBeGreaterThan(AI_DAILY_LIMIT.default);
+    expect(AI_HELPER_DEFAULT.dailyPerCollege).toBe(AI_COLLEGE_LIMIT.default);
+    // And a setting cannot name a budget outside the range.
+    expect(aiHelperSettingSchema.safeParse({ ...AI_HELPER_DEFAULT, dailyPerCollege: 0 }).success).toBe(false);
+    expect(aiHelperSettingSchema.safeParse({ ...AI_HELPER_DEFAULT, dailyPerCollege: AI_COLLEGE_LIMIT.max + 1 }).success).toBe(false);
+  });
+
+  it("reads a setting written before the college had one", () => {
+    // Phase 15g's shape: everything but the budget. It gets the default
+    // ceiling rather than none, because a setting with no budget is the
+    // state this phase exists to end.
+    const before = {
+      enabled: true,
+      provider: "anthropic",
+      modelId: "claude-haiku-5-5",
+      baseUrl: "",
+      dailyPerStudent: 4,
+      maxOutputTokens: 500,
+    };
+    expect(effectiveAiHelperSetting(before)).toEqual({ ...before, dailyPerCollege: AI_COLLEGE_LIMIT.default });
+    // And Phase 12b's shape, two upgrades back, still arrives whole.
+    expect(effectiveAiHelperSetting({ enabled: true, modelId: "claude-opus-5-5", dailyPerStudent: 4, maxOutputTokens: 500 })).toEqual({
+      enabled: true,
+      provider: "anthropic",
+      modelId: "claude-opus-5-5",
+      baseUrl: "",
+      dailyPerStudent: 4,
+      dailyPerCollege: AI_COLLEGE_LIMIT.default,
+      maxOutputTokens: 500,
+    });
   });
 });
 

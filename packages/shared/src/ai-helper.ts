@@ -203,6 +203,23 @@ export interface AiModelTarget {
 
 /** How many questions one student may ask in a day, whatever the model. */
 export const AI_DAILY_LIMIT = Object.freeze({ min: 1, max: 50, default: 10 });
+/**
+ * And how many the COLLEGE may ask in a day, across everybody (Phase 15j).
+ *
+ * The per-student allowance was the only limit there was, and it is not a
+ * budget: five thousand students at ten questions each is fifty thousand
+ * paid calls in a day, and the only way to find out was the invoice. A
+ * super-admin could set the per-student number down, but that punishes the
+ * student who asks twice to protect against the day everybody asks ten
+ * times.
+ *
+ * The default is deliberately modest. It is a ceiling, not a target: on an
+ * ordinary day nobody reaches it, and on the day something goes wrong —
+ * a cohort told to use it, a script, a problem everybody is stuck on — it
+ * is the thing that stops the bill rather than the thing that explains it
+ * afterwards.
+ */
+export const AI_COLLEGE_LIMIT = Object.freeze({ min: 10, max: 20_000, default: 500 });
 /** Hard ceilings on what crosses the wire, in characters and tokens. */
 export const AI_SOURCE_MAX_CHARS = 20_000;
 export const AI_STATEMENT_MAX_CHARS = 8_000;
@@ -229,6 +246,8 @@ export const aiHelperSettingSchema = z
      */
     baseUrl: z.union([z.literal(""), z.string().trim().url()]),
     dailyPerStudent: z.number().int().min(AI_DAILY_LIMIT.min).max(AI_DAILY_LIMIT.max),
+    /** The whole college's allowance for the day. See `AI_COLLEGE_LIMIT`. */
+    dailyPerCollege: z.number().int().min(AI_COLLEGE_LIMIT.min).max(AI_COLLEGE_LIMIT.max),
     maxOutputTokens: z.number().int().min(AI_OUTPUT_MAX_TOKENS.min).max(AI_OUTPUT_MAX_TOKENS.max),
   })
   .strict();
@@ -245,6 +264,7 @@ export const AI_HELPER_DEFAULT: AiHelperSetting = Object.freeze({
   modelId: "claude-sonnet-5-5",
   baseUrl: "",
   dailyPerStudent: AI_DAILY_LIMIT.default,
+  dailyPerCollege: AI_COLLEGE_LIMIT.default,
   maxOutputTokens: AI_OUTPUT_MAX_TOKENS.default,
 });
 
@@ -267,19 +287,29 @@ const legacySettingSchema = z
   })
   .strict();
 
+/**
+ * A setting from Phase 15g: everything but the college's allowance. Read
+ * forward the same way, and for the same reason — a deploy that widened the
+ * field should not switch a working assistant off.
+ */
+const preBudgetSettingSchema = aiHelperSettingSchema.omit({ dailyPerCollege: true }).strict();
+
 function upgradeLegacySetting(value: unknown): unknown {
   const parsed = legacySettingSchema.safeParse(value);
   if (!parsed.success) return null;
   const { modelId, ...rest } = parsed.data;
   // `custom` named no model of its own: the deployment's AI_MODEL did.
-  if (modelId === "custom") return { ...rest, provider: "openai-compatible", modelId: "", baseUrl: "" };
-  if (AI_MODEL_ID_PATTERN.test(modelId)) return { ...rest, provider: "anthropic", modelId, baseUrl: "" };
+  const budget = { dailyPerCollege: AI_COLLEGE_LIMIT.default };
+  if (modelId === "custom") return { ...rest, ...budget, provider: "openai-compatible", modelId: "", baseUrl: "" };
+  if (AI_MODEL_ID_PATTERN.test(modelId)) return { ...rest, ...budget, provider: "anthropic", modelId, baseUrl: "" };
   return null;
 }
 
 export function effectiveAiHelperSetting(value: unknown): AiHelperSetting {
   const parsed = aiHelperSettingSchema.safeParse(value);
   if (parsed.success) return parsed.data;
+  const preBudget = preBudgetSettingSchema.safeParse(value);
+  if (preBudget.success) return { ...preBudget.data, dailyPerCollege: AI_COLLEGE_LIMIT.default };
   const upgraded = aiHelperSettingSchema.safeParse(upgradeLegacySetting(value));
   return upgraded.success ? upgraded.data : AI_HELPER_DEFAULT;
 }
@@ -313,6 +343,8 @@ export const AI_REFUSALS = Object.freeze({
   tooEarly:
     "Have a real go first. The assistant unlocks after one judged submission, or ten minutes of work on this problem.",
   dailyLimit: "You have used today's questions. They come back tomorrow — and the hints are always there.",
+  collegeLimit:
+    "The assistant has answered as many questions as the college allows today, so it is resting until tomorrow. This is not about your own allowance — your hints and the editorial still work.",
   unconfigured: "The assistant has no model configured. Ask a super-admin.",
   unavailable: "The assistant could not answer just now. Try again in a moment.",
 });
@@ -337,7 +369,16 @@ export interface AiAccess {
  * something, and an assistant reachable before the first read would teach
  * students to ask it instead of reading.
  */
-export function aiHelperAccess(input: HelpInput & { enabled: boolean; askedToday: number; dailyPerStudent: number }): AiAccess {
+export function aiHelperAccess(
+  input: HelpInput & {
+    enabled: boolean;
+    askedToday: number;
+    dailyPerStudent: number;
+    /** Answered asks across the whole college since IST midnight (Phase 15j). */
+    askedTodayCollege: number;
+    dailyPerCollege: number;
+  },
+): AiAccess {
   const no = (reason: string): AiAccess => ({ allowed: false, reason, marksAssisted: false });
   if (!input.enabled) return no(AI_REFUSALS.off);
   if (input.context !== "PRACTICE") return no(AI_REFUSALS.notPractice);
@@ -346,7 +387,14 @@ export function aiHelperAccess(input: HelpInput & { enabled: boolean; askedToday
   const tried = input.attempts >= 1 || minutes >= HINT_POLICY.tier2.activeMinutes;
   if (!tried && !input.solved) return no(AI_REFUSALS.tooEarly);
 
+  /**
+   * Their own allowance first, then the college's. Both come back tomorrow,
+   * so the order is about whose fault it is: a student who has used their
+   * ten should be told that before being told about a budget they cannot
+   * see and did not spend.
+   */
   if (input.askedToday >= input.dailyPerStudent) return no(AI_REFUSALS.dailyLimit);
+  if (input.askedTodayCollege >= input.dailyPerCollege) return no(AI_REFUSALS.collegeLimit);
   return { allowed: true, reason: null, marksAssisted: !input.solved };
 }
 

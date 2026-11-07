@@ -24,6 +24,8 @@ const h = vi.hoisted(() => {
     submission: null as null | { id: string; verdict: string | null; firstFailedIndex: number | null },
     detail: null as null | { input: string | null; expected: string | null; stdout: string | null },
     asksToday: 0,
+    /** Answered asks across the college today (Phase 15j). */
+    collegeAsksToday: 0,
     assists: [] as { kind: string; answer: string | null; askedAt: Date; id: string }[],
   };
   const created: Record<string, unknown>[] = [];
@@ -40,7 +42,10 @@ const h = vi.hoisted(() => {
     submission: { findFirst: vi.fn(async () => rows.submission) },
     submissionTestDetail: { findUnique: vi.fn(async () => rows.detail) },
     aiAssist: {
-      count: vi.fn(async () => rows.asksToday),
+      // The college count has no `userId` in its filter; the student's does.
+      count: vi.fn(async (args?: { where?: { userId?: string } }) =>
+        args?.where?.userId === undefined ? rows.collegeAsksToday : rows.asksToday,
+      ),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         created.push(args.data);
         return { id: "assist_1" };
@@ -91,6 +96,7 @@ beforeEach(() => {
   h.rows.submission = null;
   h.rows.detail = null;
   h.rows.asksToday = 0;
+  h.rows.collegeAsksToday = 0;
   h.rows.assists = [];
   h.created.length = 0;
   h.env.AI_API_KEY = "test-key-123456";
@@ -124,6 +130,31 @@ describe("refusals", () => {
     await expect(askAiHelperFor(USER, { problemId: PROBLEM, kind: "MISTAKE" }, "PRACTICE")).rejects.toThrow(
       AI_REFUSALS.unconfigured,
     );
+  });
+
+  /**
+   * Phase 15j. The per-student allowance is not a budget; this is. Asserted
+   * through the real chokepoint, so a build that stopped consulting it
+   * fails here rather than on an invoice.
+   */
+  it("refuses once the college has spent the day, and says it is not the student's fault", async () => {
+    on({ dailyPerCollege: 40 });
+    tried();
+    h.rows.collegeAsksToday = 40;
+    await expect(askAiHelperFor(USER, { problemId: PROBLEM, kind: "MISTAKE" }, "PRACTICE")).rejects.toThrow(
+      AI_REFUSALS.collegeLimit,
+    );
+    // Nothing was sent and nothing was written down.
+    expect(h.created).toEqual([]);
+  });
+
+  it("still answers the student whose college has one question left", async () => {
+    on({ dailyPerCollege: 40 });
+    tried();
+    h.rows.collegeAsksToday = 39;
+    globalThis.fetch = answers("Look at line 4.") as unknown as typeof fetch;
+    const answer = await askAiHelperFor(USER, { problemId: PROBLEM, kind: "MISTAKE" }, "PRACTICE");
+    expect(answer.html).toContain("line 4");
   });
 
   it("refuses in a contest and in an assessment", async () => {

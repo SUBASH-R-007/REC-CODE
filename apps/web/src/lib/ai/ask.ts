@@ -61,8 +61,11 @@ export async function askAiHelperFor(userId: string, input: unknown, context: He
   const state = await getHelpState(userId, problemId, context);
   if (!state) throw new NotFoundError(NOT_AVAILABLE);
 
-  const askedToday = await countAsksToday(userId, state.now);
-  const access = aiAllowed(state, runtime.setting, askedToday);
+  const [askedToday, askedTodayCollege] = await Promise.all([
+    countAsksToday(userId, state.now),
+    countCollegeAsksToday(state.now),
+  ]);
+  const access = aiAllowed(state, runtime.setting, askedToday, askedTodayCollege);
   if (!access.allowed) throw new ForbiddenError(access.reason ?? AI_REFUSALS.off);
 
   const material = await loadMaterial(userId, state.problemId, state.liveVersionId);
@@ -132,6 +135,26 @@ export async function askAiHelperFor(userId: string, input: unknown, context: He
 /** Answered asks since IST midnight. A failure is not one. */
 export async function countAsksToday(userId: string, now: Date): Promise<number> {
   return db.aiAssist.count({ where: { userId, failed: false, askedAt: { gte: istDayStart(now) } } });
+}
+
+/**
+ * The same count for the whole college (Phase 15j): the day's spend.
+ *
+ * A failure is not one here either — the college is not charged for an
+ * answer nobody got, and a provider having a bad afternoon must not eat the
+ * budget and lock everybody out until tomorrow.
+ *
+ * Two numbers, two races, both known and both small: between this count and
+ * the row written below, a second request can pass the same check, so a
+ * limit can be exceeded by about as many asks as are in flight at once.
+ * `AiAssist` is append-only with `answer IS NULL` meaning failure, so there
+ * is no row to reserve and no counter to increment atomically without a
+ * table of its own. `docs/OPEN-QUESTIONS.md` records what that table would
+ * be for, and why a ceiling that can be overshot by a handful is still a
+ * ceiling where none existed.
+ */
+export async function countCollegeAsksToday(now: Date): Promise<number> {
+  return db.aiAssist.count({ where: { failed: false, askedAt: { gte: istDayStart(now) } } });
 }
 
 interface Material {

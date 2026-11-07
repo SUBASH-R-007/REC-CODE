@@ -141,8 +141,10 @@ export function discussionAllowed(state: HelpState, moderator: boolean): Discuss
  */
 export function aiAllowed(
   state: HelpState,
-  config: { enabled: boolean; dailyPerStudent: number },
+  config: { enabled: boolean; dailyPerStudent: number; dailyPerCollege: number },
   askedToday: number,
+  /** Answered asks across the college since IST midnight (Phase 15j). */
+  askedTodayCollege: number,
 ): AiAccess {
   return aiHelperAccess({
     context: state.context,
@@ -155,5 +157,7 @@ export function aiAllowed(
     enabled: config.enabled,
     askedToday,
     dailyPerStudent: config.dailyPerStudent,
+    askedTodayCollege,
+    dailyPerCollege: config.dailyPerCollege,
   });
 }

@@ -9,6 +9,7 @@ import {
   HINT_POLICY,
   formatCampusTime,
 } from "@recx/shared";
+import { countCollegeAsksToday } from "@/lib/ai/ask";
 import { getAiRuntime } from "@/lib/ai/settings";
 import { foldAiUsage } from "@/lib/ai/usage";
 import { requireSuperAdminPage } from "@/lib/auth/guards";
@@ -41,8 +42,9 @@ export default async function SuperAiPage() {
       select: { updatedAt: true },
     }),
   ]);
-  const since = new Date(Date.now() - 30 * 86_400_000);
-  const [asked, failed, students, usage] = await Promise.all([
+  const now = new Date();
+  const since = new Date(now.getTime() - 30 * 86_400_000);
+  const [asked, failed, students, usage, today] = await Promise.all([
     db.aiAssist.count({ where: { failed: false, askedAt: { gte: since } } }),
     db.aiAssist.count({ where: { failed: true, askedAt: { gte: since } } }),
     db.aiAssist.findMany({
@@ -67,7 +69,11 @@ export default async function SuperAiPage() {
       _count: { _all: true },
       _max: { askedAt: true },
     }),
+    // The day's spend against the ceiling (Phase 15j). The same count the
+    // student path uses, so the page and the refusal cannot disagree.
+    countCollegeAsksToday(now),
   ]);
+  const collegeLeft = Math.max(0, runtime.setting.dailyPerCollege - today);
 
   const models = foldAiUsage(
     usage.map((row) => ({
@@ -117,6 +123,12 @@ export default async function SuperAiPage() {
             A student cannot ask straight away: the button unlocks after one judged submission or{" "}
             {HINT_POLICY.tier2.activeMinutes} minutes of work on that problem, which is the same threshold hint 2 uses.
             Each student gets a set number of questions a day, from {AI_DAILY_LIMIT.min} to {AI_DAILY_LIMIT.max}.
+          </p>
+          <p>
+            <strong>And the college has an allowance of its own.</strong> The per-student number is not a budget —
+            five thousand students at ten questions each is fifty thousand paid calls in a day. The college ceiling is
+            what stops that: reaching it rests the assistant for everybody until midnight IST, and the student is told
+            it is not about their own allowance. A failed ask costs neither.
           </p>
         </CardBody>
       </Card>
@@ -183,6 +195,29 @@ export default async function SuperAiPage() {
           <p className="text-text-secondary">
             Suggested, not required:{" "}
             {AI_MODEL_PRESETS.map((preset) => preset.label).join(", ")}.
+          </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Today"
+          subtitle="The college's allowance resets at midnight IST. A failed ask does not count against it."
+        />
+        <CardBody>
+          <p className="text-sm">
+            <strong>
+              {today} of {runtime.setting.dailyPerCollege}
+            </strong>{" "}
+            questions answered across the college today.{" "}
+            {collegeLeft === 0 ? (
+              <span className="text-warning">
+                The allowance is used up, so the assistant is resting until midnight IST. Raise the ceiling above to
+                bring it back today.
+              </span>
+            ) : (
+              <span className="text-text-secondary">{collegeLeft} left before it rests for the day.</span>
+            )}
           </p>
         </CardBody>
       </Card>

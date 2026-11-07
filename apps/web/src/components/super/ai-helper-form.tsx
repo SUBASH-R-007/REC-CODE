@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, Save, XCircle, Zap } from "lucide-react";
 import { Button, Field, Input, Select, useToast } from "@recx/design";
 import {
+  AI_COLLEGE_LIMIT,
   AI_DAILY_LIMIT,
   AI_MODEL_ID_MAX,
   AI_MODEL_PRESETS,
@@ -54,6 +55,7 @@ export function AiHelperForm({
   const [modelId, setModelId] = useState(initial.modelId);
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
   const [dailyPerStudent, setDailyPerStudent] = useState(String(initial.dailyPerStudent));
+  const [dailyPerCollege, setDailyPerCollege] = useState(String(initial.dailyPerCollege));
   const [maxOutputTokens, setMaxOutputTokens] = useState(String(initial.maxOutputTokens));
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -214,6 +216,23 @@ export function AiHelperForm({
         </Field>
 
         <Field
+          label="Questions for the whole college per day"
+          htmlFor={`${id}-college`}
+          hint={`${AI_COLLEGE_LIMIT.min}–${AI_COLLEGE_LIMIT.max}. A ceiling on the day's spend, not a target — reaching it stops the assistant for everybody until midnight IST.`}
+        >
+          <Input
+            id={`${id}-college`}
+            type="number"
+            min={AI_COLLEGE_LIMIT.min}
+            max={AI_COLLEGE_LIMIT.max}
+            step="1"
+            required
+            value={dailyPerCollege}
+            onChange={(e) => setDailyPerCollege(e.target.value)}
+          />
+        </Field>
+
+        <Field
           label="Longest answer (tokens)"
           htmlFor={`${id}-tokens`}
           hint={`${AI_OUTPUT_MAX_TOKENS.min}–${AI_OUTPUT_MAX_TOKENS.max}. Shorter answers cost less and teach better.`}
@@ -291,6 +310,7 @@ export function AiHelperForm({
               modelId,
               baseUrl,
               dailyPerStudent: Number(dailyPerStudent),
+              dailyPerCollege: Number(dailyPerCollege),
               maxOutputTokens: Number(maxOutputTokens),
               reason,
             });

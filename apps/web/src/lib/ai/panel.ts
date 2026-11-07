@@ -1,6 +1,6 @@
 import "server-only";
 import { AI_REFUSALS, type AiAskKind, type HelpContext } from "@recx/shared";
-import { countAsksToday } from "@/lib/ai/ask";
+import { countAsksToday, countCollegeAsksToday } from "@/lib/ai/ask";
 import { aiUsable, getAiRuntime } from "@/lib/ai/settings";
 import { db } from "@/lib/db";
 import { aiAllowed, getHelpState } from "@/lib/help/access";
@@ -55,8 +55,11 @@ export async function getAiPanelState(
   const state = await getHelpState(userId, problemId, context);
   if (!state) return null;
 
-  const askedToday = await countAsksToday(userId, state.now);
-  const access = aiAllowed(state, runtime.setting, askedToday);
+  const [askedToday, askedTodayCollege] = await Promise.all([
+    countAsksToday(userId, state.now),
+    countCollegeAsksToday(state.now),
+  ]);
+  const access = aiAllowed(state, runtime.setting, askedToday, askedTodayCollege);
   const rows = await db.aiAssist.findMany({
     where: { userId, problemId: state.problemId, failed: false, askedAt: { gte: istDayStart(state.now) } },
     orderBy: { askedAt: "asc" },

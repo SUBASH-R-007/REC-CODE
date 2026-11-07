@@ -4131,3 +4131,47 @@ algorithm precisely enough to be transcribed, and that is not a hole to be
 closed — it is what a good hint does. The line drawn here is the one the
 product promised: an explanation, never a finished program.
 
+## The per-student allowance was never a budget (Phase 15j)
+
+Phase 12b gave each student ten questions a day and `docs/OPEN-QUESTIONS.md`
+said the allowance existed "partly so that week is affordable". It does not
+do that. Five thousand students at ten questions each is fifty thousand paid
+calls in a day, and the only instrument for finding out was the invoice.
+
+The lever a super-admin had was the per-student number, and turning it down
+is the wrong lever: it punishes the student who asks twice in order to
+protect against the day everybody asks ten times. So the college has an
+allowance of its own — a ceiling on the day's spend, counted across
+everybody, resetting at midnight IST like the per-student one.
+
+**The default is 500, deliberately modest.** It is a ceiling and not a
+target: on an ordinary day nobody reaches it, and on the day something goes
+wrong — a cohort told to use it, a script, one problem everybody is stuck on
+— it is the thing that stops the bill rather than the thing that explains it
+afterwards. A super-admin who wants more raises it, on a page that now shows
+what the day has spent.
+
+**Whose fault it is decides the order.** A student who has used their own ten
+is told that first; only a student with questions left hears about the
+college's budget, and that sentence says plainly that it is not about their
+own allowance. Both come back tomorrow, so the order carries no other
+information — but "not yet", the heading the panel used for a lock a student
+can clear by working, is wrong for one they cannot, and it now reads
+"Resting until tomorrow".
+
+**A failed ask costs neither allowance.** It was already true of the
+student's, and it matters more for the college's: a provider having a bad
+afternoon must not eat the day's budget and lock out everybody until
+midnight.
+
+**The race, named rather than hidden.** Between counting and writing the row,
+a second request can pass the same check, so either limit can be overshot by
+roughly the number of asks in flight at once — a handful, not a multiple.
+`AiAssist` is append-only and `answer IS NULL` means failure, so there is no
+row to reserve and no counter to increment atomically; doing better needs a
+table of its own, keyed by (scope, day), whose single conditional `UPDATE …
+WHERE used < limit` would be exact. That is worth building when the ceiling
+is a real cost boundary rather than a safety net, and it is not worth a
+migration today: a ceiling that can be exceeded by five is still a ceiling,
+where before there was none at all.
+
