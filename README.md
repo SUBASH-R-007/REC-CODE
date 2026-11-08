@@ -110,8 +110,11 @@ gate are recorded in the RUNBOOK's Gate log.
 | [docs/PROCTORING.md](docs/PROCTORING.md) | what browser proctoring can and cannot do (engine: Phase 6) |
 | [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md) | WCAG 2.2 AA, colour-independent verdicts, stated exceptions |
 | [docs/CAPACITY.md](docs/CAPACITY.md) | judge slot planning (planning figures until Phase 2) |
+| [docs/AUTHORING.md](docs/AUTHORING.md) | for faculty: what a problem may be, draft to published, the bulk import format |
+| [docs/EXAM-BROWSER.md](docs/EXAM-BROWSER.md) | REC Exam Browser: the handshake, the signals, the installers |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | local development, operations, the Gate log |
 | [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | decisions taken where the specification was ambiguous |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | what is left: launch blockers, scoped work still refused, and what stays unbuilt |
 
 ## Licence
 
