@@ -290,7 +290,10 @@ jobs:
     runs-on: ubuntu-24.04
     # A cache miss for the from-source toolchains builds GCC (~40-60 min on a
     # standard runner); the vendor toolchains install in a few minutes; with
-    # both caches warm the job takes a few minutes.
+    # both caches warm the job takes a few minutes. The .NET SDK is the
+    # largest of them by far, so if the vendor cache ever stops being
+    # restored, look at the repository's 10 GB cache budget before anything
+    # else.
     timeout-minutes: 120
 
     steps:
@@ -315,7 +318,14 @@ jobs:
             /opt/toolchains/cpython-3.12.6
           key: toolchains-native-${{ runner.os }}-${{ hashFiles('infra/judge/toolchains/build-gcc.sh', 'infra/judge/toolchains/build-gcc-pch.sh', 'infra/judge/toolchains/build-cpython.sh') }}
 
-      - name: Restore vendor toolchains (Temurin, Kotlin, PyPy, Node.js, Go, testlib)
+      # Rust and the .NET SDK were in LANGUAGE_CATALOG from Phase 13a and
+      # never in this list, so `verify-toolchains.sh` reported them MISSING
+      # and this job had failed on every run since. The key carries a `v2`
+      # because the paths changed and the hash did not: `install-*.sh`
+      # already covered install-rust.sh and install-dotnet.sh, so without it
+      # a hit on the old key would restore the six and skip installing the
+      # two, which is the same failure with a cache in front of it.
+      - name: Restore vendor toolchains (Temurin, Kotlin, PyPy, Node.js, Go, Rust, .NET, testlib)
         id: vendor
         uses: actions/cache/restore@v4
         with:
@@ -325,8 +335,10 @@ jobs:
             /opt/toolchains/pypy-7.3.17
             /opt/toolchains/node-22.11.0
             /opt/toolchains/go-1.23.2
+            /opt/toolchains/rust-1.80.0
+            /opt/toolchains/dotnet-10.0.403
             /opt/toolchains/testlib-0.9.41
-          key: toolchains-vendor-${{ runner.os }}-${{ hashFiles('infra/judge/toolchains/install-*.sh') }}
+          key: toolchains-vendor-v2-${{ runner.os }}-${{ hashFiles('infra/judge/toolchains/install-*.sh') }}
 
       - name: Build toolchains from source (cache miss)
         if: steps.native.outputs.cache-hit != 'true'
@@ -341,9 +353,13 @@ jobs:
             /opt/toolchains/cpython-3.12.6
           key: ${{ steps.native.outputs.cache-primary-key }}
 
+      # `rust` comes after the native step on purpose: it links through
+      # /opt/toolchains/gcc-13.2.0, which that step has either restored or
+      # just built. build-all.sh runs its steps in STEPS order regardless of
+      # the order they are named in here.
       - name: Install vendor toolchains (cache miss; checksum-verified)
         if: steps.vendor.outputs.cache-hit != 'true'
-        run: sudo bash infra/judge/toolchains/build-all.sh temurin kotlin pypy node go testlib
+        run: sudo bash infra/judge/toolchains/build-all.sh temurin kotlin pypy node go rust dotnet testlib
 
       - name: Save vendor toolchains
         if: steps.vendor.outputs.cache-hit != 'true'
@@ -355,6 +371,8 @@ jobs:
             /opt/toolchains/pypy-7.3.17
             /opt/toolchains/node-22.11.0
             /opt/toolchains/go-1.23.2
+            /opt/toolchains/rust-1.80.0
+            /opt/toolchains/dotnet-10.0.403
             /opt/toolchains/testlib-0.9.41
           key: ${{ steps.vendor.outputs.cache-primary-key }}
 

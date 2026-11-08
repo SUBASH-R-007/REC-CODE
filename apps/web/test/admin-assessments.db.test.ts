@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -46,7 +47,32 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
   let db: (typeof import("@/lib/db"))["db"];
   let actions: typeof import("@/server/actions/admin-assessments");
   const slugs: string[] = [];
+  /**
+   * The published coding problem this suite pins (Phase 15q).
+   *
+   * It used to be whichever problem `recx_test` happened to hold:
+   *
+   *     const problem = await db.problem.findFirst({
+   *       where: { liveVersionId: { not: null }, liveVersion: { frozenAt: { not: null } } },
+   *     });
+   *     publishedProblemSlug = problem?.slug ?? "";
+   *
+   * On this laptop the seed puts one there, so every test ran. On a CI
+   * runner the test database is migrated and not seeded, so the slug was
+   * `""`. Measured on a freshly migrated database: **1 failed, 11 passed**,
+   * and the failure was a Zod message about an empty string rather than
+   * anything this suite is about. Worse than the failure were two of the
+   * eleven. "refuses publishing an empty paper, and a lab assessment with
+   * no hall" asserted the empty half and skipped the hall half its name
+   * promises, in 17 ms; "walks DRAFT → PUBLISHED → OPEN → CLOSED" asserted
+   * that the draft was created and returned, in 12 ms. A suite that depends
+   * on ambient data either breaks somewhere else or quietly stops covering
+   * anything, and this one did both at once.
+   *
+   * So it makes its own, and the guards are gone with it.
+   */
   let publishedProblemSlug = "";
+  let problemId = "";
 
   const OPENS = new Date(Date.now() + 3_600_000).toISOString().slice(0, 16);
   const CLOSES = new Date(Date.now() + 7_200_000).toISOString().slice(0, 16);
@@ -89,11 +115,39 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
     });
     actorId = admin.id;
 
-    const problem = await db.problem.findFirst({
-      where: { liveVersionId: { not: null }, liveVersion: { frozenAt: { not: null } } },
-      select: { slug: true },
+    // A published problem of its own: ordinary STDIN/TOKEN, so none of the
+    // pin's own refusals (interactive, debug budget) can fire by accident.
+    const problem = await db.problem.create({
+      data: {
+        slug: `${tag}-pinned`,
+        displayCode: await freeDisplayCode(db),
+        title: "Add them up",
+        difficulty: "EASY",
+        status: "PUBLISHED",
+      },
+      select: { id: true, slug: true },
     });
-    publishedProblemSlug = problem?.slug ?? "";
+    problemId = problem.id;
+    publishedProblemSlug = problem.slug;
+    const version = await db.problemVersion.create({
+      data: {
+        problemId,
+        revision: 1,
+        status: "PUBLISHED",
+        title: "Add them up",
+        difficulty: "EASY",
+        statementMd: "Add them up.",
+        ioMode: "STDIN",
+        compareMode: "TOKEN",
+        scoringMode: "ICPC",
+        stopOnFirstFailure: true,
+        timeLimitMs: 2000,
+      } as never,
+      select: { id: true },
+    });
+    // Frozen by UPDATE, because the guard refuses a row that arrives frozen.
+    await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, version.id);
+    await db.problem.update({ where: { id: problemId }, data: { liveVersionId: version.id } });
   }, 120_000);
 
   afterAll(async () => {
@@ -107,6 +161,18 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
     await db.assessment.deleteMany({ where: { id: { in: ids }, status: "DRAFT" } });
     await db.auditLog.deleteMany({ where: { actorId } });
     await db.user.deleteMany({ where: { id: actorId } }).catch(() => undefined);
+    /**
+     * The problem goes too, frozen version and all — `cleanup` lifts the
+     * frozen-version triggers inside one transaction and re-enables them
+     * before it commits, and throws if any is left disabled. Leaving it
+     * behind would be cheap once and expensive by the hundredth run:
+     * there are only nine thousand display codes (see
+     * `support/display-code.ts`).
+     */
+    if (problemId) {
+      const { cleanup } = await import("./support/authoring-fixtures");
+      await cleanup(db, { problemIds: [problemId], userIds: [], blobShas: [] });
+    }
   }, 60_000);
 
   it("creates a draft under a proctored mode", async () => {
@@ -163,75 +229,73 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.error).toMatch(/empty paper|at least one question/i);
 
-    if (publishedProblemSlug) {
-      const added = await actions.addAssessmentProblem({
-        assessmentId: id,
-        problemSlug: publishedProblemSlug,
-        position: "1",
-        points: "1",
-      });
-      expect(added.ok, added.ok ? "" : added.error).toBe(true);
+    const added = await actions.addAssessmentProblem({
+      assessmentId: id,
+      problemSlug: publishedProblemSlug,
+      position: "1",
+      points: "1",
+    });
+    expect(added.ok, added.ok ? "" : added.error).toBe(true);
 
-      const noHall = await actions.setAssessmentStatus({ assessmentId: id, to: "PUBLISHED" });
-      expect(noHall.ok).toBe(false);
-      if (!noHall.ok) expect(noHall.error).toMatch(/hall|allowlist/i);
+    const noHall = await actions.setAssessmentStatus({ assessmentId: id, to: "PUBLISHED" });
+    expect(noHall.ok).toBe(false);
+    if (!noHall.ok) expect(noHall.error).toMatch(/hall|allowlist/i);
 
-      // A lab hall with no allowlist is refused: the allowlist IS the
-      // enforcement, so an empty one is a lab sitting with nothing watching.
-      const bare = await actions.scheduleExamSession({
-        assessmentId: id,
-        label: "Lab 1",
-        room: null,
-        startsAt: OPENS,
-        endsAt: CLOSES,
-        capacity: "30",
-        allowedCidrs: [],
-      });
-      expect(bare.ok).toBe(false);
+    // A lab hall with no allowlist is refused: the allowlist IS the
+    // enforcement, so an empty one is a lab sitting with nothing watching.
+    const bare = await actions.scheduleExamSession({
+      assessmentId: id,
+      label: "Lab 1",
+      room: null,
+      startsAt: OPENS,
+      endsAt: CLOSES,
+      capacity: "30",
+      allowedCidrs: [],
+    });
+    expect(bare.ok).toBe(false);
 
-      const bad = await actions.scheduleExamSession({
-        assessmentId: id,
-        label: "Lab 1",
-        room: null,
-        startsAt: OPENS,
-        endsAt: CLOSES,
-        capacity: "30",
-        allowedCidrs: ["not-a-network"],
-      });
-      expect(bad.ok).toBe(false);
+    const bad = await actions.scheduleExamSession({
+      assessmentId: id,
+      label: "Lab 1",
+      room: null,
+      startsAt: OPENS,
+      endsAt: CLOSES,
+      capacity: "30",
+      allowedCidrs: ["not-a-network"],
+    });
+    expect(bad.ok).toBe(false);
 
-      const hall = await actions.scheduleExamSession({
-        assessmentId: id,
-        label: "Lab 1",
-        room: "AB1-304",
-        startsAt: OPENS,
-        endsAt: CLOSES,
-        capacity: "30",
-        allowedCidrs: ["10.21.0.0/16"],
-      });
-      expect(hall.ok, hall.ok ? "" : hall.error).toBe(true);
+    const hall = await actions.scheduleExamSession({
+      assessmentId: id,
+      label: "Lab 1",
+      room: "AB1-304",
+      startsAt: OPENS,
+      endsAt: CLOSES,
+      capacity: "30",
+      allowedCidrs: ["10.21.0.0/16"],
+    });
+    expect(hall.ok, hall.ok ? "" : hall.error).toBe(true);
 
-      const published = await actions.setAssessmentStatus({ assessmentId: id, to: "PUBLISHED" });
-      expect(published.ok, published.ok ? "" : published.error).toBe(true);
+    const published = await actions.setAssessmentStatus({ assessmentId: id, to: "PUBLISHED" });
+    expect(published.ok, published.ok ? "" : published.error).toBe(true);
 
-      // Published: the question set is fixed, and so are the terms.
-      const late = await actions.addAssessmentProblem({
-        assessmentId: id,
-        problemSlug: publishedProblemSlug,
-        position: "2",
-        points: "1",
-      });
-      expect(late.ok).toBe(false);
-      await expect(
-        db.assessment.update({ where: { id }, data: { proctorMode: "ADVISORY" } }),
-      ).rejects.toThrow();
-    }
+    // Published: the question set is fixed, and so are the terms.
+    const late = await actions.addAssessmentProblem({
+      assessmentId: id,
+      problemSlug: publishedProblemSlug,
+      position: "2",
+      points: "1",
+    });
+    expect(late.ok).toBe(false);
+    await expect(
+      db.assessment.update({ where: { id }, data: { proctorMode: "ADVISORY" } }),
+    ).rejects.toThrow();
   }, 180_000);
 
   it("walks DRAFT → PUBLISHED → OPEN → CLOSED and refuses a jump", async () => {
     const created = await actions.createAssessment(base({ proctorMode: "ADVISORY" }));
     expect(created.ok).toBe(true);
-    if (!created.ok || !publishedProblemSlug) return;
+    if (!created.ok) return;
     const id = created.data.id;
     await actions.addAssessmentProblem({ assessmentId: id, problemSlug: publishedProblemSlug, position: "1", points: "1" });
 

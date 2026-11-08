@@ -159,12 +159,15 @@ describe.skipIf(!ENABLED)("applying a judged contest submission, against recx_te
     });
     contestProblemId = cp.id;
     await db.contestRegistration.create({ data: { contestId, userId, kind: "RATED" } as never });
-    const config = await db.languageConfig.findFirstOrThrow({
-      where: { key: "cpp20" },
-      select: { id: true },
-      orderBy: { createdAt: "desc" },
-    });
-    languageConfigId = config.id;
+    /**
+     * The same as Phase 15q did for `assessment-results`: this used to be
+     * `findFirstOrThrow({ where: { key: "cpp20" } })`, which throws in
+     * `beforeAll` on a database where no other file has made that row yet —
+     * migrations do not. The suite then reports six skipped tests, which is
+     * a loud enough failure but an odd one to debug. It makes its own now.
+     */
+    const { enableLanguages } = await import("./support/authoring-fixtures");
+    languageConfigId = (await enableLanguages(db, ["cpp20"]))["cpp20"]!;
   }, 90_000);
 
   afterAll(async () => {

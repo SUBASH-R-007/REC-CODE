@@ -20,6 +20,7 @@ import { readRepoFile, repoFiles } from "./support/repo";
 const TOOLCHAINS = "infra/judge/toolchains/";
 const CATALOG = "packages/shared/src/languages.ts";
 const BUILD_ALL = `${TOOLCHAINS}build-all.sh`;
+const WORKFLOW = ".github/workflows/ci.yml";
 
 /**
  * Every toolchain directory the catalogue asks a host for: the value of each
@@ -102,6 +103,47 @@ describe("the catalogue's toolchains and the scripts that install them", () => {
       expect(repoFiles(), `build-all.sh step '${step}' names a script that is not in the repository`).toContain(
         `${TOOLCHAINS}${script}`,
       );
+    }
+  });
+
+  /**
+   * The third half, added in Phase 15q because the first two were green
+   * while CI had been red for weeks.
+   *
+   * `judge-integration` is the only job that runs anything in a real
+   * sandbox, and it installs toolchains by naming them: two cache
+   * `path:` lists and two `build-all.sh <steps>` lines. Rust and the .NET
+   * SDK joined the catalogue in Phase 13a and nobody added them to those
+   * four places, so `verify-toolchains.sh` reported them MISSING and the
+   * job failed on every run — the one place the full fleet is exercised,
+   * failing for a reason that had nothing to do with the code.
+   *
+   * It is the catalogue that decides what a host must hold, so the
+   * catalogue is what this reads.
+   */
+  it("installs and caches every catalogue toolchain in the judge-integration job", () => {
+    const workflow = readRepoFile(WORKFLOW).replace(/\r\n/g, "\n");
+    const start = workflow.indexOf("\n  judge-integration:");
+    expect(start, `${WORKFLOW} has no judge-integration job`).toBeGreaterThan(-1);
+    const after = workflow.slice(start + 1);
+    const end = after.search(/\n {2}[a-z][a-z0-9-]*:\n/);
+    const job = end === -1 ? after : after.slice(0, end);
+
+    for (const id of catalogToolchainIds()) {
+      expect(
+        job.includes(`/opt/toolchains/${id}`),
+        `the judge-integration job never names /opt/toolchains/${id}, which ${CATALOG} does: ` +
+          "a cache hit then restores the others and the self-check reports that language MISSING",
+      ).toBe(true);
+    }
+
+    // And every step build-all.sh knows is named on one of the job's two
+    // install lines, so a new installer cannot be left out of CI either.
+    const steps = /\nSTEPS=\(([^)]*)\)/.exec(readRepoFile(BUILD_ALL))?.[1]?.trim().split(/\s+/) ?? [];
+    const run = [...job.matchAll(/build-all\.sh ([a-z0-9 -]+)/g)].flatMap((m) => m[1]!.trim().split(/\s+/));
+    expect(run.length).toBeGreaterThanOrEqual(steps.length);
+    for (const step of steps) {
+      expect(run, `the judge-integration job never runs build-all.sh step '${step}'`).toContain(step);
     }
   });
 });

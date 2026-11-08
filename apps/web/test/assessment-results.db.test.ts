@@ -124,8 +124,24 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
      */
     await db.problemVersion.update({ where: { id: version.id }, data: { frozenAt: new Date() } });
     problemVersionId = version.id;
-    const language = await db.languageConfig.findFirst({ select: { id: true } });
-    languageConfigId = language?.id ?? "";
+    /**
+     * The toolchain row this suite's submissions point at (Phase 15q).
+     *
+     * It used to be `languageConfig.findFirst()` with `?? ""`, and the
+     * guard below meant that an empty id dropped the coding half of every
+     * sitting — so the marks added up to the multiple-choice answer alone
+     * and five of these fourteen tests failed. Migrations do not create a
+     * `LanguageConfig` row (measured: zero after `migrate deploy`), so what
+     * made it pass was another file in the same run having made one first.
+     * Whether this suite tested anything was decided by file order.
+     *
+     * `enableLanguages` upserts the catalogue's own cpp20 row, keyed on
+     * `key_toolchainId`, so it is the same row the seed would make and
+     * running it twice changes nothing.
+     */
+    const { enableLanguages } = await import("./support/authoring-fixtures");
+    languageConfigId = (await enableLanguages(db, ["cpp20"]))["cpp20"] ?? "";
+    expect(languageConfigId, "no cpp20 toolchain row to point a submission at").not.toBe("");
 
     const assessment = await db.assessment.create({
       data: {
@@ -255,7 +271,7 @@ describe.skipIf(!ENABLED)("an assessment's results, against recx_test", () => {
         data: { attemptId: attempt.id, mcqId, chosenIndex: args.chosenShownIndex },
       });
     }
-    if (args.verdict !== null && languageConfigId !== "") {
+    if (args.verdict !== null) {
       await db.submission.create({
         data: {
           userId: user.id,
