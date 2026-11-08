@@ -79,6 +79,13 @@ const READ_ONLY_MESSAGE = "You are viewing as another user (read-only). End the 
 
 const CSE_STUDENTS = [ACCOUNTS.student.identifier, ACCOUNTS.authoring.identifier];
 const ECE_STUDENT = ACCOUNTS.ece.identifier;
+
+/**
+ * How long a form submit that navigates may take, for the click AND the
+ * landing. One number, because two deadlines for one navigation is how a
+ * 20 s default hid under a 60 s intention. See support/session.ts.
+ */
+const LAND_MS = process.env.CI ? 120_000 : 60_000;
 /** The second seeded ECE student (apps/web/scripts/seed.ts). */
 const ECE_STUDENT_2 = process.env.E2E_ECE_STUDENT_2_ID ?? "2116226002002";
 
@@ -231,8 +238,10 @@ test.describe("a super-admin", () => {
         await openPage(page, `/super/impersonate?q=${encodeURIComponent(ECE_STUDENT)}`);
         await expect(page.getByRole("note").filter({ hasText: SUPER_STRIP })).toBeVisible();
         await page.getByLabel(/^Why do you need to view as /).fill(reason);
-        await page.getByRole("button", { name: "Start read-only view (15 minutes)" }).click();
-        await expectLandedOn(page, "/dashboard");
+        // The click's own budget, not the 20 s `actionTimeout` default: it
+        // waits for the navigation it schedules. See support/session.ts.
+        await page.getByRole("button", { name: "Start read-only view (15 minutes)" }).click({ timeout: LAND_MS });
+        await expectLandedOn(page, "/dashboard", LAND_MS);
         await expect(banner).toBeVisible();
         await expect(banner).toContainText("read-only");
         await expect(banner).toContainText(ECE_STUDENT);
@@ -253,8 +262,8 @@ test.describe("a super-admin", () => {
       });
 
       await test.step("end it", async () => {
-        await banner.getByRole("button", { name: "End impersonation" }).click();
-        await expectLandedOn(page, "/super/impersonate");
+        await banner.getByRole("button", { name: "End impersonation" }).click({ timeout: LAND_MS });
+        await expectLandedOn(page, "/super/impersonate", LAND_MS);
         await expect(banner).toHaveCount(0);
       });
 

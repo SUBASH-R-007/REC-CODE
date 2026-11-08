@@ -9,6 +9,15 @@ import { openPage } from "./page";
  * playwright.config.ts rather than being a second, smaller number that
  * expires first. `scripts/dev/warm-routes.sh` POSTs the route before the
  * suite starts, so this budget is the backstop and not the plan.
+ *
+ * The click carries it too, and that is not belt-and-braces. `click()`
+ * waits for the navigation it scheduled, and that wait is bounded by
+ * `actionTimeout` (20 s), not by `navigationTimeout` — so the budget above
+ * was exactly the "second, smaller number that expires first" it was
+ * written to avoid, hidden one level down in a default. CI failed on it on
+ * 2026-11-08: the call log reads "click action done / waiting for scheduled
+ * navigations to finish" and then stops at 20 s, with 264 other tests
+ * passing beside it, which reads as a flake and is a budget.
  */
 const SIGN_IN_TIMEOUT_MS = process.env.CI ? 180_000 : 120_000;
 
@@ -24,7 +33,7 @@ export async function signInWithForm(page: Page, acct: Account): Promise<void> {
   await openPage(page, "/login");
   await page.getByLabel("Roll number or college email").fill(acct.identifier);
   await page.getByLabel("Password", { exact: true }).fill(passwordFor(acct));
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("button", { name: "Sign in" }).click({ timeout: SIGN_IN_TIMEOUT_MS });
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: SIGN_IN_TIMEOUT_MS }).catch(async () => {
     const alert = await page
       .getByRole("alert")

@@ -187,7 +187,10 @@ async function signIn(page: Page) {
   await openPage(page, "/login");
   await page.getByLabel("Roll number or college email").fill(STUDENT.identifier);
   await page.getByLabel("Password", { exact: true }).fill(passwordFor(STUDENT));
-  await page.getByRole("button", { name: "Sign in" }).click();
+  // The click carries the budget as well as the wait: `click()` waits for
+  // the navigation it scheduled under `actionTimeout` (20 s), which is the
+  // smaller deadline that would expire first. See support/session.ts.
+  await page.getByRole("button", { name: "Sign in" }).click({ timeout: 120_000 });
   await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 120_000 });
 }
 
