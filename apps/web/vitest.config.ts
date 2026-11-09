@@ -17,6 +17,33 @@ const INCLUDE = ["test/**/*.test.ts", "src/**/*.test.ts"];
 const DB_TEST_FILES = ["test/**/*.db.test.ts", "test/judge-routes.test.ts"];
 const RUN_DB_TESTS = process.env.RECX_DB_TESTS === "1";
 
+/**
+ * Processes, not worker threads (Phase 16e).
+ *
+ * On 2026-11-10 both gates began exiting 1 with every test passing:
+ *
+ *     Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ *
+ * That is a worker failing to deliver a progress update to the reporter
+ * inside its RPC timeout — not an assertion, not a product defect, and not
+ * one file's fault. This suite contains deliberately CPU-heavy work: the
+ * `seed-content` mirrors run every authored problem's reference solution
+ * against an independent JS implementation, seconds at a time, synchronously
+ * and on purpose. A worker THREAD doing that starves the channel it reports
+ * on; a forked process does not.
+ *
+ * Measured, four ways, before changing anything: the error survived removing
+ * the newest test files, removing the changed components, and halving the
+ * worker count, and it reproduced on the committed tree with the working
+ * copy stashed (`git stash -u`) — on code that had gated green that morning.
+ * `--pool=forks` is the only thing that cleared it, at the same wall clock
+ * (85 s against 88 s).
+ *
+ * Nothing about what is asserted changes. Files are still isolated and still
+ * run in parallel; only the isolation mechanism differs.
+ */
+const UNIT_POOL = { pool: "forks" } as const;
+
 export default defineConfig({
   // Next compiles with the automatic JSX runtime; match it so component
   // render tests need no global React.
@@ -48,7 +75,12 @@ export default defineConfig({
           projects: [
             {
               extends: true,
-              test: { name: "unit", include: INCLUDE, exclude: [...configDefaults.exclude, ...DB_TEST_FILES] },
+              test: {
+                name: "unit",
+                include: INCLUDE,
+                exclude: [...configDefaults.exclude, ...DB_TEST_FILES],
+                ...UNIT_POOL,
+              },
             },
             {
               extends: true,
@@ -63,7 +95,7 @@ export default defineConfig({
             },
           ],
         }
-      : { include: INCLUDE }),
+      : { include: INCLUDE, ...UNIT_POOL }),
   },
   resolve: {
     alias: {

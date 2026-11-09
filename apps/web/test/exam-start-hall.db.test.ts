@@ -187,12 +187,30 @@ describe.skipIf(!ENABLED)("starting a sitting, against recx_test", () => {
       select: { id: true },
     });
     hallId = await hall(["10.12.0.0/16"]);
+
+    /**
+     * Phase 16e. `startAttempt` refuses with `needs_consent` until the
+     * candidate has agreed to what the sitting records, which is what a
+     * real candidate does on the readiness page before pressing Start. The
+     * fixture does the same thing through the same function rather than
+     * inserting the row by hand, so a change to what is recorded travels
+     * here too.
+     */
+    const { recordConsent } = await import("@/lib/exam/consent");
+    await recordConsent({ userId: studentId, assessmentId, ipHash: null });
   }, 90_000);
 
   afterAll(async () => {
     if (!db) return;
     try {
       await clearSittings();
+      // Phase 16e: both of ConsentRecord's foreign keys are RESTRICT and the
+      // table is append-only, so the agreement goes before the PAPER as well
+      // as before the candidate — which is why this is here and not further
+      // down beside the user delete.
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" DISABLE TRIGGER "ConsentRecord_append_only"`);
+      await db.$executeRawUnsafe(`DELETE FROM "ConsentRecord" WHERE "assessmentId" = $1`, assessmentId);
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" ENABLE TRIGGER "ConsentRecord_append_only"`);
       await db.$executeRawUnsafe(`DELETE FROM "ExamSession" WHERE "assessmentId" = $1`, assessmentId);
       await db.$executeRawUnsafe(`DELETE FROM "AssessmentMcq" WHERE "assessmentId" = $1`, assessmentId);
       // Same as above: a published paper is archived, not deleted, so the
@@ -491,6 +509,11 @@ describe.skipIf(!ENABLED)("starting a sitting, against recx_test", () => {
       },
       select: { id: true },
     });
+    // Phase 16e: consent is PER ASSESSMENT, and this test makes a paper of
+    // its own — so the agreement recorded in beforeAll does not cover it,
+    // which is the rule working rather than the test being awkward.
+    const { recordConsent } = await import("@/lib/exam/consent");
+    await recordConsent({ userId: studentId, assessmentId: paper.id, ipHash: null });
     try {
       const result = await start.startOrResumeAttempt({
         request: request(),
@@ -514,6 +537,9 @@ describe.skipIf(!ENABLED)("starting a sitting, against recx_test", () => {
       }
       await db.$executeRawUnsafe(`DELETE FROM "ExamSession" WHERE id = $1`, room.id);
       await db.$executeRawUnsafe(`DELETE FROM "AssessmentMcq" WHERE "assessmentId" = $1`, paper.id);
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" DISABLE TRIGGER "ConsentRecord_append_only"`);
+      await db.$executeRawUnsafe(`DELETE FROM "ConsentRecord" WHERE "assessmentId" = $1`, paper.id);
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" ENABLE TRIGGER "ConsentRecord_append_only"`);
       await db.$executeRawUnsafe(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`);
       try {
         await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, paper.id);

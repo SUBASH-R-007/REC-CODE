@@ -4306,3 +4306,60 @@ it is the only one with somebody waiting on the other end of it.
 Hiding those links was never access control: every page guards itself
 server-side, and `test/admin-nav.test.ts` now asserts both staff roles can
 see the way in.
+
+## The consent record, and why `notifyParentEmail` still cannot be turned on (Phase 16e)
+
+**What was missing.** SPEC §6 asks for `ConsentRecord { userId, assessmentId,
+policyVersion, policyHash, acceptedAt, ipHash }` per assessment, "with the
+named Data Protection Officer / grievance contact on screen". §4's model
+inventory lists it. No phase built it, which is how it became the unowned
+precondition `notifyParentEmail` was waiting on (`docs/ROADMAP.md` §2.7).
+
+**Half of it was already on screen.** The readiness page has asked since
+Phase 6c: *"I have read what is recorded and I am ready to start."* It was
+client state. The tick enabled the Start button and was gone with the page —
+the platform asked for consent and kept no record of the answer, which is
+the worst of both: a candidate is made to agree and nobody can show later
+that they did.
+
+**Decisions.**
+
+*Per assessment, not per account.* A blanket acceptance at sign-up would be
+consent to a thing the student has not met yet, and SPEC's own shape
+(`userId, assessmentId`) says per assessment.
+
+*The hash is the point.* "Accepted version 1" proves nothing a year later if
+version 1's text is whatever the file says today. The record carries sha256
+of the exact words shown, and `consentPolicyText` builds that text from the
+same list the page renders — the `MONITORED_SIGNALS` list moved out of a web
+component into `@recx/shared` for this reason. A promise shown but not
+hashed is one the record cannot prove was made.
+
+*Append-only, with the trigger in the guard catalogue.* A consent record that
+can be edited is not evidence. A retention purge will eventually need to
+remove one and will have to drop the trigger in its own migration, which the
+catalogue makes impossible to do quietly.
+
+*Checked at the route, not only on the page.* The readiness page will not
+enable Start without it; `startAttempt` asks again before writing an attempt
+(`needs_consent`). A page is a courtesy, a route is the rule.
+
+*Unticking deletes nothing.* It takes the Start button away again. The table
+is append-only and a decision that can be un-made is not one anybody can
+rely on later.
+
+**Why `notifyParentEmail` is still refused, and this is now the permanent
+answer.** The old entry said the precondition — a recorded `ConsentRecord` —
+"had no owner". It has one now, and the switch stays off, because consent was
+never the real blocker: **this platform holds no guardian contact of any
+kind, by design.** SPEC §6 minimises stored data to roll number, name,
+college email, department and batch. Emailing a parent needs a parent's
+address, which is third-party personal data this system deliberately does not
+collect — so the feature is not blocked on engineering but on a policy
+decision the college has not taken, and would make.
+
+The column stays (SPEC's field list has it) and
+`InactivityPolicy_parent_email_check` stays with it. If the college ever
+decides to collect guardian contacts, that is a phase with its own consent
+flow, its own retention rule and its own migration dropping the CHECK — not
+a flag flip.

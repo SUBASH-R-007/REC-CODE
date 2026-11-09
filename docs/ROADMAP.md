@@ -232,17 +232,20 @@ The "every figure carries its denominator" rule now does more work rather
 than less: the denominator is a fact about the student instead of about the
 platform.
 
-### 2.7 `notifyParentEmail` cannot be turned on at all
+### 2.7 `notifyParentEmail` — **closed, and the consent phase built (Phase 16e)**
 
-A CHECK constraint (`InactivityPolicy_parent_email_check`) refuses `true`
-outright, and the switch renders disabled with that as its reason. The column
-exists because the spec's field list has it. The precondition — a recorded
-`ConsentRecord` — is in the spec's model inventory and in no phase of the
-plan, so it had no owner. A parent address is third-party personal data.
+The consent phase exists now: `ConsentRecord` per assessment, append-only,
+carrying a hash of the exact words shown, checked at the start route and not
+only on the page, with the named contact SPEC §6 asks for on screen. That was
+the genuinely missing thing, and it closes a gap with a law behind it rather
+than a preference.
 
-*Done when* a consent phase exists: the `ConsentRecord` model, who may record
-one, how it is withdrawn, and a migration that drops the CHECK. Never a flag
-flip.
+The switch stays off, permanently, and for a different reason than this entry
+gave. Consent was never the blocker: **the platform holds no guardian contact
+of any kind, by design** — SPEC §6 minimises stored data to roll number,
+name, college email, department and batch. Emailing a parent needs a parent's
+address, so the feature is blocked on a policy decision the college has not
+taken, not on engineering. The column and the CHECK stay.
 
 ### 2.8 Collaborative editing in a mock interview
 

@@ -210,11 +210,27 @@ describe.skipIf(!ENABLED)("a KIOSK_RECX sitting, against recx_test", () => {
       } as never,
       select: { id: true },
     });
+
+    /**
+     * Phase 16e. `startAttempt` refuses with `needs_consent` until the
+     * candidate has agreed, which is what happens on the readiness page
+     * before Start — in REC Exam Browser too. Through the same function the
+     * application uses, so a change to what is recorded travels here.
+     */
+    const { recordConsent } = await import("@/lib/exam/consent");
+    await recordConsent({ userId: studentId, assessmentId, ipHash: null });
   }, 90_000);
 
   afterAll(async () => {
     if (!db) return;
     try {
+      // Phase 16e: both of ConsentRecord's foreign keys are RESTRICT and the
+      // table is append-only, so the agreement goes before the PAPER as well
+      // as before the candidate — which is why this is here and not further
+      // down beside the user delete.
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" DISABLE TRIGGER "ConsentRecord_append_only"`);
+      await db.$executeRawUnsafe(`DELETE FROM "ConsentRecord" WHERE "assessmentId" = $1`, assessmentId);
+      await db.$executeRawUnsafe(`ALTER TABLE "ConsentRecord" ENABLE TRIGGER "ConsentRecord_append_only"`);
       await clearSittings();
       await db.$executeRawUnsafe(`DELETE FROM "AssessmentMcq" WHERE "assessmentId" = $1`, assessmentId);
       await db.$executeRawUnsafe(`ALTER TABLE "public"."Assessment" DISABLE TRIGGER "Assessment_published_immutable"`);

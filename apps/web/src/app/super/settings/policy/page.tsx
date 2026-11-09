@@ -5,6 +5,8 @@ import { requireSuperAdminPage } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { readRetention } from "@/lib/privileged/retention";
 import { XP_SETTING_KEY } from "@/lib/progress/xp-config";
+import { consentContact } from "@/lib/exam/consent";
+import { ConsentContactForm } from "@/components/super/consent-contact-form";
 import { LegalHoldForm } from "@/components/super/legal-hold-form";
 import { formatIst, Notice, PageHeader } from "@/components/super/ui";
 import { XpRulesForm } from "@/components/super/xp-rules-form";
@@ -14,9 +16,10 @@ export const metadata: Metadata = { title: "Policy · Super-admin" };
 /** XP rules (editable), retention schedule (read-only) and the legal hold. */
 export default async function SuperPolicyPage() {
   await requireSuperAdminPage();
-  const [xpRow, retention] = await Promise.all([
+  const [xpRow, retention, contact] = await Promise.all([
     db.platformSetting.findUnique({ where: { key: XP_SETTING_KEY }, select: { value: true, updatedAt: true } }),
     readRetention(),
+    consentContact(),
   ]);
   const override = xpRow ? xpRulesOverrideSchema.safeParse(xpRow.value) : null;
   const { rules, version } = effectiveXpRules(override?.success ? override.data : null);
@@ -25,6 +28,27 @@ export default async function SuperPolicyPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Policy" description="XP rules and data retention. Every change is audited with the previous value." />
+
+      {/*
+        Phase 16e. SPEC §6 asks for the named Data Protection Officer or
+        grievance contact to be ON SCREEN beside what a proctored sitting
+        records. It is here rather than in Integrations because it is a
+        policy commitment to candidates, not a connection to a system.
+      */}
+      <Card>
+        <CardHeader
+          title="Proctoring data contact"
+          subtitle="Shown to every candidate on the readiness page, beside what the sitting records."
+        />
+        <CardBody>
+          {contact ? null : (
+            <Notice tone="warning" title="No contact is named yet">
+              Candidates are told to ask their department instead. Name somebody here.
+            </Notice>
+          )}
+          <ConsentContactForm current={contact} />
+        </CardBody>
+      </Card>
 
       <Card>
         <CardHeader

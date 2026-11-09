@@ -19,6 +19,7 @@ import { db } from "@/lib/db";
 import { pageRequest } from "@/lib/exam/containment";
 import { acceptedLanguagesFor } from "@/lib/exam/language";
 import { START_REFUSAL_MESSAGES, type StartRefusal } from "@/lib/exam/start";
+import { consentContact, hasConsented } from "@/lib/exam/consent";
 import { ReadinessCheck } from "@/components/exam/readiness-check";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +116,13 @@ export default async function ReadinessPage({
    * question asked early enough to be useful, and the honest answer to
    * somebody re-opening the link is a sentence, not a form.
    */
+  /**
+   * Phase 16e: whether this candidate has already agreed, and who to ask
+   * about it. Both are read before the Start block is drawn, so the page
+   * never asks a second time for a decision that is already recorded.
+   */
+  const [consented, contact] = await Promise.all([hasConsented(user.id, assessment.id), consentContact()]);
+
   const latest = await db.assessmentAttempt.findFirst({
     where: { assessmentId: assessment.id, userId: user.id },
     orderBy: { attemptNumber: "desc" },
@@ -338,6 +346,15 @@ export default async function ReadinessPage({
            * ever on the one mode that must be sat in that browser.
            */
           fullscreenHeld={inRecxBrowser}
+          /**
+           * Phase 16e. SPEC §6 asks for a `ConsentRecord` per assessment,
+           * and the control that asks for the agreement has existed since
+           * 6c without recording anything. Both are read here so a
+           * candidate who already agreed comes back to a ticked box, and
+           * so the named contact is on screen as SPEC requires.
+           */
+          alreadyConsented={consented}
+          consentContact={contact}
         />
       )}
     </div>

@@ -5,6 +5,18 @@ import { Check, X } from "lucide-react";
 import { DeviceCheck } from "@/components/exam/device-check";
 import { MONITORED_SIGNALS } from "@/components/exam/monitored-chip";
 import { MachineNotices } from "@/components/exam/machine-notices";
+// The deep path, not the barrel: this is a client component, and
+// `@recx/shared`'s index reaches every module in the package. Measured
+// on 2026-11-10: importing four constants through it put this page
+// 41.6 KB over its 130 KB budget and the attempt page 20.9 KB over its
+// own.
+import {
+  CONSENT_CONTACT_UNSET,
+  PROCTORING_CONSENT_DECLINE,
+  PROCTORING_CONSENT_LABEL,
+  PROCTORING_CONSENT_POINTS,
+} from "@recx/shared/consent";
+import { recordProctoringConsent } from "@/server/actions/consent";
 import { clockSkew, powerState, type ClockSkew, type PowerState } from "@/lib/exam/machine-readiness";
 
 /**
@@ -67,6 +79,8 @@ export function ReadinessCheck({
   needsDevice,
   sitInPopup = false,
   fullscreenHeld = false,
+  alreadyConsented = false,
+  consentContact,
 }: {
   readonly slug: string;
   readonly durationMinutes: number;
@@ -102,6 +116,19 @@ export function ReadinessCheck({
    * which is what the row says.
    */
   readonly fullscreenHeld?: boolean;
+  /**
+   * Phase 16e. Whether this candidate's `ConsentRecord` for this paper and
+   * the current policy version already exists.
+   *
+   * The control below has asked for this agreement since Phase 6c and threw
+   * it away: it was client state, gone with the page. SPEC §6 asks for a
+   * record per assessment, so ticking it now writes one — and a candidate
+   * who has agreed already comes back to a ticked box rather than being
+   * asked a second time for a decision they have made.
+   */
+  readonly alreadyConsented?: boolean;
+  /** The named contact SPEC §6 asks to be on screen; null until one is set. */
+  readonly consentContact?: { name: string; email: string; office: string | null } | null;
 }) {
   const [passed, setPassed] = useState<Record<CheckId, boolean>>({
     // Already true inside REC Exam Browser: the application holds the
@@ -114,7 +141,9 @@ export function ReadinessCheck({
     // that needs no device passes it by answering that.
     device: false,
   });
-  const [consented, setConsented] = useState(false);
+  const [consented, setConsented] = useState(alreadyConsented);
+  /** Set when the record could not be written: the box goes back and says why. */
+  const [consentError, setConsentError] = useState<string | null>(null);
   const [scratch, setScratch] = useState("");
   const [answer, setAnswer] = useState("");
   const [networkError, setNetworkError] = useState<string | null>(null);
@@ -327,15 +356,64 @@ export function ReadinessCheck({
             </li>
           ))}
         </ul>
+        {/*
+          Phase 16e. The promises around the list: what is NOT done, that
+          nothing is decided automatically, how long it is kept, and who to
+          ask. All four are hashed into the record together with the list
+          above — a promise shown but not hashed is one the record cannot
+          prove was made.
+        */}
+        <ul className="mt-3 flex flex-col gap-1.5 text-xs text-text-secondary">
+          {PROCTORING_CONSENT_POINTS.map((point) => (
+            <li key={point} className="flex gap-2">
+              <span aria-hidden>·</span>
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-text-secondary">
+          {consentContact ? (
+            <>
+              Questions or a complaint about any of this:{" "}
+              <span className="font-medium text-text">{consentContact.name}</span>,{" "}
+              <a className="underline" href={`mailto:${consentContact.email}`}>
+                {consentContact.email}
+              </a>
+              {consentContact.office ? ` · ${consentContact.office}` : ""}
+            </>
+          ) : (
+            CONSENT_CONTACT_UNSET
+          )}
+        </p>
         <label className="mt-4 flex items-start gap-2 text-sm text-text">
           <input
             type="checkbox"
             checked={consented}
-            onChange={(event) => setConsented(event.target.checked)}
+            onChange={(event) => {
+              const next = event.target.checked;
+              setConsented(next);
+              setConsentError(null);
+              // Only ticking records anything. Unticking does not delete a
+              // record — the table is append-only, and a decision that can
+              // be un-made is not one anybody can rely on later. It only
+              // takes the Start button away again.
+              if (!next || alreadyConsented) return;
+              void recordProctoringConsent({ slug }).then((result) => {
+                if (result.ok) return;
+                setConsented(false);
+                setConsentError(result.error);
+              });
+            }}
             className="mt-0.5"
           />
-          <span>I have read what is recorded and I am ready to start.</span>
+          <span>{PROCTORING_CONSENT_LABEL}</span>
         </label>
+        <p className="mt-2 text-xs text-muted">{PROCTORING_CONSENT_DECLINE}</p>
+        {consentError ? (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {consentError}
+          </p>
+        ) : null}
       </section>
 
       <div className="flex items-center gap-3">

@@ -126,6 +126,7 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       "super-settings#setLegalHold",
       // Phase 13d: the college-wide Safe Exam Browser pair, which a hall
       // with no keys of its own falls back to.
+      "super-settings#setConsentContact",
       "super-settings#setCollegeSebKeys",
       // Phase 14f: the lowest REC Exam Browser version this deployment
       // accepts. The emergency lever that cuts off a known-bad build
@@ -902,6 +903,18 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     label: "Report a defect in a problem I am solving",
     roles: EVERY_SIGNED_IN_ROLE,
     actions: ["problem-reports#reportProblem"],
+  },
+  {
+    /**
+     * Phase 16e. Every signed-in role, acting on their own row: the record
+     * SPEC §6 asks for, written when a candidate agrees to what a proctored
+     * sitting records. It is not a staff decision and it is not a gate on
+     * reading — the rules are on the page whether or not anybody agrees.
+     */
+    key: "consent.record",
+    label: "Record that I agreed to what a proctored assessment records",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["consent#recordProctoringConsent"],
   },
   {
     key: "notifications.manage",

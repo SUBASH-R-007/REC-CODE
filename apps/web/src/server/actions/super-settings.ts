@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@recx/db";
-import { RETENTION_SETTING_KEY, parseSebKey, retentionSettingSchema, sebSettingKey } from "@recx/shared";
+import { CONSENT_SETTING_KEY, RETENTION_SETTING_KEY, parseSebKey, retentionSettingSchema, sebSettingKey } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
@@ -112,6 +112,39 @@ export type SetCollegeSebKeysInput = z.input<typeof collegeSebSchema>;
  * which: an audit row carrying the key would be a second copy of it in a
  * table more people can read.
  */
+/**
+ * The named contact SPEC §6 asks to be on screen beside the consent points
+ * (Phase 16e). A setting rather than a constant because it is a person at a
+ * college, and a person who leaves must be replaceable without a deploy.
+ *
+ * The name and the address ARE the audited values here, unlike the SEB keys
+ * above where only "whether" is recorded: this is a published contact, not
+ * a secret, and the question a reader will have later is who it was.
+ */
+export async function setConsentContact(input: unknown): Promise<ActionResult<{ name: string }>> {
+  return runAction(async () => {
+    const actor = await requireSuperAdmin();
+    const { parseConsentContact } = await import("@/lib/exam/consent");
+    const saved = parseConsentContact(input);
+    await db.platformSetting.upsert({
+      where: { key: CONSENT_SETTING_KEY },
+      create: { key: CONSENT_SETTING_KEY, value: saved, updatedById: actor.id },
+      update: { value: saved, updatedById: actor.id },
+    });
+    await audit({
+      actorId: actor.id,
+      action: "settings.consent_contact_changed",
+      entityType: "PlatformSetting",
+      entityId: CONSENT_SETTING_KEY,
+      sensitivity: "NORMAL",
+      metadata: { name: saved.name, email: saved.email },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath("/super/settings/policy");
+    return { name: saved.name };
+  }, "setConsentContact");
+}
+
 export async function setCollegeSebKeys(
   input: SetCollegeSebKeysInput,
 ): Promise<ActionResult<{ configKey: boolean; browserExamKey: boolean }>> {

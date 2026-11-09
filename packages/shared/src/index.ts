@@ -91,3 +91,5 @@ export * from "./vitals";
 export * from "./problem-report";
 export * from "./difficulty-calibration";
 export * from "./mock-readiness";
+export * from "./consent";
+export * from "./consent-contact";

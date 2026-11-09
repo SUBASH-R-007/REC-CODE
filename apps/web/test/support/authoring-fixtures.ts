@@ -105,6 +105,10 @@ export async function cleanup(db: Db, input: { problemIds: string[]; userIds: st
   await retryDeadlock(() => db.$transaction([
     ...FROZEN_GUARDED.map((t) => db.$executeRawUnsafe(`ALTER TABLE "${t}" DISABLE TRIGGER "${t}_frozen_guard"`)),
     db.$executeRawUnsafe(`DELETE FROM "ValidationRun" WHERE "problemVersionId" IN (${scope})`, ids),
+    // Phase 16a. ProblemReport_problemVersionId_fkey is RESTRICT, so a
+    // defect report on one of these revisions makes the whole teardown fail
+    // — and it fails as a SUITE error after every test has passed.
+    db.$executeRawUnsafe(`DELETE FROM "ProblemReport" WHERE "problemVersionId" IN (${scope})`, ids),
     db.$executeRawUnsafe(`DELETE FROM "Submission" WHERE "problemId" = ANY($1::text[])`, ids),
     db.$executeRawUnsafe(`DELETE FROM "ProblemStat" WHERE "problemId" = ANY($1::text[])`, ids),
     ...["ProblemLanguageLimit", "Subtask", "TestCase", "StarterCode", "ReferenceSolution", "Hint", "Editorial"].map((t) =>

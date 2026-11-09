@@ -96,6 +96,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_clashing_assessment_position",
   // 20261109090000_phase16a_problem_reports
   "recx_refuse_held_assessment_problem",
+  // 20261110090000_phase16e_consent_records
+  "recx_refuse_consent_change",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -113,6 +115,8 @@ export const TRUNCATE_GUARDED: readonly string[] = [
   "XpEvent",
   "AuditLog",
   "Announcement",
+  // 20261110090000_phase16e_consent_records
+  "ConsentRecord",
   // 20261019120000_phase5_contests
   "Contest",
   "ContestProblemAttempt",
@@ -396,6 +400,22 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_clashing_assessment_position",
+    level: "ROW",
+  },
+  // 20261110090000_phase16e_consent_records
+  {
+    /**
+     * Phase 16e. Append-only, for the same reason AuditLog and XpEvent
+     * are: a consent record that can be edited proves nothing, and the
+     * thing it has to prove is what a person agreed to before a proctored
+     * sitting. A retention purge will eventually need to remove one, and
+     * it will have to drop this trigger in its own migration — which this
+     * entry makes impossible to do quietly.
+     */
+    name: "ConsentRecord_append_only",
+    timing: "BEFORE UPDATE OR DELETE",
+    table: "ConsentRecord",
+    fn: "recx_refuse_consent_change",
     level: "ROW",
   },
   // 20261109090000_phase16a_problem_reports

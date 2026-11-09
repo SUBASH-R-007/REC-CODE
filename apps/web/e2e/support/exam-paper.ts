@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { PROCTORING_CONSENT_LABEL } from "@recx/shared";
 import { openPage } from "./page";
 
 /**
@@ -198,7 +199,13 @@ export async function walkReadinessChecks(candidate: Page): Promise<void> {
   await candidate.getByRole("textbox", { name: /sample question/i }).fill("4");
   await expect(row(/type an answer and read a question.*passed/)).toBeVisible({ timeout: 30_000 });
 
-  await candidate.getByRole("checkbox", { name: /I have read what is recorded/i }).check();
+  /**
+   * Phase 16e. The label comes from `@recx/shared` rather than being
+   * written out here: ticking this box now writes a `ConsentRecord`, and
+   * the words beside it are hashed into that record. A test pinning its
+   * own copy of them would go green while the two drifted apart.
+   */
+  await candidate.getByRole("checkbox", { name: PROCTORING_CONSENT_LABEL }).check();
   await expect(start).toBeEnabled({ timeout: 30_000 });
 }
 

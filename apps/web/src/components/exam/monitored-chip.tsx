@@ -1,6 +1,9 @@
 "use client";
 
 import { useId, useState } from "react";
+// The deep path: see readiness-check.tsx. This component is on the
+// attempt page, whose budget is 160 KB.
+import { MONITORED_SIGNALS as SIGNALS } from "@recx/shared/consent";
 import { Eye } from "lucide-react";
 
 /**
@@ -25,18 +28,15 @@ import { Eye } from "lucide-react";
  * one piece of copy in the exam that a candidate has a right to read.
  */
 
-/** Exactly what the client records, in the candidate's words. */
-export const MONITORED_SIGNALS: readonly string[] = Object.freeze([
-  "When this tab loses focus or leaves full screen, and for how long",
-  "When you paste, and whether the text came from inside or outside this exam",
-  "The size and a one-way fingerprint of pasted and copied text — never the text itself",
-  "When text appears without being typed (for example, inserted by an extension)",
-  "Typing pace statistics — counts and timings, never what you type",
-  "Copies, cuts and right-clicks",
-  "Window size changes, and whether a second screen is attached",
-  "Periodic snapshots of your code, so your work can be recovered and your progress shown",
-  "Whether this tab is connected, every ten seconds",
-]);
+/**
+ * Exactly what the client records, in the candidate's words.
+ *
+ * It lives in `@recx/shared` since Phase 16e and is re-exported here for the
+ * two components that already read it: the list shown on the readiness page
+ * is hashed into the candidate's `ConsentRecord`, and a list that could
+ * differ from the hashed one would make that record evidence of nothing.
+ */
+export { MONITORED_SIGNALS } from "@recx/shared/consent";
 
 export function MonitoredChip({ labSupervised = false }: { readonly labSupervised?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -65,7 +65,7 @@ export function MonitoredChip({ labSupervised = false }: { readonly labSupervise
           is decided automatically.
         </p>
         <ul className="mt-3 flex flex-col gap-1.5 text-text-secondary">
-          {MONITORED_SIGNALS.map((signal) => (
+          {SIGNALS.map((signal) => (
             <li key={signal} className="flex gap-2">
               <span aria-hidden>·</span>
               <span>{signal}</span>

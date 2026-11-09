@@ -620,6 +620,7 @@ model User {
   doubtReplies           DoubtReply[]
   contentReports         ContentReport[]         @relation("ReportAuthor")
   resolvedReports        ContentReport[]         @relation("ReportResolver")
+  consentRecords         ConsentRecord[]
   problemReports         ProblemReport[]         @relation("ProblemReportAuthor")
   resolvedProblemReports ProblemReport[]         @relation("ProblemReportResolver")
   interviewExperiences   InterviewExperience[]   @relation("ExperienceAuthor")
@@ -3009,6 +3010,33 @@ enum AssessmentStatus {
 ///     flag never change — a candidate's result must mean what it meant when
 ///     they sat it;
 ///   - trigger Assessment_no_truncate: TRUNCATE is refused.
+/// What a candidate agreed to before a proctored sitting (Phase 16e).
+///
+/// SPEC section 6 names this table and its columns in the DPDP paragraph. It
+/// is per ASSESSMENT rather than per account, because a blanket acceptance
+/// at sign-up would be consent to a thing the student has not met yet.
+///
+/// Append-only, like the audit log and the XP ledger: a consent record that
+/// can be edited is a consent record that proves nothing. `policyHash` is a
+/// hash of the exact words shown (`consentPolicyText` in @recx/shared), so a
+/// record is still readable as evidence after the wording changes — which is
+/// the whole reason the hash is stored beside the version.
+model ConsentRecord {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id])
+  assessmentId  String
+  assessment    Assessment @relation(fields: [assessmentId], references: [id])
+  policyVersion Int
+  policyHash    String
+  acceptedAt    DateTime   @default(now())
+  /// sha256(ip + pepper). Never the address itself, here least of all.
+  ipHash        String?
+
+  @@unique([userId, assessmentId, policyVersion])
+  @@index([assessmentId, acceptedAt])
+}
+
 model Assessment {
   id                          String           @id @default(cuid())
   slug                        String           @unique
@@ -3087,6 +3115,8 @@ model Assessment {
   attempts            AssessmentAttempt[]
   /// REC Exam Browser sittings launched for this paper (Phase 14b).
   examBrowserSittings ExamBrowserSitting[]
+  /// What each candidate agreed to before sitting it (Phase 16e).
+  consentRecords      ConsentRecord[]
 
   @@index([status, opensAt(sort: Desc)])
   @@index([opensAt])

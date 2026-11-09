@@ -17,6 +17,7 @@ import {
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { hasConsented } from "@/lib/exam/consent";
 import { mintAttemptToken, setAttemptCookie } from "@/lib/exam/attempt-token";
 import { checkContainment } from "@/lib/exam/containment";
 import { endExamBrowserSitting, examBrowserSittingClaimedBy } from "@/lib/exam/exam-browser";
@@ -60,10 +61,19 @@ export type StartRefusal =
    */
   | "outside_allowlist"
   | "seb_required"
-  | "recx_browser_required";
+  | "recx_browser_required"
+  /**
+   * Phase 16e. The consent record SPEC §6 asks for. The readiness page
+   * draws the control and will not enable Start without it; this is the
+   * route asking again, because a page is a courtesy and a route is the
+   * rule.
+   */
+  | "needs_consent";
 
 export const START_REFUSAL_MESSAGES: Readonly<Record<StartRefusal, string>> = Object.freeze({
   not_found: "That assessment does not exist.",
+  needs_consent:
+    "Read what is recorded during this assessment and agree to it before starting. The points are on this page, above the checks.",
   not_open: "This assessment is not open right now. Check the window with your department.",
   not_your_audience: "This assessment is not set for your batch, department or section.",
   no_attempts_left: "You have used all your attempts at this assessment.",
@@ -441,6 +451,18 @@ export async function startOrResumeAttempt(args: {
     device = await freshAssertionFor({ userId: args.userId, assessmentId: assessment.id });
     if (!device) return refuse("needs_device");
   }
+
+  /**
+   * Phase 16e. The consent record SPEC §6 asks for, checked HERE and not
+   * only on the page that draws the control: a page is a courtesy and a
+   * route is the rule, and a sitting whose consent nobody recorded is the
+   * one outcome this table exists to prevent.
+   *
+   * After the device check and before the attempt is written, so a
+   * candidate who has not agreed is told that rather than being told about
+   * a device they then cannot use.
+   */
+  if (!(await hasConsented(args.userId, assessment.id))) return refuse("needs_consent");
 
   const accommodation = await accommodationFor(args.userId, now);
   const expiry = computeExpiresAt({

@@ -745,6 +745,21 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
           // failure mode docs/CONVENTIONS.md warns about by name.
           "ProfileExport",
         ].map((t) => raw(`DELETE FROM "public"."${t}" WHERE "userId" = ANY($1::text[])`, userIds)),
+        /**
+         * Phase 16a/16e, and both for the reason the two comments above
+         * give. `problem-reports#reportProblem` is exercised as S, so the
+         * fixture user owns a report by the time this runs — and
+         * `ProblemReport_problemVersionId_fkey` is RESTRICT, so the
+         * PROBLEM VERSIONS below cannot be deleted while it exists. The
+         * consent record is the same shape with an append-only trigger
+         * over it. Every test in the file passed and the SUITE failed in
+         * teardown on exactly this, which is the failure mode
+         * docs/CONVENTIONS.md warns about by name — for the third time.
+         */
+        raw(`DELETE FROM "public"."ProblemReport" WHERE "reporterId" = ANY($1::text[])`, userIds),
+        raw(`ALTER TABLE "public"."ConsentRecord" DISABLE TRIGGER "ConsentRecord_append_only"`),
+        raw(`DELETE FROM "public"."ConsentRecord" WHERE "userId" = ANY($1::text[])`, userIds),
+        raw(`ALTER TABLE "public"."ConsentRecord" ENABLE TRIGGER "ConsentRecord_append_only"`),
         raw(`ALTER TABLE "public"."ProfileExport" ENABLE TRIGGER "ProfileExport_payload_frozen"`),
         // Phase 5 contest fixture. ContestProblem_frozen_version refuses an
         // UPDATE but not a DELETE, so only the contest's own guards come off.
@@ -2031,6 +2046,21 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
       ],
     ],
     "interviews#withdrawInterviewExperience": [() => [{ experienceId: `${tag}-no-such-experience` }]],
+    /**
+     * Phase 16a. A published problem (the sweep's own fixture) and a DRAFT
+     * one: the second is the interesting half, because a report on an
+     * unpublished problem must answer "not found" rather than confirming
+     * the draft exists.
+     */
+    "problem-reports#reportProblem": [
+      () => [{ problemId: ids.problem, reason: "WRONG_EXPECTED_OUTPUT", detail: "Case 3 looks wrong to me." }],
+      () => [{ problemId: ids.draftProblem, reason: "STATEMENT_UNCLEAR", detail: "I cannot see this problem." }],
+    ],
+    /**
+     * Phase 16e. The consent record for a paper that does not exist, which
+     * is the path a tampered slug would take.
+     */
+    "consent#recordProctoringConsent": [() => [{ slug: `${tag}-no-such-assessment` }]],
     "ai-helper#askAiHelper": [
       () => [{ problemId: ids.problem, kind: "MISTAKE" }],
       () => [{ problemId: ids.draftProblem, kind: "APPROACH" }],
