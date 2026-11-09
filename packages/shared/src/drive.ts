@@ -17,9 +17,16 @@ import { READINESS_TIERS, type ReadinessTier } from "./readiness";
  *
  * The threshold is on the NORMALISED figure — score as a percentage of what
  * was measurable — and that is the correction the design's own review found.
- * With `mockInterviewScore` permanently unsourced, no TOP score can exceed
- * 85; counting "students at TOP >= 70" against a raw 70 would mark a whole
- * cohort as under-prepared because of a component nobody has built.
+ * The example it was written from was the permanently unsourced
+ * `mockInterviewScore`, which capped every TOP score at 85: counting
+ * "students at TOP >= 70" against a raw 70 would have marked a whole cohort
+ * as under-prepared because of a component nobody had built.
+ *
+ * Phase 16c gave that component a source, so the cap is gone — and the
+ * normalised threshold matters just as much, because the denominator is now
+ * DIFFERENT PER STUDENT. One who has sat two mock interviews is scored out
+ * of 100 and one who has sat none out of 85, and a raw bar would quietly
+ * compare the two.
  */
 
 export const DRIVE_ELIGIBILITY = ["ELIGIBLE", "NOT_ELIGIBLE"] as const;

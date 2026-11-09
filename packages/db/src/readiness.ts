@@ -7,12 +7,14 @@ import {
   cohortKeyFor,
   histogram,
   missing,
+  mockInterviewComponent,
   percentileRankSorted,
   present,
   scoreAllTiers,
   sortedPopulation,
   type AptitudeTopic,
   type ComponentValue,
+  type MockRating,
   type ReadinessInputs,
   type ReadinessTier,
   type Topic,
@@ -195,6 +197,50 @@ export async function ratings(db: Db): Promise<Map<string, { rating: number; con
   return new Map(rows.map((row) => [row.userId, { rating: row.rating, contestsRated: row.contestsRated }]));
 }
 
+/**
+ * A student's rated mock interviews, most recent first (Phase 16c).
+ *
+ * Only interviews that were COMPLETED **and** rated: a NO_SHOW is not a
+ * measurement, a CANCELLED slot is not a measurement, and an interview the
+ * interviewer ended without filling in the ratings is not one either —
+ * otherwise the component would depend on whether a mentor finished a form.
+ *
+ * One whole-college pass, like every other source here. `feedbackAt` orders
+ * them rather than `startsAt`, because what is being ordered is when the
+ * judgement was made.
+ */
+export async function mockFeedback(db: Db): Promise<Map<string, MockRating[]>> {
+  const rows = await db.mockInterview.findMany({
+    where: {
+      status: "COMPLETED",
+      candidateId: { not: null },
+      feedbackAt: { not: null },
+      ratingCommunication: { not: null },
+      ratingProblemSolving: { not: null },
+      ratingCode: { not: null },
+    },
+    orderBy: { feedbackAt: "desc" },
+    select: {
+      candidateId: true,
+      ratingCommunication: true,
+      ratingProblemSolving: true,
+      ratingCode: true,
+    },
+  });
+  const out = new Map<string, MockRating[]>();
+  for (const row of rows) {
+    if (!row.candidateId) continue;
+    const list = out.get(row.candidateId) ?? [];
+    list.push({
+      communication: row.ratingCommunication!,
+      problemSolving: row.ratingProblemSolving!,
+      code: row.ratingCode!,
+    });
+    out.set(row.candidateId, list);
+  }
+  return out;
+}
+
 export interface ActivityWindow {
   readonly activeDays: number;
   readonly lastActiveOn: string | null;
@@ -242,20 +288,23 @@ export interface ReadinessSources {
   readonly aptitude: Map<string, AptitudeAccuracy>;
   readonly rating: Map<string, { rating: number; contestsRated: number }>;
   readonly activity: Map<string, ActivityWindow>;
+  /** Phase 16c: rated mock interviews, most recent first. */
+  readonly mocks: Map<string, MockRating[]>;
   readonly evaluationDay: string;
 }
 
 export async function loadReadinessSources(db: Db, now: Date): Promise<ReadinessSources> {
   const evaluationDay = campusDay(now);
-  const [students, solves, topics, aptitude, rating, activity] = await Promise.all([
+  const [students, solves, topics, aptitude, rating, activity, mocks] = await Promise.all([
     readinessCohort(db),
     solveCounts(db),
     unassistedByTopic(db),
     aptitudeAccuracy(db),
     ratings(db),
     activityWindow(db, evaluationDay),
+    mockFeedback(db),
   ]);
-  return { students, solves, topics, aptitude, rating, activity, evaluationDay };
+  return { students, solves, topics, aptitude, rating, activity, mocks, evaluationDay };
 }
 
 /**
@@ -366,11 +415,18 @@ export function inputsFor(
           ? missing("TOO_FEW_RATED_CONTESTS")
           : missing("NO_DATA_YET"),
     /**
-     * No source in this plan at any phase — the mock-interview scheduler is
-     * Phase 11+. Permanently MISSING, which is why no TOP score can exceed
-     * 85 and why every officer surface divides by `availableWeight`.
+     * Phase 16c. It HAS a source now: the mock-interview scheduler shipped
+     * in 12h and an interviewer writes three 1–5 ratings when they finish.
+     * The arithmetic and the four decisions inside it (the mean, the
+     * three-interview window, the two-interview minimum, and what does not
+     * count) are in `@recx/shared`'s `mock-readiness`.
+     *
+     * A student with fewer than two rated interviews is NO_DATA_YET —
+     * theirs to fix, because the slots are bookable — and never
+     * NO_SOURCE_YET, which was true for exactly as long as the scheduler
+     * did not exist.
      */
-    mockInterviewScore: missing("NO_SOURCE_YET"),
+    mockInterviewScore: mockInterviewComponent(sources.mocks.get(student.userId) ?? []),
     consistency: present((activity?.activeDays ?? 0) / CONSISTENCY_WINDOW_DAYS),
     unassistedByTopic: sources.topics.get(student.userId) ?? {},
     easyMediumSolved: solves?.easyMedium ?? 0,

@@ -65,6 +65,21 @@ function sources(n: number, over: Record<string, unknown> = {}) {
     ),
     rating: new Map(students.map((s) => [s.userId, { rating: 1300, contestsRated: 5 }])),
     activity: new Map(students.map((s) => [s.userId, { activeDays: 12, lastActiveOn: "2026-10-18" }])),
+    /**
+     * Phase 16c: two rated mock interviews each, which is the minimum that
+     * makes `mockInterviewScore` measurable. Without this key every
+     * student's TOP denominator would be 85 and the "every figure carries
+     * its denominator" assertions below would be testing the old world.
+     */
+    mocks: new Map(
+      students.map((s) => [
+        s.userId,
+        [
+          { communication: 4, problemSolving: 3, code: 4 },
+          { communication: 3, problemSolving: 3, code: 3 },
+        ],
+      ]),
+    ),
     evaluationDay: "2026-10-19",
     ...over,
   };
@@ -207,10 +222,14 @@ describe("what it computes", () => {
   it("puts a DENOMINATOR on every figure in the sample", async () => {
     /**
      * The whole phase in one assertion. A bare "70" in a report a human
-     * reads is the exact mistake this design is arranged to avoid: with
-     * mockInterviewScore unsourced, a 70 on TOP is 70 out of 85 — and in
-     * THIS fixture it is 70 out of 50, because the seeded students have five
-     * rated contests and the readiness floor is eight.
+     * reads is the exact mistake this design is arranged to avoid: in THIS
+     * fixture a 70 on TOP is 70 out of 65, because the seeded students have
+     * five rated contests and the readiness floor is eight.
+     *
+     * It used to be out of 50, with 15 of those points lost to
+     * `mockInterviewScore` having no source at all. Phase 16c sourced it
+     * from rated mock interviews and the fixture now gives each student
+     * two, so the only thing still withheld is the rating.
      */
     const { db } = recordingDb();
     const job = new ReadinessJob({ db, log, dryRun: true });
@@ -218,8 +237,8 @@ describe("what it computes", () => {
     expect(report.sample.length).toBeGreaterThan(0);
     for (const row of report.sample) {
       expect(row.top, row.collegeId).toMatch(/^(—|\d+\/\d+)$/);
-      // 100 - 15 (mock, no source) - 35 (rating, below the floor).
-      if (row.top !== "—") expect(row.top.split("/")[1]).toBe("50");
+      // 100 - 35 (rating, below the floor). Nothing else is missing.
+      if (row.top !== "—") expect(row.top.split("/")[1]).toBe("65");
     }
   });
 
@@ -248,9 +267,12 @@ describe("what it computes", () => {
       return Number(top.split("/")[1]);
     };
 
-    expect(await denominator(READINESS_RATING_MIN_CONTESTS), "at the floor it counts").toBe(85);
-    expect(await denominator(READINESS_RATING_MIN_CONTESTS - 1), "one short, it does not").toBe(50);
-    expect(85 - 50, "the rating is 35 % of TOP").toBe(35);
+    // 100 with the rating counted, 65 without it. Both numbers moved up by
+    // 15 in Phase 16c, when `mockInterviewScore` stopped being unsourced;
+    // the DIFFERENCE is what this test is about and it has not moved.
+    expect(await denominator(READINESS_RATING_MIN_CONTESTS), "at the floor it counts").toBe(100);
+    expect(await denominator(READINESS_RATING_MIN_CONTESTS - 1), "one short, it does not").toBe(65);
+    expect(100 - 65, "the rating is 35 % of TOP").toBe(35);
   });
 
   it("puts no name in the sample — a college id and numbers only", async () => {

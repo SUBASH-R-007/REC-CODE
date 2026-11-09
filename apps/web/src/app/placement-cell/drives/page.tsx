@@ -59,8 +59,10 @@ export default async function DrivesPage() {
                   {/*
                     "% of measurable" in the words. A bare "70" invites the
                     comparison against a raw score that the design's review
-                    caught — with mockInterviewScore unsourced, no TOP score
-                    can reach 70 out of 100 at all.
+                    caught. The example then was mockInterviewScore being
+                    unsourced for everybody; since Phase 16c it is sourced,
+                    and the denominator varies per student instead — which
+                    is the same trap with a moving floor.
                   */}
                   <dd>
                     {drive.thresholdScore === null

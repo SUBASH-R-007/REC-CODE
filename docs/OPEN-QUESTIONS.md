@@ -4175,3 +4175,134 @@ is a real cost boundary rather than a safety net, and it is not worth a
 migration today: a ceiling that can be exceeded by five is still a ceiling,
 where before there was none at all.
 
+## A student says this problem is wrong (Phase 16a)
+
+**The gap.** `docs/ROADMAP.md` §3.2: no `ProblemReport` model and no
+"something is wrong with this problem" affordance anywhere. A student who
+believed a test case was wrong had the discussion thread and
+`/mentor/doubts`, which are conversations — no queue, no owner, no state.
+Three students could each say the same thing, a mentor could answer the
+third, and the author would never learn.
+
+That matters more here than it would elsewhere. Every problem in this
+catalogue was authored at this college: there is no upstream to inherit a
+corrected test case from, and no million-submission population to surface a
+bad one by statistics. On the day a problem is published the only people who
+will read it carefully are the students sitting in front of it.
+
+**Four decisions inside it.**
+
+**It attaches to a `ProblemVersion`, not a `Problem`.** A revision is frozen
+on publish and immutable thereafter, so "case 3 is wrong" is a statement
+about exact bytes. A report against the problem would survive the edit that
+fixed it and read as still open.
+
+**A report does nothing by itself, and that is the whole design.** An OPEN
+row has no effect anywhere: no unpublish, no delisting, no refusal, no
+change to a single submission. Withholding follows a staff member UPHOLDING
+the report and choosing a hold. This is not timidity — a report that
+automatically kept a problem out of a paper would hand every student a veto
+over the paper they are about to sit, which is the clearest abuse vector
+this product could grow. It is also the project's rule everywhere else: the
+maximum automatic consequence is that a human is told.
+
+**The hold is refused at the pin, not at the problem.** `qualityHold` stops
+a problem being pinned into a NEW paper (`AssessmentProblem_no_quality_hold`,
+the sixth refusal of that shape and the only one a staff member turns on). It
+does not unpublish the problem, delist it, or touch one existing paper or
+sitting: a candidate mid-sitting is not interrupted by a decision taken while
+they sit, and a problem students are part-way through solving in practice
+stays solvable.
+
+**Clearing the hold is a separate action from deciding the report.** The fix
+lands in a new revision, which is a different day's work by possibly a
+different person. A hold that lifted itself when the report was closed would
+be a hold that never held anything.
+
+**One open report per student per revision**, as a partial unique index. Not
+a rate limit in disguise: a student who has already said this revision is
+wrong has nothing to add by saying it again, and a queue holding four rows
+from one person is a queue somebody stops reading. They may file again on the
+next revision, and again once the first is decided.
+
+**What is deliberately not built.** No notification to the author (the
+`/admin/problems/[id]` page carries the queue, above the content, because an
+open report is the most urgent fact on that screen). No count of other
+people's reports on the student's own page — "3 people think this is wrong"
+on a problem page is a suggestion to stop trying. No gate on having solved
+it: the student most likely to notice that case 3 is wrong is the one whose
+correct program it is failing.
+
+## `mockInterviewScore` has a source now (Phase 16c)
+
+**What the old entry said.** *"`mockInterviewScore` has no source, and will
+not have one this year… the mock-interview scheduler is Phase 11 or later. So
+it is permanently `MISSING / NO_SOURCE_YET` at launch, and no TOP score can
+exceed 85."* It is 10% of SERVICE, 10% of PRODUCT and 15% of TOP.
+
+The scheduler shipped in Phase 12h, and an interviewer writes three 1–5
+ratings and a note when they finish. That is the measurement the component
+was defined for, so the sentence above stopped being true — and leaving it
+would mean a readiness score permanently fifteen points short of itself for
+no reason anybody could point at.
+
+**Four decisions, because turning three opinions into a number is not
+obvious.** The reasoning is in `packages/shared/src/mock-readiness.ts`; in
+short:
+
+  * **the mean of the three, mapped so 1 is 0 and 5 is 1.** Not weighted:
+    nothing here knows whether communication matters more than code for a
+    given company, and a weight would be inventing the part of the
+    judgement the interviewer was asked to make. `(mean - 1) / 4`, so
+    straight 3s is 0.5 rather than 0.6;
+  * **the most recent three, not all and not the best.** A student who was
+    poor in October and good in February is good in February; the best of
+    them would make the number a high-water mark, and practice is about the
+    trend;
+  * **two interviews minimum.** One is one mentor's reading on one
+    afternoon, and this carries 15% of TOP — a single generous or harsh
+    interviewer must not move a placement signal by fifteen points. Below
+    two it is `NO_DATA_YET`, which is the student's to fix, and never
+    `NO_SOURCE_YET`, which was true for exactly as long as the scheduler
+    did not exist;
+  * **a NO_SHOW is not a zero.** Only an interview that was COMPLETED and
+    rated counts. `MockInterview_feedback_pair_check` already makes feedback
+    all-or-nothing, so "rated but undated" is not a storable state — the
+    source's conditions are belt-and-braces over a constraint, and a test
+    asserts that constraint rather than assuming it.
+
+**`READINESS_RULES_VERSION` is 2, and no weight moved.** That is exactly why
+the bump was needed: a version-1 TOP score of 62 was 62 out of an available
+85, and a version-2 one is 62 out of 100. The same number means two
+different things, so the two must not share a version.
+
+**The "every figure carries its denominator" rule survives unchanged, and
+now does more work.** It was written because the denominator was 85 for
+everybody. It is now a fact about the STUDENT: out of 100 once they have two
+rated interviews, out of 85 until then. A bare "62" would read as 62 out of
+100 for both. Five comments across the placement surfaces said the cap was
+permanent and have been corrected rather than left to mislead.
+
+## `/admin/discuss` is closed as a decision, not a gap (Phase 16d)
+
+**What the old entry said.** *"`/admin/discuss` is not built. Discussion
+ships with Phase 11 together with TA_MENTOR moderation (PLAN decision 13);
+the admin navigation does not link it."*
+
+Discussion arrived in 12d with its moderation queue at `/mentor/moderation`,
+because SPEC §9 gives a `TA_MENTOR` exactly those powers. An
+`/admin/discuss` built now would be a second queue over the same rows, and
+the predictable outcome of two queues is that one of them is the stale one
+nobody is reading. So it is not being built.
+
+**What was actually missing was a way in.** An ADMIN holds every mentor
+capability (`MENTOR_CAPABILITIES`) and the admin shell linked none of the
+five mentor pages, so a report a student filed through the discussion panel
+landed in a queue only a `TA_MENTOR` would think to visit. The admin
+navigation has a Mentoring group now — moderation, doubts, written answers,
+the interview archive and mock interviews — with moderation first, because
+it is the only one with somebody waiting on the other end of it.
+
+Hiding those links was never access control: every page guards itself
+server-side, and `test/admin-nav.test.ts` now asserts both staff roles can
+see the way in.

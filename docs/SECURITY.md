@@ -254,6 +254,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `problems.review` | staff | - | - | yes | - | yes | 3 actions |
 | `problems.publish` | staff | - | - | yes | - | yes | 1 action |
 | `problems.import` | staff | - | - | yes | - | yes | 1 action, 1 route, 2 pages |
+| `problems.defects` | staff | - | - | yes | - | yes | 2 actions |
 | `placement.analytics` | placement | - | - | - | yes | yes | 4 pages |
 | `placement.drilldown` | placement | - | - | - | yes | yes | 1 page |
 | `placement.export` | placement | - | - | - | yes | yes | 1 route, 1 page |
@@ -283,6 +284,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `interviews.share` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `discussion.participate` | self-service | yes | yes | yes | yes | yes | 7 actions |
 | `ai.ask` | self-service | yes | yes | yes | yes | yes | 1 action |
+| `problems.report` | self-service | yes | yes | yes | yes | yes | 1 action |
 | `notifications.manage` | self-service | yes | yes | yes | yes | yes | 2 actions |
 | `plans.enroll` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.manage` | self-service | yes | yes | yes | yes | yes | 1 action |

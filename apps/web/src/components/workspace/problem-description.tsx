@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import {
   ANSWER_LABELS,
@@ -207,7 +208,22 @@ function SqlSampleOutput({ text }: { text: string }) {
   return <ResultSetTable title="Expected rows" resultSet={resultSet} />;
 }
 
-export function ProblemDescription({ problem, statementHtml }: { problem: ProblemWorkspace; statementHtml: string }) {
+export function ProblemDescription({
+  problem,
+  statementHtml,
+  footer,
+}: {
+  problem: ProblemWorkspace;
+  statementHtml: string;
+  /**
+   * Rendered last, inside the description's own landmark (Phase 16a). The
+   * defect report lives here rather than in a tab of its own because the
+   * thing being reported is what the student is reading two inches above
+   * it — a constraint that contradicts a sample is noticed while reading
+   * the samples, not after remembering that a tab exists.
+   */
+  footer?: ReactNode;
+}) {
   const sql = problem.ioMode === "SQL";
   const interactive = problem.compareMode === "INTERACTIVE";
   /** Phase 12n: the answer itself, so no limits of its own and no expected side. */
@@ -308,6 +324,7 @@ export function ProblemDescription({ problem, statementHtml }: { problem: Proble
           ))}
         </section>
       )}
+      {footer}
     </article>
   );
 }

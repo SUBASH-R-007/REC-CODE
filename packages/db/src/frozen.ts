@@ -67,6 +67,8 @@ export const FROZEN_EXEMPT_MODELS: Readonly<Record<string, string>> = Object.fre
     "pins a frozen version into a contest; not version content. The ContestProblem_frozen_version trigger refuses an unfrozen version at INSERT and freezes contestId/problemVersionId/index afterwards",
   AssessmentProblem:
     "pins a frozen version into an assessment; not version content. The AssessmentProblem_frozen_version trigger refuses an unfrozen version at INSERT and freezes assessmentId/problemVersionId/position afterwards",
+  ProblemReport:
+    "a student's claim ABOUT a frozen revision, written after it was published, and a staff decision on that claim. It is not version content and must stay writable while the revision it names never changes — which is the whole point of attaching it to the revision",
 });
 
 const WRITE_OPS = new Set([

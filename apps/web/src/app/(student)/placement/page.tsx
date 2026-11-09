@@ -36,8 +36,10 @@ export const metadata: Metadata = { title: "Placement readiness" };
  *   1. Show a band, an "integrity score", or a flag count. There is none
  *      here and none is queryable from the student's own readiness.
  *   2. Show a bare score. Every figure carries the weight that was
- *      measurable, because `mockInterviewScore` has no source in this plan
- *      and a TOP score is a score out of 85.
+ *      measurable. Until Phase 16c that was because `mockInterviewScore`
+ *      had no source and every TOP score was out of 85; now it is because
+ *      the denominator differs per student — out of 100 once they have two
+ *      rated mock interviews, out of 85 until then.
  *   3. Show a zero where it means "not measured". The database refuses to
  *      store that pair, and the card renders the sentence instead.
  *

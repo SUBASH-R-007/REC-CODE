@@ -1,5 +1,5 @@
 import type { Role, User } from "@recx/db";
-import { Accessibility, Calculator, ClipboardCheck, UserRoundSearch, ChartColumnBig, ChevronDown, Cpu, Eye, GraduationCap, Layers, LayoutDashboard, ListChecks, Megaphone, Menu, ShieldAlert, ShieldCheck, SquareCode, Swords, UsersRound, type LucideIcon } from "lucide-react";
+import { Accessibility, BookMarked, Calculator, ClipboardCheck, UserRoundSearch, ChartColumnBig, ChevronDown, Cpu, Eye, FileText, GraduationCap, Layers, LayoutDashboard, ListChecks, Megaphone, Menu, MessageCircleQuestion, ShieldAlert, ShieldCheck, SquareCode, Swords, UserRoundCheck, UsersRound, type LucideIcon } from "lucide-react";
 import { MenuDetails } from "@/components/admin/menu-details";
 import { NavLink } from "@/components/shell/nav-link";
 import { UserMenu } from "@/components/shell/user-menu";
@@ -28,6 +28,12 @@ const ICONS: Readonly<Record<AdminNavIcon, LucideIcon>> = {
   announcements: Megaphone,
   reports: ChartColumnBig,
   judge: Cpu,
+  // Phase 16d: the mentor queues, reachable from the admin shell at last.
+  moderation: ShieldCheck,
+  doubts: MessageCircleQuestion,
+  written: FileText,
+  experiences: BookMarked,
+  mockInterviews: UserRoundCheck,
   super: ShieldAlert,
 };
 

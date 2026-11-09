@@ -117,6 +117,19 @@ export default defineConfig({
      * test can be. NOT in any gate: it needs a live stack. Run it by name,
      * `--project=invigilate`.
      */
+    /**
+     * Phase 16a: the defect report, watched end to end. The rules are
+     * covered by database and unit tests; this is the wiring — the panel,
+     * the dialog, the staff queue and the hold banner. NOT in any gate: it
+     * needs a live stack and a seeded database. Run it by name,
+     * `--project=defect`.
+     */
+    {
+      name: "defect",
+      testMatch: /problem-defect\.spec\.ts$/,
+      outputDir: "./test-results/defect",
+      fullyParallel: false,
+    },
     {
       name: "invigilate",
       testMatch: /invigilate-journey\.spec\.ts$/,

@@ -6,13 +6,17 @@ import type { TierView } from "@/server/queries/readiness";
  * One readiness tier, as a student reads it (Phase 9c).
  *
  * Every number on this card carries its denominator. That is the single
- * design rule here and it is not a style preference: `mockInterviewScore` is
- * 15 % of TOP and has no source in this plan at any phase, so a TOP score is
- * a score out of 85. A bare "62" would read as 62 out of 100 and make a
- * student believe they are further behind than they are — and the weights are
- * NOT renormalised to hide it, because renormalising would make somebody who
- * has never done a mock interview look exactly as ready as somebody who has
- * done five.
+ * design rule here and it is not a style preference. It was written when
+ * `mockInterviewScore` — 15 % of TOP — had no source at all, so every TOP
+ * score was a score out of 85; Phase 16c sourced it from rated mock
+ * interviews, and the rule survives unchanged because the denominator is now
+ * a fact about the STUDENT rather than about the platform. A student who has
+ * sat two mock interviews is scored out of 100 and one who has sat none out
+ * of 85, so a bare "62" would read as 62 out of 100 for both and make one of
+ * them believe they are further behind than they are. The weights are still
+ * NOT renormalised, because renormalising would make somebody who has never
+ * done a mock interview look exactly as ready as somebody who has done
+ * five.
  *
  * No client JavaScript: this is a server component and the route is in
  * `size-budgets.json`'s `serverRendered` list, so a regression that pulls a

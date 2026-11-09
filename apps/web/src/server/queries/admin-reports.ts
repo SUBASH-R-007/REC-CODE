@@ -1,7 +1,16 @@
 import "server-only";
 import { z } from "zod";
 import { Prisma } from "@recx/db";
-import { TOPIC_LABEL, TOPICS, type Topic } from "@recx/shared";
+import {
+  CALIBRATION_MIN_ATTEMPTERS,
+  TOPIC_LABEL,
+  TOPICS,
+  calibrationDistance,
+  calibrationSentence,
+  calibrationVerdict,
+  type CalibrationVerdict,
+  type Topic,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 import { scopeCovers, scopedStudentSql, type StudentScope } from "@/lib/auth/scope";
 import { lastCampusWeeks, type CampusWeek } from "@/lib/admin/campus-week";
@@ -69,6 +78,17 @@ export interface HardProblemRow {
   solvers: number;
 }
 
+/** Phase 16b: a problem whose label disagrees with the share of students who solve it. */
+export interface MislabelledRow {
+  displayCode: string;
+  title: string;
+  difficulty: "EASY" | "MEDIUM" | "HARD";
+  attempters: number;
+  solvers: number;
+  verdict: Exclude<CalibrationVerdict, "too-few-attempts" | "as-labelled">;
+  sentence: string;
+}
+
 export interface PlanProgressRow {
   title: string;
   kind: "SHEET" | "TRACK";
@@ -86,6 +106,7 @@ export interface CohortReport {
   difficulty: { easy: number; medium: number; hard: number };
   topics: TopicRow[];
   hardest: HardProblemRow[];
+  mislabelled: MislabelledRow[];
   plans: PlanProgressRow[];
   streaks: { bucket: string; students: number }[];
 }
@@ -205,6 +226,47 @@ async function hardestProblems(scope: StudentScope, cohort: Cohort | null): Prom
   return rowsOf(z.object({ displayCode: z.string(), title: z.string(), attempters: num, solvers: num }), rows);
 }
 
+/**
+ * Problems whose declared difficulty disagrees with the data (Phase 16b).
+ *
+ * The SQL does the counting and nothing else: every threshold lives in
+ * `@recx/shared`'s `difficulty-calibration`, because a band repeated in a
+ * HAVING clause is a band that drifts from the one the tests cover and the
+ * one the sentence beside the row describes. So this asks for every problem
+ * with enough attempters and lets the pure function decide.
+ */
+async function mislabelledProblems(scope: StudentScope, cohort: Cohort | null): Promise<MislabelledRow[]> {
+  const rows = await db.$queryRaw<unknown[]>`
+    SELECT p."displayCode", p."title", p."difficulty"::text AS difficulty,
+           count(*)::int AS attempters,
+           count(*) FILTER (WHERE ups."status" = 'SOLVED')::int AS solvers
+    FROM "UserProblemStatus" ups
+    JOIN "User" u ON u.id = ups."userId"
+    JOIN "Problem" p ON p.id = ups."problemId"
+    WHERE ${scopedStudentSql(scope, "u")} AND ${CURRENT} ${cohortFilter(cohort)}
+    GROUP BY p.id, p."displayCode", p."title", p."difficulty"
+    HAVING count(*) >= ${CALIBRATION_MIN_ATTEMPTERS}`;
+  const parsed = rowsOf(
+    z.object({
+      displayCode: z.string(),
+      title: z.string(),
+      difficulty: z.enum(["EASY", "MEDIUM", "HARD"]),
+      attempters: num,
+      solvers: num,
+    }),
+    rows,
+  );
+  return parsed
+    .flatMap((row) => {
+      const verdict = calibrationVerdict(row);
+      if (verdict === "too-few-attempts" || verdict === "as-labelled") return [];
+      return [{ ...row, verdict, sentence: calibrationSentence(row), distance: calibrationDistance(row) }];
+    })
+    .sort((a, b) => b.distance - a.distance || a.displayCode.localeCompare(b.displayCode))
+    .slice(0, 15)
+    .map(({ distance: _distance, ...row }) => row);
+}
+
 async function planProgress(scope: StudentScope, cohort: Cohort | null): Promise<PlanProgressRow[]> {
   const rows = await db.$queryRaw<unknown[]>`
     SELECT sp."title", sp."kind"::text AS kind,
@@ -256,13 +318,14 @@ export async function getCohortReport(
   const requested = options.cohort ?? null;
   const cohort = requested && scopeCovers(scope, requested) ? requested : null;
   const weeks = lastCampusWeeks(now, options.weeks ?? 8);
-  const [summary, active, solves, difficulty, topics, hardest, plans, streaks] = await Promise.all([
+  const [summary, active, solves, difficulty, topics, hardest, mislabelled, plans, streaks] = await Promise.all([
     cohortSummary(scope, cohort, now),
     weeklyActive(scope, cohort, weeks),
     weeklySolves(scope, cohort, weeks),
     difficultySplit(scope, cohort),
     topicCoverage(scope, cohort),
     hardestProblems(scope, cohort),
+    mislabelledProblems(scope, cohort),
     planProgress(scope, cohort),
     streakBuckets(scope, cohort),
   ]);
@@ -275,6 +338,7 @@ export async function getCohortReport(
     difficulty,
     topics,
     hardest,
+    mislabelled,
     plans,
     streaks,
   };

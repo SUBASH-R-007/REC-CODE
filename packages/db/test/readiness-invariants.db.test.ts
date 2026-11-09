@@ -20,8 +20,11 @@ import {
  * they are the reason this suite exists:
  *
  *   - `score <= availableWeight` — a renormalised or zero-filled score is
- *     NOT STORABLE. With `mockInterviewScore` unsourced, no TOP score may
- *     exceed 85, and a row claiming 95 is refused.
+ *     NOT STORABLE. A row claiming a score above what was measurable for
+ *     that student is refused. (The example this was written from was
+ *     `mockInterviewScore` being unsourced for everybody, which capped TOP
+ *     at 85; Phase 16c sourced it, and the denominator now differs per
+ *     student instead — which is the same constraint doing more work.)
  *   - `(availableWeight = 0) = (score IS NULL)` — a tier with nothing
  *     measurable has NO score, not a zero.
  *   - a breadth value always names the topic that limited it, so the MINIMUM
@@ -516,6 +519,128 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
     it("refuses TRUNCATE", async () => {
       expect(await refused(() => db.$executeRawUnsafe(`TRUNCATE "MentorAssignment"`))).toMatch(/TRUNCATE/i);
+    });
+  });
+
+  /**
+   * Phase 16c. `mockFeedback` is what finally gives `mockInterviewScore` a
+   * source, and the whole of its correctness is WHICH ROWS IT COUNTS — so
+   * that is what this tests, against the real table rather than a fake.
+   *
+   * The CHECKs from Phase 12h decide what a row may even look like, and one
+   * of them is load-bearing here: `MockInterview_feedback_pair_check` makes
+   * feedback all-or-nothing, so "rated but with no timestamp" is not a
+   * storable state. The source's four NOT NULL conditions are therefore
+   * belt-and-braces over a constraint rather than the only thing holding
+   * the rule up — which is exactly the arrangement this project wants, and
+   * the last test here is the proof of it.
+   */
+  describe("the mock-interview source", () => {
+    const BOOKED = new Date("2026-09-20T04:00:00.000Z");
+    const NOTE = "Solid on arrays, needs to talk through the plan before coding. Try one graph problem next.";
+
+    async function rated(over: Record<string, unknown> = {}): Promise<string> {
+      const row = await db.mockInterview.create({
+        data: {
+          mentorId,
+          candidateId: studentId,
+          startsAt: new Date("2026-10-01T04:00:00.000Z"),
+          durationMinutes: 45,
+          status: "COMPLETED",
+          bookedAt: BOOKED,
+          startedAt: new Date("2026-10-01T04:01:00.000Z"),
+          endedAt: new Date("2026-10-01T04:46:00.000Z"),
+          ratingCommunication: 4,
+          ratingProblemSolving: 4,
+          ratingCode: 4,
+          feedbackMd: NOTE,
+          feedbackAt: new Date("2026-10-01T05:00:00.000Z"),
+          ...over,
+        } as never,
+        select: { id: true },
+      });
+      return row.id;
+    }
+
+    const source = async () => {
+      const { mockFeedback } = await import("../src/readiness");
+      return mockFeedback(db as never);
+    };
+
+    afterEach(async () => {
+      await db.$executeRawUnsafe(`DELETE FROM "MockInterview" WHERE "candidateId" = $1 OR "mentorId" = $1`, studentId);
+      await db.$executeRawUnsafe(`DELETE FROM "MockInterview" WHERE "mentorId" = $1`, mentorId);
+    });
+
+    it("counts a completed, rated interview", async () => {
+      await rated();
+      expect((await source()).get(studentId)).toEqual([{ communication: 4, problemSolving: 4, code: 4 }]);
+    });
+
+    it("ignores a no-show, a cancellation and an interview nobody rated", async () => {
+      // None of the three is a measurement. A NO_SHOW is not a zero, and an
+      // interview the mentor ended without filling in the form would make
+      // the component depend on whether somebody finished a form.
+      await db.mockInterview.create({
+        data: {
+          mentorId,
+          candidateId: studentId,
+          startsAt: new Date("2026-10-02T04:00:00.000Z"),
+          durationMinutes: 45,
+          status: "NO_SHOW",
+          bookedAt: BOOKED,
+        } as never,
+      });
+      await db.mockInterview.create({
+        data: {
+          mentorId,
+          candidateId: studentId,
+          startsAt: new Date("2026-10-03T04:00:00.000Z"),
+          durationMinutes: 45,
+          status: "CANCELLED",
+          bookedAt: BOOKED,
+          cancelledById: mentorId,
+          cancelReason: "The mentor had a timetable clash.",
+        } as never,
+      });
+      await rated({
+        startsAt: new Date("2026-10-04T04:00:00.000Z"),
+        startedAt: new Date("2026-10-04T04:01:00.000Z"),
+        endedAt: new Date("2026-10-04T04:46:00.000Z"),
+        ratingCommunication: null,
+        ratingProblemSolving: null,
+        ratingCode: null,
+        feedbackMd: null,
+        feedbackAt: null,
+      });
+      expect((await source()).get(studentId)).toBeUndefined();
+    });
+
+    it("returns them most recent first, by when the judgement was made", async () => {
+      // `feedbackAt` orders them, not `startsAt`: what is being ordered is
+      // when the interviewer formed the opinion. Here the EARLIER sitting
+      // was written up later, and it must come first.
+      await rated({
+        startsAt: new Date("2026-09-01T04:00:00.000Z"),
+        startedAt: new Date("2026-09-01T04:01:00.000Z"),
+        endedAt: new Date("2026-09-01T04:46:00.000Z"),
+        ratingCommunication: 1,
+        ratingProblemSolving: 1,
+        ratingCode: 1,
+        feedbackAt: new Date("2026-10-10T05:00:00.000Z"),
+      });
+      await rated({ ratingCode: 5, ratingCommunication: 5, ratingProblemSolving: 5 });
+      expect((await source()).get(studentId)?.map((r) => r.code)).toEqual([1, 5]);
+    });
+
+    it("cannot be handed half a judgement: the database pairs it", async () => {
+      // Three ratings with no timestamp and no note is not a row this
+      // table will hold, which is why the source can trust the pairing.
+      expect(
+        await refused(() =>
+          rated({ feedbackAt: null, feedbackMd: null }),
+        ),
+      ).toMatch(/MockInterview_feedback_pair_check/);
     });
   });
 });

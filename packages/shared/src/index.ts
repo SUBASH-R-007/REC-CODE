@@ -88,3 +88,6 @@ export * from "./metrics";
 export * from "./metrics-registry";
 export * from "./percentile";
 export * from "./vitals";
+export * from "./problem-report";
+export * from "./difficulty-calibration";
+export * from "./mock-readiness";

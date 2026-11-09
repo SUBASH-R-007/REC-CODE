@@ -6,8 +6,20 @@ import type { Role } from "@recx/db";
  *
  * Only implemented routes appear here (test/admin-nav.test.ts fails on an
  * href without a page.tsx). Hiding a link is never the access control:
- * every page and action guards itself server-side. /admin/discuss is not
- * built in Phase 4 (discussion arrives with Phase 11), so it is not linked.
+ * every page and action guards itself server-side.
+ *
+ * **`/admin/discuss` is not built, and will not be (Phase 16d).** The Phase
+ * 4 note here said discussion arrives with Phase 11 and the route is
+ * therefore unlinked. Discussion arrived in 12d — with its moderation queue
+ * at `/mentor/moderation`, because `TA_MENTOR` is the role SPEC §9 gives
+ * those powers to. An `/admin/discuss` built now would be a SECOND queue
+ * over the same rows, and the predictable outcome of two queues is that one
+ * of them is the stale one somebody is not reading.
+ *
+ * What was actually missing was a way IN. An ADMIN holds every mentor
+ * capability and had no link to any of these five pages from the admin
+ * shell, so a report a student filed landed in a queue only a TA_MENTOR
+ * would think to visit. That is what the Mentoring group below fixes.
  */
 
 export type AdminNavIcon =
@@ -25,6 +37,11 @@ export type AdminNavIcon =
   | "announcements"
   | "reports"
   | "judge"
+  | "moderation"
+  | "doubts"
+  | "written"
+  | "experiences"
+  | "mockInterviews"
   | "super";
 
 export interface AdminNavItem {
@@ -36,7 +53,7 @@ export interface AdminNavItem {
 }
 
 export interface AdminNavGroup {
-  id: "overview" | "people" | "content" | "insight" | "operations" | "super";
+  id: "overview" | "people" | "content" | "insight" | "mentoring" | "operations" | "super";
   label: string;
   items: readonly AdminNavItem[];
 }
@@ -78,6 +95,24 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = Object.freeze([
     ]),
   },
   { id: "insight", label: "Insight", items: Object.freeze([item("/admin/reports", "Reports", "reports")]) },
+  {
+    /**
+     * Phase 16d. These five pages live under /mentor because SPEC §9 gives
+     * a TA_MENTOR exactly these powers; an ADMIN and a SUPER_ADMIN hold
+     * them too (MENTOR_CAPABILITIES) and until now had no link to any of
+     * them. Moderation is first because it is the only one with somebody
+     * waiting on the other end of it.
+     */
+    id: "mentoring",
+    label: "Mentoring",
+    items: Object.freeze([
+      item("/mentor/moderation", "Moderation", "moderation"),
+      item("/mentor/doubts", "Doubts", "doubts"),
+      item("/mentor/written", "Written answers", "written"),
+      item("/mentor/experiences", "Interview archive", "experiences"),
+      item("/mentor/mock-interviews", "Mock interviews", "mockInterviews"),
+    ]),
+  },
   { id: "operations", label: "Operations", items: Object.freeze([item("/admin/judge", "Judge", "judge")]) },
 ]);
 

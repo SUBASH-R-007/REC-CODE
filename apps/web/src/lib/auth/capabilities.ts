@@ -677,6 +677,24 @@ export const STAFF_CAPABILITIES = deepFreeze([
     routes: ["app/api/admin/problems/import/route.ts#POST"],
     pages: ["app/admin/problems/import/page.tsx", "app/admin/problems/import/[importId]/page.tsx"],
   },
+  {
+    /**
+     * Phase 16a. Answering a student's defect report, and lifting the hold
+     * that answer may have set. A capability of its own rather than part of
+     * `problems.review`, which is about a DRAFT on its way to publication:
+     * this is about a published revision students are already solving, and
+     * one of its outcomes withholds that problem from new papers.
+     *
+     * Clearing a hold is here and not in `problems.publish` on purpose —
+     * the fix lands in a new revision, which is a different day's work by
+     * possibly a different person, and a hold that lifted itself when the
+     * report closed would be a hold that never held anything.
+     */
+    key: "problems.defects",
+    label: "Answer a reported problem defect, and withhold or release the problem",
+    roles: STAFF,
+    actions: ["problem-reports#decideProblemReport", "problem-reports#clearQualityHold"],
+  },
 ] as const satisfies readonly Capability[]);
 
 /**
@@ -871,6 +889,19 @@ export const SELF_SERVICE_CAPABILITIES = deepFreeze([
     label: "Ask the AI helper about a practice problem",
     roles: EVERY_SIGNED_IN_ROLE,
     actions: ["ai-helper#askAiHelper"],
+  },
+  {
+    /**
+     * Phase 16a. Every signed-in role, and deliberately not gated on
+     * having solved the problem: the student most likely to notice that a
+     * test case is wrong is the one whose correct program it is failing.
+     * The same reasoning as `discussion.participate`'s report — a gate on
+     * the safety valve is not a safety valve.
+     */
+    key: "problems.report",
+    label: "Report a defect in a problem I am solving",
+    roles: EVERY_SIGNED_IN_ROLE,
+    actions: ["problem-reports#reportProblem"],
   },
   {
     key: "notifications.manage",

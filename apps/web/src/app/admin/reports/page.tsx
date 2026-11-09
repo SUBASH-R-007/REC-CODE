@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChartColumnBig } from "lucide-react";
-import { ButtonLink, Card, EmptyState } from "@recx/design";
+import { Badge, ButtonLink, Card, DifficultyBadge, EmptyState } from "@recx/design";
+import { CALIBRATION_MIN_ATTEMPTERS, CALIBRATION_VERDICT_LABEL } from "@recx/shared";
 import { describeScope, isEmptyScope, requireAdminScopePage } from "@/lib/auth/scope";
 import { formatCohort, parseCohortParam } from "@/lib/admin/cohort";
 import { getCohortReport } from "@/server/queries/admin-reports";
@@ -174,6 +175,74 @@ export default async function AdminReportsPage({ searchParams }: { searchParams:
               note: `${t.students} ${t.students === 1 ? "student" : "students"} · ${t.assisted} with hints`,
             }))}
           />
+        </ReportSection>
+
+        {/* Phase 16b. Not "which problems are hard" — that is the section
+            below — but which labels DISAGREE with the data. A problem
+            labelled easy that a tenth of its attempters finish is either
+            mis-labelled or broken, and the whole catalogue was written
+            here, so nobody else is going to notice. */}
+        <ReportSection
+          title="Labels that disagree with the data"
+          subtitle={`At least ${CALIBRATION_MIN_ATTEMPTERS} of your students tried it; the widest disagreement first.`}
+        >
+          {report.mislabelled.length === 0 ? (
+            <EmptyState
+              compact
+              title="Every label agrees with its solve rate"
+              description={`A problem appears here once ${CALIBRATION_MIN_ATTEMPTERS} of your students have tried it and the share who solved it falls outside the band for its label.`}
+            />
+          ) : (
+            <TableFrame label="Problems whose difficulty label disagrees with the data">
+              <table className="w-full min-w-[44rem] text-sm">
+                <caption className="sr-only">
+                  Problems whose declared difficulty disagrees with the share of your students who solved them.
+                </caption>
+                <thead>
+                  <tr className={THEAD_ROW}>
+                    <th scope="col" className={TH}>
+                      Problem
+                    </th>
+                    <th scope="col" className={TH}>
+                      Label
+                    </th>
+                    <th scope="col" className={TH}>
+                      Solved
+                    </th>
+                    <th scope="col" className={TH}>
+                      What it looks like
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.mislabelled.map((row) => (
+                    <tr key={row.displayCode} className={TBODY_ROW}>
+                      <td className={TD}>
+                        <Link href={`/problems/${row.displayCode}`} className="font-medium text-primary hover:underline">
+                          {row.displayCode}
+                        </Link>
+                        <span className="block text-xs text-text-secondary">{row.title}</span>
+                      </td>
+                      <td className={TD}>
+                        <DifficultyBadge difficulty={row.difficulty} />
+                      </td>
+                      <td className={TD}>
+                        <span className="font-mono">
+                          {row.solvers} / {row.attempters}
+                        </span>
+                      </td>
+                      <td className={TD}>
+                        <Badge tone={row.verdict === "harder-than-labelled" ? "danger" : "accent"}>
+                          {CALIBRATION_VERDICT_LABEL[row.verdict]}
+                        </Badge>
+                        <span className="mt-1 block text-xs text-text-secondary">{row.sentence}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableFrame>
+          )}
         </ReportSection>
 
         <div className="grid gap-6 lg:grid-cols-2">

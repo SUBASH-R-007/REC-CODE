@@ -599,57 +599,59 @@ model User {
   /// Editor preferences (font size, tab width, keymap) as plain JSON.
   editorPrefs       Json              @default("{}")
 
-  sessions             Session[]
-  passwordResets       PasswordReset[]
-  submissions          Submission[]
-  runRequests          RunRequest[]
-  judgeUsage           UserJudgeUsage[]
-  quotaOverrides       JudgeQuotaOverride[]
-  problemStatuses      UserProblemStatus[]
-  activityDays         ActivityDay[]
-  stats                UserStats?
-  xpEvents             XpEvent[]
-  xpBuckets            XpBucket[]
-  hintReveals          HintReveal[]
-  editorialViews       EditorialView[]
-  aiAssists            AiAssist[]
-  revisionCards        RevisionCard[]
-  discussionPosts      DiscussionPost[]        @relation("PostAuthor")
-  moderatedPosts       DiscussionPost[]        @relation("PostModerator")
-  doubtThreads         DoubtThread[]
-  doubtReplies         DoubtReply[]
-  contentReports       ContentReport[]         @relation("ReportAuthor")
-  resolvedReports      ContentReport[]         @relation("ReportResolver")
-  interviewExperiences InterviewExperience[]   @relation("ExperienceAuthor")
-  decidedExperiences   InterviewExperience[]   @relation("ExperienceModerator")
-  mockInterviewsGiven  MockInterview[]         @relation("MockMentor")
-  mockInterviewsSat    MockInterview[]         @relation("MockCandidate")
-  mockInterviewsEnded  MockInterview[]         @relation("MockCanceller")
-  writtenPromptsSet    WrittenPrompt[]         @relation("WrittenAuthor")
-  writtenAnswers       WrittenAnswer[]         @relation("WrittenAnswerAuthor")
-  writtenAnswersMarked WrittenAnswer[]         @relation("WrittenGrader")
-  problemActivity      ProblemActivity[]
-  enrollments          StudyPlanEnrollment[]
-  bookmarks            Bookmark[]
-  notes                Note[]
-  notifications        Notification[]
-  codeDrafts           CodeDraft[]
-  badges               UserBadge[]
+  sessions               Session[]
+  passwordResets         PasswordReset[]
+  submissions            Submission[]
+  runRequests            RunRequest[]
+  judgeUsage             UserJudgeUsage[]
+  quotaOverrides         JudgeQuotaOverride[]
+  problemStatuses        UserProblemStatus[]
+  activityDays           ActivityDay[]
+  stats                  UserStats?
+  xpEvents               XpEvent[]
+  xpBuckets              XpBucket[]
+  hintReveals            HintReveal[]
+  editorialViews         EditorialView[]
+  aiAssists              AiAssist[]
+  revisionCards          RevisionCard[]
+  discussionPosts        DiscussionPost[]        @relation("PostAuthor")
+  moderatedPosts         DiscussionPost[]        @relation("PostModerator")
+  doubtThreads           DoubtThread[]
+  doubtReplies           DoubtReply[]
+  contentReports         ContentReport[]         @relation("ReportAuthor")
+  resolvedReports        ContentReport[]         @relation("ReportResolver")
+  problemReports         ProblemReport[]         @relation("ProblemReportAuthor")
+  resolvedProblemReports ProblemReport[]         @relation("ProblemReportResolver")
+  interviewExperiences   InterviewExperience[]   @relation("ExperienceAuthor")
+  decidedExperiences     InterviewExperience[]   @relation("ExperienceModerator")
+  mockInterviewsGiven    MockInterview[]         @relation("MockMentor")
+  mockInterviewsSat      MockInterview[]         @relation("MockCandidate")
+  mockInterviewsEnded    MockInterview[]         @relation("MockCanceller")
+  writtenPromptsSet      WrittenPrompt[]         @relation("WrittenAuthor")
+  writtenAnswers         WrittenAnswer[]         @relation("WrittenAnswerAuthor")
+  writtenAnswersMarked   WrittenAnswer[]         @relation("WrittenGrader")
+  problemActivity        ProblemActivity[]
+  enrollments            StudyPlanEnrollment[]
+  bookmarks              Bookmark[]
+  notes                  Note[]
+  notifications          Notification[]
+  codeDrafts             CodeDraft[]
+  badges                 UserBadge[]
   /// ADMIN student-visibility grants (Phase 4). Actor ids elsewhere stay plain strings.
-  adminScopes          AdminScope[]
-  accommodations       Accommodation[]
+  adminScopes            AdminScope[]
+  accommodations         Accommodation[]
   /// Contests (Phase 5). Participation is student data, like submissions and
   /// XP, so it relates to User (onDelete RESTRICT by default) rather than
   /// holding a plain id: a student is never hard-deleted, and past standings
   /// must stay honest.
-  contestRegistrations ContestRegistration[]
-  contestAttempts      ContestProblemAttempt[]
-  contestStandings     ContestStanding[]
-  ratingChanges        RatingChange[]
-  rating               UserRating?
+  contestRegistrations   ContestRegistration[]
+  contestAttempts        ContestProblemAttempt[]
+  contestStandings       ContestStanding[]
+  ratingChanges          RatingChange[]
+  rating                 UserRating?
   /// Sittings of an assessment (Phase 6).
-  assessmentAttempts   AssessmentAttempt[]
-  examBrowserSittings  ExamBrowserSitting[]
+  assessmentAttempts     AssessmentAttempt[]
+  examBrowserSittings    ExamBrowserSitting[]
 
   deviceRegistrations DeviceRegistration[]
   webAuthnChallenges  WebAuthnChallenge[]
@@ -794,6 +796,16 @@ model Problem {
   version            Int             @default(0)
   /// Editorial opens to everyone (in PRACTICE) from this moment; null = never by date.
   editorialVisibleAt DateTime?
+  /// Phase 16a. Withheld from NEW assessment papers because a reported
+  /// defect was upheld. Never set by a report arriving — only by a staff
+  /// member upholding one, which is why the reason and the stamp are
+  /// required alongside it (CHECK `Problem_quality_hold_check`). It does
+  /// not unpublish the problem, delist it or touch a single existing
+  /// paper: a problem people are part-way through solving stays solvable.
+  qualityHold        Boolean         @default(false)
+  qualityHoldReason  String?
+  qualityHeldById    String?
+  qualityHeldAt      DateTime?
   createdById        String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
@@ -973,6 +985,10 @@ model ProblemVersion {
   /// Contests that pin this (frozen) version — Phase 5.
   contestProblems    ContestProblem[]
   AssessmentProblem  AssessmentProblem[]
+  /// Students saying this revision is wrong — Phase 16a. On the REVISION
+  /// and not on the Problem, because a frozen revision is exact bytes: a
+  /// report against the problem would outlive the edit that answered it.
+  reports            ProblemReport[]
 
   @@unique([problemId, revision])
 }
@@ -1766,6 +1782,51 @@ model ContentReport {
   @@index([status, createdAt])
   @@index([postId])
   @@index([doubtId])
+}
+
+enum ProblemReportReason {
+  WRONG_EXPECTED_OUTPUT
+  STATEMENT_UNCLEAR
+  STATEMENT_CONTRADICTS_SAMPLES
+  LIMITS_TOO_TIGHT
+  MISSING_CONSTRAINT
+  OTHER
+}
+
+/// A student saying a published revision is wrong (Phase 16a).
+///
+/// `ContentReport` beside it reports something a PERSON wrote and is decided
+/// by hiding it. This reports the PROBLEM and is decided by fixing it, so it
+/// is a separate table rather than two more nullable columns on that one:
+/// the queues are read by different people, the decisions mean different
+/// things, and `packages/shared/src/problem-report.ts` holds the reasoning.
+///
+/// An OPEN row does nothing at all. Withholding follows a staff member
+/// upholding it and setting `Problem.qualityHold`, never the report's
+/// arrival — a report that withheld a problem by itself would hand every
+/// candidate a veto over the paper they are about to sit.
+model ProblemReport {
+  id               String              @id @default(cuid())
+  problemVersionId String
+  problemVersion   ProblemVersion      @relation(fields: [problemVersionId], references: [id])
+  reporterId       String
+  reporter         User                @relation("ProblemReportAuthor", fields: [reporterId], references: [id])
+  reason           ProblemReportReason
+  detail           String
+  status           ReportStatus        @default(OPEN)
+  /// The staff member who decided it, and the sentence the student is shown.
+  resolvedById     String?
+  resolvedBy       User?               @relation("ProblemReportResolver", fields: [resolvedById], references: [id])
+  resolvedAt       DateTime?
+  resolution       String?
+  createdAt        DateTime            @default(now())
+
+  /// One OPEN report per student per revision — a partial unique index,
+  /// created in the migration because Prisma cannot model the predicate.
+  /// A decided report never blocks a new one.
+  @@index([status, createdAt])
+  @@index([problemVersionId, status])
+  @@index([reporterId])
 }
 
 /// A problem coming back to a student on a spaced schedule (Phase 12c).

@@ -4,9 +4,14 @@ import { implementedRoutes } from "./support/routes";
 
 /**
  * The admin shell never shows a dead link: every href in the admin
- * navigation has a page.tsx. /admin/discuss is not built in Phase 4, so it is
- * not linked; the super-admin console link is shown to SUPER_ADMIN only
- * (hiding it is a convenience — /super guards itself).
+ * navigation has a page.tsx. The super-admin console link is shown to
+ * SUPER_ADMIN only (hiding it is a convenience — /super guards itself).
+ *
+ * `/admin/discuss` is still not linked, and Phase 16d closed that as a
+ * decision rather than a gap: discussion moderation lives at
+ * `/mentor/moderation`, a second queue over the same rows would leave one
+ * of them stale, and what was actually missing was the LINK — which the
+ * Mentoring group now provides.
  */
 
 describe("admin navigation", () => {
@@ -43,11 +48,34 @@ describe("admin navigation", () => {
         ],
       ],
       ["Insight", ["/admin/reports"]],
+      // Phase 16d. Five pages under /mentor, because SPEC §9 gives those
+      // powers to TA_MENTOR; an ADMIN holds them as well and had no link
+      // to any of them. Moderation first: it is the only one with somebody
+      // waiting on the other end.
+      [
+        "Mentoring",
+        [
+          "/mentor/moderation",
+          "/mentor/doubts",
+          "/mentor/written",
+          "/mentor/experiences",
+          "/mentor/mock-interviews",
+        ],
+      ],
       ["Operations", ["/admin/judge"]],
     ]);
   });
 
-  it("does not link /admin/discuss (Phase 11)", () => {
+  it("links the mentor queues for both staff roles", () => {
+    // An ADMIN holds MENTOR_CAPABILITIES, so hiding these from them was
+    // never access control — just a missing route in.
+    for (const role of ["ADMIN", "SUPER_ADMIN"] as const) {
+      const hrefs = adminNavFor(role).flatMap((g) => g.items.map((i) => i.href));
+      expect(hrefs, role).toContain("/mentor/moderation");
+    }
+  });
+
+  it("does not link /admin/discuss, and there is no such page (Phase 16d: by decision)", () => {
     expect(allAdminNavItems().some((i) => i.href.startsWith("/admin/discuss"))).toBe(false);
     expect(routes.has("/admin/discuss")).toBe(false);
   });

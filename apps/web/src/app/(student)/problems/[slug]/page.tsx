@@ -17,6 +17,8 @@ import { findLiveContestEntry } from "@/lib/contests/entry";
 import { getProblemWorkspace } from "@/server/queries/problems";
 import { HISTORY_LIMIT, recentSubmissions } from "@/server/queries/submissions";
 import { ActivityTracker } from "@/components/help/activity-tracker";
+import { myReportsFor } from "@/lib/problems/reports";
+import { ReportDefect } from "@/components/problems/report-defect";
 import { EditorialPanel } from "@/components/help/editorial-panel";
 import { DiscussionPanel } from "@/components/discussion/discussion-panel";
 import { AssistantPanel } from "@/components/help/assistant-panel";
@@ -66,7 +68,7 @@ export default async function ProblemPage({ params }: Params) {
   if (!problem) notFound();
 
   const key = { userId: user.id, problemId: problem.id };
-  const [history, serverDrafts, bookmark, progress, cookieStore, aiRuntime, contestEntry] = await Promise.all([
+  const [history, serverDrafts, bookmark, progress, cookieStore, aiRuntime, contestEntry, myReports] = await Promise.all([
     recentSubmissions(user.id, problem.id),
     loadServerDrafts(user.id, problem.id),
     db.bookmark.findUnique({ where: { userId_problemId: key }, select: { problemId: true } }),
@@ -81,6 +83,13 @@ export default async function ProblemPage({ params }: Params) {
      * out, so the chip is a heads-up and never the authority.
      */
     findLiveContestEntry(db, { userId: user.id, problemId: problem.id, now: new Date() }),
+    /**
+     * This student's own defect reports on the live revision (Phase 16a).
+     * Theirs only: somebody else's report is not their business, and a
+     * count of "3 people think this is wrong" on a problem page is a
+     * suggestion to stop trying.
+     */
+    myReportsFor(user.id, problem.id),
   ]);
   // Whether the Assistant tab exists at all. The setting read is cache()d
   // per request, so asking here and again inside the panel is one query.
@@ -145,7 +154,15 @@ export default async function ProblemPage({ params }: Params) {
         submissionCount={history.length}
         editorPrefs={readEditorPrefs(user.editorPrefs)}
         panels={{
-          description: <ProblemDescription problem={problem} statementHtml={problem.statementHtml} />,
+          description: (
+            <ProblemDescription
+              problem={problem}
+              statementHtml={problem.statementHtml}
+              // Phase 16a: inside the description's own landmark, under the
+              // samples, because that is where a contradiction is noticed.
+              footer={<ReportDefect problemId={problem.id} mine={myReports} />}
+            />
+          ),
           editorial: (
             <Suspense fallback={<PanelSkeleton />}>
               <EditorialPanel problemId={problem.id} versionId={problem.versionId} />

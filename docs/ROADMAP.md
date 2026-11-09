@@ -208,27 +208,29 @@ the practice surface, which knows every kind.
 *Size:* one slice each, in roughly the order above. Output-only is the
 cheapest; interactive is the one to leave alone longest.
 
-### 2.5 `/admin/discuss` is not built
+### 2.5 `/admin/discuss` — **closed as a decision (Phase 16d)**
 
-Discussion shipped in Phase 12d with the `TA_MENTOR` moderation role at
-`/mentor/moderation`, which is where moderation actually happens. The admin
-navigation links nothing, and `docs/OPEN-QUESTIONS.md` records the route as
-unbuilt. Decide whether it should exist at all now that the mentor surface
-covers the work — and if not, close the entry rather than leaving a route
-that reads as missing.
+It will not be built: a second queue over the same rows leaves one of them
+stale, and moderation belongs to `TA_MENTOR` by SPEC §9.
 
-*Size:* a decision, then either nothing or a small page.
+Asking the question found the real gap, which was not a page. An ADMIN holds
+every mentor capability and the admin shell linked **none** of the five
+mentor pages, so a report a student filed landed in a queue only a
+`TA_MENTOR` would think to visit. The admin navigation has a Mentoring group
+now, moderation first.
 
-### 2.6 `mockInterviewScore` has no source
+### 2.6 `mockInterviewScore` — **sourced (Phase 16c)**
 
-A readiness component with no input. The entry that records this says plainly
-it "will not have one this year". The readiness card renders missing
-components as missing, which is the right behaviour, so this is honest today
-— but it means one of the readiness tiers is permanently thinner than
-designed.
+Fed from rated mock interviews: the mean of the interviewer's three 1–5
+ratings, over the most recent three interviews, with a two-interview
+minimum. Below that it is `NO_DATA_YET` — the student's to fix, because the
+slots are bookable — and never `NO_SOURCE_YET` again.
 
-*Done when* `/mentor/mock-interviews` outcomes feed it, or the component is
-removed from the model and `docs/OPEN-QUESTIONS.md` says why.
+`READINESS_RULES_VERSION` is 2 even though no weight moved, because a
+version-1 score of 62 was 62 out of 85 and a version-2 one is 62 out of 100.
+The "every figure carries its denominator" rule now does more work rather
+than less: the denominator is a fact about the student instead of about the
+platform.
 
 ### 2.7 `notifyParentEmail` cannot be turned on at all
 
@@ -272,30 +274,38 @@ codes recorded in the audit log by the fact of their use and never by value.
 Students keep a password, because 5,000 students with TOTP is a help-desk
 programme, not a security improvement.
 
-### 3.2 A student-facing problem-defect report
+### 3.2 A student-facing problem-defect report — **built (Phase 16a)**
 
-There is no `ProblemReport` model and no "something is wrong with this
-problem" affordance. A student who believes a test case is wrong has
-discussion and `/mentor/doubts`, which are conversations, not a queue.
+`ProblemReport` on the frozen revision, a quiet link under the samples, and
+the queue on `/admin/problems/[id]` above the content. One open report per
+student per revision; a decision is all three columns or none; the staff
+answer is the sentence the student reads.
 
-For a platform whose entire catalogue is authored in-house — twelve problems
-today, thousands intended — a structured defect channel is the cheapest
-quality mechanism available. It should attach to a `ProblemVersion` rather
-than a `Problem`, reach the author, and be able to withhold that problem from
-assessment pinning while it is open.
+One thing changed on the way in. This entry asked for a report that could
+"withhold that problem from assessment pinning while it is open", and that
+is exactly what was NOT built: a report that withholds a problem by itself
+hands every student a veto over the paper they are about to sit. Withholding
+follows a staff member upholding the report and choosing a hold, which is the
+project's rule everywhere else. See `docs/OPEN-QUESTIONS.md`, Phase 16a.
 
-*Size:* one slice. High value per line of code.
+### 3.3 A mis-labelled-difficulty report — **built (Phase 16b)**
 
-### 3.3 A mis-labelled-difficulty report
+"Labels that disagree with the data" on `/admin/reports`, above "Hardest
+problems", which answers a different question: a hard problem being hard is
+not news.
 
-`ProblemStat` carries `submissions`, `accepted`, `attempters`, `solvers` and
-`acceptanceRate`, and `/admin/reports` already shows "Hardest problems" —
-lowest share solved first, once five students have tried. What it does not
-show is the **disagreement**: a problem labelled EASY that eight per cent of
-attempters solve is either mis-labelled or broken, and it is the single most
-useful signal a new catalogue produces about itself.
+The bands are a choice and are argued for in
+`packages/shared/src/difficulty-calibration.ts` rather than asserted — EASY
+flags at or below 35% solved, HARD at or above 70%, MEDIUM takes the wide
+middle (15–85%), and the asymmetry is deliberate because an EASY problem
+nobody finishes costs a beginner their first week while a HARD problem
+everybody finishes costs a strong student an afternoon. Minimum 8 attempters
+within the viewer's own scope. Every threshold lives in that one module, so
+no band is repeated in a HAVING clause where it could drift from the tests
+and from the sentence beside the row.
 
-*Size:* a report section. The data is already there.
+Nothing acts on a verdict: re-labelling a problem starts a new revision, and
+that is an author's judgement a solve share cannot make.
 
 ### 3.4 Field vitals cannot be read by cohort
 
@@ -325,12 +335,21 @@ and the p95 queue waits are recorded. This depends on §1.4.
 ### 3.6 Coverage the axe run does not reach
 
 The accessibility sweep is 260 scans over 65 pages, with `none` on every one.
-Two gaps are named in the runbook rather than implied: the student assistant
-panel renders only where the AI helper is switched on and configured, and
-`/super/settings/ai` is visited as an admin rather than as a signed-in
-super-admin, so the controls a super-admin sees on it are not scanned.
 
-*Size:* two fixtures. Worth doing because both surfaces are new.
+One gap, not the two this document first claimed. `/super/settings/ai` **is**
+scanned as a signed-in super-admin: `e2e/support/accounts.ts` makes the
+`admin` account `RECADMIN01`, a SUPER_ADMIN, and the 2026-11-08 run covered
+the page — which is what the Phase 15g row meant by "the next run of the
+a11y suite covers this page". Corrected here rather than quietly dropped.
+
+What is genuinely unscanned is the student assistant panel, which renders
+only where the AI helper is switched on and configured, and this
+deployment's is off. Scanning it needs the helper enabled for the duration
+of one spec and switched back afterwards, plus a key on the server — so it
+belongs behind its own flag, like `E2E_JUDGE=1`, and must fail loudly rather
+than skip silently if the tab is absent.
+
+*Size:* one spec and one fixture.
 
 ### 3.7 Keep CI readable now that it runs
 

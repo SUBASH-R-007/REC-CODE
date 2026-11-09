@@ -94,6 +94,8 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_sql_contest_problem",
   // 20261101190000_phase12r_assessment_mcq
   "recx_refuse_clashing_assessment_position",
+  // 20261109090000_phase16a_problem_reports
+  "recx_refuse_held_assessment_problem",
 ] as const;
 export type GuardFunction = (typeof GUARD_FUNCTIONS)[number];
 
@@ -394,6 +396,25 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_clashing_assessment_position",
+    level: "ROW",
+  },
+  // 20261109090000_phase16a_problem_reports
+  {
+    /**
+     * Phase 16a. The sixth refusal of this shape, and the only one a
+     * STAFF MEMBER turns on: `Problem.qualityHold` is set by upholding a
+     * student's defect report, never by the report arriving. It fires on
+     * the pin and not on the hold, so an existing paper keeps the
+     * question it already has and a sitting in progress is not
+     * interrupted by a decision taken while it runs.
+     *
+     * Unlike its five neighbours this one is not lifted by a DROP
+     * TRIGGER — it is lifted per problem, by clearing the hold.
+     */
+    name: "AssessmentProblem_no_quality_hold",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_held_assessment_problem",
     level: "ROW",
   },
   {
@@ -1393,5 +1414,21 @@ export const PARTIAL_UNIQUE_INDEXES = [
     columns: ["menteeId"],
     nullsNotDistinct: false,
     where: String.raw`"?endedAt"?\s+IS\s+NULL`,
+  },
+  /**
+   * 20261109090000_phase16a_problem_reports. One OPEN defect report per
+   * student per revision. Partial, because the uniqueness is a property of
+   * OPEN rows only: a decided report never blocks a new one, and a student
+   * who has already said this revision is wrong has nothing to add by
+   * saying it again — while a queue holding four rows from one person is a
+   * queue somebody stops reading.
+   */
+  {
+    name: "ProblemReport_one_open_per_reporter",
+    table: "ProblemReport",
+    migration: "20261109090000_phase16a_problem_reports",
+    columns: ["problemVersionId", "reporterId"],
+    nullsNotDistinct: false,
+    where: String.raw`"?status"?\s*=\s*'OPEN'`,
   },
 ] as const;

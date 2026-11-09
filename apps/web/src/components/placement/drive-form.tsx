@@ -11,10 +11,12 @@ import { createDrive } from "@/server/actions/placement-drives";
  *
  * The threshold field says "% of what was measurable" in its own label, not
  * in a footnote. That is the correction the design's review found: with
- * `mockInterviewScore` permanently unsourced no TOP score can exceed 85, so a
- * bar typed as a raw 70 would exclude a cohort for a component nobody has
- * built. Labelling the unit at the point of entry is the only place it
- * reliably lands.
+ * `mockInterviewScore` then permanently unsourced, no TOP score could exceed
+ * 85, so a bar typed as a raw 70 would have excluded a cohort for a
+ * component nobody had built. Phase 16c sourced that component, which makes
+ * the label matter MORE rather than less: the denominator now varies per
+ * student, so a raw bar compares two different scales. Labelling the unit at
+ * the point of entry is the only place it reliably lands.
  *
  * There is no "auto-mark eligible above the bar" option, and there never will
  * be. SPEC §5: eligibility is a human decision recorded with its reason.

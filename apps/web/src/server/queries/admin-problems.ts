@@ -207,6 +207,8 @@ export interface AdminProblemDetail {
     version: number;
     liveVersionId: string | null;
     topics: string[];
+    /** Phase 16a: set when a reported defect was upheld and a hold chosen. */
+    qualityHold: { reason: string; at: Date } | null;
   };
   revisions: RevisionSummary[];
   /** The revision shown: ?rev=N, else the open draft, else the live one. */
@@ -268,6 +270,13 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       status: true,
       version: true,
       liveVersionId: true,
+      // Phase 16a: whether a reported defect was upheld and the problem
+      // withheld from new papers. Read here so the detail page can say so
+      // above the content, rather than an examiner finding out from a
+      // refused pin on the assessment screen.
+      qualityHold: true,
+      qualityHoldReason: true,
+      qualityHeldAt: true,
       tags: { select: { topic: true } },
       versions: {
         orderBy: { revision: "desc" },
@@ -408,6 +417,12 @@ export async function getAdminProblem(viewer: StaffViewer, problemId: string, re
       version: problem.version,
       liveVersionId: problem.liveVersionId,
       topics: problem.tags.map((t) => t.topic),
+      // The CHECK makes the three columns move together, so one truthy
+      // flag is enough to know the other two are there.
+      qualityHold:
+        problem.qualityHold && problem.qualityHoldReason && problem.qualityHeldAt
+          ? { reason: problem.qualityHoldReason, at: problem.qualityHeldAt }
+          : null,
     },
     revisions,
     selected,

@@ -37,8 +37,14 @@ import { TOPICS, type Topic } from "./topics";
  * than silently rewriting last year's. Bump it in the same change that
  * changes any weight or any target, or a stored breakdown will stop
  * explaining its own score.
+ *
+ * **2 (Phase 16c): `MOCK_INTERVIEW_SCORE` became measurable.** No weight
+ * moved, and that is exactly why the bump is needed: a version-1 TOP score
+ * of 62 was 62 out of an available 85, and a version-2 one is 62 out of
+ * 100. The same number means two different things, so the two must not
+ * share a version. See `mock-readiness.ts`.
  */
-export const READINESS_RULES_VERSION = 1;
+export const READINESS_RULES_VERSION = 2;
 
 export const READINESS_TIERS = ["SERVICE", "PRODUCT", "TOP"] as const;
 export type ReadinessTier = (typeof READINESS_TIERS)[number];

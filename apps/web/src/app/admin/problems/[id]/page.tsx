@@ -18,6 +18,7 @@ import {
   TopicsForm,
 } from "@/components/admin/problems/draft-forms";
 import { COMPARE_MODE_OPTIONS, LANGUAGE_OPTIONS, ORIGIN_OPTIONS, TOPIC_OPTIONS, VERDICT_OPTIONS } from "@/components/admin/problems/options";
+import { DefectReports } from "@/components/admin/problems/defect-reports";
 import { ProblemNav } from "@/components/admin/problems/problem-nav";
 import { ReferenceSolutions } from "@/components/admin/problems/reference-solutions";
 import { ReviewPanel } from "@/components/admin/problems/review-panel";
@@ -97,6 +98,10 @@ export default async function AdminProblemPage({ params, searchParams }: Props) 
           </Link>
         )}
       </header>
+
+      {/* Phase 16a. Above the revisions, because an open report saying a
+          test case is wrong is the most urgent fact on this screen. */}
+      <DefectReports problemId={problem.id} hold={problem.qualityHold} />
 
       <Card>
         <CardHeader title="Revisions" subtitle="Published revisions are frozen. Editing starts a new draft revision." />
