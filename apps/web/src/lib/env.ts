@@ -1,7 +1,8 @@
 import "server-only";
 import { z } from "zod";
-import { aiAllowedEndpoints } from "@recx/shared";
+import { aiAllowedEndpoints, isAllowedEndpoint } from "@recx/shared";
 import { hydrateFileBackedSecrets } from "@recx/shared/env-file";
+import { decodeSecretBoxKey } from "@/lib/crypto/secret-box";
 
 /**
  * Validated server environment. Parsed lazily (first access) so `next build`
@@ -113,6 +114,49 @@ const shape = {
    * endpoint configured" much later and somewhere else. https, or loopback
    * for a model on the same box.
    */
+  /**
+   * Signing in through REC Learning (Phase 16i).
+   *
+   * All four together or none at all: a half-configured provider is a
+   * button that fails after a redirect, which is worse than no button. The
+   * refinement below enforces that, and `lmsSignInConfig()` is the only
+   * reader.
+   *
+   * The issuer is checked against the discovery document it serves, so a
+   * mistyped one fails at the first request rather than at a redirect.
+   */
+  LMS_OIDC_ISSUER: z
+    .string()
+    .trim()
+    .min(1)
+    .refine(isAllowedEndpoint, {
+      message: "LMS_OIDC_ISSUER must be an https URL (http is allowed only on localhost).",
+    })
+    .optional(),
+  LMS_OIDC_CLIENT_ID: z.string().trim().min(1).optional(),
+  LMS_OIDC_CLIENT_SECRET: z.string().trim().min(1).optional(),
+  /**
+   * Phase 16j: the key a stored TOTP secret is encrypted under
+   * (`docs/SECURITY.md` §2, `docs/RUNBOOK.md` §2.22).
+   *
+   * 32 bytes, as base64, base64url or hex. Optional, because a second
+   * factor is optional — without it `/account/two-factor` says so and the
+   * super-admin switch cannot be turned on, which is better than an admin
+   * enrolling into a secret the server cannot read back. Not optional once
+   * anybody HAS enrolled: removing it locks those accounts out until it is
+   * put back, and that is said plainly in the runbook rather than guarded
+   * against here, where this process cannot see the table.
+   *
+   * In production it arrives as TOTP_ENCRYPTION_KEY_FILE (a Docker secret).
+   */
+  TOTP_ENCRYPTION_KEY: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((value) => decodeSecretBoxKey(value) !== null, {
+      message: "TOTP_ENCRYPTION_KEY must decode to exactly 32 bytes (base64, base64url or hex).",
+    })
+    .optional(),
   AI_BASE_URL: z
     .string()
     .trim()
@@ -158,6 +202,21 @@ const schema = z.object(shape).superRefine((value, ctx) => {
    * every sitting key from it — which is the shared-key flaw
    * `docs/EXAM-BROWSER.md` §5 exists to avoid, reintroduced by omission.
    */
+  /**
+   * Phase 16i. All three LMS sign-in settings or none: a half-configured
+   * provider is a button on the sign-in page that fails after a redirect,
+   * which is worse for a student than no button at all.
+   */
+  const lms = [value.LMS_OIDC_ISSUER, value.LMS_OIDC_CLIENT_ID, value.LMS_OIDC_CLIENT_SECRET];
+  const set = lms.filter((entry) => entry !== undefined).length;
+  if (set > 0 && set < lms.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["LMS_OIDC_ISSUER"],
+      message:
+        "LMS sign-in needs LMS_OIDC_ISSUER, LMS_OIDC_CLIENT_ID and LMS_OIDC_CLIENT_SECRET together, or none of them.",
+    });
+  }
   if (value.NODE_ENV === "production" && value.EXAM_BROWSER_SECRET.startsWith("dev-only-")) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

@@ -23,6 +23,16 @@ const h = vi.hoisted(() => {
     calls,
     jar,
     users: [] as FakeUser[],
+    /**
+     * Phase 16j. Which accounts have a CONFIRMED second factor, by id. The
+     * sign-in path reads this before it rotates anything, so an empty set
+     * is the ordinary password-only sign-in every case below but one is
+     * about.
+     */
+    enrolled: new Set<string>(),
+    /** A value this test invents; undefined means the deployment has none. */
+    totpKey: Buffer.alloc(32, 13).toString("base64") as string | undefined,
+    challenges: [] as { userId: string }[],
     findError: null as Error | null,
     limited: false,
     cookieSets: [] as { name: string; value: string; options: Record<string, unknown> }[],
@@ -45,6 +55,26 @@ vi.mock("@/lib/db", () => ({
         return {};
       }),
     },
+    totpCredential: {
+      findUnique: vi.fn(async ({ where }: { where: { userId: string } }) => {
+        h.calls.push("totpCredential.findUnique");
+        return h.enrolled.has(where.userId) ? { confirmedAt: new Date() } : null;
+      }),
+    },
+    secondFactorChallenge: {
+      create: vi.fn(async ({ data }: { data: { userId: string } }) => {
+        h.calls.push("secondFactorChallenge.create");
+        h.challenges.push({ userId: data.userId });
+        return {};
+      }),
+      deleteMany: vi.fn(async () => {
+        h.calls.push("secondFactorChallenge.deleteMany");
+        return { count: 0 };
+      }),
+    },
+    platformSetting: {
+      findUnique: vi.fn(async () => null),
+    },
     session: {
       // destroySession() looks for a live impersonation on the old session first (none here).
       findUnique: vi.fn(async () => null),
@@ -65,6 +95,17 @@ vi.mock("@/lib/audit", () => ({
   }),
 }));
 vi.mock("@/lib/ip", () => ({ requestIpHash: async () => "ip-hash" }));
+/**
+ * Phase 16j. The sign-in path now asks whether a second factor is
+ * configured at all, which reads the environment — and this suite has no
+ * DATABASE_URL, because it fakes the database. A stand-in keeps the test
+ * about the route rather than about the environment, and the key is a
+ * value this test invents.
+ */
+vi.mock("@/lib/env", () => ({
+  env: () => ({ TOTP_ENCRYPTION_KEY: h.totpKey, APP_URL: "http://localhost:3000" }),
+  isProduction: () => false,
+}));
 vi.mock("@/lib/auth/password", () => ({
   dummyPasswordHash: async () => "DECOY",
   verifyPassword: vi.fn(async (password: string, hash: string) => {
@@ -133,6 +174,9 @@ beforeEach(() => {
   ];
   h.findError = null;
   h.limited = false;
+  h.enrolled.clear();
+  h.challenges.length = 0;
+  h.totpKey = Buffer.alloc(32, 13).toString("base64");
   h.cookieSets.length = 0;
   h.audits.length = 0;
   h.verified.length = 0;
@@ -286,6 +330,41 @@ describe("POST /api/auth/login — success", () => {
     expect(h.audits).toEqual([expect.objectContaining({ action: "auth.login", actorId: "2116231001001" })]);
     expect(identifierCookie(response)).toMatch(/^recx_login_id=;.*Path=\/login/i);
     expect(identifierCookie(response)).toMatch(/Expires=Thu, 01 Jan 1970|Max-Age=0/i);
+  });
+
+  /**
+   * Phase 16j. The branch that matters most about this route: a correct
+   * password for an enrolled account must create NO session.
+   */
+  it("an enrolled admin gets the code page and NO session", async () => {
+    h.enrolled.add("RECADMIN01");
+    const response = await POST(post(form({ identifier: "RECADMIN01", password: "right password" })));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/second-factor");
+    // A challenge, and nothing that signs anybody in.
+    expect(h.challenges).toEqual([{ userId: "RECADMIN01" }]);
+    expect(h.calls).not.toContain("session.create");
+    expect(h.calls).not.toContain("user.update");
+    // The browser's existing session is NOT dropped either: a password
+    // offered and then abandoned must leave a shared machine as it was.
+    expect(h.calls).not.toContain("session.deleteMany");
+    // And the attempt is on the record as needing a second factor.
+    expect(h.audits.map((a) => a.action)).toEqual(["auth.second_factor_required"]);
+  });
+
+  it("with no encryption key on the deployment, an enrolled admin signs in on the password alone", async () => {
+    // Not a loophole: a credential the server cannot READ cannot be
+    // checked, and refusing the sign-in would lock out every admin the
+    // moment a key went missing, with the page that could fix it behind
+    // the same refusal. `docs/RUNBOOK.md` §2.22 says so plainly, and the
+    // super-admin switch refuses to turn on without the key.
+    h.totpKey = undefined;
+    h.enrolled.add("RECADMIN01");
+    const response = await POST(post(form({ identifier: "RECADMIN01", password: "right password" })));
+    expect(response.headers.get("location")).toBe("/admin");
+    expect(h.calls).toContain("session.create");
+    expect(h.challenges).toEqual([]);
   });
 
   it("an admin lands on /admin — the home comes from the role, never from the request", async () => {

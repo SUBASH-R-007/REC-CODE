@@ -14,6 +14,30 @@ export const SIGN_IN_MESSAGES = {
   "password-missing": "Enter your password.",
   "password-long": "That password is too long.",
   "cross-site": "Please sign in from this page.",
+  /**
+   * Signing in through REC Learning (Phase 16i). The sentences live in
+   * `OIDC_MESSAGES` so the provider-facing half and this page cannot
+   * drift; they are repeated here only because this table is the one
+   * thing the sign-in page reads, and it is dependency-free on purpose.
+   */
+  "lms-off": "Signing in through REC Learning is not switched on for this deployment.",
+  "lms-unavailable":
+    "REC Learning could not be reached just now. Sign in with your REC Code password below, or try again in a moment.",
+  "lms-failed":
+    "That sign-in could not be completed. Start again from the sign-in page, and tell your department if it keeps happening.",
+  "lms-expired": "That sign-in took too long. Start again from the sign-in page.",
+  "lms-not-enrolled":
+    "You signed in to REC Learning, but there is no REC Code account for you yet. Your department adds accounts from the roster — ask them, and nothing is needed from you in the meantime.",
+  /**
+   * Phase 16j. `/second-factor` sends somebody here when their challenge
+   * has expired, been spent or never existed. Declared rather than left to
+   * fall through to "no message": a code the product itself emits must
+   * render a sentence, or the page silently shows a plain form to a person
+   * who was half-way through signing in.
+   */
+  "second-factor-expired": "That sign-in took too long, or had too many tries. Start again.",
+  "lms-inactive":
+    "Your REC Code account is not active. Ask your department, who can see why and can put it back.",
 } as const;
 
 export type SignInFailure = keyof typeof SIGN_IN_MESSAGES | "rate-limited" | "unavailable";

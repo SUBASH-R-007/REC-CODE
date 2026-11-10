@@ -138,6 +138,12 @@ export const SUPER_ADMIN_CAPABILITIES: readonly Capability<SuperAdminCapabilityK
       // on every request, so turning it off takes the file away from
       // anybody who kept the URL.
       "super-settings#setExamBrowserDownloads",
+      // Phase 16j: whether ADMIN and SUPER_ADMIN must hold a second
+      // factor. SECURITY, and refused outright when the deployment has no
+      // encryption key -- turning it on without one would send every
+      // admin, the one who turned it on included, to a page that cannot
+      // mint a secret.
+      "super-settings#setSecondFactorPolicy",
       "super-flags#setFeatureFlag",
       "super-branding#saveBrandTheme",
       // Phase 8b. The inactivity thresholds are settings, not constants —
@@ -307,6 +313,33 @@ export const SUPER_ADMIN_SUPPORTING_PAGES: readonly PageRef[] = Object.freeze([
  * AdminScope (lib/auth/scope.ts), which is data, not role.
  */
 export const STAFF_CAPABILITIES = deepFreeze([
+  {
+    /**
+     * Phase 16j. Setting up a second factor on YOUR OWN admin account.
+     *
+     * Staff, not every signed-in role: `docs/ROADMAP.md` §3.1 scoped it to
+     * ADMIN and SUPER_ADMIN, `SECOND_FACTOR_ROLES` is the one list that
+     * says so, and a database trigger enforces the same thing on the row.
+     * It is not a self-service capability for that reason -- those are the
+     * ones every signed-in account has.
+     *
+     * There is deliberately no "remove somebody else's second factor"
+     * action anywhere in the product: that would be a privileged operation
+     * in the ordinary sense, and the recovery codes exist so that the usual
+     * case -- a lost phone -- needs nobody else at all. A super-admin who
+     * truly must can delete the row, which is a database operation with an
+     * audit trail of its own.
+     */
+    key: "security.secondFactor",
+    label: "Set up, replace or remove my own authenticator app",
+    roles: STAFF,
+    actions: [
+      "second-factor#beginSecondFactorEnrolment",
+      "second-factor#confirmSecondFactor",
+      "second-factor#regenerateRecoveryCodes",
+      "second-factor#removeSecondFactor",
+    ],
+  },
   {
     key: "integrity.review",
     label: "Review a flagged sitting and record a verdict",
@@ -1305,6 +1338,39 @@ export const PUBLIC_ROUTES: readonly RouteRef[] = Object.freeze([
    * from the request reaches a path; and a rate limit.
    */
   "app/api/exam-browser/download/[platform]/route.ts#GET",
+  /**
+   * Phase 16i: the two halves of signing in through REC Learning.
+   * Unauthenticated by nature and for the same reason the password form
+   * is -- these are what a person uses *instead* of having a session.
+   *
+   * What stands in for a guard, in the order the callback applies it:
+   * three httpOnly cookies scoped to this path and good for ten minutes;
+   * `state` compared before anything is exchanged; the code exchanged
+   * over a back channel with the client secret, never through the
+   * browser; the id_token's algorithm checked against a list of one, then
+   * its signature against the provider's JWKS, and only THEN its claims
+   * (issuer, audience, expiry, age, nonce); and a subject that must
+   * already have a roster row -- a sign-in never creates an account.
+   * `/start` mints three random values, sets cookies and touches nothing
+   * the platform owns, which is why it is a GET from a page that ships no
+   * JavaScript.
+   */
+  "app/api/auth/oidc/start/route.ts#GET",
+  "app/api/auth/oidc/callback/route.ts#GET",
+  /**
+   * Phase 16j: finishing a sign-in with a second factor. Unauthenticated
+   * for the same reason `/api/auth/login` is -- the person using it has no
+   * session and will not have one until it succeeds.
+   *
+   * What stands in for a guard is the CHALLENGE, and the reason there is no
+   * half-signed-in session to guard instead is in
+   * `lib/auth/second-factor.ts`: a correct password creates a
+   * `SecondFactorChallenge` row and nothing else, so a guard that forgot to
+   * check a second factor could not exist. The challenge is named by an
+   * httpOnly cookie, lives five minutes, and carries an attempt count a
+   * database trigger refuses to let fall.
+   */
+  "app/api/auth/second-factor/route.ts#POST",
 ] as const);
 
 export type StaffCapabilityKey = (typeof STAFF_CAPABILITIES)[number]["key"];

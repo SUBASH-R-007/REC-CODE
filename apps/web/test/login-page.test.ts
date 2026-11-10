@@ -10,8 +10,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   live: vi.fn(async (_token: string | undefined) => false),
+  lms: vi.fn(() => false),
 }));
-vi.mock("@/lib/pages-server", () => ({ hasLiveSession: h.live, brandForPages: vi.fn() }));
+vi.mock("@/lib/pages-server", () => ({
+  hasLiveSession: h.live,
+  brandForPages: vi.fn(),
+  offersLmsSignIn: h.lms,
+}));
 
 const React = await import("react");
 (globalThis as { React?: unknown }).React = React;
@@ -22,7 +27,7 @@ const LoginPage = page.default;
 
 type Props = Parameters<typeof LoginPage>[0];
 const render = (props: Props) => renderToStaticMarkup(createElement(LoginPage, props));
-const NONE: Props = { error: null, notice: null, identifier: "", invalid: [], focus: null };
+const NONE: Props = { error: null, notice: null, identifier: "", invalid: [], focus: null, lms: false };
 
 /** The opening tag of the input with this id. */
 function input(html: string, id: string): string {
@@ -34,6 +39,8 @@ function input(html: string, id: string): string {
 beforeEach(() => {
   h.live.mockReset();
   h.live.mockResolvedValue(false);
+  h.lms.mockReset();
+  h.lms.mockReturnValue(false);
 });
 
 describe("login page markup", () => {
@@ -62,7 +69,7 @@ describe("login page markup", () => {
   });
 
   it("a credential failure: the alert, both fields invalid and described by it, focus on the password", () => {
-    const html = render({ error: "Roll number/email or password is incorrect.", notice: null, identifier: "2116231001001", invalid: ["identifier", "password"], focus: "password" });
+    const html = render({ error: "Roll number/email or password is incorrect.", notice: null, identifier: "2116231001001", invalid: ["identifier", "password"], focus: "password", lms: false });
     expect(html).toMatch(/<p id="login-error" role="alert"[^>]*>Roll number\/email or password is incorrect\.<\/p>/);
     for (const id of ["identifier", "password"]) {
       expect(input(html, id)).toContain('aria-invalid="true"');
@@ -75,7 +82,7 @@ describe("login page markup", () => {
   });
 
   it("a field error marks only that field invalid; both fields still point at the message", () => {
-    const html = render({ error: "Enter your password.", notice: null, identifier: "2116231001001", invalid: ["password"], focus: "password" });
+    const html = render({ error: "Enter your password.", notice: null, identifier: "2116231001001", invalid: ["password"], focus: "password", lms: false });
     expect(input(html, "password")).toContain('aria-invalid="true"');
     expect(input(html, "identifier")).not.toContain("aria-invalid");
     expect(input(html, "identifier")).toContain('aria-describedby="login-error"');
@@ -83,9 +90,48 @@ describe("login page markup", () => {
   });
 
   it("the echoed identifier is escaped", () => {
-    const html = render({ error: "Enter your password.", notice: null, identifier: '"><script>alert(1)</script>', invalid: ["password"], focus: "password" });
+    const html = render({ error: "Enter your password.", notice: null, identifier: '"><script>alert(1)</script>', invalid: ["password"], focus: "password", lms: false });
     expect(html).not.toContain("<script>");
     expect(input(html, "identifier")).toContain('value="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
+  });
+});
+
+/**
+ * Signing in through REC Learning (Phase 16i). The button is drawn from
+ * `offersLmsSignIn()`, which reads three environment names per request — so
+ * the two things worth proving are that a deployment without them shows
+ * nothing at all, and that the one with them offers a plain GET link rather
+ * than anything needing script.
+ */
+describe("login page: the REC Learning link", () => {
+  it("is absent when LMS sign-in is not configured", () => {
+    const html = render(NONE);
+    expect(html).not.toContain("REC Learning");
+    expect(html).not.toContain("/api/auth/oidc/start");
+  });
+
+  it("is a plain GET anchor when it is, and the password form is still first", () => {
+    const html = render({ ...NONE, lms: true });
+    const anchor = html.match(/<a[^>]*href="\/api\/auth\/oidc\/start"[^>]*>/)?.[0] ?? "";
+    expect(anchor, "an anchor, not a form or a button").not.toBe("");
+    expect(anchor).toContain('rel="nofollow"');
+    expect(html).toContain("Sign in with REC Learning");
+    // Still no script, and the password form still comes first in the
+    // document — a student who has a password must not have to read past
+    // a second option to use it.
+    expect(html).not.toContain("<script");
+    expect(html.indexOf('action="/api/auth/login"')).toBeLessThan(html.indexOf('href="/api/auth/oidc/start"'));
+  });
+
+  it("an lms-* failure renders its sentence as the alert, with neither field marked invalid", () => {
+    const html = render({
+      ...NONE,
+      lms: true,
+      error: "Your REC Code account is not active. Ask your department, who can see why and can put it back.",
+      focus: "identifier",
+    });
+    expect(html).toMatch(/<p id="login-error" role="alert"/);
+    expect(html).not.toContain('aria-invalid');
   });
 });
 
@@ -112,6 +158,7 @@ describe("login getServerSideProps", () => {
         identifier: "2116231001001",
         invalid: ["identifier", "password"],
         focus: "password",
+        lms: false,
       },
     });
     expect(headers["cache-control"]).toBe("private, no-store");
@@ -121,7 +168,7 @@ describe("login getServerSideProps", () => {
   it("an unknown code or a message in the URL renders the plain form", async () => {
     for (const error of ["<b>you have been hacked</b>", "toString", "Roll number/email or password is incorrect."]) {
       const { ctx } = context({ recx_login_id: "someone" }, { error });
-      expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null } });
+      expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null, lms: false } });
     }
   });
 
@@ -134,6 +181,14 @@ describe("login getServerSideProps", () => {
     });
     expect(await page.getServerSideProps(context({}, { error: "unavailable", ref: "K7QM2X" }).ctx)).toMatchObject({
       props: { error: expect.stringContaining("K7QM2X") },
+    });
+  });
+
+  it("lms is whatever offersLmsSignIn() answers, on both the plain and the failed path", async () => {
+    h.lms.mockReturnValue(true);
+    expect(await page.getServerSideProps(context({}, {}).ctx)).toMatchObject({ props: { lms: true } });
+    expect(await page.getServerSideProps(context({}, { error: "lms-not-enrolled" }).ctx)).toMatchObject({
+      props: { lms: true, error: expect.stringContaining("no REC Code account for you yet"), invalid: [] },
     });
   });
 
@@ -154,7 +209,7 @@ describe("login getServerSideProps", () => {
     h.live.mockRejectedValue(new Error("database down"));
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { ctx } = context({ recx_session: "token" }, {});
-    expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null } });
+    expect(await page.getServerSideProps(ctx)).toEqual({ props: { error: null, notice: null, identifier: "", invalid: [], focus: null, lms: false } });
     logged.mockRestore();
   });
 });

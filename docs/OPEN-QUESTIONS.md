@@ -4511,3 +4511,119 @@ behind a condition no amount of code satisfies.
 **So both refusals stay, and the roadmap's §2 table is corrected rather
 than worked around.** Two of four lifted is the honest state, and the two
 that remain are blocked on a measurement and on a date, not on a pane.
+
+## LMS sign-in exists, and what was decided inside it (Phase 16i)
+
+`docs/ROADMAP.md` §1.1 was the first launch blocker, and the entry it was
+built from is in this file: the roster import's accounts *"cannot sign in
+until LMS sign-in (OIDC) ships in Phase 10"*. Phase 10 shipped ops, and
+Phases 11a and 11f built an interim that works. This closes it. Written
+down are the four decisions inside it that a reader would otherwise have to
+reverse-engineer, each of which could reasonably have gone the other way.
+
+**No `jose`, and the reason is not confidence.** The verification is an
+algorithm allow-list of one, a JWKS lookup by `kid`, a signature check and
+eight claim comparisons — forty lines, in `apps/web/src/lib/auth/oidc.ts`,
+with every negative case tested against a provider served on loopback with
+an in-process RSA key (`alg: none`, an HS256 swap, a stranger's key, a
+tampered payload, a `kid` naming the wrong key). Against those forty lines
+is a new dependency in the ONE application that holds `DATABASE_URL`, which
+SPEC §1 pins the stack to avoid. A library would be the right call the
+moment this needs encrypted tokens, a second algorithm, or request objects;
+it does not, and adding one then is a smaller change than removing one now.
+*If this is revisited:* the thing to preserve is the ORDER — algorithm,
+signature, claims, account — not the implementation.
+
+**A sign-in never creates an account, even though the data to do it is
+right there.** The id_token carries a name and an address, and auto-creating
+on first sign-in is what most platforms do. Refused: the roster import
+reconciles roll numbers, refuses duplicate `lmsUserId` keys, and leaves
+conflicts to a super-admin, and none of that can happen inside a redirect
+handler. The cost is real and is paid by a student who signs in before their
+department has imported them — they are told to ask their department, which
+is the true answer. *The alternative considered and rejected* was creating a
+provisional account with no cohort: it would make every downstream surface
+that assumes a cohort either lie or crash, and the readiness score would
+quietly include a person nobody had enrolled.
+
+**`mustChangePassword` is ignored on this path.** The flag means "replace
+the password you were handed" (Phase 11f), and somebody who signed in
+through the LMS was not handed one. Honouring it would send them to
+`/account/new-password` and ask them to invent a REC Code password — the
+exact second credential this phase exists to remove. The flag is left
+untouched, so a later password sign-in still has to clear it. This is the
+one place in the product where a `mustChangePassword` account reaches its
+home with the flag still set, and it is deliberate.
+
+**The button is below the password form, not above it.** The opposite is the
+usual arrangement and would be right if students were the only people here.
+They are not: staff, mentors and placement officers sign in with a password,
+the failure messages on that page are about that form, and a student who has
+a password should not have to read past a second option to use it. If
+telemetry ever says students are missing the link, the fix is a clearer
+divider rather than a reordering.
+
+**What is NOT covered, and is not pretended to be.** There is no
+single-logout: signing out of REC Code does not sign anybody out of REC
+Learning, and the reverse is also true until the session expires. OIDC
+front-channel and back-channel logout both exist and neither is implemented,
+because a logout endpoint another system can call is a way to end sessions
+on this one, and that deserves its own phase rather than a paragraph in this
+one. Recorded as the honest gap it is.
+
+## Two decisions inside the second factor, and one thing it does not do (Phase 16j)
+
+`docs/ROADMAP.md` §3.1 is closed. Three things inside it could reasonably
+have gone the other way, and one gap is worth naming rather than leaving to
+be discovered.
+
+**No Session row until both factors pass.** The obvious implementation is a
+`Session` with `secondFactorAt`, and every guard checking it. Refused,
+because this product has a great many guards and one that forgot would be
+full administrative access rather than a cosmetic bug. A
+`SecondFactorChallenge` instead costs a table and a cookie, and makes the
+property structural: with no session, there is nothing for a guard to
+mishandle. *The cost:* a half-finished sign-in is a state the product has to
+model — an expiry, an attempt ceiling, a status re-check — and
+`/second-factor` is a page reachable with no session, which is unusual here
+and deliberate.
+
+**The requirement is enforced in `requirePageRole` and
+`requireActionRole`, not in `requireUser`.** It was in `requireUser` first,
+which covered every authenticated page including `/dashboard` and
+`/profile` — and `apps/web/test/capability-matrix.test.ts` refused it,
+correctly: the base guard of the whole product would have read the database
+BEFORE deciding the caller's role, so a caller it was about to send away
+cost a query. Moving it after the role check also moved it onto the action
+guard, which matters more than any page: an admin who never loads a page can
+still call an action. What is given up is a required-but-unenrolled admin
+reading their own dashboard, which is not among the surfaces §3.1 names.
+
+**No QR code.** A QR encoder is Reed-Solomon over GF(256) plus a drawing
+routine, or a new dependency in the ONE application that holds
+`DATABASE_URL` (SPEC §1 pins the stack for that reason). This surface is used
+by a handful of people perhaps twice each, and every authenticator app
+accepts a typed setup key, so the secret is shown in groups of four with the
+`otpauth://` URI beside it. *If this is revisited:* the thing worth buying is
+not convenience but typo-freedom, and a wrong secret already fails at the
+confirm step rather than at the next sign-in, which is the failure mode that
+would have been worth a dependency.
+
+**What it does NOT do, said plainly.** No WebAuthn — §3.1 said TOTP first.
+No SMS. No "trust this device for 30 days", which is the feature most asked
+for and the one that quietly turns a second factor back into a password. And
+a key rotation has no re-encryption ceremony: changing
+`TOTP_ENCRYPTION_KEY` makes every stored secret unreadable and every admin
+re-enrols from a recovery code. `docs/RUNBOOK.md` §2.22 states that in the
+place somebody would be standing when it mattered, rather than hiding it
+behind a scheme that would not be operated correctly.
+
+**And one fence this phase closed on the way past.** `CHECK_CATALOG_THROUGH`
+in `packages/db/test/support/guard-catalog.ts` had sat at
+`20261101120500_phase12k_sql_checks` while four phases added CHECK
+constraints — 27 of them, across MCQ questions, result release, paper and
+question language restrictions, question moderation, the REC Exam Browser
+sitting, the sitting's session, problem reports and consent records. Every
+one was real and none was catalogued, so a later migration could have
+dropped any of them with every fence green. They are all listed now and the
+cut-off moved to this phase's migration.

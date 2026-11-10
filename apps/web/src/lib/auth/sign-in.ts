@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { z } from "zod";
 import type { User } from "@recx/db";
+import { SECOND_FACTOR_PATHS } from "@recx/shared";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { requestIpHash } from "@/lib/ip";
@@ -10,6 +11,7 @@ import { dummyPasswordHash, verifyPassword } from "@/lib/auth/password";
 import { createSession, destroySession } from "@/lib/auth/session";
 import { homeForRole, INITIAL_PASSWORD_PATH } from "@/lib/auth/guards";
 import type { SignInFailure } from "@/lib/auth/sign-in-errors";
+import { openChallenge, secondFactorDemanded } from "@/lib/auth/second-factor";
 import {
   hitRateLimit,
   LOGIN_RATE_LIMITS,
@@ -53,6 +55,14 @@ export const SIGN_IN_STATUSES = new Set<User["status"]>(["ACTIVE", "SOFT_RESTRIC
 
 export type SignInResult =
   | { ok: true; home: string }
+  /**
+   * Phase 16j. The password was right and the account owes a code. NO
+   * session exists at this point and none will until the code verifies --
+   * `lib/auth/second-factor.ts` has the reasoning. `home` is the page that
+   * asks, so the caller treats this exactly like a success for redirect
+   * purposes and like a failure for everything else.
+   */
+  | { ok: true; secondFactor: true; home: string }
   | { ok: false; failure: SignInFailure; retryMinutes?: number };
 
 /**
@@ -127,6 +137,32 @@ export async function signIn(input: { identifier: unknown; password: unknown }):
   // a student who mistyped a few times is not left near the limit.
   await Promise.all([...hits.map((h) => releaseRateLimit(h)), resetRateLimit(accountKey)]);
 
+  /**
+   * Phase 16j. An account with a confirmed second factor gets NO session
+   * here: a challenge row, a cookie, and the page that asks for a code.
+   * The password alone has created nothing, so there is no half-signed-in
+   * session for a guard to get wrong -- every page and action refuses
+   * because the viewer is, correctly, signed out.
+   *
+   * This is checked before the rotation below on purpose: a browser that
+   * offers a correct password and then abandons the second step keeps the
+   * session it already had, which is the right outcome for a shared
+   * machine and the wrong one to discover afterwards.
+   */
+  if (await secondFactorDemanded(account.id)) {
+    await audit({
+      actorId: account.id,
+      action: "auth.second_factor_required",
+      entityType: "User",
+      entityId: account.id,
+      targetUserId: account.id,
+      sensitivity: "SECURITY",
+      ipHash,
+    });
+    await openChallenge(account.id);
+    return { ok: true, secondFactor: true, home: SECOND_FACTOR_PATHS.verify };
+  }
+
   // Rotate: drop any session this browser already carried, then mint a new one.
   await destroySession();
   await createSession(account.id, headerStore.get("user-agent"));
@@ -145,4 +181,71 @@ export async function signIn(input: { identifier: unknown; password: unknown }):
    * the form, rather than a bounce.
    */
   return { ok: true, home: account.mustChangePassword ? INITIAL_PASSWORD_PATH : homeForRole(account.role) };
+}
+
+/**
+ * Sign in a subject the LMS has already authenticated (Phase 16i).
+ *
+ * No password is involved and none is checked: the id_token has been
+ * verified against the provider's own key before this is called, and the
+ * only question left is which account it names.
+ *
+ * **The roster decides, and nothing here creates an account.** The subject
+ * is matched to `User.lmsUserId`, which `/admin/students/import` is the
+ * only writer of. A subject with no row is refused — the import reconciles
+ * roll numbers, refuses duplicate keys and leaves conflicts to a
+ * super-admin, and none of that can happen inside a sign-in.
+ *
+ * `mustChangePassword` is deliberately NOT consulted. It marks an account
+ * still holding an initial password an admin set, and somebody arriving
+ * through the LMS has just proved their identity to the system of record —
+ * sending them to choose a local password would be asking for the
+ * credential this exists to replace.
+ */
+export async function signInWithLmsSubject(subject: string): Promise<
+  { ok: true; home: string } | { ok: false; failure: "not-enrolled" | "inactive" }
+> {
+  const [account, ipHash, headerStore] = await Promise.all([
+    db.user.findUnique({
+      where: { lmsUserId: subject },
+      select: { id: true, role: true, status: true },
+    }),
+    requestIpHash(),
+    headers(),
+  ]);
+
+  if (!account) {
+    // Not audited against a user, because there is no user; the subject is
+    // not recorded either, since it is an identifier from another system
+    // for somebody this one does not know.
+    return { ok: false, failure: "not-enrolled" };
+  }
+  if (!SIGN_IN_STATUSES.has(account.status)) {
+    await audit({
+      actorId: null,
+      action: "auth.login_failed",
+      entityType: "User",
+      entityId: account.id,
+      targetUserId: account.id,
+      sensitivity: "SECURITY",
+      metadata: { via: "lms" },
+      ipHash,
+    });
+    return { ok: false, failure: "inactive" };
+  }
+
+  await destroySession();
+  await createSession(account.id, headerStore.get("user-agent"));
+  await db.user.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } });
+  await audit({
+    actorId: account.id,
+    action: "auth.login",
+    entityType: "User",
+    entityId: account.id,
+    // Which door, so a reader of the log can tell an LMS sign-in from a
+    // password one without inferring it from what is missing.
+    metadata: { via: "lms" },
+    ipHash,
+  });
+  return { ok: true, home: homeForRole(account.role) };
 }

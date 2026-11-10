@@ -62,6 +62,20 @@ export function parseModels(schema: string): Map<string, ModelField[]> {
 /** Models that reference a user but are not student data the fence must scope. */
 const NON_STUDENT: Readonly<Record<string, string>> = {
   AdminScope: "an ADMIN's own grants, read only by lib/auth/scope.ts",
+  /**
+   * Phase 16j. These three hang off `userId` and so look like student data
+   * to the rule above, and they are the opposite of it: a second factor
+   * exists only for ADMIN and SUPER_ADMIN (a database trigger refuses one
+   * for any other role), every row is read by its OWN holder, and no admin
+   * surface reads anybody else's -- there is deliberately no action in the
+   * product that touches another account's second factor. Scoping them by
+   * `scopedStudentWhere` would be scoping an admin's own credential to the
+   * students that admin may see, which is not a sentence that means
+   * anything.
+   */
+  TotpCredential: "an ADMIN's own authenticator secret, read only by its holder (Phase 16j)",
+  TotpRecoveryCode: "an ADMIN's own recovery codes, spent only by their holder (Phase 16j)",
+  SecondFactorChallenge: "a half-finished sign-in, named by an httpOnly cookie and nothing else (Phase 16j)",
 };
 
 /** Models with a user reference other than userId / a User relation, and why they are not fenced. */

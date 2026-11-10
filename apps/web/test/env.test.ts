@@ -89,6 +89,89 @@ describe("the addresses an OpenAI-compatible model may be reached at", () => {
   });
 });
 
+/**
+ * Phase 16i. `docs/RUNBOOK.md` §2.21 tells an operator "all three or none —
+ * the app refuses to start on a partial set", and a sentence in a runbook
+ * that the code does not keep is worse than no sentence: somebody acts on
+ * it. So the refusal is asserted here, both ways round.
+ *
+ * The reason the rule exists: a half-configured provider means a "Sign in
+ * with REC Learning" link on the sign-in page that fails AFTER a redirect,
+ * which for a student is worse than no link at all.
+ */
+describe("LMS sign-in is configured whole or not at all", () => {
+  const LMS = {
+    LMS_OIDC_ISSUER: "https://learning.example.invalid/oidc",
+    LMS_OIDC_CLIENT_ID: "recx-web",
+    // A value this test invents.
+    LMS_OIDC_CLIENT_SECRET: "a-client-secret-for-a-test",
+  } as const;
+
+  it("accepts all three", async () => {
+    const { env } = await loadEnv({ ...MINIMUM, ...LMS });
+    expect(env().LMS_OIDC_ISSUER).toBe(LMS.LMS_OIDC_ISSUER);
+    expect(env().LMS_OIDC_CLIENT_ID).toBe("recx-web");
+  });
+
+  it("accepts none of them", async () => {
+    const { env } = await loadEnv({ ...MINIMUM });
+    expect(env().LMS_OIDC_ISSUER).toBeUndefined();
+  });
+
+  it.each(Object.keys(LMS))("refuses a set missing %s", async (missing) => {
+    const partial = { ...MINIMUM, ...LMS } as Record<string, string>;
+    delete partial[missing];
+    const { env } = await loadEnv(partial);
+    expect(() => env()).toThrow(/LMS_OIDC_ISSUER, LMS_OIDC_CLIENT_ID and LMS_OIDC_CLIENT_SECRET/);
+  });
+
+  it("refuses an issuer that is not https, and allows a loopback one for a test provider", async () => {
+    const { env: plainHttp } = await loadEnv({
+      ...MINIMUM,
+      ...LMS,
+      LMS_OIDC_ISSUER: "http://learning.example.invalid/oidc",
+    });
+    expect(() => plainHttp()).toThrow(/LMS_OIDC_ISSUER/);
+
+    // `apps/web/test/oidc-provider.test.ts` serves a provider on loopback,
+    // which is the only reason plain http is admitted at all.
+    const { env: loopback } = await loadEnv({ ...MINIMUM, ...LMS, LMS_OIDC_ISSUER: "http://127.0.0.1:41234" });
+    expect(loopback().LMS_OIDC_ISSUER).toBe("http://127.0.0.1:41234");
+  });
+});
+
+/**
+ * Phase 16j. `docs/RUNBOOK.md` §2.22 says to generate 32 bytes with
+ * `openssl rand -base64 32`, and the whole second factor rests on that key
+ * being the right length — a short one would make AES-256-GCM refuse at the
+ * first enrolment, from inside an action, long after the deploy.
+ */
+describe("the key a TOTP secret is encrypted under", () => {
+  const key = (bytes: number, encoding: BufferEncoding = "base64") =>
+    Buffer.alloc(bytes, 7).toString(encoding);
+
+  it("accepts 32 bytes as base64, base64url or hex", async () => {
+    for (const encoding of ["base64", "base64url", "hex"] as const) {
+      const { env } = await loadEnv({ ...MINIMUM, TOTP_ENCRYPTION_KEY: key(32, encoding) });
+      expect(env().TOTP_ENCRYPTION_KEY, encoding).toBe(key(32, encoding));
+    }
+  });
+
+  it("is optional, because a second factor is", async () => {
+    const { env } = await loadEnv({ ...MINIMUM });
+    expect(env().TOTP_ENCRYPTION_KEY).toBeUndefined();
+  });
+
+  it("refuses a key of any other length, at boot rather than at an enrolment", async () => {
+    for (const bytes of [16, 24, 31, 33, 64]) {
+      const { env } = await loadEnv({ ...MINIMUM, TOTP_ENCRYPTION_KEY: key(bytes) });
+      expect(() => env(), String(bytes)).toThrow(/TOTP_ENCRYPTION_KEY must decode to exactly 32 bytes/);
+    }
+    const { env: notAKey } = await loadEnv({ ...MINIMUM, TOTP_ENCRYPTION_KEY: "not a key at all" });
+    expect(() => notAKey()).toThrow(/TOTP_ENCRYPTION_KEY/);
+  });
+});
+
 describe("production refuses a variable it would otherwise default", () => {
   it("names APP_URL and REDIS_URL together, so one deploy fixes both", async () => {
     const { env } = await loadEnv({ ...MINIMUM, NODE_ENV: "production", EXPORT_SIGNING_SECRET: PRODUCTION.EXPORT_SIGNING_SECRET });

@@ -657,6 +657,14 @@ model User {
   deviceRegistrations DeviceRegistration[]
   webAuthnChallenges  WebAuthnChallenge[]
 
+  /// A second factor (Phase 16j). ADMIN and SUPER_ADMIN only, enforced by a
+  /// trigger. There is deliberately NO boolean here saying "this account has
+  /// one": the credential row is that fact, and a flag beside it is a second
+  /// answer to the same question.
+  totpCredential         TotpCredential?
+  totpRecoveryCodes      TotpRecoveryCode[]
+  secondFactorChallenges SecondFactorChallenge[]
+
   integrityReviews IntegrityReview[]
   integrityAppeals IntegrityAppeal[] @relation("AppealStudent")
 
@@ -4791,4 +4799,84 @@ model WrittenMark {
   note        String?
 
   @@id([answerId, criterionId])
+}
+
+/// An authenticator app bound to one privileged account (Phase 16j).
+///
+/// `docs/ROADMAP.md` §3.1 is the entry: a single password stood in front of
+/// impersonation, the roster import commit, result release, the placement
+/// export, the AI provider settings and the judge node controls.
+///
+/// The secret is encrypted at rest (AES-256-GCM under TOTP_ENCRYPTION_KEY,
+/// bound to this account by associated data), because a database dump must
+/// not be a working credential store.
+model TotpCredential {
+  id String @id @default(cuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// AES-256-GCM over the base32 secret. Never the secret itself.
+  secretCipher String
+
+  /// NULL until the holder typed one correct code. An unconfirmed
+  /// credential is never asked for at sign-in, so an abandoned enrolment
+  /// cannot lock anybody out.
+  confirmedAt DateTime?
+
+  /// The last 30-second step accepted. Monotonic (trigger
+  /// `TotpCredential_no_rewind`), which is what makes one code one use even
+  /// when two requests race.
+  lastCounter BigInt?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+/// One-use codes for an admin whose phone is gone (Phase 16j).
+///
+/// sha256 only, like the password-reset link: shown once at generation and
+/// not recoverable from here. Spending one is audited by the FACT of its
+/// use and never by value.
+model TotpRecoveryCode {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// sha256 of the normalised code.
+  codeHash String @unique
+
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, usedAt])
+}
+
+/// A sign-in that has passed the password and is waiting for a code
+/// (Phase 16j).
+///
+/// There is NO Session row until the second factor verifies, which is the
+/// point: a correct password alone creates nothing any guard has to know
+/// about, so a guard that forgot to check could not exist. The cookie holds
+/// the only copy of the token.
+model SecondFactorChallenge {
+  id String @id @default(cuid())
+
+  /// sha256 of the cookie value.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Never falls, never passes 5 (trigger and CHECK).
+  attempts  Int     @default(0)
+  userAgent String?
+  /// sha256(ip + pepper). Never a raw IP.
+  ipHash    String?
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
 }

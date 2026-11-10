@@ -1,4 +1,5 @@
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { lmsSignInOffered } from "@recx/shared/oidc";
 import { brandFromRow, FALLBACK_BRAND, PLATFORM_THEME_ID, type Brand } from "@/lib/brand/brand-core";
 import { liveSession } from "@/lib/auth/session-token";
 import { processDb } from "@/lib/db-client";
@@ -13,6 +14,25 @@ import { processDb } from "@/lib/db-client";
  * from getServerSideProps and _document.getInitialProps, which Next strips
  * from client bundles (and Prisma would not bundle for a browser anyway).
  */
+
+/**
+ * Is signing in through REC Learning offered by this deployment
+ * (Phase 16i)?
+ *
+ * `process.env` directly, and the predicate from `@recx/shared` rather than
+ * a second copy of the rule. It cannot go through `src/lib/env.ts` for the
+ * reason in the comment above: that module is `server-only`, which Next
+ * refuses anywhere in a `pages/` import graph, and this answer is needed by
+ * the sign-in page's `getServerSideProps`. Reading three names off
+ * `process.env` is the narrowest thing that works; `env.ts` still validates
+ * them at boot for every process that uses them.
+ */
+export function offersLmsSignIn(): boolean {
+  // `ProcessEnv` is an index signature, so it has no named properties in
+  // common with the predicate's parameter; the three names are read here.
+  const { LMS_OIDC_ISSUER, LMS_OIDC_CLIENT_ID, LMS_OIDC_CLIENT_SECRET } = process.env;
+  return lmsSignInOffered({ LMS_OIDC_ISSUER, LMS_OIDC_CLIENT_ID, LMS_OIDC_CLIENT_SECRET });
+}
 
 /** Does this raw session cookie belong to a live session whose account may sign in? */
 export async function hasLiveSession(token: string | undefined): Promise<boolean> {

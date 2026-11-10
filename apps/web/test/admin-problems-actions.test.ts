@@ -11,11 +11,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => {
   const user = { current: null as null | { id: string; role: string } };
   const touched: string[] = [];
+  /**
+   * Every delegate throws, which is how "refused before touching the
+   * database" is proved -- with ONE exception.
+   *
+   * Phase 16j: `requireActionRole` reads the second-factor policy setting
+   * AFTER it has decided the role, so a staff action legitimately touches
+   * `platformSetting` on the allowed path. It is answered rather than
+   * thrown, and `touched` still records it, so the refusal assertions
+   * below (which check that NOTHING was touched) are unchanged for every
+   * caller the guard sends away.
+   */
+  const policy = {
+    findUnique: async () => null,
+  };
   const db = new Proxy(
     {},
     {
       get(_t, prop) {
         touched.push(String(prop));
+        if (prop === "platformSetting") return policy;
         throw new Error(`DbTouched: ${String(prop)}`);
       },
     },
@@ -252,7 +267,14 @@ describe("allowed paths", () => {
     };
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/originally authored/);
-    expect(h.touched).toEqual([]);
+    /**
+     * No PROBLEM data was read or written, which is what this asserts: an
+     * attestation that was not given must stop the action before it reaches
+     * the version. `platformSetting` is the guard's own second-factor
+     * policy read (Phase 16j), which happens for every staff action before
+     * the action's body runs at all.
+     */
+    expect(h.touched.filter((delegate) => delegate !== "platformSetting")).toEqual([]);
   });
 
   it("previewStatement renders sanitised Markdown", async () => {

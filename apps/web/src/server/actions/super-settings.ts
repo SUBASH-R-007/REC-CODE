@@ -145,6 +145,48 @@ export async function setConsentContact(input: unknown): Promise<ActionResult<{ 
   }, "setConsentContact");
 }
 
+/**
+ * Phase 16j. Whether ADMIN and SUPER_ADMIN accounts must have a second
+ * factor (`docs/ROADMAP.md` §3.1, `docs/RUNBOOK.md` §2.22).
+ *
+ * SECURITY, and refused outright with no encryption key configured: turning
+ * it on without one would send every admin to an enrolment page that cannot
+ * mint a secret, and the super-admin doing it would be caught by their own
+ * switch. Switching it OFF never weakens an account that has already
+ * enrolled -- a confirmed credential is always asked for at sign-in,
+ * whatever this setting says (`secondFactorDemanded`).
+ */
+export async function setSecondFactorPolicy(input: unknown): Promise<ActionResult<{ required: boolean }>> {
+  return runAction(async () => {
+    const actor = await requireSuperAdmin();
+    const { SECOND_FACTOR_SETTING_KEY } = await import("@recx/shared");
+    const { secondFactorConfigured } = await import("@/lib/auth/totp");
+    const required = z.object({ required: z.boolean() }).parse(input).required;
+    if (required && !secondFactorConfigured()) {
+      throw new ValidationError(
+        "This deployment has no TOTP_ENCRYPTION_KEY, so an admin could not set up an authenticator app. See docs/RUNBOOK.md §2.22.",
+      );
+    }
+    const value = required ? "true" : "false";
+    await db.platformSetting.upsert({
+      where: { key: SECOND_FACTOR_SETTING_KEY },
+      create: { key: SECOND_FACTOR_SETTING_KEY, value, updatedById: actor.id },
+      update: { value, updatedById: actor.id },
+    });
+    await audit({
+      actorId: actor.id,
+      action: "settings.second_factor_policy_changed",
+      entityType: "PlatformSetting",
+      entityId: SECOND_FACTOR_SETTING_KEY,
+      sensitivity: "SECURITY",
+      metadata: { required },
+      ipHash: await requestIpHash(),
+    });
+    revalidatePath("/super/settings/policy");
+    return { required };
+  }, "setSecondFactorPolicy");
+}
+
 export async function setCollegeSebKeys(
   input: SetCollegeSebKeysInput,
 ): Promise<ActionResult<{ configKey: boolean; browserExamKey: boolean }>> {

@@ -76,6 +76,25 @@ const ROUTE_EXEMPT_PREFIXES = [
   "apps/web/src/app/api/judge/",
   "apps/web/src/app/api/auth/login/",
   /**
+   * Phase 16j: finishing a sign-in with a second factor. There is no actor
+   * to authenticate -- the person using it has passed the password and has
+   * no session, and will not have one until this request succeeds. What
+   * stands in for a guard is the CHALLENGE: a row this browser's httpOnly
+   * cookie names, five minutes old at most, with an attempt count a
+   * database trigger refuses to let fall. Without one it creates nothing
+   * and answers `?error=no-challenge`.
+   */
+  "apps/web/src/app/api/auth/second-factor/",
+  /**
+   * Phase 16i: the two halves of signing in through REC Learning. Same
+   * reason -- these are what a person uses INSTEAD of having a session.
+   * `/start` mints three random values into cookies and touches nothing
+   * the platform owns; `/callback` checks a state, an algorithm, a
+   * signature and every claim before it looks for an account, and never
+   * creates one.
+   */
+  "apps/web/src/app/api/auth/oidc/",
+  /**
    * Field vitals (Phase 10d). It authenticates nothing because there is
    * nothing to attribute: the body is three fields, the metric and route
    * must each be one of a closed list, the value is bucketed before it is

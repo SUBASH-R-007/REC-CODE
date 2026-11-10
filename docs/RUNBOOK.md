@@ -1808,6 +1808,210 @@ claim something:
   results may feed shortlisting, certificates or placement eligibility
   (`docs/PROCTORING.md` §3).
 
+### 2.21 Turning on sign-in through REC Learning (Phase 16i)
+
+SPEC §1 makes the LMS the identity source of record, and
+`/admin/students/import` has acted on that since Phase 4: every roster row
+needs its `lmsUserId`, and the accounts it creates have `passwordHash =
+null`. Until this section existed, those accounts could not sign in at all
+without one of the two interim paths (a one-time link, Phase 11a; an
+admin-set initial password good for one sign-in, Phase 11f). Both still
+work and both stay: this is the door a student uses, and the password form
+is the door staff use and the one that still opens during an LMS outage.
+
+**What the department needs from whoever runs REC Learning.** Register a
+client there and ask for three things back:
+
+| What | What it must be |
+| --- | --- |
+| Issuer | The base URL, https, e.g. `https://learning.rajalakshmi.edu.in`. The app fetches `<issuer>/.well-known/openid-configuration` and **refuses a document that names a different issuer**. |
+| Client ID | Anything the provider assigns. |
+| Client secret | A confidential client. This is a server-to-server secret; it never reaches a browser. |
+
+And give them one redirect URI, exactly:
+
+```
+https://<your APP_URL>/api/auth/oidc/callback
+```
+
+Ask for the authorization-code flow with PKCE, scopes `openid profile
+email`, and `RS256` id_tokens. The app asks for nothing else and accepts
+nothing else — no implicit flow, no hybrid, no `form_post`, and exactly one
+signing algorithm.
+
+**What to tell them NOT to send.** No grade, enrolment, roster or group
+claims. The app reads one claim for identity (`sub`) and ignores the rest.
+A claim this platform does not read is a claim it cannot leak.
+
+**Switching it on.** Three names in `apps/web/.env.local` (production: a
+Docker secret for the third):
+
+```
+LMS_OIDC_ISSUER="https://learning.rajalakshmi.edu.in"
+LMS_OIDC_CLIENT_ID="..."
+LMS_OIDC_CLIENT_SECRET="..."
+```
+
+All three or none. The app **refuses to start** on a partial set, because a
+half-configured identity provider is a button that fails at the student.
+Restart, then reload `/login`: a "Sign in with REC Learning" link appears
+under the password form. It is below the form on purpose — staff sign in
+with a password, and a student who has one should not have to read past a
+second option.
+
+**Mapping an account to an LMS user.** `lmsUserId` must equal the provider's
+`sub` for that person. The roster import is what sets it, and a sign-in
+**never creates an account**: a subject the roster does not know is told to
+ask their department, in the same sentence used for a subject that was
+never there. So the order is roster first, sign-in second — and when a
+student says the link refuses them, check their row before checking the
+provider.
+
+**The five things a student can be told, and what each means.**
+
+| On `/login` | What happened | What to do |
+| --- | --- | --- |
+| `lms-off` | The link was reached on a deployment with LMS sign-in not configured (a bookmark, or a guess). | Nothing. The password form works. |
+| `lms-unavailable` | The provider could not be reached to start the sign-in. | Check the provider; the password form still works for staff. |
+| `lms-expired` | More than ten minutes between starting and coming back, or the cookies were cleared in between. | Start again from `/login`. |
+| `lms-failed` | Everything else: the provider refused, the state did not match, the code would not exchange, or the id_token did not verify. | Start again. If it repeats, read the app log — the reason is there and never in the URL. |
+| `lms-not-enrolled` | The sign-in worked and there is no REC Code account with that `sub`. | Import the roster row, or correct its `lmsUserId`. |
+| `lms-inactive` | There is an account and its status is not one that may sign in (`ACTIVE` or `SOFT_RESTRICTED`). | `/admin/students` shows why. The attempt is in the audit log against that account. |
+
+**Reading the log.** A successful LMS sign-in is `auth.login` with
+`metadata.via = "lms"`; a refused one against a known account is
+`auth.login_failed`, also with `via: "lms"`, actor null, sensitivity
+SECURITY. A refused *subject* is not audited at all — there is no account to
+audit it against, and the subject is an identifier from a directory this
+platform does not own, so it is not written down.
+
+**Rotating the provider's keys.** Nothing to do here. Discovery and JWKS are
+cached for five minutes, so a rotation costs at most five minutes of
+refusals, and a token signed by a key the provider has already published
+verifies immediately. If a rotation needs to take effect at once, restart
+the app.
+
+**Turning it off again.** Remove the three names and restart. The link
+disappears, both routes answer `lms-off`, and every account that has a
+password still signs in. Accounts with `passwordHash = null` are then
+unreachable again until somebody sends them a one-time link from
+`/forgot-password` (Phase 11a) — so if LMS sign-in is being switched off for more than an hour, say
+so to the departments first.
+
+---
+
+### 2.22 Turning on two-step sign-in for admins (Phase 16j)
+
+`docs/ROADMAP.md` §3.1. A single password stood in front of impersonation,
+the roster import commit, result release, the placement export, the AI
+provider settings and the judge node controls. This puts an authenticator app
+in front of every ADMIN and SUPER_ADMIN sign-in. Students keep a password.
+The security reasoning is `docs/SECURITY.md` §2.
+
+**Step 1: give the deployment an encryption key.** A stored authenticator
+secret is encrypted, because a database dump must not be a working credential
+store. 32 bytes:
+
+```bash
+openssl rand -base64 32
+```
+
+Put it in `apps/web/.env.local` (production: the Docker secret
+`TOTP_ENCRYPTION_KEY_FILE`):
+
+```
+TOTP_ENCRYPTION_KEY="<the 32 bytes>"
+```
+
+Restart. Without it nothing below works, and the switch in step 3 refuses to
+turn on — which is deliberate: requiring a second factor that cannot be set
+up would lock every admin out of everything except a page that cannot help
+them.
+
+**Step 2: enrol, before requiring it.** Each admin opens
+`/account/two-factor` and follows the two steps there: add an entry to any
+authenticator app (the secret is shown in groups of four to type; the
+`otpauth://` URI is beside it for an app that takes one), then type the code
+it shows. There is no QR code — see `docs/OPEN-QUESTIONS.md` for why.
+
+Confirming hands over **ten recovery codes, shown once**. Only a one-way hash
+is stored, so nobody — a super-admin included — can read them back. Tell
+people to save them somewhere that is not the phone.
+
+Do this before step 3 and the switch costs nobody an interrupted afternoon.
+
+**Step 3: require it.** `/super/settings/policy` → *Two-step sign-in for
+admins*. The card says how many admin accounts have not enrolled before you
+decide. Turning it on:
+
+* every ADMIN and SUPER_ADMIN without a **confirmed** credential is sent to
+  `/account/two-factor` from every admin page, and every staff action refuses
+  with a sentence naming that page. Their own dashboard and profile still
+  open — the restriction is on what an admin may DO, and `docs/SECURITY.md`
+  §2 says why it is enforced there rather than in the base guard;
+* they can do it themselves — nobody has to be let in by hand;
+* an unconfirmed, abandoned setup does not count either way: it cannot sign
+  anybody in and it does not satisfy the requirement.
+
+**Switching it off is not a way to disable anybody's second factor.** It
+stops NEW admins being made to enrol. An account that has a confirmed
+credential is **always** asked for a code at sign-in, whatever this setting
+says. Taking one off is the holder's own action, on
+`/account/two-factor`, with a current code from the app.
+
+**When somebody loses their phone.** They sign in and use a recovery code on
+the second-factor page. That is what the codes are for, and it needs nobody
+else. Then they should remove the factor and set it up again on the new
+phone, or at least generate a fresh set of codes — the card says how many are
+left.
+
+**When somebody loses the phone AND the codes.** There is deliberately no
+action in the product that removes another account's second factor, so this
+is a database operation a super-admin performs with somebody watching:
+
+```sql
+-- Identify the account first, and read the row back before deleting it.
+SELECT u."collegeId", u."email", t."confirmedAt", t."lastUsedAt"
+  FROM "TotpCredential" t JOIN "User" u ON u."id" = t."userId"
+ WHERE u."collegeId" = 'RECADMIN01';
+
+DELETE FROM "TotpCredential" WHERE "userId" = (
+  SELECT "id" FROM "User" WHERE "collegeId" = 'RECADMIN01'
+);
+```
+
+The recovery codes go with it (ON DELETE CASCADE). The holder then signs in
+on their password and is sent straight to `/account/two-factor` if the policy
+is on. Write down who asked, who did it and when: the audit log records
+everything the product does and cannot record this.
+
+**Rotating the encryption key.** There is no re-encryption ceremony, and
+pretending otherwise would be a scheme nobody operates correctly. Changing
+`TOTP_ENCRYPTION_KEY` makes **every stored secret unreadable**, which means:
+
+* every enrolled admin's codes stop verifying;
+* each of them signs in with a **recovery code**, removes the factor and
+  sets it up again — which is why the codes matter;
+* an admin with neither needs the SQL above.
+
+So: rotate it only for a reason, tell every admin first, and do it when
+somebody is available to run that SQL.
+
+**Removing the key entirely.** An enrolled admin then signs in on the
+password alone, and nothing says so on screen. That is the honest trade: the
+alternative is locking every admin out of a deployment whose own recovery
+page needs them signed in. If a key is removed, the policy switch should be
+turned off in the same change, so the state on screen matches the state in
+force.
+
+**Reading the log.** `auth.second_factor_started`,
+`auth.second_factor_enabled`, `auth.recovery_codes_regenerated`,
+`auth.second_factor_disabled` and `settings.second_factor_policy_changed` are
+all SECURITY. A refused code is `auth.second_factor_failed` with a reason and
+never the code; a sign-in that used one is `auth.login` with
+`metadata.via = "totp"` or `"recovery"`. A successful sign-in through a
+recovery code is the row worth noticing in a weekly read.
+
 ---
 
 ## 3. Gate log
@@ -2697,3 +2901,15 @@ coordinator from actual runs — never in advance.
 | 16h | 2026-11-10 | The last two exam kinds are not blocked on a surface, and the roadmap said they were | CORRECTED. `docs/ROADMAP.md` 2.1 said SQL "needs its lane and a result set". Underneath that: `SENSITIVE_LANES` is ASSESSMENT and CONTEST, a node may serve them only while calibrated, and `lanes.ts` bars the SQL engine from both **by name** -- "a query's limit is the database's own statement_timeout". A SQL question in a paper would queue a submission **no node may claim**. Phase 12q worked this out for contests; it holds identically for assessments | Claude |
 | 16h | 2026-11-10 | What lifting SQL would actually take, and why it is a phase | STATED. A calibration benchmark for the SQL engine -- and the difficulty is that what CPU calibration measures does not exist here. An isolate node's score is a one-second CPU benchmark against the fleet median, with 10% deviation barring it; a query's cost is the database's, bounded by a statement timeout rather than this node's processor. Inventing a number to satisfy the gate would be inventing a safety signal, which is the one thing this project will not do with the judge | Claude |
 | 16h | 2026-11-10 | And interactive is blocked on a date, not on code | STATED. SPEC section 11: "keep them out of high-stakes assessments until they have run cleanly through two practice contests". No contest has been run with real students on this deployment, so the condition is unmeetable before launch -- and the conversation surface sits second in line behind it. Two of four lifted is the honest state | Claude |
+| 16i | 2026-11-10 | Signing in through REC Learning (OIDC) -- `docs/ROADMAP.md` 1.1, the first launch blocker | **DONE.** Authorization code with PKCE S256 and nothing else: no implicit, no hybrid, no form_post, so the id_token never touches a redirect URL or a browser history. Three httpOnly cookies scoped to `/api/auth/oidc` for ten minutes (state, nonce, verifier), all three spent on arrival on EVERY path including success. The callback's order is the security property: clear cookies, refuse a provider error by code, compare state **before** exchanging, exchange over the back channel, check the algorithm against an allow-list of one, check the signature against JWKS by kid, **then** the claims, **then** look for an account. Discovery is refused if the document names a different issuer. A subject with no roster row is refused -- a sign-in never creates an account -- and the sentence is the same one used for a subject that was never there | Claude |
+| 16i | 2026-11-10 | The signature is tested against a real provider, not a hand-written token | 23 tests in `apps/web/test/oidc-provider.test.ts` against a `node:http` OpenID provider on 127.0.0.1 with an RSA pair generated in-process: `alg: none`, an HS256 algorithm swap (where a header-trusting verifier would HMAC with the public key anybody can fetch), a real signature from a key the provider does not publish, a tampered payload, an empty JWKS, a `kid` naming the wrong key, and a mid-rotation JWKS with the new key first. Checked adversarially: removing the algorithm check fails three of them. 29 pure tests in `packages/shared`, 20 route tests, 12 database tests | Claude |
+| 16i | 2026-11-10 | No `jose`, and `mustChangePassword` ignored on the LMS path | DECIDED, both recorded in `docs/OPEN-QUESTIONS.md`. The verifier is forty lines against a new dependency in the one application that holds `DATABASE_URL` (SPEC section 1 pins the stack for this reason); what a revisit must preserve is the ORDER, not the implementation. And `mustChangePassword` means "replace the password you were handed" -- somebody who signed in through the LMS was not handed one, so honouring it would ask them to invent the second credential this phase exists to remove. The flag survives untouched for a later password sign-in | Claude |
+| 16i | 2026-11-10 | No single-logout, said plainly rather than left to be discovered | STATED. Signing out of REC Code does not sign anybody out of REC Learning, and the reverse holds until the session expires. OIDC front-channel and back-channel logout both exist and neither is implemented: a logout endpoint another system can call is a way to end sessions on this one, which deserves its own phase rather than a paragraph in this one | Claude |
+| 16j | 2026-11-10 | A second factor for ADMIN and SUPER_ADMIN -- `docs/ROADMAP.md` 3.1 | **DONE.** RFC 6238 TOTP (SHA-1, 6 digits, 30s, plus/minus one step), with the published test vectors asserted so interoperability with a real authenticator app is a fact rather than a hope. The design decision the phase rests on: **no Session row until both factors pass** -- a correct password creates a SecondFactorChallenge and nothing else, so every page and action refuses because the viewer is signed out, not because a guard remembered to look. Five minutes, five tries, and the attempt count cannot fall and the window cannot widen (triggers). One code one use, enforced by a monotonic lastCounter the database refuses to rewind, so two racing requests cannot both succeed. Secret encrypted at rest (AES-256-GCM, associated data binding it to its own row). Ten recovery codes, sha256 only, shown once, audited by the fact of their use and never by value | Claude |
+| 16j | 2026-11-10 | The requirement moved out of `requireUser`, and the fence is why | CORRECTED DURING THE PHASE. It was in `requireUser`, which covered every authenticated page -- and `capability-matrix.test.ts` refused it: the base guard of the whole product would have read the database BEFORE deciding the caller's role, so a caller it was about to send away cost a query. Moved to `requirePageRole` and `requireActionRole`, after the role check. That also put it on the ACTION guard, which matters more than any page: an admin who never loads a page can still call an action. Recorded in `docs/OPEN-QUESTIONS.md` with what is given up | Claude |
+| 16j | 2026-11-10 | Switching the policy off is not a way to disable anybody's second factor | STATED. `mustEnrolSecondFactor` reads the setting; `secondFactorDemanded` reads the CREDENTIAL. So the switch decides who is made to enrol, and an account that already has a confirmed app is always asked for a code whatever the setting says. A single "is 2FA on" check would have made the switch a way to turn off everybody's second factor, which is the shape of this mistake in other products | Claude |
+| 16j | 2026-11-10 | 27 uncatalogued CHECK constraints across four phases, found by moving the cut-off | **FIXED.** `CHECK_CATALOG_THROUGH` had sat at `20261101120500_phase12k_sql_checks` while Phases 12r, 12y, 13a, 13c, 13i, 14b, 14g, 16a and 16e added CHECKs -- MCQ shape, result release attribution, paper and question language restrictions, question moderation, the exam-browser sitting's six rules, its session pointer, problem reports and consent records. Every one real, none catalogued, so a later migration could have dropped any of them with every fence green. All 27 listed with their reasons and the cut-off moved to this phase's migration; `frozen-coverage` is 382 tests and `guard-state` 496 | Claude |
+| 16j | 2026-11-10 | No QR code, and no re-encryption ceremony for the key | DECIDED, both in `docs/OPEN-QUESTIONS.md` and `docs/RUNBOOK.md` 2.22. A QR encoder is Reed-Solomon plus a drawing routine or a dependency in the one application holding DATABASE_URL, for a surface a handful of people use twice each; the secret is shown in groups of four with the otpauth URI beside it, and a mistyped secret fails at the confirm step rather than at the next sign-in. And rotating TOTP_ENCRYPTION_KEY makes every stored secret unreadable, so every admin re-enrols from a recovery code -- written where somebody would be standing when it mattered rather than behind a scheme nobody would operate correctly | Claude |
+| 16i+16j | 2026-11-10 | Gate 7/7 on Linux, both phases together | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. 5,363 web tests (198 files, none skipped with RECX_DB_TESTS=1), 1,445 repo fences, 1,770 shared, 297 db-package, 276 isolate integration cases on real sandbox boxes. Windows bundle budgets met and `/login` still serves with no script at all, which the LMS link had to not break | Claude |
+| 16i+16j | 2026-11-10 | What the gate caught that nothing local could: a route may export only route fields | **FIXED.** `start/route.ts` exported the three OIDC cookie names, and Next refuses anything but a route field -- *"OIDC_STATE_COOKIE is not a valid Route export field"*. `tsc --noEmit` cannot see it: the check lives in the types Next GENERATES during a build, so only `next build` and the gate's typecheck after it do. The names moved to `lib/auth/oidc-cookies.ts` with the reason written in it. The lesson for every later phase: a constant shared by two route handlers lives beside them, never inside one | Claude |
+| 16j | 2026-11-10 | Three defects found by reviewing my own work before the gate, not by the gate | **FIXED, each with a fence checked against the broken code.** (1) `/account/two-factor` promised "this setup expires in 15 minutes" and nothing enforced it, so an unconfirmed secret that had been on a screen stayed usable indefinitely; now enforced and the stale row deleted. (2) After the enforcement moved off `requireUser`, four places still said an un-enrolled admin "reaches only /account/two-factor" -- a dashboard and profile still open; corrected, and `second-factor-scope.test.ts` pins the guards AND the sentences so they cannot drift again. (3) Two guarantees `docs/RUNBOOK.md` tells an operator to rely on -- all three LMS names or none, and a 32-byte key -- were implemented and untested; `env.test.ts` covers both, and the policy switch's refusal without a key is covered too | Claude |

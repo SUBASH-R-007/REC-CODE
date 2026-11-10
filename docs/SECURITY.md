@@ -153,6 +153,212 @@ the same mechanism for "I never had one" and "I forgot mine"
   drains it. Nothing but the link is in the body, and the address is
   resolved at send time rather than stored.
 
+### Signing in through REC Learning (OIDC, Phase 16i)
+
+SPEC §1 makes the LMS the identity source of record. `/admin/students/import`
+has acted on that since Phase 4 — every roster row needs its `lmsUserId`, and
+the accounts it creates have `passwordHash = null` — and until this phase
+there was no door those accounts could use. Operationally:
+`docs/RUNBOOK.md` §2.21.
+
+**Authorization code with PKCE, and nothing else.** No implicit flow, no
+hybrid, no `response_mode=form_post`. The id_token is fetched from the token
+endpoint over a back channel, so it never appears in a redirect URL, a
+browser history entry or an access log. The client secret travels in a POST
+body, server to server, and never reaches a browser.
+
+**Three values, each doing one job.** `/api/auth/oidc/start` mints them,
+puts each in an httpOnly cookie scoped to `/api/auth/oidc` and good for ten
+minutes, and redirects:
+
+| Value | What it makes impossible |
+| --- | --- |
+| `state` | A callback somebody else triggered completing in this browser. |
+| `nonce` | An id_token captured earlier being replayed. |
+| PKCE verifier (S256) | A stolen authorization code being worth anything on its own. |
+
+All three are spent on arrival — the callback reads and **clears** them
+before it does anything else, on every path including the successful one. A
+state that survives a failed attempt is a state somebody can retry.
+
+**The order of the checks, which is the security property.** The callback
+does these in exactly this order and never out of it:
+
+1. read and clear the three cookies;
+2. refuse a provider error, by code, logged and never rendered;
+3. compare `state` — a forged callback stops here, before anything is
+   exchanged;
+4. exchange the code over the back channel;
+5. check the id_token's **algorithm** against an allow-list of exactly one
+   (`RS256`) — `alg: none` and every HMAC variant fail here;
+6. check its **signature** against the provider's JWKS, by `kid`;
+7. only then read its **claims**: issuer, subject, audience, expiry (120 s
+   leeway), age (600 s), and the nonce;
+8. only then look for an account.
+
+Nothing reads a claim for any purpose other than finding the key until the
+signature has verified, and nothing touches the database until the claims
+pass. `apps/web/test/oidc-provider.test.ts` runs this against a real OpenID
+provider served on loopback with an RSA key generated in-process: `alg:
+none`, an HS256 algorithm swap, a real signature from a key the provider
+does not publish, a tampered payload, a `kid` naming the wrong key, and a
+mid-rotation JWKS are each a case.
+
+**No library.** `jose` is the obvious choice and is not in this repository.
+Node 22 imports a JWK directly (`createPublicKey({ format: "jwk" })`), so
+there is no key parsing to get wrong, and the algorithm is a hard-coded list
+of one; against that is a new dependency in the ONE application that holds
+`DATABASE_URL`. The verification is forty lines, and each negative case
+above is a test.
+
+**A sign-in never creates an account.** A subject with no roster row is
+refused. `/admin/students/import` stays the only thing that creates
+accounts: it reconciles roll numbers, refuses duplicate keys and leaves
+conflicts to a super-admin, and none of that can happen inside a sign-in.
+The sentence shown is the same for a subject the roster never knew and one
+it no longer has, so a signed-in LMS user learns nothing about who else has
+an account here.
+
+**It reads one claim.** `sub`, for identity. Scopes asked for are `openid
+profile email` and nothing more — no grades, no enrolments, no roster, no
+groups. Nothing from the provider becomes a field on an account: a name, an
+address or a photo arriving in a token is ignored, because the roster import
+owns those and a sign-in is not an import.
+
+**Its own refusals, and what they disclose.** Six codes
+(`lms-off`, `lms-unavailable`, `lms-expired`, `lms-failed`,
+`lms-not-enrolled`, `lms-inactive`), each a sentence rendered server-side
+from the code. The reason an id_token was rejected is logged and is never in
+a URL or on the page — a candidate learns that it failed, and an
+administrator learns why.
+
+**The same account rules as the password door.** `SIGN_IN_STATUSES`
+(`ACTIVE`, `SOFT_RESTRICTED`) is the one definition of "may sign in", used
+by both; a refused status is audited as `auth.login_failed` with
+`via: "lms"` against that account, so a coordinator can see the attempt. A
+success is `auth.login` with `via: "lms"` — which door, so a reader of the
+log does not infer it from what is missing. The session is **rotated**: the
+session this browser carried is dropped before a new one is minted, and a
+session on another device is left alone.
+
+**`mustChangePassword` is ignored here, deliberately.** That flag means
+"replace the password you were handed". Somebody who signed in through the
+LMS has not been handed one, and sending them to `/account/new-password`
+would ask them to invent a credential the platform did not want them to
+have. The flag survives untouched, so a later password sign-in still has to
+clear it.
+
+**All three names or none.** `LMS_OIDC_ISSUER`, `LMS_OIDC_CLIENT_ID` and
+`LMS_OIDC_CLIENT_SECRET`; the app refuses to start on a partial set. With
+them missing, `/login` grows no button and both routes answer `lms-off` —
+the local password path is the fallback for staff and for an LMS outage, and
+it is first on the page.
+
+**The issuer must prove it is the issuer.** Discovery is fetched from
+`<issuer>/.well-known/openid-configuration` and **refused** if the document
+names a different issuer, which is what stops a misconfigured or
+impersonated host handing over endpoints that would then receive a code and
+a client secret. Every endpoint must be https; plain http is admitted only
+on loopback, so that a test can serve a provider of its own.
+
+### A second factor for privileged accounts (TOTP, Phase 16j)
+
+`docs/ROADMAP.md` §3.1 was the entry: a single password stood in front of
+impersonation, the roster import commit, result release, the placement
+export, the AI provider settings and the judge node controls. Every one of
+those is audited, which is how a department finds out afterwards. This is how
+it avoids needing to. Operationally: `docs/RUNBOOK.md` §2.22.
+
+**Scope, as that entry scoped it.** `ADMIN` and `SUPER_ADMIN` only
+(`SECOND_FACTOR_ROLES`, and a database trigger that refuses a credential for
+any other role). Students keep a password: 5,000 students with TOTP is a
+help-desk programme rather than a security improvement.
+
+**No Session exists until both factors pass.** This is the design decision
+the whole phase rests on. The alternative — a `Session` row with a
+`secondFactorAt IS NULL` column that every guard must remember to check —
+turns one forgotten check into full administrative access, and this product
+has a great many guards. Instead, a correct password for an enrolled account
+creates a `SecondFactorChallenge` row and nothing else:
+
+* the browser holds the only copy of a 256-bit token; the row holds sha256
+  of it;
+* five minutes, five attempts, and the attempt count cannot FALL and the
+  expiry cannot WIDEN (a trigger refuses both) — without the first, five
+  tries would be five tries per reset;
+* the account is re-checked against `SIGN_IN_STATUSES` when the code
+  arrives, so a status that changed in between is not a way in;
+* every page and every action refuses meanwhile, because the viewer is
+  correctly signed out — not because a guard remembered to look.
+
+**RFC 6238, SHA-1, 6 digits, 30 seconds, ±1 step.** Not a preference: it is
+what every authenticator application implements, and a second factor only one
+app supports is a second factor nobody switches on. The published RFC test
+vectors are asserted in `apps/web/test/totp.test.ts`, which is what makes
+interoperability a fact rather than a hope. The window means a code is good
+for at most 90 seconds.
+
+**One code, one use, enforced by the database.** `TotpCredential.lastCounter`
+is the last 30-second step accepted, and a trigger refuses a counter that
+does not move forward. The check in TypeScript reads a value a racing request
+has not committed; the trigger reads the row it locks. So two requests
+holding the same code cannot both succeed, and a code replayed inside its own
+90-second window is refused with its own sentence ("wait for the next one")
+rather than a generic failure.
+
+**The secret is encrypted at rest.** AES-256-GCM under
+`TOTP_ENCRYPTION_KEY`, with associated data binding each ciphertext to its
+own account — a column value copied from one row to another fails to decrypt
+rather than handing over somebody else's factor. §9 treats a database dump as
+a thing that happens (the backups in `docs/RUNBOOK.md` §2.13 are taken on
+purpose), and a plaintext column would make every dump a working credential
+store. Without the key, `/account/two-factor` says so, the super-admin switch
+refuses to turn on, and an enrolled admin signs in on the password alone —
+refusing instead would lock every admin out with the page that could fix it
+behind the same refusal, and `docs/RUNBOOK.md` §2.22 says that plainly.
+
+**Recovery codes: ten, sha256 only, one use each.** Shown once at
+generation and not recoverable afterwards. Spending one is a conditional
+`UPDATE` whose row count settles a race, and a trigger refuses un-spending
+one or moving it to another account. The audit records the FACT of a recovery
+sign-in (`via: "recovery"`) and never which code. They exist so that the
+usual case — a lost phone — needs nobody else: there is deliberately no
+action anywhere in the product that removes somebody else's second factor.
+
+**Removing one needs a current code, not the password.** Somebody holding
+the password and not the phone is exactly who that must refuse.
+
+**Where the requirement is enforced, and in which order.** The policy is a
+super-admin setting (`security.secondFactor.requiredForAdmins`,
+SECURITY-audited). An admin the policy requires one of, who has not set one
+up, is refused by `requirePageRole` (redirected to `/account/two-factor`) and
+by `requireActionRole` (`SecondFactorRequiredError`) — **after** the role
+check in both, so a caller who is about to be sent away costs no query, and
+the guard never touches the database before deciding the role. The action
+half is the one that matters most: an admin who never loads a page can still
+call an action.
+
+What that leaves open, stated rather than implied: a page guarded by bare
+`requireUser` — the dashboard and the profile every signed-in account has —
+still opens for an un-enrolled admin. None of the surfaces §3.1 names is
+among them, and the alternative was a database read inside the base guard of
+the whole product, before it had decided the caller's role. The copy on
+`/super/settings/policy` and on the enrolment page says this, so nobody is
+told the restriction is wider than it is.
+
+**The switch is asymmetric, on purpose.** Turning it ON makes
+un-enrolled admins enrol. Turning it OFF stops that, and does **not** weaken
+an account that already has a confirmed credential — `secondFactorDemanded`
+reads the credential and not the setting. A single "is 2FA on" check would
+have made the policy switch a way to disable everybody's second factor.
+
+**What is not here.** No WebAuthn (TOTP first, as §3.1 said), no SMS, and no
+"trust this device". And no QR code: a QR encoder is Reed-Solomon plus a
+drawing routine, or a new dependency in the one application that holds
+`DATABASE_URL`, and this surface is used by a handful of people perhaps twice
+each — so the secret is shown in groups of four to type, with the
+`otpauth://` URI beside it. `docs/OPEN-QUESTIONS.md` has that reasoning.
+
 ## 3. Sessions
 
 Server-side sessions in Postgres (`apps/web/src/lib/auth/session.ts`), not
@@ -224,7 +430,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | Capability | Tier | STUDENT | TA_MENTOR | ADMIN | PLACEMENT_OFFICER | SUPER_ADMIN | Bound to |
 | --- | --- | :---: | :---: | :---: | :---: | :---: | --- |
 | `roles.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
-| `settings.write` | super-admin | - | - | - | - | yes | 14 actions, 5 pages |
+| `settings.write` | super-admin | - | - | - | - | yes | 15 actions, 5 pages |
 | `accounts.status` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `problems.lifecycle` | super-admin | - | - | - | - | yes | 5 actions |
 | `ratings.manage` | super-admin | - | - | - | - | yes | 1 action |
@@ -235,6 +441,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `pii.export` | super-admin | - | - | - | - | yes | 1 action, 1 route, 1 page |
 | `calendar.manage` | super-admin | - | - | - | - | yes | 3 actions, 1 page |
 | `xp.void` | super-admin | - | - | - | - | yes | 1 action, 1 page |
+| `security.secondFactor` | staff | - | - | yes | - | yes | 4 actions |
 | `integrity.review` | staff | - | - | yes | - | yes | 2 actions, 2 pages |
 | `exam.invigilate` | staff | - | - | yes | - | yes | 5 actions, 1 route, 2 pages |
 | `exam.device.enrol` | staff | - | - | yes | - | yes | 1 action, 1 route, 1 page |
@@ -294,7 +501,7 @@ regenerate it, run `RECX_UPDATE_DOCS=1` with the capabilities test.
 | `account.leave` | self-service | yes | yes | yes | yes | yes | 3 actions |
 | `profile.export` | self-service | yes | yes | yes | yes | yes | 2 actions |
 
-Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/auth/forgot-password/route.ts#POST`, `app/api/auth/reset-password/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`, `app/api/exam/browser/exchange/route.ts#POST`, `app/api/exam/browser/signals/route.ts#POST`, `app/api/exam-browser/download/[platform]/route.ts#GET`.
+Not capabilities: 11 SUPER_ADMIN supporting actions (`admin-judge#grantJudgeQuotaOverride`, `admin-accommodations#approveAccommodation`, `admin-accommodations#rejectAccommodation`, `admin-accommodations#revokeAccommodation`, `privileged#approvePrivilegedOperation`, `privileged#selfApprovePrivilegedOperation`, `privileged#rejectPrivilegedOperation`, `privileged#cancelPrivilegedOperation`, `super-data#requestSubmissionPurge`, `super-branding#previewBrandTheme`, `super-integrations#sendTestEmail`), 3 supporting pages (`app/super/page.tsx`, `app/super/jobs/page.tsx`, `app/super/settings/integrations/page.tsx`); impersonator only: `super-impersonate#endImpersonation`; public: `auth#logout`, `app/api/auth/login/route.ts#POST`, `app/api/auth/forgot-password/route.ts#POST`, `app/api/auth/reset-password/route.ts#POST`, `app/api/health/route.ts#GET`, `app/api/metrics/route.ts#GET`, `app/api/vitals/route.ts#POST`, `app/api/exam/browser/exchange/route.ts#POST`, `app/api/exam/browser/signals/route.ts#POST`, `app/api/exam-browser/download/[platform]/route.ts#GET`, `app/api/auth/oidc/start/route.ts#GET`, `app/api/auth/oidc/callback/route.ts#GET`, `app/api/auth/second-factor/route.ts#POST`.
 <!-- capability-matrix:end -->
 
 ## 5. Browser hardening

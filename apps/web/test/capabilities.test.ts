@@ -329,6 +329,34 @@ describe("every action's real guard admits exactly its capability's roles", () =
   });
 });
 
+/**
+ * Phase 16j. The capability's role list and `@recx/shared`'s
+ * `SECOND_FACTOR_ROLES` are the same set.
+ *
+ * Two copies exist on purpose: the actions name their roles as a literal
+ * because `tests/repo/support/action-guards.ts` reads those arguments
+ * STATICALLY, and a computed list resolves to "unknown" so the matrix
+ * cannot say which roles the action admits. This is the fence that keeps
+ * the two in step.
+ */
+describe("the second factor is scoped to the roles @recx/shared names", () => {
+  it("binds exactly ADMIN and SUPER_ADMIN", async () => {
+    const { SECOND_FACTOR_ROLES } = await import("@recx/shared");
+    const capability = CAPABILITIES.find((c) => c.key === "security.secondFactor");
+    expect(capability, "the capability exists").toBeDefined();
+    expect([...capability!.roles].sort()).toEqual([...SECOND_FACTOR_ROLES].sort());
+    // And the four actions are all of them: an action added to the file and
+    // not bound here fails the matrix above, but one bound to the WRONG
+    // capability would not, so the list is named.
+    expect([...capability!.actions].sort()).toEqual([
+      "second-factor#beginSecondFactorEnrolment",
+      "second-factor#confirmSecondFactor",
+      "second-factor#regenerateRecoveryCodes",
+      "second-factor#removeSecondFactor",
+    ]);
+  });
+});
+
 describe("route handlers are bound and guarded", () => {
   const routeFiles = walk(path.join(SRC, "app"), (n) => n === "route.ts");
   const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
@@ -366,6 +394,15 @@ describe("route handlers are bound and guarded", () => {
      * PUBLIC_ROUTES is the thing that owns it.
      */
     "app/api/exam-browser/download/[platform]/route.ts#GET",
+    /**
+     * Phase 16i. GETs, and the only GETs in the product that can END with
+     * a signed-in session -- so whatever else is left undeclared, these
+     * are not. Declaring them is what makes the fence below insist that
+     * PUBLIC_ROUTES owns them, which in turn is what makes a future
+     * capability that quietly adopted one of them fail here.
+     */
+    "app/api/auth/oidc/start/route.ts#GET",
+    "app/api/auth/oidc/callback/route.ts#GET",
   ];
 
   /** Route methods that must be bound: admin and super trees, plus every mutating API route except judge-node ones. */

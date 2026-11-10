@@ -50,6 +50,22 @@ path survives as the fallback for staff and for an LMS outage.
 *Size:* a phase of its own. It touches the session, the roster import, the
 onboarding route and `docs/SECURITY.md`.
 
+**BUILT (Phase 16i).** Authorization code with PKCE S256 and nothing else.
+`/api/auth/oidc/start` mints a state, a nonce and a PKCE verifier into three
+httpOnly cookies scoped to the callback path for ten minutes;
+`/api/auth/oidc/callback` spends all three on arrival whatever happens next,
+compares the state **before** exchanging anything, checks the algorithm
+against an allow-list of one, then the signature against the provider's
+JWKS, then the claims, and only then looks for an account. A subject the
+roster does not know is refused — a sign-in never creates an account — and
+`/login` grows a "Sign in with REC Learning" link **under** the password
+form, which is still first and still the answer for staff and for an LMS
+outage. Three environment names, all or none. Discovery is refused if the
+document names a different issuer. `docs/SECURITY.md` §2 has the ordering
+and what it buys; `docs/RUNBOOK.md` §2.21 is how a department switches it
+on; `docs/OPEN-QUESTIONS.md` records the four decisions inside it, including
+the one thing this does NOT do (there is no single-logout).
+
 ### 1.2 The catalogue is twelve problems and no aptitude questions
 
 `apps/web/scripts/content/index.ts` lists **eleven** authored problems, seeded
@@ -276,6 +292,23 @@ factor is how you avoid needing to.
 codes recorded in the audit log by the fact of their use and never by value.
 Students keep a password, because 5,000 students with TOTP is a help-desk
 programme, not a security improvement.
+
+**BUILT (Phase 16j), to that scope exactly.** RFC 6238 TOTP with the
+published test vectors asserted, so it works with an authenticator app
+somebody already has. The decision the phase rests on: **no `Session` row
+exists until both factors pass** — a correct password creates a
+`SecondFactorChallenge` and nothing else, so every page and every action
+refuses because the viewer is signed out, not because a guard remembered to
+look. One code is one use, enforced by a counter the database refuses to
+rewind. The secret is encrypted at rest. Ten recovery codes, sha256 only,
+shown once, audited by the fact of their use. The requirement is enforced on
+`requirePageRole` AND `requireActionRole`, after the role check — the action
+half matters more, because an admin who never loads a page can still call an
+action. Switching the policy off stops new admins being made to enrol and
+does not weaken anybody who already did. `docs/SECURITY.md` §2 has the
+ordering, `docs/RUNBOOK.md` §2.22 is how a department turns it on (and what
+a lost phone costs), and `docs/OPEN-QUESTIONS.md` records what it does not
+do — no WebAuthn, no SMS, no "trust this device", and no QR code.
 
 ### 3.2 A student-facing problem-defect report — **built (Phase 16a)**
 

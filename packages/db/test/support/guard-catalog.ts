@@ -84,6 +84,11 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_password_reset_change",
   // 20261030094500_phase12b_ai_helper
   "recx_refuse_ai_assist_change",
+  // 20261110180000_phase16j_second_factor
+  "recx_refuse_totp_counter_rewind",
+  "recx_refuse_recovery_code_change",
+  "recx_refuse_second_factor_challenge_change",
+  "recx_refuse_totp_for_role",
   // 20261101140500_phase12l_assessment_rule
   "recx_refuse_interactive_assessment_problem",
   "recx_refuse_debug_assessment_problem",
@@ -687,6 +692,32 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
    * number resting on it be re-written after the fact.
    */
   { name: "AiAssist_append_only", timing: "BEFORE UPDATE OR DELETE", table: "AiAssist", fn: "recx_refuse_ai_assist_change", level: "ROW" },
+  /**
+   * Phase 16j. The four guards behind a second factor, and what each one
+   * makes impossible:
+   *
+   *   * `TotpCredential_no_rewind` -- the 30-second step only ever moves
+   *     FORWARD, so one code is one use even when two requests arrive
+   *     holding it together. The check in TypeScript reads a value the
+   *     other request has not committed; this one reads the row it locks.
+   *     It also refuses un-confirming a credential and moving one to
+   *     another account.
+   *   * `TotpRecoveryCode_no_unspend` -- a spent code stays spent, and its
+   *     hash and owner are immutable. Editing the hash in place would mint
+   *     a code with no row to audit.
+   *   * `SecondFactorChallenge_no_reset` -- the attempt count never falls
+   *     and the window never widens. Without the first, five tries is five
+   *     tries PER RESET rather than five tries.
+   *   * `TotpCredential_role_only` -- a credential belongs to an ADMIN or
+   *     SUPER_ADMIN, which is the scope ROADMAP §3.1 set. INSERT only: a
+   *     demotion leaves the row alone, because deleting a credential as a
+   *     side effect of a role change is a sign-in that breaks for a reason
+   *     nobody can see.
+   */
+  { name: "TotpCredential_no_rewind", timing: "BEFORE UPDATE", table: "TotpCredential", fn: "recx_refuse_totp_counter_rewind", level: "ROW" },
+  { name: "TotpRecoveryCode_no_unspend", timing: "BEFORE UPDATE", table: "TotpRecoveryCode", fn: "recx_refuse_recovery_code_change", level: "ROW" },
+  { name: "SecondFactorChallenge_no_reset", timing: "BEFORE UPDATE", table: "SecondFactorChallenge", fn: "recx_refuse_second_factor_challenge_change", level: "ROW" },
+  { name: "TotpCredential_role_only", timing: "BEFORE INSERT", table: "TotpCredential", fn: "recx_refuse_totp_for_role", level: "ROW" },
 ];
 
 /** Every table that has at least one guard trigger. */
@@ -787,7 +818,7 @@ export const DROPPED_GUARDS: ReadonlyArray<{
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261101120500_phase12k_sql_checks";
+export const CHECK_CATALOG_THROUGH = "20261110180000_phase16j_second_factor";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [
@@ -1340,6 +1371,131 @@ export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; m
       ["ProblemVersion_output_only_fields", "ProblemVersion"],
     ] as const
   ).map(([name, table]) => ({ name, table, migration: "20261101160500_phase12n_output_only_checks" })),
+  ...(
+    [
+      // Phase 12r. What a multiple-choice question IS: between two and
+      // eight non-empty options, a correct index inside that list, a stem
+      // somebody can read, points worth having, and a position inside the
+      // paper. The index pair is the one that matters -- a `correctIndex`
+      // outside `options` is a question with no right answer, marked
+      // automatically.
+      ["AssessmentMcq_options_check", "AssessmentMcq"],
+      ["AssessmentMcq_correct_index_check", "AssessmentMcq"],
+      ["AssessmentMcq_stem_check", "AssessmentMcq"],
+      ["AssessmentMcq_points_check", "AssessmentMcq"],
+      ["AssessmentMcq_position_check", "AssessmentMcq"],
+      // And a candidate's answer is an index inside the widest option list
+      // a question may have. The row cannot see its own question's length
+      // (a CHECK body holds no subquery), so the ceiling is the palette's.
+      ["AssessmentMcqAnswer_chosen_index_check", "AssessmentMcqAnswer"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101190000_phase12r_assessment_mcq" })),
+  ...(
+    [
+      // Phase 12y. A release carries who released it. Results published
+      // with nobody named is a decision no reader can attribute, and a name
+      // with no timestamp is a release that never happened.
+      ["Assessment_results_published_by_check", "Assessment"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261101230000_phase12y_results_published" })),
+  ...(
+    [
+      // Phase 13a. A paper's language restriction is at most 32 plausible
+      // language keys. Written against the joined string because a CHECK
+      // body may not hold a subquery and `unnest` needs one; the empty
+      // array means "no restriction" and passes.
+      ["Assessment_allowedLanguages_check", "Assessment"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261102000000_phase13a_paper_languages" })),
+  ...(
+    [
+      // Phase 13c. The same rule one level down: a QUESTION may narrow the
+      // paper's set, and the narrowing is held to the same shape.
+      ["AssessmentProblem_allowedLanguages_check", "AssessmentProblem"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261102030000_phase13c_question_languages" })),
+  ...(
+    [
+      // Phase 13i. A moderation decision is its state, a reason somebody
+      // can read, a moderator and a timestamp -- all of them or none. A
+      // question pulled from a paper with no reason recorded is a decision
+      // the next examiner has to guess at.
+      ["AssessmentProblem_moderation_check", "AssessmentProblem"],
+      ["AssessmentMcq_moderation_check", "AssessmentMcq"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261105000000_phase13i_question_moderation" })),
+  ...(
+    [
+      // Phase 14b. What a REC Exam Browser sitting is, in six rules. The
+      // first and the last are the ones that enforce a promise made
+      // elsewhere in writing: a launch token is a sha256 DIGEST and never
+      // the token (`docs/EXAM-BROWSER.md` §5), and an address is
+      // sha256(ip + pepper) and never an address. The rest keep the row
+      // honest: it expires after it was made, it cannot have been seen
+      // before it was bound, and a version is either absent with its
+      // timestamp or a semantic version.
+      ["ExamBrowserSitting_launch_token_is_a_digest", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_expiry_follows_creation", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_seen_implies_bound", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_version_pair_is_whole", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_version_looks_like_one", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_ip_is_hashed", "ExamBrowserSitting"],
+      // And an attempt only carries a sitting when its paper asked for
+      // that browser. A sitting attached to a KIOSK_SEB or unproctored
+      // attempt would be a proctoring claim nobody made.
+      ["AssessmentAttempt_browser_sitting_needs_kiosk_recx", "AssessmentAttempt"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261105110000_phase14b_exam_browser_sitting" })),
+  ...(
+    [
+      // Phase 14g. The session a sitting holds: a pointer implies it was
+      // issued, and issuing implies the sitting had been bound. A session
+      // minted for a sitting nobody had bound is a session minted for a
+      // launch token that was never spent.
+      ["ExamBrowserSitting_session_pointer_implies_issued", "ExamBrowserSitting"],
+      ["ExamBrowserSitting_session_implies_bound", "ExamBrowserSitting"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261105120000_phase14g_sitting_session" })),
+  ...(
+    [
+      // Phase 16a. A report's decision is all three columns or none, its
+      // detail is something somebody wrote, and a hold carries its reason.
+      // The migration's own comment has the reasoning; what these add is
+      // that a decision nobody can read cannot be stored at all.
+      ["ProblemReport_decision_check", "ProblemReport"],
+      ["ProblemReport_detail_check", "ProblemReport"],
+      ["ProblemReport_resolution_length_check", "ProblemReport"],
+      ["Problem_quality_hold_check", "Problem"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261109090000_phase16a_problem_reports" })),
+  ...(
+    [
+      // Phase 16e. A consent record names a policy version, the sha256 of
+      // the text that was on screen, and an address only ever as a hash.
+      // The hash is what makes the record evidence rather than an
+      // assertion: it says WHICH words the candidate agreed to.
+      ["ConsentRecord_version_check", "ConsentRecord"],
+      ["ConsentRecord_hash_check", "ConsentRecord"],
+      ["ConsentRecord_ip_hash_check", "ConsentRecord"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261110090000_phase16e_consent_records" })),
+  ...(
+    [
+      // Phase 16j. What a second factor is: a counter only a CONFIRMED
+      // credential may have (a step recorded before the app was proved is
+      // a code accepted before anybody checked it worked), a cipher text
+      // of a plausible length, a recovery hash that is a sha256, a
+      // challenge token that is one too, and an attempt count inside the
+      // ceiling @recx/shared sets. The ceiling is in the database as well
+      // as in the code because five tries that a bug can reset is not a
+      // ceiling.
+      ["TotpCredential_counter_needs_confirmation_check", "TotpCredential"],
+      ["TotpCredential_cipher_check", "TotpCredential"],
+      ["TotpRecoveryCode_hash_check", "TotpRecoveryCode"],
+      ["SecondFactorChallenge_hash_check", "SecondFactorChallenge"],
+      ["SecondFactorChallenge_attempts_check", "SecondFactorChallenge"],
+    ] as const
+  ).map(([name, table]) => ({ name, table, migration: "20261110180000_phase16j_second_factor" })),
 ];
 
 /**

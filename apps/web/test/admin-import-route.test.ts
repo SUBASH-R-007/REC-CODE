@@ -29,6 +29,10 @@ vi.mock("@/lib/authoring/import/run", () => ({ sweepStaleImports: async () => 0,
 vi.mock("@/lib/authoring/import/process", () => ({ processSpooledImport: vi.fn(async () => undefined) }));
 vi.mock("@/lib/db", () => ({
   db: {
+    // Phase 16j: `requireActionRole` reads the second-factor policy after
+    // it has decided the role. Null means the switch is off, which is what
+    // every case here assumes.
+    platformSetting: { findUnique: async () => null },
     problemImport: {
       findFirst: async () => h.running,
       create: async (args: unknown) => {

@@ -54,6 +54,23 @@ export class InitialPasswordRequiredError extends ForbiddenError {
   }
 }
 
+/**
+ * Phase 16j. An ADMIN or SUPER_ADMIN the policy requires a second factor
+ * of, who has not set one up, calling a staff action.
+ *
+ * Its own class rather than a ForbiddenError: this is not "you may not do
+ * that", it is "do this first", and the sentence has to say which page.
+ */
+export class SecondFactorRequiredError extends AppError {
+  constructor() {
+    super(
+      "Set up two-step sign-in before using this. Open Account → Two-step sign-in (/account/two-factor).",
+      403,
+    );
+    this.name = "SecondFactorRequiredError";
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = "That resource was not found.") {
     super(message, 404);

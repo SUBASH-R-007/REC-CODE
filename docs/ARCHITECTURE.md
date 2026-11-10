@@ -1025,6 +1025,18 @@ files, and `pnpm --filter @recx/web size` serves every production build and
 fails if `/login` ever loads a script. Sign-in security: `docs/SECURITY.md`
 §2.
 
+Phase 16i added a second door to this page and kept the constraint: a "Sign
+in with REC Learning" link, drawn only when three environment names are set,
+is a plain `<a>` to `GET /api/auth/oidc/start` — a link, not a form and not a
+`<Button>`, because a browser already knows what to do with one and this page
+has no router to help it. The predicate behind it (`lmsSignInOffered`) lives
+in `@recx/shared/oidc` and is read here off `process.env` through
+`pages-server.ts`, since `src/lib/env.ts` is `server-only` and so cannot
+appear anywhere in a `pages/` import graph. The constants come in by subpath
+(`@recx/shared/oidc`) rather than through the package barrel, which pulls
+zod: Phase 16c measured a 41.6 KB regression from exactly that mistake in a
+client component, and `pnpm size` is the only thing that caught it.
+
 ## Local development topology
 
 Windows hosts run `apps/web` natively; Linux-only pieces (isolate, the real

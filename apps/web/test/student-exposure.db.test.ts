@@ -1012,6 +1012,41 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
         }),
       ),
     },
+    /**
+     * Phase 16i. Both GETs, both unauthenticated, and `/start` is the only
+     * GET in the product that sets a cookie. Neither may echo anything
+     * back: `/start` redirects to the provider (or to `/login?error=` when
+     * LMS sign-in is off, which it is in this test environment), and
+     * `/callback` lands on `/login?error=` with a CODE rather than a
+     * message, so nothing a provider or a browser can put in a query
+     * string reaches the page.
+     */
+    "api/auth/oidc/start/route.ts#GET": {
+      call: call(() => studentRequest("/api/auth/oidc/start")),
+      status: [303],
+    },
+    "api/auth/oidc/callback/route.ts#GET": {
+      // A state and a code this test invented, with no cookies: the
+      // callback refuses before it reaches a provider.
+      call: call(() => studentRequest(`/api/auth/oidc/callback?state=${tag}&code=${tag}`)),
+      status: [303],
+    },
+    /**
+     * Phase 16j. Unauthenticated, like the login route above it: the person
+     * using it has no session and will not have one until it succeeds. With
+     * no challenge cookie it refuses and creates nothing, which is what the
+     * canary sweep checks here.
+     */
+    "api/auth/second-factor/route.ts#POST": {
+      call: call(() =>
+        studentRequest("/api/auth/second-factor", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "code=000000",
+        }),
+      ),
+      status: [303],
+    },
     "api/drafts/route.ts#POST": {
       call: call(() =>
         studentRequest("/api/drafts", { method: "POST", json: { problemId: ids.problem, language: "cpp20", source: "// draft\n", clientUpdatedAt: Date.now() } }),
@@ -1755,6 +1790,23 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
      * anything about the account on the way past.
      */
     "(onboarding)/account/new-password/page.tsx": () => ({}),
+    /**
+     * Phase 16j. Rendered as S it redirects to `/login`: there is no
+     * challenge cookie, and a page that asks for a second factor must not
+     * render for somebody who is not half-way through signing in. The
+     * sweep records the redirect, which is the answer this page owes a
+     * student.
+     */
+    // `await {}` is `{}`, which is what the page does with it.
+    "(onboarding)/second-factor/page.tsx": () => ({ searchParams: {} }),
+    /**
+     * Phase 16j. Rendered as S it redirects home: a second factor is for
+     * ADMIN and SUPER_ADMIN (`SECOND_FACTOR_ROLES`), and a student reaching
+     * this URL must learn nothing from it -- not whose account it is, not
+     * whether anybody has a factor set up, not whether the deployment can
+     * mint one.
+     */
+    "(onboarding)/account/two-factor/page.tsx": () => ({}),
     // Phase 8e. The route OUT of a restriction, and the page that renders a
     // student's own status history.
     "(student)/account/reactivate/page.tsx": () => ({}),

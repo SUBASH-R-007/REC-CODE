@@ -1,13 +1,14 @@
 import type { GetServerSideProps, PageConfig } from "next";
 import Head from "next/head";
-import { CircleCheck, CodeXml, LogIn } from "lucide-react";
+import { CircleCheck, CodeXml, GraduationCap, LogIn } from "lucide-react";
 import { Button, Field, Input } from "@recx/design";
+import { OIDC_BUTTON_LABEL, OIDC_START_PATH } from "@recx/shared/oidc";
 import { COLLEGE_NAME, PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand/names";
 import { LOGIN_IDENTIFIER_COOKIE } from "@/lib/auth/login-cookie";
 import { PASSWORD_SET_NOTICE } from "@/lib/auth/reset-errors";
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors";
 import { SESSION_COOKIE } from "@/lib/auth/session-token";
-import { hasLiveSession } from "@/lib/pages-server";
+import { hasLiveSession, offersLmsSignIn } from "@/lib/pages-server";
 import { CollegeLogo } from "@/components/brand/college-logo";
 import { Wordmark } from "@/components/shell/wordmark";
 
@@ -41,6 +42,13 @@ type Props = {
   invalid: FieldName[];
   /** Where focus starts after a failure: the field to fix. */
   focus: FieldName | null;
+  /**
+   * Is LMS sign-in configured (Phase 16i)? Drawn from `process.env` per
+   * request, so switching it on is a restart rather than a release — and
+   * so the button is never offered by a deployment whose routes would
+   * answer `?error=lms-off`.
+   */
+  lms: boolean;
 };
 
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
@@ -76,14 +84,15 @@ export const getServerSideProps: GetServerSideProps<Props> = async ({ req, res, 
   const notice = first(query.reset) === "1" ? PASSWORD_SET_NOTICE : null;
   const code = first(query.error);
   const error = signInErrorMessage(code, first(query.retry), first(query.ref));
+  const lms = offersLmsSignIn();
   if (!error || !code) {
-    return { props: { error: null, notice, identifier: "", invalid: [], focus: notice ? "identifier" : null } };
+    return { props: { error: null, notice, identifier: "", invalid: [], focus: notice ? "identifier" : null, lms } };
   }
   const typed = (carried ?? "").slice(0, 254);
-  return { props: { error, notice, identifier: typed, ...fieldsFor(code, typed) } };
+  return { props: { error, notice, identifier: typed, ...fieldsFor(code, typed), lms } };
 };
 
-export default function LoginPage({ error, notice, identifier, invalid, focus }: Props) {
+export default function LoginPage({ error, notice, identifier, invalid, focus, lms }: Props) {
   // Every field points at the message; the ones it is about are marked invalid.
   const describe = (field: FieldName) =>
     error ? { "aria-describedby": ERROR_ID, ...(invalid.includes(field) ? { "aria-invalid": true } : {}) } : {};
@@ -206,6 +215,45 @@ export default function LoginPage({ error, notice, identifier, invalid, focus }:
                   Sign in
                 </Button>
               </form>
+              {/*
+                Phase 16i. SPEC §1 makes the LMS the identity source of
+                record, and the roster import has created accounts with no
+                password since Phase 4 — this is how those people get in.
+                It is UNDER the password form, not above it: staff sign in
+                with a password, the error messages above are about this
+                form, and a student who does have a password should not
+                have to read past a second option to use it.
+
+                An anchor styled as a button rather than a <Button>: this
+                page ships no JavaScript, /start is a GET, and a link is
+                what a browser already knows how to do with one. The
+                `rel="nofollow"` keeps a crawler from spending a state
+                cookie nobody asked for.
+              */}
+              {lms && (
+                <>
+                  <div className="my-6 flex items-center gap-3" aria-hidden>
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted">or</span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+                  <a
+                    href={OIDC_START_PATH}
+                    rel="nofollow"
+                    /* The `outline` Button variant at size lg, by hand: @recx/design's
+                       ButtonLink wraps next/link, and this page's whole point is that
+                       no router ships. utilities.css gives every anchor the focus ring. */
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-5 text-base font-medium text-text transition-colors select-none hover:border-primary/40 hover:bg-primary-subtle"
+                  >
+                    <GraduationCap className="h-4 w-4" aria-hidden />
+                    {OIDC_BUTTON_LABEL}
+                  </a>
+                  <p className="mt-2 text-center text-xs text-muted">
+                    Students: this is the same account you use for your course pages. You do not need a REC Code
+                    password.
+                  </p>
+                </>
+              )}
               {/*
                 A plain anchor, not next/link: this page ships no JavaScript
                 (unstable_runtimeJS: false) and a router that cannot run is

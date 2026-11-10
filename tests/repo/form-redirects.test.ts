@@ -38,7 +38,19 @@ import { findFiles, isTestPath, lexSource, lineAt, readRepoFile } from "./suppor
  */
 
 /** Route handlers allowed to build an absolute redirect, with the reason. */
-const ALLOWED = new Map<string, string>();
+const ALLOWED = new Map<string, string>([
+  [
+    "apps/web/src/app/api/auth/oidc/start/route.ts",
+    // Phase 16i. The destination is the LMS's authorization endpoint, which
+    // is ANOTHER ORIGIN by definition, so a relative Location cannot
+    // express it. The URL is built from the issuer's own discovery document
+    // and never from anything in the request; both of this route's
+    // refusals, and every redirect in its callback, are relative through
+    // `seeOther()`. Nothing posts a form to it -- it is a link on the
+    // sign-in page.
+    "redirects the browser to the LMS authorization endpoint (another origin by definition)",
+  ],
+]);
 
 const ABSOLUTE_REDIRECT = /\bNextResponse\s*\.\s*redirect\s*\(/g;
 
@@ -104,6 +116,23 @@ describe("redirects out of a route handler", () => {
       .flatMap((f) => absoluteRedirects(f, readRepoFile(f)))
       .map((f) => `${f.file}:${f.line}  ${f.what} — use seeOther() from lib/http/form-body.ts`);
     expect(outside).toEqual([]);
+  });
+
+  it("the one allowed exception is the LMS authorization redirect, and nothing else in that file", () => {
+    /**
+     * Phase 16i. `ALLOWED` exempts a FILE, not a line, so the exemption is
+     * checked here: the start route may build exactly ONE absolute
+     * redirect, and its refusals must still be relative. Without this, the
+     * exception for a cross-origin provider would quietly cover an
+     * absolute `/login` redirect added later -- which is the defect this
+     * whole file exists to refuse.
+     */
+    const file = "apps/web/src/app/api/auth/oidc/start/route.ts";
+    expect([...ALLOWED.keys()]).toEqual([file]);
+    expect(absoluteRedirects(file, readRepoFile(file))).toHaveLength(1);
+    // And the callback, which is NOT exempt, has none at all.
+    const callback = "apps/web/src/app/api/auth/oidc/callback/route.ts";
+    expect(absoluteRedirects(callback, readRepoFile(callback))).toEqual([]);
   });
 
   it("and the route the readiness form posts to uses the shared helper", () => {

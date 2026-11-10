@@ -6,7 +6,10 @@ import { db } from "@/lib/db";
 import { readRetention } from "@/lib/privileged/retention";
 import { XP_SETTING_KEY } from "@/lib/progress/xp-config";
 import { consentContact } from "@/lib/exam/consent";
+import { secondFactorPolicy } from "@/lib/auth/second-factor";
+import { secondFactorConfigured } from "@/lib/auth/totp";
 import { ConsentContactForm } from "@/components/super/consent-contact-form";
+import { SecondFactorPolicyForm } from "@/components/super/second-factor-policy-form";
 import { LegalHoldForm } from "@/components/super/legal-hold-form";
 import { formatIst, Notice, PageHeader } from "@/components/super/ui";
 import { XpRulesForm } from "@/components/super/xp-rules-form";
@@ -16,10 +19,20 @@ export const metadata: Metadata = { title: "Policy · Super-admin" };
 /** XP rules (editable), retention schedule (read-only) and the legal hold. */
 export default async function SuperPolicyPage() {
   await requireSuperAdminPage();
-  const [xpRow, retention, contact] = await Promise.all([
+  const [xpRow, retention, contact, secondFactorRequired, adminsWithoutFactor] = await Promise.all([
     db.platformSetting.findUnique({ where: { key: XP_SETTING_KEY }, select: { value: true, updatedAt: true } }),
     readRetention(),
     consentContact(),
+    secondFactorPolicy(),
+    // How many accounts the switch would affect, so the decision is taken
+    // with the number in view rather than afterwards.
+    db.user.count({
+      where: {
+        role: { in: ["ADMIN", "SUPER_ADMIN"] },
+        status: { in: ["ACTIVE", "SOFT_RESTRICTED"] },
+        OR: [{ totpCredential: null }, { totpCredential: { confirmedAt: null } }],
+      },
+    }),
   ]);
   const override = xpRow ? xpRulesOverrideSchema.safeParse(xpRow.value) : null;
   const { rules, version } = effectiveXpRules(override?.success ? override.data : null);
@@ -47,6 +60,40 @@ export default async function SuperPolicyPage() {
             </Notice>
           )}
           <ConsentContactForm current={contact} />
+        </CardBody>
+      </Card>
+
+      {/*
+        Phase 16j (ROADMAP §3.1). A single password stood in front of
+        impersonation, the roster import commit, result release, the
+        placement export, the AI provider settings and the judge node
+        controls. Here rather than in Integrations for the same reason the
+        contact above is: it is a policy about who may act, not a
+        connection to a system.
+      */}
+      <Card>
+        <CardHeader
+          title="Two-step sign-in for admins"
+          subtitle="An authenticator app in front of every ADMIN and SUPER_ADMIN sign-in."
+          action={secondFactorRequired ? <Badge tone="success">Required</Badge> : <Badge>Not required</Badge>}
+        />
+        <CardBody className="space-y-3">
+          {secondFactorRequired && adminsWithoutFactor > 0 ? (
+            <Notice
+              tone="warning"
+              title={`${adminsWithoutFactor} admin ${adminsWithoutFactor === 1 ? "account has" : "accounts have"} not set one up yet`}
+            >
+              Each of them reaches only /account/two-factor until they do. They can do it themselves; nobody has to be
+              let in by hand.
+            </Notice>
+          ) : null}
+          {!secondFactorRequired && adminsWithoutFactor > 0 ? (
+            <p className="text-sm text-text-secondary">
+              {adminsWithoutFactor} admin {adminsWithoutFactor === 1 ? "account has" : "accounts have"} no
+              authenticator app. Turning this on makes each of them set one up before they can do anything else.
+            </p>
+          ) : null}
+          <SecondFactorPolicyForm required={secondFactorRequired} configured={secondFactorConfigured()} />
         </CardBody>
       </Card>
 

@@ -1,8 +1,16 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import type { Role, User } from "@recx/db";
+import { SECOND_FACTOR_PATHS } from "@recx/shared";
 import { getCurrentUser, type ImpersonationContext } from "@/lib/auth/session";
-import { ForbiddenError, ImpersonationReadOnlyError, InitialPasswordRequiredError, UnauthorizedError } from "@/lib/errors";
+import { mustEnrolSecondFactor } from "@/lib/auth/second-factor";
+import {
+  ForbiddenError,
+  ImpersonationReadOnlyError,
+  InitialPasswordRequiredError,
+  SecondFactorRequiredError,
+  UnauthorizedError,
+} from "@/lib/errors";
 
 /**
  * The one guards module. RBAC is enforced server-side in every page guard and
@@ -55,6 +63,31 @@ export async function requireUser(): Promise<User> {
 }
 
 /**
+ * Page guard for the enrolment page -- the third guard that admits an
+ * account `requireUser` would bounce, and the second that exists only
+ * because of a bounce. It admits any signed-in account, because an admin who
+ * has already enrolled may still come here to see the state or to replace
+ * their recovery codes; what it does NOT do is call `requireUser`, which
+ * would send a required-but-unenrolled admin here in a loop.
+ */
+export async function requireUserEnrollingSecondFactor(): Promise<User> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (user.mustChangePassword) redirect(INITIAL_PASSWORD_PATH);
+  if (user.impersonation) throw new ImpersonationReadOnlyError();
+  return user;
+}
+
+/** The action half of the pair, throwing where the page guard navigates. */
+export async function requireActionUserEnrollingSecondFactor(): Promise<User> {
+  const user = await getCurrentUser();
+  if (!user) throw new UnauthorizedError();
+  if (user.mustChangePassword) throw new UnauthorizedError();
+  if (user.impersonation) throw new ImpersonationReadOnlyError();
+  return user;
+}
+
+/**
  * Page guard for the set-your-own-password page, and one of the two guards
  * that admit an account still holding its initial password. Deliberately a
  * separate function rather than a flag on `requireUser`: a page cannot opt
@@ -84,6 +117,28 @@ export async function requireActionUserSettingInitialPassword(): Promise<User> {
 export async function requirePageRole(...roles: Role[]): Promise<User> {
   const user = await requireUser();
   if (!roles.includes(user.role)) redirect(homeForRole(user.role));
+  /**
+   * Phase 16j. An ADMIN or SUPER_ADMIN the policy requires a second factor
+   * of, who has not set one up, reaches exactly one page until they do --
+   * the same shape as the initial-password bounce in `requireUser`, and for
+   * the same reason: the gate is the account's state, so a session that
+   * predates the policy being switched on is caught too.
+   *
+   * AFTER the role check, and that order is the point. A guard that read
+   * the database before deciding the role would touch it for a caller it
+   * was about to send away, which `apps/web/test/capability-matrix.test.ts`
+   * refuses -- and which would be a query on every bounce. It costs nothing
+   * for the other three roles either way: `mustEnrolSecondFactor` checks
+   * the role before it touches the database.
+   *
+   * It is HERE and not in `requireUser` because the surfaces ROADMAP §3.1
+   * names -- impersonation, the roster import commit, result release, the
+   * placement export, the AI provider settings, the judge node controls --
+   * are all behind a role, and `/dashboard` and `/profile` are not among
+   * them. The action half below is the one that matters most: an admin who
+   * never loads a page can still call an action.
+   */
+  if (await mustEnrolSecondFactor(user)) redirect(SECOND_FACTOR_PATHS.enrol);
   return user;
 }
 
@@ -125,6 +180,9 @@ export async function requireImpersonator(): Promise<{ actorId: string; imperson
 export async function requireActionRole(...roles: Role[]): Promise<User> {
   const user = await requireActionUser();
   if (!roles.includes(user.role)) throw new ForbiddenError();
+  // Phase 16j, the half that matters: every staff action funnels through
+  // here, and an admin who never loads a page can still call one.
+  if (await mustEnrolSecondFactor(user)) throw new SecondFactorRequiredError();
   return user;
 }
 

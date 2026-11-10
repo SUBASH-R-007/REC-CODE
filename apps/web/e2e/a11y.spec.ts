@@ -249,6 +249,26 @@ const TARGETS: readonly Target[] = [
   { path: "/super/flags", as: "admin", gating: true },
   { path: "/super/jobs", as: "admin", gating: true },
   { path: "/super/data", as: "admin", gating: true },
+  /**
+   * Phase 16j. The second-factor setup, GATING, as the super-admin.
+   *
+   * Worth gating rather than reporting for a reason specific to it: it is a
+   * form a person is SENT to and cannot leave until they finish, so a
+   * failure here is unrecoverable in the same way `/login` and
+   * `/forgot-password` are — and the page it bounces them from is every
+   * other admin page. The secret is rendered in a `<code>` block and the
+   * recovery codes in a list, which is where a contrast or a
+   * reading-order mistake would land.
+   *
+   * `/second-factor` (the page that asks for a code) is NOT here, and
+   * cannot be from a path: it needs a live challenge cookie, which only a
+   * password sign-in by an enrolled account creates. Its markup is the
+   * same `Field` + `Input` + alert shapes this page and `/login` already
+   * gate, and `apps/web/test/oidc-routes.test.ts` and the page's own test
+   * cover its behaviour. Recorded as a gap rather than left to look like
+   * coverage.
+   */
+  { path: "/account/two-factor", as: "admin", gating: true },
   { path: "/judge", as: null, gating: true },
 ];
 
