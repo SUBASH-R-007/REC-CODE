@@ -4664,3 +4664,42 @@ rows and never publishes them, and the bank's own proof needs no database at
 all. The first version of that test published the real bank into recx_test
 and could not clean up; 201 rows had to be retired by hand. Recorded so the
 next person does not write it that way.
+
+## A CI-only Next.js invariant on one a11y target (Phase 16i/16j, 2026-11-10)
+
+The `E2E (axe + keyboard)` job failed once on commit 4f9c977 with a 500 from
+`/mentor/doubts`, and the server-side cause is in the job log:
+
+> Error [InvariantError]: Invariant: Expected clientReferenceManifest to be
+> defined. This is a bug in Next.js.
+
+Recorded rather than re-run blindly, because this project's rule is that a
+failure which only happens under load is usually a real defect. What is
+known, and what is not:
+
+* **It is one variant of four.** `/mentor/doubts` passed desktop-light,
+  mobile-light and mobile-dark in the same run; only desktop-dark got the
+  500. A broken page fails all four.
+* **It names itself.** The invariant is Next's own, about a client reference
+  manifest it could not find for a route — not an exception from any
+  application code.
+* **Nothing in the phase touches that path.** Phases 16i and 16j changed
+  sign-in, the guards and `/login`; `/mentor/doubts` renders through
+  `requireMentorPage`, whose only new work is one `PlatformSetting` read,
+  and that read happens for ADMIN and SUPER_ADMIN only and cannot produce
+  this error.
+* **The Linux gate is green**, including the production `next build` the
+  E2E job then serves, and every other CI job passed.
+* **What is NOT known** is whether it recurs. One observation is not a
+  pattern, and the honest state is "seen once, cause named by Next, not
+  reproduced locally".
+
+*If it recurs:* the thing to look at is the serving mode. The job builds and
+then serves a production build while Playwright drives several pages in
+parallel, and this invariant is reported against exactly that combination
+upstream. A first step would be running the E2E job's server with one worker
+to see whether the race disappears, which would localise it without guessing.
+
+*What would be wrong to do:* mark the target non-gating to make it quiet. It
+is already in the REPORTED set — the failure is the page not loading at all,
+which is worth failing a run over however the 500 arises.
