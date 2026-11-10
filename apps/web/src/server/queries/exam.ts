@@ -1,11 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import {
-  paperLanguageViews,
-  questionLanguages,
-  type AttemptLayout,
-  type PaperLanguageView,
-} from "@recx/shared";
+import { ANSWER_LANGUAGE_KEY, paperLanguageViews, questionLanguages, type AttemptLayout, type PaperLanguageView } from "@recx/shared";
 import { db } from "@/lib/db";
 import { languagesOfSitting } from "@/lib/exam/language";
 import { renderMarkdown } from "@/lib/markdown";
@@ -118,6 +113,12 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
       continue;
     }
     const starters = new Map(version.starterCodes.map((s) => [s.language, s.code]));
+    /**
+     * Phase 16f. Read from the FROZEN layout, never from the version's
+     * current `ioMode`: a problem republished mid-sitting must not turn a
+     * code editor into an answer box under somebody part way through.
+     */
+    const kind = question.kind ?? "CODE";
     questions.push({
       questionId: question.questionId,
       title: version.title,
@@ -138,19 +139,25 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
        * business shipping eleven starters, and the samples beside them are
        * already the bulk of this payload.
        */
-      starters: Object.fromEntries(acceptedFor(question.questionId).map((key) => [key, starters.get(key) ?? ""])),
+      starters:
+        kind === "ANSWER"
+          ? {}
+          : Object.fromEntries(acceptedFor(question.questionId).map((key) => [key, starters.get(key) ?? ""])),
       /**
        * The languages THIS question accepts (Phase 13c). Usually the
        * paper's own set; fewer when the question narrows it.
        */
-      languages: paperLanguageViews(acceptedFor(question.questionId)),
+      // An ANSWER question has no language to choose, so the picker has
+      // nothing to render and the routes accept exactly `answer1`.
+      languages: kind === "ANSWER" ? [] : paperLanguageViews(acceptedFor(question.questionId)),
       // Named for what it is: the key the routes validate against, which
       // is the language this question OPENS in. Handing the client the
       // editor's highlighting mode under the name `language` is what
       // stopped every sitting saving, running and submitting (12r.2).
       // The language this question OPENS in: the first it accepts, which
       // is the paper's default unless the question narrows past it.
-      languageKey: acceptedFor(question.questionId)[0] ?? defaultLanguage,
+      languageKey: kind === "ANSWER" ? ANSWER_LANGUAGE_KEY : (acceptedFor(question.questionId)[0] ?? defaultLanguage),
+      kind,
     });
   }
   return { questions, mcqs, languages, missing };

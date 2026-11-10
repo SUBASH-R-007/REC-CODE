@@ -92,6 +92,24 @@ export function questionSeed(attemptSeed: number, position: number): number {
 }
 
 /** One question as the candidate will see it. */
+/**
+ * What a candidate is asked to produce (Phase 16f).
+ *
+ * `CODE` is a program, which is every question laid out before this field
+ * existed and most questions after it. `ANSWER` is an output-only problem:
+ * the submission IS the answer, worked out however the candidate likes and
+ * typed into a box — no compiler, no run, no language to choose.
+ *
+ * A KIND rather than a language, deliberately. `answer1` is a
+ * `SubmitLanguageKey` and not in `LANGUAGE_CATALOG`, precisely so that
+ * nothing treats it as a toolchain; widening `LanguageKey` to carry it
+ * would spread "this might not be a program" through every route that
+ * validates one. One field, read in the four places that care, is the
+ * smaller change and the honest one.
+ */
+export const EXAM_QUESTION_KINDS = ["CODE", "ANSWER"] as const;
+export type ExamQuestionKind = (typeof EXAM_QUESTION_KINDS)[number];
+
 export interface LayoutQuestion {
   /** The AssessmentProblem row. */
   readonly questionId: string;
@@ -113,6 +131,14 @@ export interface LayoutQuestion {
    * the paper is what the candidate was told before the clock started.
    */
   readonly languages?: readonly string[];
+  /**
+   * `ANSWER` for an output-only question (Phase 16f); absent means CODE.
+   *
+   * Frozen with the rest of the layout, like the version ids and the
+   * languages: a problem republished mid-sitting must not turn a code
+   * editor into an answer box under somebody who is part way through.
+   */
+  readonly kind?: ExamQuestionKind;
 }
 
 /**
@@ -202,6 +228,8 @@ export interface AssessmentQuestionInput {
   readonly points: number;
   /** Phase 13c: the languages this question narrows the paper to, if any. */
   readonly languages?: readonly string[];
+  /** Phase 16f: `ANSWER` for an output-only question. Absent means CODE. */
+  readonly kind?: ExamQuestionKind;
 }
 
 /** An MCQ of the paper, as the assessment stores it (Phase 12r). */
@@ -297,6 +325,10 @@ function codingQuestions(sequence: readonly AssessmentQuestionInput[], seed: num
     ...(question.languages === undefined || question.languages.length === 0
       ? {}
       : { languages: [...question.languages] }),
+    // Phase 16f, written only when it is not CODE, so a layout is
+    // byte-identical to one from before this field for every ordinary
+    // question.
+    ...(question.kind === undefined || question.kind === "CODE" ? {} : { kind: question.kind }),
     // Keyed on the question's own source position, not its shuffled index,
     // so a candidate's test order for a given problem is stable even if the
     // order resolution ever changes.
@@ -378,6 +410,16 @@ export function parseAttemptLayout(value: unknown): AttemptLayout {
       ) {
         throw new Error("stored attempt layout has a malformed question language list");
       }
+    }
+    /**
+     * Phase 16f, refused rather than repaired for the same reason. A kind
+     * nobody recognises would quietly become CODE, and a candidate asked
+     * for an answer would be handed a code editor over a question that
+     * wants a number — which is exactly what the refusal this replaces
+     * existed to prevent.
+     */
+    if (question.kind !== undefined && !EXAM_QUESTION_KINDS.includes(question.kind as ExamQuestionKind)) {
+      throw new Error("stored attempt layout has a malformed question kind");
     }
   }
   return layout as AttemptLayout;

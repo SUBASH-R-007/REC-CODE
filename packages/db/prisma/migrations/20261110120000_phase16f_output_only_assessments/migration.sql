@@ -1,0 +1,41 @@
+-- Phase 16f: an output-only problem can be sat in an assessment.
+--
+-- This drops a refusal, which is rarer here than adding one, so the reason
+-- is written out in full.
+--
+-- Phase 12n refused the pin because "the practice workspace is the only
+-- surface that knows an output-only problem: the answer box, the one
+-- language, the data without the expected answer, no Run. A sitting builds
+-- its own editor and submits every answer in one language." Every clause of
+-- that was true when it was written.
+--
+-- Phase 13a then gave a sitting A LANGUAGE PER QUESTION, through the layout,
+-- the snapshot route, the submit route and the marking — and
+-- `docs/OPEN-QUESTIONS.md` recorded that the engine change was done and the
+-- four refusals were each blocked on one surface instead. Output-only's
+-- surface is the smallest of the four: an answer box rather than an editor.
+--
+-- What makes it safe to lift, all of it frozen into the attempt's layout at
+-- start so a republished problem cannot change it underneath a candidate:
+--
+--   * `LayoutQuestion.kind` is `ANSWER` for one of these, written when the
+--     paper is laid out from the version's own `ioMode`;
+--   * the exam view renders a textarea, no language picker and no starter;
+--   * `/api/exam/[attemptId]/run` refuses an ANSWER question with a
+--     sentence, because there is no program to run;
+--   * `/api/exam/[attemptId]/submit` accepts `answer1` for an ANSWER
+--     question and ONLY for one — a toolchain key on an ANSWER question and
+--     `answer1` on a CODE question are both refused, because either means
+--     the client and the frozen layout disagree about what was asked;
+--   * the submission is created exactly as every other is, against the
+--     pinned version and the `answer1` LanguageConfig row, so marking,
+--     rejudging and the result pages need no special case at all.
+--
+-- The other three refusals stay. A SQL question needs its lane and a result
+-- set; a debugging question needs an edit budget a sitting can refuse
+-- without destroying work; an interactive question needs a conversation
+-- surface, and SPEC §11 keeps it out of high-stakes papers until it has run
+-- cleanly through two practice contests.
+
+DROP TRIGGER IF EXISTS "AssessmentProblem_no_output_only" ON "public"."AssessmentProblem";
+DROP FUNCTION IF EXISTS recx_refuse_output_only_assessment_problem();

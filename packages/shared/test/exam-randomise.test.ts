@@ -498,3 +498,41 @@ describe("the languages a question narrows the paper to", () => {
     expect(layout.questions[0]!.languages).toEqual(["py312"]);
   });
 });
+
+describe("the question kind (Phase 16f)", () => {
+  const withKind = (kind: "CODE" | "ANSWER" | undefined): AssessmentQuestionInput[] => [
+    { id: "q1", problemVersionId: "pv1", position: 1, points: 10, ...(kind === undefined ? {} : { kind }) },
+  ];
+
+  it("writes nothing for an ordinary question, so a layout is byte-identical to one from before the field", () => {
+    const before = resolveLayout({ questions: withKind(undefined), seed: 7, randomiseOrder: false });
+    const explicit = resolveLayout({ questions: withKind("CODE"), seed: 7, randomiseOrder: false });
+    expect(before.questions[0]).not.toHaveProperty("kind");
+    expect(explicit.questions[0]).not.toHaveProperty("kind");
+    expect(JSON.stringify(explicit)).toBe(JSON.stringify(before));
+  });
+
+  it("writes ANSWER, because that one changes what the candidate is shown", () => {
+    const layout = resolveLayout({ questions: withKind("ANSWER"), seed: 7, randomiseOrder: false });
+    expect(layout.questions[0]!.kind).toBe("ANSWER");
+  });
+
+  it("survives a round trip through the parser", () => {
+    const layout = resolveLayout({ questions: withKind("ANSWER"), seed: 7, randomiseOrder: false });
+    const parsed = parseAttemptLayout(JSON.parse(JSON.stringify(layout)));
+    expect(parsed.questions[0]!.kind).toBe("ANSWER");
+  });
+
+  it("refuses a kind nobody recognises rather than treating it as CODE", () => {
+    /**
+     * The whole point of the refusal this replaced: a candidate asked for
+     * an answer must not be handed a code editor. A stored kind that
+     * quietly degraded to CODE would do exactly that, months later, with
+     * nothing on screen saying so.
+     */
+    const layout = resolveLayout({ questions: withKind("ANSWER"), seed: 7, randomiseOrder: false });
+    const tampered = JSON.parse(JSON.stringify(layout));
+    tampered.questions[0].kind = "ESSAY";
+    expect(() => parseAttemptLayout(tampered)).toThrow(/malformed question kind/);
+  });
+});

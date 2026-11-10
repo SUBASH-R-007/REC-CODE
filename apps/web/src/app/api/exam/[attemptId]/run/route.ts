@@ -112,6 +112,16 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
   const question = layout.questions.find((q) => q.questionId === body.data.questionId);
   if (!question) return json({ error: "That question is not part of this assessment." }, 404);
   /**
+   * Phase 16f. An output-only question has nothing to run: the submission
+   * IS the answer, and there is no program, no compiler and no sample to
+   * run it against. The client draws no Run button for one, so reaching
+   * here means a client somebody has been editing — 409 and a sentence,
+   * rather than a queued job no node could ever serve.
+   */
+  if (question.kind === "ANSWER") {
+    return json({ error: "There is nothing to run on this question: hand in the answer itself." }, 409);
+  }
+  /**
    * The language must be one the paper accepts (Phase 13a).
    *
    * It used to have to be THE language: a sitting had one, nobody chose

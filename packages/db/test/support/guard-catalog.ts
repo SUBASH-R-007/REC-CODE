@@ -87,6 +87,7 @@ export const GUARD_FUNCTIONS = [
   // 20261101140500_phase12l_assessment_rule
   "recx_refuse_interactive_assessment_problem",
   "recx_refuse_debug_assessment_problem",
+  // 20261101161000_phase12n_assessment_rule (dropped in 20261110120000; see DROPPED_GUARDS)
   "recx_refuse_output_only_assessment_problem",
   // 20261101170000_phase12p_sql_assessment_rule
   "recx_refuse_sql_assessment_problem",
@@ -325,22 +326,6 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     fn: "recx_refuse_debug_assessment_problem",
     level: "ROW",
   },
-  // 20261101161000_phase12n_assessment_rule
-  {
-    /**
-     * Phase 12n. The practice workspace is the only surface that knows an
-     * output-only problem — an exam attempt builds its own editor and
-     * submits every answer in one language, so a candidate would get a
-     * code box for a question that wants an answer. Lifting this needs an
-     * exam path that knows the kind, and a line in the gate log that this
-     * entry makes compulsory.
-     */
-    name: "AssessmentProblem_no_output_only",
-    timing: "BEFORE INSERT OR UPDATE",
-    table: "AssessmentProblem",
-    fn: "recx_refuse_output_only_assessment_problem",
-    level: "ROW",
-  },
   // 20261101170000_phase12p_sql_assessment_rule
   {
     /**
@@ -356,6 +341,20 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
     timing: "BEFORE INSERT OR UPDATE",
     table: "AssessmentProblem",
     fn: "recx_refuse_sql_assessment_problem",
+    level: "ROW",
+  },
+  // 20261101161000_phase12n_assessment_rule
+  {
+    /**
+     * Phase 12n, and DROPPED in Phase 16f — `DROPPED_GUARDS` carries the
+     * reason. It stays listed here because the migration that created it
+     * is still held to having created it properly; the live database is
+     * checked for its ABSENCE instead of its presence.
+     */
+    name: "AssessmentProblem_no_output_only",
+    timing: "BEFORE INSERT OR UPDATE",
+    table: "AssessmentProblem",
+    fn: "recx_refuse_output_only_assessment_problem",
     level: "ROW",
   },
   // 20261101180000_phase12q_sql_contest_rule
@@ -733,6 +732,42 @@ export const OTHER_TRIGGERS_ON_GUARDED_TABLES: ReadonlyArray<{ name: string; tab
    * asserts the two agree on all six seeded patterns.
    */
   { name: "AptitudeSection_totals_sync", table: "AptitudeSection" },
+];
+
+/**
+ * Guards a migration created and a LATER migration deliberately dropped.
+ *
+ * Dropping one is a violation unless it is listed here, and listing one is
+ * the line in the record the original catalogue entry existed to compel. The
+ * fences read it three ways: the creating migration is still required to
+ * define the guard properly, the dropping migration is allowed to drop that
+ * one name and nothing else, and the live database is checked for its
+ * ABSENCE rather than its presence.
+ */
+export const DROPPED_GUARDS: ReadonlyArray<{
+  readonly kind: "trigger" | "function";
+  readonly name: string;
+  readonly table?: string;
+  readonly createdBy: string;
+  readonly droppedBy: string;
+  readonly why: string;
+}> = [
+  {
+    kind: "trigger",
+    name: "AssessmentProblem_no_output_only",
+    table: "AssessmentProblem",
+    createdBy: "20261101161000_phase12n_assessment_rule",
+    droppedBy: "20261110120000_phase16f_output_only_assessments",
+    why:
+      "Phase 12n refused the pin because a sitting built one editor for every question and submitted every answer in one language. Phase 13a gave it a language per question; Phase 16f gave it a question KIND, frozen in the layout, that the view, the Run route and the submit route each read. An output-only question reaches a candidate as an answer box with no language picker and no Run — which is what the refusal was protecting them from not having.",
+  },
+  {
+    kind: "function",
+    name: "recx_refuse_output_only_assessment_problem",
+    createdBy: "20261101161000_phase12n_assessment_rule",
+    droppedBy: "20261110120000_phase16f_output_only_assessments",
+    why: "The function behind AssessmentProblem_no_output_only; see that entry.",
+  },
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */

@@ -1,3 +1,4 @@
+import { ANSWER_LANGUAGE_KEY, ANSWER_LANGUAGE_LABEL } from "@recx/shared";
 import { randomBytes } from "node:crypto";
 import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -478,4 +479,64 @@ describe.skipIf(!ENABLED)("a paper answered in two languages, against recx_test"
     expect(all).toContain("cpp20");
     expect(all).toContain("py312");
   });
+
+  /**
+   * An output-only question in a sitting (Phase 16f).
+   *
+   * The refusal that used to keep these out of a paper is gone, and what
+   * replaced it is one field: `LayoutQuestion.kind`. These three cases are
+   * the whole of what that field does on the submit path — accept
+   * `answer1` where the layout says ANSWER, and refuse every other pairing
+   * in both directions, because either means the client and the frozen
+   * layout disagree about what the candidate was asked.
+   */
+  describe("an ANSWER question", () => {
+    function answerLayout() {
+      const base = layout();
+      return {
+        ...base,
+        questions: [{ ...base.questions[0]!, kind: "ANSWER" as const }, base.questions[1]!],
+      };
+    }
+
+    it("is submitted with answer1, and carries the answer1 toolchain row", async () => {
+      const answerConfigId = await toolchain(ANSWER_LANGUAGE_KEY, ANSWER_LANGUAGE_LABEL);
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, answerLayout() as never, [
+        { questionId: questionIds[0]!, language: ANSWER_LANGUAGE_KEY, source: "42\n" },
+      ]);
+      expect(result.submitted, result.reason ?? "").toBe(true);
+      expect(result.submissionIds).toHaveLength(1);
+      const row = await db.submission.findUniqueOrThrow({
+        where: { id: result.submissionIds[0]! },
+        select: { language: true, languageConfigId: true },
+      });
+      expect(row.language).toBe(ANSWER_LANGUAGE_KEY);
+      expect(row.languageConfigId).toBe(answerConfigId);
+    }, 90_000);
+
+    it("refuses a toolchain language on it — there is no program to compile", async () => {
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, answerLayout() as never, [
+        { questionId: questionIds[0]!, language: "cpp20", source: "int main(){}\n" },
+      ]);
+      expect(result.submitted).toBe(false);
+      expect(result.reason).toBe("language_not_accepted");
+      expect(result.refusedLanguage).toBe("cpp20");
+    }, 90_000);
+
+    it("refuses answer1 on an ordinary coding question", async () => {
+      await toolchain(ANSWER_LANGUAGE_KEY, ANSWER_LANGUAGE_LABEL);
+      const guard = await sitting();
+      // The second question of this paper is CODE, and a client that sent
+      // an answer for it would be describing a paper nobody set.
+      const result = await submitModule.submitAttempt(guard, answerLayout() as never, [
+        { questionId: questionIds[1]!, language: ANSWER_LANGUAGE_KEY, source: "42\n" },
+      ]);
+      expect(result.submitted).toBe(false);
+      expect(result.reason).toBe("language_not_accepted");
+      expect(result.refusedLanguage).toBe(ANSWER_LANGUAGE_KEY);
+    }, 90_000);
+  });
+
 });

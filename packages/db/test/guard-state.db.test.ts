@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  DROPPED_GUARDS,
   GUARD_FUNCTIONS,
   GUARD_TRIGGERS,
   GUARDED_TABLES,
@@ -83,7 +84,24 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     restoreEnv();
   });
 
-  it.each(GUARD_TRIGGERS.map((t) => [t.name, t] as const))(
+  /**
+   * Guards a later migration deliberately dropped (Phase 16f). Listed in
+   * the catalogue so the creating migration is still held to having
+   * created them properly, and checked HERE for absence: a dropped guard
+   * that is somehow still live is as much a surprise as a live one that
+   * has gone missing.
+   */
+  const dropped = new Set(DROPPED_GUARDS.map((g) => g.name));
+
+  it.each(DROPPED_GUARDS.map((g) => [g.name, g] as const))("%s is gone, as its record says", (name, g) => {
+    if (g.kind === "trigger") {
+      expect(triggers.filter((r) => r.name === name), `${name} was dropped by ${g.droppedBy} and is still live`).toEqual([]);
+    } else {
+      expect(triggers.filter((r) => r.fn === name).map((r) => r.name), `${name} still runs`).toEqual([]);
+    }
+  });
+
+  it.each(GUARD_TRIGGERS.filter((t) => !dropped.has(t.name)).map((t) => [t.name, t] as const))(
     "%s exists once on its table, runs its guard function on exactly its events, is enabled (tgenabled = 'O') and has only its WHEN clause",
     (name, t) => {
       const found = triggers.filter((r) => r.name === name);
@@ -133,13 +151,18 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
       ...GUARD_TRIGGERS.map((t) => t.name),
       ...DEFERRED_CONSTRAINT_TRIGGERS.map((t) => t.name),
     ]);
+    // A dropped guard's function may still be catalogued; nothing live runs it.
+
     const guardFns = new Set<string>(GUARD_FUNCTIONS);
     expect(triggers.filter((r) => guardFns.has(r.fn) && !listed.has(r.name)).map((r) => r.name)).toEqual([]);
     expect(triggers.filter((r) => r.enabled !== "O").map((r) => `${r.table}.${r.name}=${r.enabled}`)).toEqual([]);
   });
 
   it("the triggers on every guarded table are exactly the catalogued ones (no extra trigger, whatever function it runs)", () => {
-    const expected = [...GUARD_TRIGGERS, ...OTHER_TRIGGERS_ON_GUARDED_TABLES].map((t) => `${t.table}.${t.name}`).sort();
+    const expected = [...GUARD_TRIGGERS, ...OTHER_TRIGGERS_ON_GUARDED_TABLES]
+      .filter((t) => !dropped.has(t.name))
+      .map((t) => `${t.table}.${t.name}`)
+      .sort();
     const live = triggers
       .filter((r) => r.schema === "public" && GUARDED_TABLES.includes(r.table))
       .map((r) => `${r.table}.${r.name}`)
@@ -150,16 +173,19 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
   });
 
   it("every guard trigger executes exactly public.<function>() (tgfoid = 'public.<fn>()'::regprocedure)", async () => {
+    // Phase 16f: the ones a later migration dropped are checked for
+    // absence above, not for a function they no longer run.
+    const live = GUARD_TRIGGERS.filter((t) => !dropped.has(t.name));
     const rows = await db.$queryRawUnsafe<Array<{ name: string; table: string; same: boolean | null }>>(
       `SELECT g.name, g.tbl AS "table", (t.tgfoid = to_regprocedure('public.' || g.fn || '()')) AS same
          FROM unnest($1::text[], $2::text[], $3::text[]) AS g(name, tbl, fn)
          LEFT JOIN pg_trigger t ON t.tgname = g.name AND NOT t.tgisinternal
               AND t.tgrelid = to_regclass(format('public.%I', g.tbl))`,
-      GUARD_TRIGGERS.map((t) => t.name),
-      GUARD_TRIGGERS.map((t) => t.table),
-      GUARD_TRIGGERS.map((t) => t.fn),
+      live.map((t) => t.name),
+      live.map((t) => t.table),
+      live.map((t) => t.fn),
     );
-    expect(rows).toHaveLength(GUARD_TRIGGERS.length);
+    expect(rows).toHaveLength(live.length);
     expect(rows.filter((r) => r.same !== true).map((r) => `${r.table}.${r.name}`)).toEqual([]);
   });
 
@@ -180,9 +206,9 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
          JOIN pg_namespace n ON n.oid = p.pronamespace
          JOIN pg_language l ON l.oid = p.prolang
         WHERE n.nspname = 'public' AND p.proname = ANY($1::text[])`,
-      [...GUARD_FUNCTIONS],
+      [...GUARD_FUNCTIONS.filter((fn) => !dropped.has(fn))],
     );
-    for (const fn of GUARD_FUNCTIONS) {
+    for (const fn of GUARD_FUNCTIONS.filter((fn) => !dropped.has(fn))) {
       const found = rows.filter((r) => r.name === fn);
       expect(found, `${fn}: ${found.length} definitions`).toHaveLength(1);
       expect(found[0], fn).toMatchObject({ lang: "plpgsql", args: 0 });

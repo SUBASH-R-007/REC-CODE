@@ -1,6 +1,11 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { acceptsLanguage, questionLanguages, type AttemptLayout } from "@recx/shared";
+import {
+  acceptsLanguage,
+  ANSWER_LANGUAGE_KEY,
+  questionLanguages,
+  type AttemptLayout,
+} from "@recx/shared";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { enqueueJudge } from "@/lib/judge/queue";
@@ -120,6 +125,15 @@ export async function submitAttempt(
     // Phase 13c: a question may narrow the paper, so each answer is
     // judged against ITS OWN question's frozen list.
     const question = layout.questions.find((q) => q.questionId === questionId);
+    /**
+     * Phase 16f. An output-only question accepts exactly `answer1` and
+     * nothing else — not because the paper narrowed it, but because there
+     * is no program to write. Both directions matter: a toolchain key on
+     * an ANSWER question is refused, and `answer1` on a CODE question is
+     * refused, because either would mean the client and the frozen layout
+     * disagree about what was asked.
+     */
+    if (question?.kind === "ANSWER") return [ANSWER_LANGUAGE_KEY];
     return questionLanguages({ question: question?.languages, paper: paperLanguages });
   };
   const refused = answers.find(

@@ -124,17 +124,25 @@ describe("not sat in an assessment yet, and not quietly (Phase 12p)", () => {
   });
 
   it("every kind the exam engine cannot sit is refused, not just this one", () => {
-    // The four rules read the same on purpose: one sentence per kind, in the
-    // one place a person is choosing the question.
+    /**
+     * Three now, not four: Phase 16f lifted output-only, which a sitting
+     * CAN hold since the layout freezes a question kind and the view, the
+     * Run route and the submit route each read it. The remaining three
+     * still read the same on purpose — one sentence per kind, in the one
+     * place a person is choosing the question — and each is lifted the
+     * same way, by building the surface it names.
+     */
     const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
     for (const sentence of [
       "An interactive problem is not sat in an assessment yet",
       "A debugging problem is not sat in an assessment yet",
-      "An output-only problem is not sat in an assessment yet",
       "A SQL problem is not sat in an assessment yet",
     ]) {
-      expect(action, "the four pin refusals are one family").toContain(sentence);
+      expect(action, "the pin refusals are one family").toContain(sentence);
     }
+    expect(action, "output-only was lifted in Phase 16f").not.toContain(
+      "An output-only problem is not sat in an assessment yet",
+    );
   });
 });
 describe("the catalogue names the kind, in the shared words (Phase 12p)", () => {

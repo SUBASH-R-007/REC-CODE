@@ -284,17 +284,20 @@ export async function addAssessmentProblem(
     }
 
     /**
-     * Phase 12n. The practice workspace is the only surface that knows an
-     * output-only problem: the answer box, the one language, the data
-     * without the expected answer, no Run. A sitting builds its own editor
-     * and submits every answer in one language, so the pin is refused here
-     * and in the database (AssessmentProblem_no_output_only).
+     * Phase 16f: an output-only problem IS pinnable now, and the refusal
+     * that used to be here is gone with its trigger.
+     *
+     * What changed is that a sitting stopped giving every question the
+     * same code editor. `LayoutQuestion.kind` is frozen as `ANSWER` when
+     * the paper is laid out, the exam view renders a box with no language
+     * picker and no Run, the Run route refuses one, and the submit route
+     * accepts `answer1` for an ANSWER question and only for one. The
+     * submission is created exactly as every other is, so marking and
+     * rejudging needed no special case.
+     *
+     * The three other kinds are still refused below, each for its own
+     * reason.
      */
-    if (problem.liveVersion.ioMode === "OUTPUT_ONLY") {
-      throw new ValidationError(
-        "An output-only problem is not sat in an assessment yet: a sitting gives every question the same code editor, and this one wants the answer itself. Put it in a contest or leave it in practice.",
-      );
-    }
 
     /**
      * Phase 12p. The fourth rule of this shape, and the kind that was

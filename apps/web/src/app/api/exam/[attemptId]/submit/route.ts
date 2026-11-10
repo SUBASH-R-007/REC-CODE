@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { LANGUAGE_CATALOG, LANGUAGE_NOT_ACCEPTED_MESSAGE, SNAPSHOT_MAX_BYTES } from "@recx/shared";
+import { ANSWER_LANGUAGE_KEY, LANGUAGE_CATALOG, LANGUAGE_NOT_ACCEPTED_MESSAGE, SNAPSHOT_MAX_BYTES } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
@@ -36,7 +36,16 @@ function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: noStore });
 }
 
-const LANGUAGE_IDS = Object.keys(LANGUAGE_CATALOG) as [string, ...string[]];
+/**
+ * The keys an answer may carry.
+ *
+ * The eleven toolchains, plus `answer1` since Phase 16f — which is NOT a
+ * toolchain and is accepted here only so that an output-only question can
+ * be handed in. Whether this particular question may use it is decided by
+ * `submitAttempt` against the frozen layout, not by this enum: a key that
+ * parses is not a key this question accepts.
+ */
+const LANGUAGE_IDS = [ANSWER_LANGUAGE_KEY, ...Object.keys(LANGUAGE_CATALOG)] as [string, ...string[]];
 
 const bodySchema = z
   .object({

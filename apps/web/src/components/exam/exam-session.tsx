@@ -10,6 +10,7 @@ import {
   isNoiseFocusLoss,
   paletteCounts,
   type ExamHeartbeatResponse,
+  type ExamQuestionKind,
   type InvigilatorMessage,
   type ProctorEventBatchResponse,
   type QuestionProgress,
@@ -142,6 +143,12 @@ export interface ExamQuestionView {
    * one.
    */
   readonly languages: readonly ExamLanguageView[];
+  /**
+   * Phase 16f. `ANSWER` for an output-only question: the submission IS the
+   * answer, so this question gets a box rather than an editor, no language
+   * picker and no Run. Frozen in the layout at start, read here.
+   */
+  readonly kind: ExamQuestionKind;
 }
 
 export function ExamSession({
@@ -1244,7 +1251,16 @@ export function ExamSession({
           if (item?.kind === "code") void persist("TICK");
           goTo(Math.min(current + 1, items.length - 1));
         }}
-        onRun={item?.kind === "code" && question && question.samples.length > 0 ? () => void runSamples() : undefined}
+        /*
+          Phase 16f: and not on an output-only question, which has no
+          program to run and whose Run would queue a job no node could
+          serve. The route refuses it too.
+        */
+        onRun={
+          item?.kind === "code" && question && question.kind !== "ANSWER" && question.samples.length > 0
+            ? () => void runSamples()
+            : undefined
+        }
         running={running}
         onSubmit={() => void submit()}
         answered={counts.answered}

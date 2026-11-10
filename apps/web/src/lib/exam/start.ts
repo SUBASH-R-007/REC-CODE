@@ -259,7 +259,16 @@ export async function startOrResumeAttempt(args: {
       // `allowedLanguages` per question (Phase 13c): the narrowing a
       // question may put on the paper's own set.
       problems: {
-        select: { id: true, problemVersionId: true, position: true, points: true, allowedLanguages: true },
+        select: {
+          id: true,
+          problemVersionId: true,
+          position: true,
+          points: true,
+          allowedLanguages: true,
+          // Phase 16f: an OUTPUT_ONLY question is answered in a box, not
+          // written in a language, and the layout freezes which it is.
+          problemVersion: { select: { ioMode: true } },
+        },
       },
       /**
        * The paper's MCQs (Phase 12r). `options` comes back only to be
@@ -504,8 +513,15 @@ export async function startOrResumeAttempt(args: {
      */
     questions: assessment.problems.map((problem) => ({
       ...problem,
+      /**
+       * Phase 16f. An output-only question has no language to choose: the
+       * submission IS the answer. Its narrowing is therefore ignored —
+       * there is nothing for it to narrow — and the kind is what the
+       * surfaces read.
+       */
+      kind: problem.problemVersion.ioMode === "OUTPUT_ONLY" ? ("ANSWER" as const) : ("CODE" as const),
       languages:
-        problem.allowedLanguages.length === 0
+        problem.problemVersion.ioMode === "OUTPUT_ONLY" || problem.allowedLanguages.length === 0
           ? undefined
           : questionLanguages({ question: problem.allowedLanguages, paper: accepted }),
     })),

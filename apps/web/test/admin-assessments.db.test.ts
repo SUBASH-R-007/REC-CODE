@@ -73,6 +73,8 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
    */
   let publishedProblemSlug = "";
   let problemId = "";
+  /** Problems the kind tests make, so the teardown can take them away. */
+  const kindProblemIds: string[] = [];
 
   const OPENS = new Date(Date.now() + 3_600_000).toISOString().slice(0, 16);
   const CLOSES = new Date(Date.now() + 7_200_000).toISOString().slice(0, 16);
@@ -169,9 +171,9 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
      * there are only nine thousand display codes (see
      * `support/display-code.ts`).
      */
-    if (problemId) {
+    if (problemId || kindProblemIds.length > 0) {
       const { cleanup } = await import("./support/authoring-fixtures");
-      await cleanup(db, { problemIds: [problemId], userIds: [], blobShas: [] });
+      await cleanup(db, { problemIds: [problemId, ...kindProblemIds].filter(Boolean), userIds: [], blobShas: [] });
     }
   }, 60_000);
 
@@ -425,4 +427,79 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
       if (!late.ok) expect(late.error).toMatch(/question set is fixed/i);
     }, 120_000);
   });
+
+  /**
+   * Phase 16f. The refusal that kept output-only problems out of a paper
+   * is gone, and the three beside it are not. Pinned here through the real
+   * action, so the trigger and the sentence are both exercised.
+   */
+  describe("the kinds a paper may hold", () => {
+    /** A fresh DRAFT paper to pin into; the MCQ block has its own copy. */
+    async function draft(): Promise<string> {
+      const made = await actions.createAssessment(base({ proctorMode: "ADVISORY" }));
+      expect(made.ok, made.ok ? "" : made.error).toBe(true);
+      return made.ok ? made.data.id : "";
+    }
+
+    async function problemWith(suffix: string, over: Record<string, unknown>): Promise<string> {
+      const problem = await db.problem.create({
+        data: {
+          slug: `${tag}-${suffix}`,
+          displayCode: await freeDisplayCode(db),
+          title: `A ${suffix} problem`,
+          difficulty: "EASY",
+          status: "PUBLISHED",
+        },
+        select: { id: true, slug: true },
+      });
+      kindProblemIds.push(problem.id);
+      const version = await db.problemVersion.create({
+        data: {
+          problemId: problem.id,
+          revision: 1,
+          status: "PUBLISHED",
+          title: `A ${suffix} problem`,
+          difficulty: "EASY",
+          statementMd: "Work it out.",
+          ioMode: "STDIN",
+          compareMode: "TOKEN",
+          scoringMode: "ICPC",
+          stopOnFirstFailure: true,
+          timeLimitMs: 2000,
+          ...over,
+        } as never,
+        select: { id: true },
+      });
+      await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, version.id);
+      await db.problem.update({ where: { id: problem.id }, data: { liveVersionId: version.id } });
+      return problem.slug;
+    }
+
+    it("takes an output-only problem, which it refused until Phase 16f", async () => {
+      const slug = await problemWith("answerkind", { ioMode: "OUTPUT_ONLY" });
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentProblem({ assessmentId, problemSlug: slug, position: 20, points: 10 });
+      expect(added.ok, added.ok ? "" : added.error).toBe(true);
+    }, 90_000);
+
+    /**
+     * The interactive and SQL refusals are NOT re-asserted here. Both need
+     * a conforming version row — `ProblemVersion_interactive_mode_mirror`
+     * wants an interactor and a testlib id, `ProblemVersion_sql_mode_mirror`
+     * wants `compareMode = ROWS` and the two SQL columns — so a fixture for
+     * either would mostly be testing the fixture. Their triggers are live-
+     * checked by `packages/db/test/guard-state.db.test.ts` and their
+     * sentences by `tests/repo/sql-student-surface.test.ts`, which also
+     * asserts that output-only's is gone.
+     */
+    it("still refuses a debugging one", async () => {
+      const slug = await problemWith("debugkind", { maxEditedLines: 3 });
+      const assessmentId = await draft();
+      const added = await actions.addAssessmentProblem({ assessmentId, problemSlug: slug, position: 22, points: 10 });
+      expect(added.ok).toBe(false);
+      if (!added.ok) expect(added.error).toMatch(/debugging problem is not sat in an assessment/i);
+    }, 90_000);
+
+  });
+
 });

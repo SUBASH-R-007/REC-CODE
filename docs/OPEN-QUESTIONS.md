@@ -4363,3 +4363,57 @@ The column stays (SPEC's field list has it) and
 decides to collect guardian contacts, that is a phase with its own consent
 flow, its own retention rule and its own migration dropping the CHECK — not
 a flag flip.
+
+## An output-only problem can be sat in an assessment (Phase 16f)
+
+**The refusal that went.** Phase 12n: *"the practice workspace is the only
+surface that knows an output-only problem: the answer box, the one language,
+the data without the expected answer, no Run. A sitting builds its own editor
+and submits every answer in one language."* Every clause of that was true
+when it was written, and the refusal lived in three places — a trigger, the
+guard catalogue, and the sentence an admin read.
+
+Phase 12p then named what would lift all four kinds: *"a language per
+question, through the layout, the snapshot route, the submit route and the
+marking."* Phase 13a did that, and `docs/OPEN-QUESTIONS.md` recorded that the
+four refusals were no longer blocked on the engine but on **one surface
+each**. Output-only's is the smallest: an answer box.
+
+**A kind, not a language.** `answer1` is a `SubmitLanguageKey` and
+deliberately not in `LANGUAGE_CATALOG`, so that nothing treats it as a
+toolchain. Widening `LanguageKey` to carry it would spread "this might not be
+a program" through every route that validates one. Instead
+`LayoutQuestion.kind` is `ANSWER` for one of these — written only when it is
+not CODE, so a layout is byte-identical to one from before the field for
+every ordinary question — and four places read it:
+
+  * the paper freezes it at start from the version's own `ioMode`, so a
+    problem republished mid-sitting cannot turn a code editor into an
+    answer box under somebody part way through;
+  * the view renders a textarea with the practice workspace's own copy
+    (`ANSWER_NOTICES`), no language picker, no starter;
+  * `/api/exam/[attemptId]/run` refuses one with a sentence — there is no
+    program, and a queued job no node could serve is worse than a refusal;
+  * `submitAttempt` accepts `answer1` for an ANSWER question **and only for
+    one**. A toolchain key on an ANSWER question and `answer1` on a CODE
+    question are both refused, because either means the client and the
+    frozen layout disagree about what was asked.
+
+Everything downstream needed nothing. The submission is created exactly as
+every other is — against the pinned version and the `answer1`
+`LanguageConfig` row — so marking, rejudging and the result pages have no
+special case.
+
+**Dropping a guard, written down.** `tests/repo` treats `DROP TRIGGER` on a
+catalogued guard as a violation, which is right. `DROPPED_GUARDS` in the
+guard catalogue now names the guard, the migration that created it, the
+migration that dropped it and why; the fence allows the drop in that one
+migration and nowhere else, the creating migration is still held to having
+created it properly, and `guard-state.db.test.ts` checks the live database
+for its ABSENCE. A guard removed is now as deliberate as a guard added.
+
+**The other three stay.** SQL needs its lane and a result set; debugging
+needs an edit budget a sitting can refuse without destroying work a candidate
+cannot redo; interactive needs a conversation surface, and SPEC §11 keeps it
+out of high-stakes papers until it has run cleanly through two practice
+contests.

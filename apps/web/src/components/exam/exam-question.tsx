@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { EDITOR_KEYMAP_NOTICES } from "@recx/shared";
+import { ANSWER_LABELS, ANSWER_NOTICES, EDITOR_KEYMAP_NOTICES } from "@recx/shared";
 import { CodeEditor } from "@/components/editor/code-editor";
 import type { EditorPrefs } from "@/components/editor/editor-types";
 import type { ExamLanguageView, ExamQuestionView } from "@/components/exam/exam-session";
@@ -58,6 +58,7 @@ export function ExamQuestion({
 }) {
   const noteId = useId();
   const languageId = useId();
+  const answerId = useId();
   const active = languages.find((entry) => entry.key === language) ?? languages[0];
 
   return (
@@ -133,6 +134,41 @@ export function ExamQuestion({
           * judged by" — and under exam conditions there is no /judge page
           * to go and read.
           */}
+        {/*
+          Phase 16f. An output-only question in a sitting: the submission
+          IS the answer, so there is no language to choose, nothing to run
+          and no editor to open. The copy is the practice workspace's own
+          (`ANSWER_NOTICES`), because a candidate meeting this kind for the
+          first time under exam conditions should read the same sentences
+          they read in practice.
+        */}
+        {question.kind === "ANSWER" ? (
+          <>
+            <p className="border-b border-border px-4 py-2 text-xs text-text-secondary">
+              {ANSWER_NOTICES.whatToSubmit}
+            </p>
+            <p id={noteId} className="border-b border-border px-4 py-2 text-xs text-text-secondary">
+              {ANSWER_NOTICES.noProgram} {ANSWER_NOTICES.whitespace}
+            </p>
+            <div className="min-h-0 flex-1 p-4">
+              <label htmlFor={answerId} className="text-xs font-medium text-text">
+                {ANSWER_LABELS.answer}
+              </label>
+              <textarea
+                id={answerId}
+                value={source}
+                onChange={(event) => onSourceChange(event.target.value)}
+                onPaste={(event) =>
+                  onInsertion({ chars: event.clipboardData.getData("text").length, origin: "paste" })
+                }
+                aria-describedby={noteId}
+                spellCheck={false}
+                className="mt-2 h-[calc(100%-2rem)] min-h-40 w-full resize-none rounded-md border border-border bg-surface p-3 font-mono text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              />
+            </div>
+          </>
+        ) : (
+          <>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2">
           {languages.length > 1 ? (
             <>
@@ -182,6 +218,8 @@ export function ExamQuestion({
             className="h-full"
           />
         </div>
+          </>
+        )}
       </section>
     </main>
   );

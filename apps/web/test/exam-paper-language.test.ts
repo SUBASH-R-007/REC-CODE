@@ -74,13 +74,18 @@ describe("the language a sitting sends to its routes", () => {
     // because neither reads like the other.
     const query = read("src/server/queries/exam.ts");
     // The key a question OPENS in — the first language it accepts, which
-    // is the paper's default unless the question narrows past it (13c).
-    expect(query).toContain("languageKey: acceptedFor(question.questionId)[0] ?? defaultLanguage");
+    // is the paper's default unless the question narrows past it (13c),
+    // and `answer1` for an output-only question, which accepts nothing
+    // else (16f). Still a KEY either way, which is the point here.
+    expect(query).toContain("acceptedFor(question.questionId)[0] ?? defaultLanguage");
+    expect(query).toMatch(/languageKey:[\s\S]{0,80}ANSWER_LANGUAGE_KEY/);
     // Phase 13a: the modes travel inside the accepted-language views,
     // resolved on the server, each field named for what it carries.
     expect(query).toContain("paperLanguageViews(accepted)");
-    // Phase 13c: and the per-question list the pane actually renders.
+    // Phase 13c: and the per-question list the pane actually renders —
+    // empty for an output-only question, which has no language to pick.
     expect(query).toContain("paperLanguageViews(acceptedFor(");
+    expect(query).toMatch(/kind === "ANSWER" \? \[\]/);
   });
 
   it("sends the KEY to every route, and the mode to none of them", () => {

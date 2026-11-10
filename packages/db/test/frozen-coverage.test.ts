@@ -5,6 +5,7 @@ import { FROZEN_CHILD_MODELS, FROZEN_EXEMPT_MODELS } from "../src/frozen";
 import { FACTORIES } from "./support/frozen-factories";
 import {
   CHECK_CATALOG_THROUGH,
+  DROPPED_GUARDS,
   GUARD_FUNCTIONS,
   GUARD_TRIGGERS,
   GUARDED_TABLES,
@@ -249,15 +250,26 @@ function uncataloguedChecks(migs: readonly Migration[]): string[] {
 // ── Statements that remove or switch off a guard ──────────────────────────
 
 /** Statements in one migration that drop, alter, disable or bypass a guard. */
-function guardViolations(sql: string): string[] {
+function guardViolations(sql: string, migration?: string): string[] {
   const found: string[] = [];
+  /**
+   * A guard this migration is RECORDED as dropping (Phase 16f). Dropping
+   * one is a violation unless `DROPPED_GUARDS` names both the guard and
+   * this migration — which is what makes removing a guard a decision
+   * somebody wrote down rather than a line in a diff.
+   */
+  const allowedDrop = new Set(
+    DROPPED_GUARDS.filter((g) => migration !== undefined && g.droppedBy === migration).map((g) => g.name),
+  );
   const statementMentions = (verb: string, name: string) =>
     new RegExp(String.raw`${verb}\b[^;]*?(?:^|[\s,."(])"?${escape(name)}"?(?![\w$])`, "im");
   for (const fn of GUARD_FUNCTIONS) {
+    if (allowedDrop.has(fn)) continue;
     if (statementMentions(String.raw`DROP\s+FUNCTION`, fn).test(sql)) found.push(`DROP FUNCTION ${fn}`);
     if (statementMentions(String.raw`ALTER\s+FUNCTION`, fn).test(sql)) found.push(`ALTER FUNCTION ${fn}`);
   }
   for (const { name } of GUARD_TRIGGERS) {
+    if (allowedDrop.has(name)) continue;
     if (statementMentions(String.raw`DROP\s+TRIGGER`, name).test(sql)) found.push(`DROP TRIGGER ${name}`);
     if (statementMentions(String.raw`ALTER\s+TRIGGER`, name).test(sql)) found.push(`ALTER TRIGGER ${name}`);
     if (new RegExp(String.raw`DISABLE\s+TRIGGER\s+"?${escape(name)}"?(?![\w$])`, "im").test(sql)) found.push(`DISABLE TRIGGER ${name}`);
@@ -817,8 +829,10 @@ describe("database guards (functions, triggers, CHECKs, partial unique indexes) 
     );
   });
 
-  it.each(migrations.map((m) => [m.dir, m.sql] as const))("%s drops, alters, disables or bypasses no guard", (_dir, sql) => {
-    expect(guardViolations(sql)).toEqual([]);
+  it.each(migrations.map((m) => [m.dir, m.sql] as const))("%s drops, alters, disables or bypasses no guard", (dir, sql) => {
+    // The migration name is passed so a drop RECORDED in DROPPED_GUARDS is
+    // allowed in the one migration that records it, and nowhere else.
+    expect(guardViolations(sql, dir)).toEqual([]);
   });
 
   it.each(migrations.map((m) => [m.dir, m.sql] as const))("%s sets no search_path", (_dir, sql) => {

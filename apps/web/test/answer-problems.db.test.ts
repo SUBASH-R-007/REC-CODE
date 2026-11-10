@@ -242,8 +242,15 @@ describe.skipIf(!ENABLED)("output-only problems against recx_test", () => {
     });
   });
 
-  describe("not sat in an assessment yet", () => {
-    it("refuses the pin, by trigger", async () => {
+  /**
+   * Phase 16f. This block used to assert the opposite: the pin was refused
+   * by `AssessmentProblem_no_output_only`, because a sitting gave every
+   * question the same code editor. The layout freezes a question KIND now,
+   * and the view, the Run route and the submit route each read it — so the
+   * trigger is dropped (recorded in `DROPPED_GUARDS`) and the pin is taken.
+   */
+  describe("sat in an assessment, since Phase 16f", () => {
+    it("takes the pin", async () => {
       const v = await version({ status: "PUBLISHED" });
       await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, v.id);
       const user = await db.user.create({
@@ -272,11 +279,12 @@ describe.skipIf(!ENABLED)("output-only problems against recx_test", () => {
         select: { id: true },
       });
       try {
-        await expect(
-          db.assessmentProblem.create({
-            data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
-          }),
-        ).rejects.toThrow(/not sat in an assessment yet/);
+        const pinned = await db.assessmentProblem.create({
+          data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
+          select: { id: true },
+        });
+        expect(pinned.id).toBeTruthy();
+        await db.$executeRawUnsafe(`DELETE FROM "AssessmentProblem" WHERE id = $1`, pinned.id);
       } finally {
         await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, assessment.id);
         await db.user.deleteMany({ where: { id: user.id } });

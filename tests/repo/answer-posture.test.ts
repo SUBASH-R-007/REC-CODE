@@ -180,26 +180,58 @@ describe("one visible case, and nothing to run", () => {
   });
 });
 
-describe("not sat in an assessment yet, and not quietly", () => {
-  it("a trigger refuses the pin, because a sitting has one editor for every question", () => {
+/**
+ * Phase 16f lifted the refusal this block used to assert. What replaces it
+ * is not "nothing": a kind frozen into the layout, and three surfaces that
+ * read it. The fence follows the rule rather than the sentence, because a
+ * lifted refusal with no surface behind it is exactly the regression the
+ * original one existed to prevent.
+ */
+describe("sat in an assessment, and only because the sitting knows the kind", () => {
+  it("the refusal and its trigger are recorded as dropped, not quietly deleted", () => {
     const migration = readRepoFile(
-      "packages/db/prisma/migrations/20261101161000_phase12n_assessment_rule/migration.sql",
+      "packages/db/prisma/migrations/20261110120000_phase16f_output_only_assessments/migration.sql",
     );
     expect(migration).toContain("AssessmentProblem_no_output_only");
-    expect(migration).toContain("not sat in an assessment yet");
-    expect(migration).toMatch(/CREATE TRIGGER[\s\S]*ON "public"\."AssessmentProblem"/);
-    // A contest links to the ordinary workspace, so it needs no rule.
-    expect(migration).not.toMatch(/ON "public"\."ContestProblem"/);
-  });
-
-  it("the action says so in a sentence first", () => {
-    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
-    expect(action).toContain("An output-only problem is not sat in an assessment yet");
-  });
-
-  it("the trigger and its function are catalogued, so lifting the rule fails the build", () => {
+    expect(migration).toMatch(/DROP TRIGGER/);
     const catalog = readRepoFile("packages/db/test/support/guard-catalog.ts");
+    // Still catalogued (the creating migration is held to it) AND listed as
+    // dropped, which is what makes removing a guard a written decision.
     expect(catalog).toContain("AssessmentProblem_no_output_only");
     expect(catalog).toContain("recx_refuse_output_only_assessment_problem");
+    expect(catalog).toContain("DROPPED_GUARDS");
+    expect(catalog).toContain("20261110120000_phase16f_output_only_assessments");
+  });
+
+  it("the paper freezes the kind when it is laid out, from the version's own ioMode", () => {
+    const start = readRepoFile("apps/web/src/lib/exam/start.ts");
+    expect(start).toMatch(/ioMode === "OUTPUT_ONLY"[\s\S]{0,80}"ANSWER"/);
+  });
+
+  it("the candidate gets a box, not an editor, and no language picker", () => {
+    const question = readRepoFile("apps/web/src/components/exam/exam-question.tsx");
+    expect(question).toContain('question.kind === "ANSWER"');
+    expect(question).toContain("<textarea");
+    expect(question).toContain("ANSWER_NOTICES");
+  });
+
+  it("Run is refused on one, at the route and not only in the UI", () => {
+    const run = readRepoFile("apps/web/src/app/api/exam/[attemptId]/run/route.ts");
+    expect(run).toContain('question.kind === "ANSWER"');
+    expect(run).toContain("nothing to run");
+  });
+
+  it("submit accepts answer1 for an ANSWER question and only for one", () => {
+    const submit = readRepoFile("apps/web/src/lib/exam/submit.ts");
+    expect(submit).toMatch(/question\?\.kind === "ANSWER"[\s\S]{0,60}ANSWER_LANGUAGE_KEY/);
+  });
+
+  it("the other three kinds are still refused, each with its own sentence", () => {
+    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
+    expect(action).toContain("An interactive problem is not sat in an assessment yet");
+    expect(action).toContain("A debugging problem is not sat in an assessment yet");
+    expect(action).toContain("A SQL problem is not sat in an assessment yet");
+    // And this one is NOT, which is the change.
+    expect(action).not.toContain("An output-only problem is not sat in an assessment yet");
   });
 });
