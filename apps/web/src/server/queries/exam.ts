@@ -1,6 +1,14 @@
 import "server-only";
 import { cache } from "react";
-import { ANSWER_LANGUAGE_KEY, paperLanguageViews, questionLanguages, type AttemptLayout, type PaperLanguageView } from "@recx/shared";
+import {
+  ANSWER_LANGUAGE_KEY,
+  SQL_LANGUAGE_KEY,
+  SQL_LANGUAGE_VIEW,
+  paperLanguageViews,
+  questionLanguages,
+  type AttemptLayout,
+  type PaperLanguageView,
+} from "@recx/shared";
 import { db } from "@/lib/db";
 import { languagesOfSitting } from "@/lib/exam/language";
 import { renderMarkdown } from "@/lib/markdown";
@@ -142,21 +150,35 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
       starters:
         kind === "ANSWER"
           ? {}
-          : Object.fromEntries(acceptedFor(question.questionId).map((key) => [key, starters.get(key) ?? ""])),
+          : // Phase 16o: a SQL question's one starter, which an author
+            // writes as a comment rather than as a program.
+            kind === "SQL"
+            ? { [SQL_LANGUAGE_KEY]: starters.get(SQL_LANGUAGE_KEY) ?? "" }
+            : Object.fromEntries(acceptedFor(question.questionId).map((key) => [key, starters.get(key) ?? ""])),
       /**
        * The languages THIS question accepts (Phase 13c). Usually the
        * paper's own set; fewer when the question narrows it.
        */
       // An ANSWER question has no language to choose, so the picker has
       // nothing to render and the routes accept exactly `answer1`.
-      languages: kind === "ANSWER" ? [] : paperLanguageViews(acceptedFor(question.questionId)),
+      //
+      // A SQL question has exactly ONE (Phase 16o), and it is sent rather
+      // than left empty: the pane labels the language under the editor and
+      // takes the editor's grammar from the same entry, so an empty list
+      // would mean a query highlighted as plain text.
+      languages: kind === "ANSWER" ? [] : kind === "SQL" ? [SQL_LANGUAGE_VIEW] : paperLanguageViews(acceptedFor(question.questionId)),
       // Named for what it is: the key the routes validate against, which
       // is the language this question OPENS in. Handing the client the
       // editor's highlighting mode under the name `language` is what
       // stopped every sitting saving, running and submitting (12r.2).
       // The language this question OPENS in: the first it accepts, which
       // is the paper's default unless the question narrows past it.
-      languageKey: kind === "ANSWER" ? ANSWER_LANGUAGE_KEY : (acceptedFor(question.questionId)[0] ?? defaultLanguage),
+      languageKey:
+        kind === "ANSWER"
+          ? ANSWER_LANGUAGE_KEY
+          : kind === "SQL"
+            ? SQL_LANGUAGE_KEY
+            : (acceptedFor(question.questionId)[0] ?? defaultLanguage),
       kind,
       // Phase 16g: from the FROZEN layout, like the kind beside it.
       ...(typeof question.editBudget === "number" ? { editBudget: question.editBudget } : {}),

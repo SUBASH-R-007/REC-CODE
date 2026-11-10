@@ -28,7 +28,22 @@ describe("the environment it accepts", () => {
     expect(config.RECX_SQL_STUDENT_URL).toContain("student");
     // The trailing slash is trimmed, as the isolate worker's is.
     expect(config.RECX_APP_URL).toBe("http://127.0.0.1:3000");
-    expect(config.RECX_QUEUES).toEqual(["judge-sql-practice", "judge-sql-run"]);
+    /**
+     * EVERY SQL lane, since Phase 16o. It was practice and run only, because
+     * `lanes.ts` barred a SQL node from ASSESSMENT and CONTEST by engine and
+     * a node subscribed to a queue it could never claim from would burn an
+     * attempt on every refusal. Phase 16n gave the engine a calibration
+     * benchmark and lifted that bar; Phase 16o made a paper able to hold a
+     * query. A default that still excluded the two would leave an exam
+     * submission queued with nobody listening.
+     */
+    expect(config.RECX_QUEUES).toEqual([
+      "judge-sql-assessment",
+      "judge-sql-contest",
+      "judge-sql-practice",
+      "judge-sql-rejudge",
+      "judge-sql-run",
+    ]);
   });
 
   it("only accepts SQL queues", () => {

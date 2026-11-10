@@ -2252,6 +2252,179 @@ behind — it runs unattended every six hours.
 
 ---
 
+### 2.28 The pre-launch interview collection (Phase 16q)
+
+SPEC §11 calls the moderated `InterviewExperience` archive load-bearing
+rather than a nicety — the only legal and genuinely REC-specific source of
+company tags and "asked at" frequency — and asks for a one-time structured
+collection from the two most recent graduated batches before launch.
+
+`docs/ROADMAP.md` §1.7 said "the software is ready for it". **It was not.**
+`InterviewSource.BOOTSTRAP` existed, the CHECK
+`InterviewExperience_author_check` allowed a row with no author precisely so
+a bootstrap row could have none, a query knew how to label one, and a
+database test inserted one by hand — and **nothing in the product wrote
+one.** The archive's only write path is the student's own form, which
+hardcodes `source: "STUDENT"`. The placement cell could run the survey and
+then had nowhere to put it.
+
+**The file.** `apps/web/content/interviews/template.csv` is the header, and
+nothing else: an example row in a template is a fabricated interview one
+copy-paste away from the archive. The columns, in order:
+
+| Column | Required | What it takes |
+|---|---|---|
+| `companyName` | yes | free text, 2–80 characters. The only free-text field, as on the student's form |
+| `role` | yes | free text, 2–80 characters |
+| `mode` | yes | `ON_CAMPUS`, `OFF_CAMPUS` or `REFERRAL` |
+| `heldYear` | yes | 2020 to this campus year |
+| `heldMonth` | yes | 1–12. Month precision, because a day is identifying |
+| `rounds` | yes | 1–12 |
+| `longestRoundMinutes` | no | 5–600, or empty for "we did not ask" |
+| `outcome` | yes | `OFFER`, `NO_OFFER`, `WITHDREW` or `WAITING` |
+| `roundKinds` | yes | pipe-separated: `ONLINE_ASSESSMENT`, `TECHNICAL`, `SYSTEM_DESIGN`, `MANAGERIAL`, `HR` |
+| `topics` | no | pipe-separated, from the fourteen in `TOPICS` |
+| `preparation` | no | pipe-separated, from `INTERVIEW_PREPARATION` |
+| `problemSlugs` | no | pipe-separated catalogue ADDRESSES (not ids), published problems only |
+
+Every closed list is read case-insensitively with spaces for underscores, so
+a survey answer of "On campus" imports as `ON_CAMPUS`. Lists are
+**pipe**-separated and never comma-separated: a comma inside a CSV field is
+a quoting problem nobody should have to think about while typing sixty rows.
+
+**Running it:**
+
+```bash
+cd apps/web && npx tsx --conditions=react-server scripts/import-experiences.ts content/interviews --as RECADMIN01 --dry-run
+```
+
+Drop `--dry-run` to write. Each row is its own transaction, so a bad row on
+line 180 never discards the 179 before it, and every problem with a row is
+printed rather than the first — one pass over the file fixes it. Re-running
+is safe: a row already in the archive is reported as a duplicate, keyed on
+company, role, month and outcome, so a second pass of the same survey with
+better notes does not double a company tag.
+
+**Every row arrives PENDING.** §1.7's "done when" has two halves —
+collected, and *"the moderation queue has been worked through once"* — and
+an import that approved its own rows would quietly delete the second. Work
+the queue at `/mentor/experiences`; nothing in the importer can approve
+anything. Approving is also what writes a company tag
+(`applyCompanyTags`), so until a moderator has been through it the archive
+contributes no "asked at" frequency at all.
+
+**Why a script and not a page.** The bootstrap is one act, before launch, by
+a member of staff. An upload page would be a surface to keep, test, scan for
+accessibility and reason about in the capability matrix forever, for a job
+that happens once — and `AptitudeImport.via` already establishes
+`cli:<operator>` as this repository's answer to "a one-time import by
+somebody with a shell". The import is audited to the `--as` account, because
+a row with no author would otherwise be an account of an interview nobody in
+the system is answerable for.
+
+---
+
+### 2.29 A SQL question in an assessment (Phase 16o)
+
+`docs/ROADMAP.md` §2.1 held four kinds out of a paper. Output-only went in
+Phase 16f, debugging in 16g, and SQL is the third — the first one whose
+blocker was not a surface at all.
+
+**What the refusal said, and what each clause needed.** Phase 12p: *"a
+sitting chooses ONE language for the whole paper and the exam submit route
+only accepts a toolchain language, so a SQL question would be a C++ editor
+over a problem that wants a query"*. Phase 16h then found a clause 12p had
+missed: `SENSITIVE_LANES` barred a `postgres` node from ASSESSMENT and
+CONTEST **by engine**, so a pinned query would have queued a submission no
+node could claim.
+
+* the paper's single language — Phase 13a, a language per question;
+* the lane — **Phase 16n**, a calibration benchmark for the query engine,
+  which is what the bar was standing in for;
+* the kind — this phase.
+
+**What a candidate meets.** A query editor with one language and no picker,
+and the same three sentences they read in practice: the dialect, the single
+statement, and the read-only copy of the data (`SQL_NOTICES`, the same
+constants — a candidate meeting this kind for the first time under exam
+conditions should not be told something different from what they practised
+against). Run works, because a SQL question HAS sample datasets, unlike an
+output-only one; the exam console already lazy-loads the practice
+`ResultPanel`, which has drawn result sets since Phase 12k.
+
+**What the fleet needs.** A SQL judge, with a calibration it has reported
+in the last 6.5 hours, serving the ASSESSMENT queue. The node's default
+`RECX_QUEUES` now names every SQL lane; before this pair of phases it named
+practice and run only, because a node subscribed to a queue it could never
+claim from would burn an attempt on every refusal.
+
+**If a pinned query sits QUEUED,** read `/admin/judge`: a SQL node with
+*"Calibration: Not measured"* is refused the sensitive lanes, and that is
+the state to fix — not the pin.
+
+**One kind is still refused.** An interactive question needs a conversation
+surface, and SPEC §11 keeps it out of high-stakes assessments until it has
+run cleanly through two practice contests. That is a date, not code.
+
+---
+
+### 2.30 Letting Prometheus evaluate the real rules (Phase 16v)
+
+`docs/ROADMAP.md` §1.4 carries four open bullets, three of which need
+hardware. The fourth does not: *"`promtool test rules` passes in CI, but
+**Prometheus has never evaluated these rules against a live series**."*
+`scripts/ops/fire-alerts.ts` says the same thing from the other side —
+*"`reduce` mirrors each PromQL expression; it does not evaluate it. Nothing
+on this machine can."*
+
+What stood in the way was one file that cannot live in the repository,
+because it carries a bearer token. `scripts/dev/prom-local.mjs` generates
+it, outside the checkout, and points `rule_files` at
+`infra/monitoring/alerts.yml` **unmodified** — the real rules, the real
+expressions, the real `for:` durations:
+
+```bash
+node scripts/dev/prom-local.mjs --out "$HOME/recx-prom"
+```
+
+It prints the token's LENGTH and never the token.
+
+**Two things have to be running, and which metric lives where decides it.**
+
+| Metric | Published by | Needed for |
+|---|---|---|
+| `judge_verdict_total`, `auth_login_failures_total` | the web app, `/api/metrics` behind `METRICS_TOKEN` | `JudgeInternalErrorRate`, `FailedLoginBurst` |
+| `judge_queue_depth`, `judge_oldest_job_age_seconds`, `judge_worker_heartbeat_age_seconds` | the **scheduler**, on `METRICS_PORT` | `JudgeQueueBacklog`, `JudgeEngineBacklog`, `JudgeOldestJobStale`, `JudgeWorkerHeartbeatStale`, `SubmissionLatencyP95High` |
+
+`METRICS_PORT` is **0 (off) by default**, so a scheduler started without it
+publishes nothing and five of the nine rules have no series at all. Set it in
+`apps/scheduler/.env.local` before you start.
+
+Then run Prometheus beside the stack and read back what IT decided:
+
+```bash
+curl -s http://127.0.0.1:9090/api/v1/rules | jq -r '.data.groups[].rules[] | "\(.name) \(.state)"'
+```
+
+`inactive`, `pending` or `firing`, evaluated by Prometheus rather than
+mirrored in TypeScript. Producing a condition is what
+`scripts/ops/fire-alerts.ts` already does; a 1,000-job burst
+(`docs/CAPACITY.md`) produces `JudgeQueueBacklog` on its own.
+
+**Prometheus runs NATIVELY beside the stack, not in a container, and the
+reason is addressing.** Both listeners bind loopback, and on a WSL2 stack a
+container's `host.docker.internal` is the Windows host rather than the
+distro — so the container reaches nothing. Native needs no address at all.
+
+**NOT RUN on this machine.** Four of the nine rules read exporters
+(node_exporter, postgres_exporter) that a development laptop does not have,
+so they would stay `inactive` whatever happened — and the bullet is about a
+live Prometheus, which means fetching one. This phase removed the only part
+that was repository work; what is left is one download and one command, and
+§1.4 stays open on the other three bullets regardless.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -3180,3 +3353,24 @@ coordinator from actual runs — never in advance.
 | 16p | 2026-11-10 | What the sink does NOT prove, said rather than implied | NAMED. Nothing about a real relay: SPF, DKIM, a provider's rate limit, or whether the college's mail server accepts the envelope. 1.6 stays open on exactly that, and it is a credential and an afternoon rather than code. What it closed is the engineering half, which the entry did not know was open | Claude |
 | 16p | 2026-11-10 | A sink cannot keep the "never log a recipient" rule in the file, so it keeps it everywhere else | DELIBERATE. `apps/scheduler/src/mail.ts` holds the rule that no transport logs a recipient, and a sink's whole purpose is to show you the message -- so the `.eml` carries the address. What the sink PRINTS masks the local part, and it refuses an output directory inside the checkout, so a real address cannot be committed by accident | Claude |
 | 1.3+16l+16m+16n+16p | 2026-11-10 | Gate 7/7 on Linux for the five entries together | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. With `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1`: **5,406** web tests (201 files, none skipped), 1,446 repo fences, 1,770 shared, 297 db-package, 87 scheduler, and **276** isolate integration cases on real sandbox boxes. Windows the same plus the size budgets: 2,943 tests, every budget met, `/login` still served with no script at all. The SQL judge's new calibration suite ran against the real cluster separately (`RECX_SQL_TESTS=1`, **81 passed**): the benchmark through the sandbox, its checksum, its head-room, its repeatability inside the fleet's deviation, and no schema left behind | Claude |
+| 16q | 2026-11-10 | "The software is ready for it" was false: nothing in the product wrote a BOOTSTRAP row (`docs/ROADMAP.md` 1.7) | **FOUND AND BUILT.** `InterviewSource.BOOTSTRAP` existed, `InterviewExperience_author_check` allowed a row with no author precisely so a bootstrap row could have none, a query knew how to label one, and a db test inserted one by hand -- and the archive's only write path was the student's own form, which hardcodes `source: "STUDENT"`. The placement cell could run the survey and then had nowhere to put it. `scripts/import-experiences.ts`, `lib/interviews/bootstrap.ts` and `@recx/shared/interview-bootstrap` are the missing write; `docs/RUNBOOK.md` 2.28 is the procedure and the column list | Claude |
+| 16q | 2026-11-10 | The importer refuses rather than guesses, and reports every problem with a row | DELIBERATE. Every row becomes an account of a real company's interview that a moderator reads and a student revises from, so a coerced month or a misspelt outcome would become a fact about a company nobody stated. "3 rounds" is refused rather than read as 3; a value outside a closed list is refused with the whole list in the message; a row naming more kinds of round than rounds is refused because a moderator cannot tell which answer is the mistake. One pass over the file fixes it | Claude |
+| 16q | 2026-11-10 | Re-running the import must not double a company tag | DELIBERATE. The duplicate key is company, role, month and outcome -- NOT the whole row, because a second pass of the same survey may have added the round length or the topics, and that is the same interview with better notes. Matched against BOOTSTRAP rows only, so a student who later writes up the same interview is still a second account of it | Claude |
+| 16q | 2026-11-10 | Nothing in the importer can approve anything | DELIBERATE. 1.7's "done when" has two halves -- collected, and "the moderation queue has been worked through once" -- and an import that approved its own rows would quietly delete the second. Rows arrive PENDING, and approving is also what writes a company tag, so until a moderator has been through the queue the archive contributes no "asked at" frequency at all | Claude |
+| 16q | 2026-11-10 | The template ships with no example row | DELIBERATE. `content/interviews/template.csv` is the header line and nothing else. An example row in a template is a fabricated interview one copy-paste away from an archive whose whole value is that it is an account of something that happened | Claude |
+| 16o | 2026-11-10 | A SQL question can be sat in an assessment (`docs/ROADMAP.md` 2.1) | **BUILT.** The third of the four kinds to go in, after 16f and 16g, and the first whose blocker was not a surface: `LayoutQuestion.kind` is frozen as `SQL` from the version's own `ioMode`, the pane offers one language and no picker with the same three `SQL_NOTICES` sentences a candidate reads in practice, Run serves it (a SQL question HAS sample datasets), and the submit route accepts `sql17` for a SQL question and ONLY for one. `AssessmentProblem_no_sql` and its function are dropped; the guard catalogue carries the reason in `DROPPED_GUARDS`. `docs/RUNBOOK.md` 2.29 | Claude |
+| 16o | 2026-11-10 | The submission is the same row every other submission is | DELIBERATE, and it is why this phase is small. The row is created against the pinned version and the `sql17` LanguageConfig row like any other, so marking, rejudging, the result pages and the standings needed no special case -- and the exam console already lazy-loads the practice `ResultPanel`, which has drawn a result set since Phase 12k. The db test asserts the row's `languageConfigId` is the sql17 one, because that join is where the Phase 13a defect lived | Claude |
+| 16o | 2026-11-10 | A SQL node's default queue list excluded the two lanes this phase needs | **FOUND while finishing it.** `RECX_QUEUES` defaulted to `judge-sql-practice,judge-sql-run`, chosen when `lanes.ts` barred a postgres node from ASSESSMENT and CONTEST by engine -- a node subscribed to a queue it could never claim from would burn an attempt on every refusal. 16n lifted the bar and 16o made a paper able to hold a query, so the default would have left an exam submission queued with nobody listening: exactly the state this pair of phases existed to end. It now names every SQL lane -- and the change was proven to BE a change by its own fence: `apps/sql-judge/test/config.test.ts` asserted the old default and failed, which is the only reason a one-line default edit did not pass unnoticed | Claude |
+| 16o | 2026-11-10 | What is still refused, and why it is not code | STATED. An interactive question. SPEC 11 keeps it out of high-stakes assessments until it has run cleanly through two practice contests, and no contest has been run with real students on this deployment -- so the condition is unmeetable before launch, and the conversation surface sits behind it rather than in front of it | Claude |
+| 16s | 2026-11-10 | Collaborative editing in a mock interview: NOT built, as a decision (`docs/ROADMAP.md` 2.8) | **DECIDED, not deferred.** The entry sets its own condition -- "worth doing only if mentors ask for it" -- and nobody has, because there are no mentors yet. Three reasons it is the right call for now, all written into the entry so it can be overturned in a sentence: the condition is unmet; the platform has NO websocket infrastructure (every live surface here is SSE -- the verdict stream, the spectate mirror, the invigilation feed), so Yjs means a new deployment unit, a new auth model for a document rather than a request, and a new inbound surface on a host that runs exams; and the read-only mirror it would replace is proved against a production build. What would reopen it is named: a mentor asking after a real mock interview, or a reported need for the interviewer to type into the candidate's editor rather than talk over it | Claude |
+| 16t | 2026-11-10 | Four of the fourteen topics had NO authored problem at all (`docs/ROADMAP.md` 1.2) | **FOUND, and the first of the four written.** TREES, HEAPS, BACKTRACKING and DYNAMIC_PROGRAMMING had nothing filed under them, so a student filtering the catalogue by any of them met an empty page -- a hole the "eleven authored problems" count hides. `lab-slot-plan` (REC-0013, MEDIUM, DYNAMIC_PROGRAMMING) is the first: book lab slots to clear the most backlog, leaving a write-up gap of `c` slots between sessions. The gap is an INPUT rather than a constant, so a remembered recurrence does not survive and the student has to say what "the last slot I could have used" means | Claude |
+| 16t | 2026-11-10 | The jury solution was checked against a brute force before it was trusted | DONE. Exhaustive agreement over every shape with n <= 12 and every gap 1..n, 40 random value sets each: **3120/3120**. The samples, the single-slot case, the gap-is-the-whole-day case and the 10^14 case were checked by hand on top. The problem ships four references, which the golden suite judges: two AC (C++ and Python), one WA (take the biggest slot that still fits -- 65 against the correct 68 on the trap, so it really does fail) and one TLE (the right recurrence read as a maximum over every earlier slot) | Claude |
+| 16t | 2026-11-10 | What is still open in 1.2, and it is not engineering | STATED. The entry says it itself: "It needs faculty time, not engineering time." Both pipelines are proven, the aptitude half is built (16k, 201 questions), and the coding half is 12 authored problems against a target of 450. The per-term quota with a named owner is a department decision. Three of the four empty topics -- TREES, HEAPS, BACKTRACKING -- are still empty | Claude |
+| 16q | 2026-11-11 | The importer was run, not just written | **PASS, dry run.** Over the shipped header-only template: 1 file, 0 rows, nothing written. Over a three-row probe: the valid row accepted, a row with every optional column empty accepted, and one deliberately bad row refused with **eight** problems named in a single pass -- the mode, the outcome, the month, the round count, an unknown round kind, no round kind at all, an unknown topic, an unknown preparation and a repeated problem address -- each with the whole allowed list in the message. Nothing was written, because the probe ran with `--dry-run`: a fabricated interview in the archive is the one thing this phase is careful about | Claude |
+| 16o | 2026-11-11 | Three repo fences asserted the refusal 16o lifted, and only the Linux gate saw it | **FOUND BY THE GATE, and the reason Windows missed it is worth more than the fix.** `answer-posture.test.ts` and `sql-student-surface.test.ts` read the admin action and required *"A SQL problem is not sat in an assessment yet"* -- the fourth place the refusal lived, which the phase's own "three places" count had not included. They follow the RULE now, the way 16f's and 16g's do: the dropped trigger recorded in `DROPPED_GUARDS`, the lane lifted by a benchmark, the kind frozen from `ioMode`, the pane's one language and its practice sentences, Run serving it, and submit accepting `sql17` only for a SQL question. **Windows never reached them:** `pnpm test` is a recursive run that stops at the first failing package, an `apps/web` test had failed on the pass before, and after fixing it I re-ran the three files rather than the whole suite -- so `tests/repo` did not run on Windows at all. Re-run the WHOLE suite after a fix, never the file | Claude |
+| 16v | 2026-11-11 | The one bullet of 1.4 that is not blocked on hardware | **THE REPOSITORY HALF IS DONE; the bullet is NOT closed.** 1.4 says Prometheus has never evaluated these rules against a live series, and `fire-alerts.ts` agrees from the other side: it mirrors each PromQL expression in TypeScript and says plainly that it does not evaluate one. What stood in the way was a config file that cannot be committed, because it carries a bearer token: `scripts/dev/prom-local.mjs` generates it outside the checkout, prints the token's LENGTH and never the token, and points `rule_files` at `infra/monitoring/alerts.yml` UNMODIFIED. `docs/RUNBOOK.md` 2.30 is the procedure | Claude |
+| 16v | 2026-11-11 | Which process publishes which metric decides what can fire at all | **FOUND while writing it, and it is a trap.** `judge_queue_depth`, `judge_oldest_job_age_seconds` and `judge_worker_heartbeat_age_seconds` are the SCHEDULER's, on `METRICS_PORT` -- which is **0 (off) by default**. A scheduler started the ordinary way publishes none of them, so five of the nine rules would have had no series and reported `inactive` while looking checked. The RUNBOOK section names the five and says to set the port first | Claude |
+| 16v | 2026-11-11 | Prometheus runs natively beside the stack, not in a container | DECIDED, and the reason is addressing rather than taste. Both listeners bind loopback, and on this WSL2 stack a container's `host.docker.internal` resolves to the Windows host rather than the distro -- so a containerised Prometheus reaches neither. Native needs no address at all. Nothing was downloaded tonight: the bullet is one fetch and one command away, and 1.4 stays open on its other three bullets (a second host, the offsite pgBackRest repository, GlitchTip) regardless | Claude |
+| 16o | 2026-11-11 | The refusal lived in FIVE places, not the three the phase counted | **BOTH EXTRAS FOUND BY THE GATE.** The phase's notes said three -- the trigger, the guard catalogue and the admin copy. The Linux gate's `test` step found the fourth (three repo fences requiring the removed sentence) and its `services-tests` step found the fifth: `sql-assessment.db.test.ts` asserted the trigger REJECTS the pin, against `recx_test`. It asserts the acceptance now, reads the row back rather than trusting the create's return value, and adds the check the old file could not make -- that `AssessmentProblem_no_sql` and `recx_refuse_sql_assessment_problem` are gone from the LIVE database, which is a different statement from a migration containing a DROP. Its sibling test is unchanged and matters more now: a pinned question still cannot be REPOINTED, and since the kind trigger went that write-once rule is the only one left on the table | Claude |
+| 16o | 2026-11-11 | And the production compose file overrode the default, so the queue fix was cosmetic | **FOUND by grepping for the default's old value rather than trusting it.** `deploy/compose.sql-judge.yml` set `RECX_QUEUES: judge-sql-practice,judge-sql-run,judge-sql-rejudge` explicitly, which is what a real SQL judge host would have used -- so fixing the code default alone would have left an exam submission queued with nobody listening on the one deployment that matters. It names every SQL lane now, through `${RECX_SQL_QUEUES:-...}` so a site can still narrow it deliberately. `tests/repo/deploy-topology.test.ts` passes (40) | Claude |
+| 16o+16q+16s+16t+16v | 2026-11-11 | Gate 7/7 on Linux, at the third attempt | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. With `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1`: **5,449** web tests (203 files, none skipped), **1,450** repo fences, 1,770 shared, 297 db-package, 87 scheduler, and **280** isolate integration cases -- up from 276, because the golden suite now judges `lab-slot-plan`'s four references on real sandbox boxes and each behaved as declared: two AC, one WA and one TLE. The two earlier attempts earned their keep: the first found three repo fences requiring a sentence 16o had removed, the second found a db test asserting the dropped trigger still refuses. Windows: lint 0 warnings, typecheck clean, the whole suite green, and the web package re-run from INSIDE `apps/web` with the db tests on (203 files, 5,446 passed) after `vitest --root` from the repository root had failed two of them on cwd alone | Claude |

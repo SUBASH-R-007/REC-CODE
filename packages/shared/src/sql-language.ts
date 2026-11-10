@@ -60,6 +60,22 @@ export function isSqlLanguage(key: string): boolean {
 }
 
 /**
+ * The SQL language as the exam surfaces read a language (Phase 16o): the
+ * same shape `paperLanguageViews` produces for a toolchain, so a sitting's
+ * question pane needs no special case to label it or to highlight it.
+ *
+ * One entry and never a list, because a SQL question accepts exactly this
+ * and the picker therefore renders its single-language branch rather than a
+ * dropdown of one.
+ */
+export const SQL_LANGUAGE_VIEW = Object.freeze({
+  key: SQL_LANGUAGE_KEY,
+  label: SQL_LANGUAGE_LABEL,
+  shortLabel: SQL_LANGUAGE_LABEL,
+  editorLanguage: SQL_EDITOR_LANGUAGE,
+});
+
+/**
  * Which engine judges a problem of this kind.
  *
  * The one place the mapping lives, so the queue, the claim and the fleet

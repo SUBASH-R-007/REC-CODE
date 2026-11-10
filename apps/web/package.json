@@ -15,6 +15,7 @@
     "postinstall": "node scripts/copy-monaco.mjs",
     "judge-node": "tsx --conditions=react-server scripts/judge-node.ts",
     "validate-and-publish": "tsx --conditions=react-server scripts/validate-and-publish.ts",
+    "import-experiences": "tsx --conditions=react-server scripts/import-experiences.ts",
     "import-aptitude": "tsx --conditions=react-server scripts/import-aptitude.ts"
   },
   "dependencies": {

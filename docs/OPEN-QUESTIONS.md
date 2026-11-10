@@ -4851,3 +4851,124 @@ accepts `answer1` and every `LANGUAGE_CATALOG` key and not `sql17`. That is
 the surface half of §2.1 and it is the next slice, with 16f and 16g as its
 template. This phase removed the engine-shaped blocker under it, which is
 the half nobody could see a way through.
+
+## The interview archive had no way in (Phase 16q)
+
+`docs/ROADMAP.md` §1.7 ends *"Size: a placement-cell exercise. The software
+is ready for it."* That was the one sentence in the entry worth checking,
+and it was wrong.
+
+Everything around the bootstrap existed. `InterviewSource.BOOTSTRAP` is in
+the enum. `InterviewExperience_author_check` reads
+`("source" = 'STUDENT' AND "authorId" IS NOT NULL) OR "source" =
+'BOOTSTRAP'` — a constraint written specifically so a bootstrap row could
+have no author. `server/queries/interviews.ts` has a branch for labelling
+one. `interview-archive-invariants.db.test.ts` inserts one directly and
+asserts the constraint accepts it.
+
+And nothing in the product wrote one. `submitExperienceFor(userId)` is the
+only write, it is the student's own form, and it hardcodes `source:
+"STUDENT"`. A schema built for an import, with no import.
+
+**What that means for the entry.** §1.7 is still a placement-cell exercise —
+somebody has to ask two graduated batches what their interviews were like,
+and nothing in a repository can do that. But it was ALSO a missing piece of
+software, and the entry's confidence that it was not is the reason nobody
+had looked.
+
+**Three decisions in the import, each with a reason that is not convenience.**
+
+*It refuses rather than guesses.* A row becomes an account of a real
+company's interview that a moderator reads and a student revises from.
+"3 rounds" is refused rather than read as 3; "Got the job" is refused with
+all four outcomes named in the message; a row claiming one round and two
+kinds of round is refused, because the survey's two answers disagree and a
+moderator cannot tell which is the mistake. Every problem with a row is
+reported, not the first, so one pass over the file fixes it.
+
+*The duplicate key is not the whole row.* Company, role, month and outcome —
+the four things the person being asked cannot misremember differently on a
+Tuesday. A second pass of the same survey may have tidied the topics or
+added the round length, and keying on the whole row would import that again
+and double the company tag, which is a derived number SPEC §4(d) says is
+maintained and never recomputed.
+
+*It cannot approve.* §1.7's "done when" has two halves, and an import that
+approved its own rows would quietly delete the second one. Rows arrive
+PENDING; `decideExperienceAs` is the only thing that can approve one and it
+needs a person. Approving is also what writes the company tag, so until a
+moderator has worked the queue the archive contributes no "asked at"
+frequency — which is the right order, because an unread account of an
+interview is not evidence of anything.
+
+**And the template ships with no example row**, for the same reason the
+archive exists: a fabricated interview one copy-paste away from a page
+students revise from is worse than an empty file.
+
+## The SQL pin, and the clause the refusal did not have (Phase 16o)
+
+Three of the four kinds `docs/ROADMAP.md` §2.1 held out of a paper are in
+now. Output-only (16f) and debugging (16g) were surfaces. SQL was not, and
+the interesting part is how long that took to see.
+
+Phase 12p wrote the refusal with two clauses: a sitting chooses one
+language for the whole paper, and the exam submit route only accepts a
+toolchain language. Phase 13a answered both — a language per question,
+through the layout, the snapshot route, the submit route and the marking —
+and §2.1 was updated to say the engine change had happened and the four
+refusals were each blocked on one surface instead.
+
+That was wrong for SQL, and Phase 16h found out why: `SENSITIVE_LANES` is
+`["ASSESSMENT", "CONTEST"]` and `lanes.ts` barred the SQL engine from both
+**by name**. A query pinned into a paper would have queued a submission no
+node could claim — a candidate's answer sitting QUEUED while a clock ran.
+The refusal was protecting them from something its own text did not
+mention.
+
+So the order mattered: Phase 16n had to give the query engine a calibration
+benchmark of its own before this phase could exist, and the surface — the
+part §2.1 named — turned out to be the small half.
+
+**What made the surface small.** Three things that were already true:
+
+*The kind was already a pattern.* `LayoutQuestion.kind` exists because
+Phase 16f needed one, and the argument transfers unchanged: `sql17` is a
+`SubmitLanguageKey` and deliberately not a `LanguageKey`, so that nothing
+treats a query as a toolchain. One field, read in four places.
+
+*The console was already shared.* `exam-console.tsx` lazy-loads the
+practice workspace's `ResultPanel`, which has drawn a SQL result set since
+Phase 12k. The exam surface did not need to learn what a result set is.
+
+*The submission is the same row.* Created against the pinned version and
+the `sql17` LanguageConfig row like every other, so marking, rejudging, the
+result pages and the standings needed nothing. The db test asserts the
+`languageConfigId`, because that join is exactly where the Phase 13a defect
+lived: a Python file compiled by gcc, and a correct program reading
+"compile error".
+
+**And one thing that was not true, found while finishing — in TWO places.**
+The SQL node's code default `RECX_QUEUES` was
+`judge-sql-practice,judge-sql-run`, and `deploy/compose.sql-judge.yml` set
+its own list of three explicitly. Both were chosen when the lane was
+barred, because a node subscribed to a queue it could never claim from
+burns an attempt on every refusal.
+
+Lifting the lane in 16n and the pin in 16o would have left an exam
+submission queued with nobody listening: the exact state both phases
+existed to end, reached by a default nobody had revisited. The code default
+was found by its own config fence failing; the compose file was found by
+grepping for the old value rather than trusting that the default was the
+only place it lived. Both name every SQL lane now, and the compose one
+through `${RECX_SQL_QUEUES:-…}` so a site can still narrow it deliberately.
+
+The general lesson, since this is the second time in one phase: a
+"default" is only a default where nothing overrides it, and this repository
+overrides its own defaults in `deploy/`.
+
+**What is left of §2.1 is one kind and it is not code.** An interactive
+question needs a conversation surface, and SPEC §11 keeps it out of
+high-stakes assessments until it has run cleanly through two practice
+contests. No contest has been run with real students on this deployment, so
+the condition is unmeetable before launch — and building the surface first
+would be building for a date rather than for a requirement.

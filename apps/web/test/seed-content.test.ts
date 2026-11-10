@@ -17,6 +17,7 @@ import { campusDayNumber, dailyChallengeIndex } from "../scripts/content/daily-c
 import { HANDLE_MAKER, handleOf, MAX_NAME_LENGTH } from "../scripts/content/handle-maker";
 import { AUTHORED_PROBLEMS, HELP_BY_SLUG, TOPICS_BY_SLUG } from "../scripts/content/index";
 import { LAB_POWER_BUDGET, LAB_POWER_LIMITS } from "../scripts/content/lab-power-budget";
+import { LAB_SLOT_LIMITS, LAB_SLOT_PLAN } from "../scripts/content/lab-slot-plan";
 import { SECOND_SWIPE, SECOND_SWIPE_LIMITS } from "../scripts/content/second-swipe";
 import { desiredSections, SEEDED_PLANS, UNTAGGED_SECTION, type PublishedProblem } from "../scripts/content/study-plans";
 import type { AuthoredProblem, AuthoredTest } from "../scripts/content/types";
@@ -323,6 +324,119 @@ describe("second-swipe", () => {
     const caught = tests.filter((t) => wrong(parse(t).cards) !== t.output);
     expect(caught.length).toBeGreaterThanOrEqual(3);
     expect(caught.some((t) => !t.isSample && parse(t).n === SECOND_SWIPE_LIMITS.maxN)).toBe(true);
+  });
+});
+
+describe("lab-slot-plan", () => {
+  const tests = LAB_SLOT_PLAN.generateTests();
+  const parse = (t: { input: string }) => {
+    const [header, values] = t.input.trimEnd().split("\n");
+    const [n, c] = header!.trim().split(/\s+/).map(Number) as [number, number];
+    return { n, c, v: values!.trim().split(/\s+/).map(Number) };
+  };
+
+  /**
+   * The mirror, and it is deliberately the other way round: the problem's
+   * own solution scans LEFT to right and asks "what is behind me?", so this
+   * one scans RIGHT to left and asks "what is ahead?". Same answers, no
+   * shared arithmetic — an off-by-one in `i - c - 1` has no counterpart
+   * here to be wrong in the same direction.
+   */
+  function viaBackwardScan(v: readonly number[], c: number): number {
+    const n = v.length;
+    const best = new Array<number>(n + 2).fill(0);
+    for (let i = n; i >= 1; i--) {
+      const next = i + c + 1;
+      const take = v[i - 1]! + (next <= n ? best[next]! : 0);
+      best[i] = Math.max(best[i + 1]!, take);
+    }
+    return best[1]!;
+  }
+
+  /** Every legal booking set, for the tests small enough to enumerate. */
+  function viaEveryBookingSet(v: readonly number[], c: number): number {
+    const n = v.length;
+    let best = 0;
+    for (let mask = 0; mask < 1 << n; mask++) {
+      let last = -Infinity;
+      let total = 0;
+      let legal = true;
+      for (let i = 0; i < n; i++) {
+        if ((mask & (1 << i)) === 0) continue;
+        if (i - last <= c) {
+          legal = false;
+          break;
+        }
+        last = i;
+        total += v[i]!;
+      }
+      if (legal && total > best) best = total;
+    }
+    return best;
+  }
+
+  it("expects exactly what an independent implementation produces", () => {
+    for (const t of tests) {
+      const { v, c } = parse(t);
+      expect(t.output).toBe(`${viaBackwardScan(v, c)}\n`);
+    }
+  });
+
+  it("agrees with enumerating every booking set, where that is possible", () => {
+    const small = tests.filter((t) => parse(t).n <= 20);
+    // Every hand-written case is small, so this is not a token sample.
+    expect(small.length).toBeGreaterThanOrEqual(6);
+    for (const t of small) {
+      const { v, c } = parse(t);
+      expect(t.output, t.input).toBe(`${viaEveryBookingSet(v, c)}\n`);
+    }
+  });
+
+  it("keeps every input inside the constraints", () => {
+    for (const t of tests) {
+      const { n, c, v } = parse(t);
+      expect(v).toHaveLength(n);
+      expect(n).toBeGreaterThanOrEqual(1);
+      expect(n).toBeLessThanOrEqual(LAB_SLOT_LIMITS.maxN);
+      expect(c).toBeGreaterThanOrEqual(1);
+      expect(c).toBeLessThanOrEqual(n);
+      expect(v.every((x) => Number.isInteger(x) && x >= 0 && x <= LAB_SLOT_LIMITS.maxCleared)).toBe(true);
+      expect(t.input.split("\n")).toHaveLength(3);
+    }
+  });
+
+  it("needs 64-bit answers, and exercises every shape of the gap", () => {
+    const answers = tests.map((t) => Number(t.output));
+    expect(Math.max(...answers)).toBeGreaterThan(2 ** 32);
+    // c = 1 (the familiar case), c = n (at most one booking), and something
+    // in between where the index arithmetic is easiest to get wrong.
+    const gaps = tests.map((t) => parse(t));
+    expect(gaps.some((g) => g.c === 1)).toBe(true);
+    expect(gaps.some((g) => g.c === g.n)).toBe(true);
+    expect(gaps.some((g) => g.c > 1 && g.c < g.n)).toBe(true);
+    // And a zero answer, so "print the total you booked" is not confused
+    // with "something must be booked".
+    expect(answers).toContain(0);
+  });
+
+  it("catches the deliberately-wrong solution (book the biggest that still fits)", () => {
+    const wrong = (v: readonly number[], c: number) => {
+      const order = v.map((value, at) => ({ value, at })).sort((a, b) => b.value - a.value || a.at - b.at);
+      const blocked = new Array<boolean>(v.length).fill(false);
+      let total = 0;
+      for (const { value, at } of order) {
+        if (blocked[at]) continue;
+        total += value;
+        for (let j = Math.max(0, at - c); j <= Math.min(v.length - 1, at + c); j++) blocked[j] = true;
+      }
+      return `${total}\n`;
+    };
+    const caught = tests.filter((t) => {
+      const { v, c } = parse(t);
+      return wrong(v, c) !== t.output;
+    });
+    expect(caught.length).toBeGreaterThanOrEqual(3);
+    expect(caught.some((t) => !t.isSample && parse(t).n === LAB_SLOT_LIMITS.maxN - 2)).toBe(true);
   });
 });
 

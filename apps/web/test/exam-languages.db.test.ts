@@ -1,4 +1,9 @@
-import { ANSWER_LANGUAGE_KEY, ANSWER_LANGUAGE_LABEL } from "@recx/shared";
+import {
+  ANSWER_LANGUAGE_KEY,
+  ANSWER_LANGUAGE_LABEL,
+  SQL_LANGUAGE_KEY,
+  SQL_LANGUAGE_LABEL,
+} from "@recx/shared";
 import { randomBytes } from "node:crypto";
 import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -539,6 +544,69 @@ describe.skipIf(!ENABLED)("a paper answered in two languages, against recx_test"
     }, 90_000);
   });
 
+
+  /**
+   * A SQL question in a sitting (Phase 16o).
+   *
+   * The same three cases the ANSWER block above holds, for the same
+   * reason and against the same field. `sql17` is a `SubmitLanguageKey`
+   * and not a toolchain, exactly like `answer1`, so the pairing rule is
+   * the whole of what `LayoutQuestion.kind` does on this path: accept it
+   * where the layout says SQL, and refuse every other pairing in both
+   * directions.
+   *
+   * Phase 12p's refusal said a sitting "submits every answer in one
+   * programming language"; this is the test that says it no longer does.
+   */
+  describe("a SQL question", () => {
+    function sqlLayout() {
+      const base = layout();
+      return {
+        ...base,
+        questions: [{ ...base.questions[0]!, kind: "SQL" as const }, base.questions[1]!],
+      };
+    }
+
+    it("is submitted with sql17, and carries the sql17 toolchain row", async () => {
+      const sqlConfigId = await toolchain(SQL_LANGUAGE_KEY, SQL_LANGUAGE_LABEL);
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, sqlLayout() as never, [
+        { questionId: questionIds[0]!, language: SQL_LANGUAGE_KEY, source: "select id from students order by id" },
+      ]);
+      expect(result.submitted, result.reason ?? "").toBe(true);
+      expect(result.submissionIds).toHaveLength(1);
+      const row = await db.submission.findUniqueOrThrow({
+        where: { id: result.submissionIds[0]! },
+        select: { language: true, languageConfigId: true },
+      });
+      // The row a SQL node claims is the row every other submission is:
+      // which is why marking, rejudging and the result pages needed no
+      // special case at all.
+      expect(row.language).toBe(SQL_LANGUAGE_KEY);
+      expect(row.languageConfigId).toBe(sqlConfigId);
+    }, 90_000);
+
+    it("refuses a toolchain language on it — the question wants a query", async () => {
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, sqlLayout() as never, [
+        { questionId: questionIds[0]!, language: "cpp20", source: "int main(){}\n" },
+      ]);
+      expect(result.submitted).toBe(false);
+      expect(result.reason).toBe("language_not_accepted");
+      expect(result.refusedLanguage).toBe("cpp20");
+    }, 90_000);
+
+    it("refuses sql17 on an ordinary coding question", async () => {
+      await toolchain(SQL_LANGUAGE_KEY, SQL_LANGUAGE_LABEL);
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, sqlLayout() as never, [
+        { questionId: questionIds[1]!, language: SQL_LANGUAGE_KEY, source: "select 1" },
+      ]);
+      expect(result.submitted).toBe(false);
+      expect(result.reason).toBe("language_not_accepted");
+      expect(result.refusedLanguage).toBe(SQL_LANGUAGE_KEY);
+    }, 90_000);
+  });
 
   /**
    * A debugging question's edit budget in a sitting (Phase 16g).

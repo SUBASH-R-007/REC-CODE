@@ -110,6 +110,20 @@ a department decision, and the 450 authored coding problems, which is the
 other half of the content programme and is untouched (eleven authored, one
 published).
 
+**A hole the count hides (Phase 16t).** Twelve problems is not twelve
+problems spread thinly — **four of the fourteen `TOPICS` had none at all**:
+TREES, HEAPS, BACKTRACKING and DYNAMIC_PROGRAMMING. A student filtering the
+catalogue by any of them met an empty page, and no number in this entry says
+so. `lab-slot-plan` (REC-0013, MEDIUM, DYNAMIC_PROGRAMMING) is the first of
+the four, checked against an exhaustive brute force before it was trusted
+(3120/3120) and shipping a WA and a TLE reference so the tests are known to
+discriminate. **Three remain empty.**
+
+That changes nothing about the size of this entry. It is still continuous,
+still the largest line item here, and still faculty time rather than
+engineering time — but "which topics have nothing" is a better measure of
+it than "how many problems exist", and it is the one to work down first.
+
 ### 1.3 The join from the web app to a student's screen is unproven
 
 `isolate-integration` proves 276 cases on real sandbox boxes, and the judge
@@ -181,6 +195,24 @@ repository, and `docs/RUNBOOK.md` carries the dates.
 
 *Size:* an infrastructure phase. It is blocked on hardware, not on code.
 
+**One bullet was partly code after all (Phase 16v).** "Prometheus has never
+evaluated these rules against a live series" was blocked on a file that
+cannot be committed, because it carries a bearer token.
+`scripts/dev/prom-local.mjs` generates it outside the checkout and points
+`rule_files` at `infra/monitoring/alerts.yml` **unmodified**, so what runs
+is the rules CI checks rather than a copy of them.
+`docs/RUNBOOK.md` §2.30 is the procedure.
+
+Writing it found the trap in the bullet: `judge_queue_depth` and two more
+gauges are the **scheduler's**, on `METRICS_PORT`, which is **0 by
+default** — so a scheduler started the ordinary way publishes none of them
+and five of the nine rules would report `inactive` while looking checked.
+
+**The bullet is still open**, and so are the other three. Four of the nine
+rules read exporters a laptop does not have, and a live Prometheus is a
+fetch this phase deliberately did not make. What changed is that none of
+what remains is repository work.
+
 ### 1.5 The exam browser's installers are unsigned
 
 `apps/exam-browser/electron-builder.yml` is written for signed Windows and
@@ -249,6 +281,28 @@ structured fields and the moderation queue has been worked through once.
 
 *Size:* a placement-cell exercise. The software is ready for it.
 
+**"The software is ready for it" was FALSE (Phase 16q), and now it is
+true.** `InterviewSource.BOOTSTRAP` existed, the CHECK
+`InterviewExperience_author_check` allowed a row with no author precisely so
+a bootstrap row could have none, and a query knew how to label one — and
+**nothing in the product wrote one.** The only write was the student's own
+form, which hardcodes `source: "STUDENT"`, so the placement cell could run
+the survey and then had nowhere to put it.
+
+Built: `@recx/shared/interview-bootstrap` (the file's shape, pure),
+`lib/interviews/bootstrap.ts` (the write, audited to the operator,
+PENDING), `scripts/import-experiences.ts` (the importer, with `--dry-run`)
+and `content/interviews/template.csv` — the header and no example row,
+because a fabricated interview one copy-paste from the archive is worse
+than an empty file. `docs/RUNBOOK.md` §2.28 lists every column and its
+allowed values.
+
+**What remains is exactly what this entry says it is: people.** Somebody has
+to ask two graduated batches what their interviews were like, and a
+moderator has to work the queue — approving is what writes a company tag,
+so an unimported survey and an unmoderated one both contribute nothing. No
+software is in the way of either any more.
+
 ---
 
 ## 2. Scoped, and still refused — one surface each
@@ -269,7 +323,7 @@ surface:
 
 | Kind | What it still needs |
 |---|---|
-| **SQL** | **Not a surface problem, and this entry was wrong (Phase 16h).** `SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]` and `lanes.ts` bars the SQL engine from both by name — "a query's limit is the database's own `statement_timeout`" — so a SQL question in a paper would queue a submission **no node may claim**. Lifting it needs a calibration benchmark for the SQL engine, and the honest difficulty is that what CPU calibration measures does not exist for a query. A phase with a measurement question in it. **The benchmark is BUILT (Phase 16n)** and the lane is lifted: a SQL node that reports one is judged by the same rule every other node is. The measurement question was answered by asking what a calibration is FOR — not scaling a limit, but noticing that one node is slower than its neighbours — so it measures per-row throughput on the judging cluster, scored from the FASTEST of five runs because wall time is the only thing a query offers and wall-time noise is one-sided. **What is left is the surface**, and it is the shape of 16f and 16g: `/api/exam/[attemptId]/submit` accepts `answer1` and every `LANGUAGE_CATALOG` key and not `sql17`, so `AssessmentProblem_no_sql` stands until a sitting can carry a query and show a result set. `docs/RUNBOOK.md` §2.27, `docs/OPEN-QUESTIONS.md`. |
+| **SQL** | **Not a surface problem, and this entry was wrong (Phase 16h).** `SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]` and `lanes.ts` bars the SQL engine from both by name — "a query's limit is the database's own `statement_timeout`" — so a SQL question in a paper would queue a submission **no node may claim**. Lifting it needs a calibration benchmark for the SQL engine, and the honest difficulty is that what CPU calibration measures does not exist for a query. A phase with a measurement question in it. **The benchmark is BUILT (Phase 16n)** and the lane is lifted: a SQL node that reports one is judged by the same rule every other node is. The measurement question was answered by asking what a calibration is FOR — not scaling a limit, but noticing that one node is slower than its neighbours — so it measures per-row throughput on the judging cluster, scored from the FASTEST of five runs because wall time is the only thing a query offers and wall-time noise is one-sided. **The surface is BUILT too (Phase 16o)**, and it was the small half: `LayoutQuestion.kind` is frozen as `SQL`, the pane offers one language and no picker with the same three `SQL_NOTICES` sentences a candidate reads in practice, Run serves it (a SQL question HAS sample datasets), and the submit route accepts `sql17` for a SQL question and ONLY for one. `AssessmentProblem_no_sql` and its function are dropped. It stayed small because three things were already true: the KIND was already a pattern (16f); the exam console already lazy-loads the practice `ResultPanel`, which has drawn a result set since Phase 12k; and the submission is created against the pinned version and the `sql17` LanguageConfig row like every other, so marking, rejudging and the standings needed nothing. Finishing it found one thing that was NOT true — the SQL node's default `RECX_QUEUES` still excluded the two lanes, which would have left an exam submission queued with nobody listening. **This row is closed.** `docs/RUNBOOK.md` §2.27 and §2.29, `docs/OPEN-QUESTIONS.md`. |
 | **Output-only** | ~~An answer box rather than an editor, with `answer1` carried the same way.~~ **Built (Phase 16f):** `LayoutQuestion.kind` is frozen as `ANSWER` at start; the view renders a textarea with no picker and no Run; the submit route accepts `answer1` for an ANSWER question and only for one. |
 | **Debugging** | ~~An edit budget a sitting can refuse without destroying work a candidate can no longer redo.~~ **Built (Phase 16g):** the whole hand-in is refused, not one answer — nothing finalised, the clock still running, the question named — with the budget frozen in the layout and a live count in the pane. |
 | **Interactive** | **Blocked on a date, not on code (Phase 16h).** SPEC §11: "keep them out of high-stakes assessments until they have run cleanly through two practice contests" — and no contest has been run with real students on this deployment, so the condition is unmeetable before launch. The conversation surface is real work and sits second in line behind it. |
@@ -329,6 +383,31 @@ halves are proved against a production build.
 
 *Size:* a phase. Worth doing only if mentors ask for it — read-only spectate
 plus a voice call covers most of what a mock interview needs.
+
+**NOT BUILT, as a decision (Phase 16s), and this is the one entry on this
+roadmap deliberately left undone.** The reasoning, so it can be overturned
+in a sentence rather than re-derived:
+
+* this entry sets its own condition — *"worth doing only if mentors ask for
+  it"* — and nobody has asked, because there are no mentors yet: the
+  product has not launched;
+* the platform has **no websocket infrastructure at all.** Every live
+  surface here is SSE: the verdict stream, the spectate mirror, the
+  invigilation feed. Yjs needs a bidirectional transport, which means a new
+  deployment unit, a new authentication model for a document rather than a
+  request, and a new inbound surface on a host that also runs exams. That
+  is an infrastructure phase, not a feature;
+* and the thing it would replace is working. The read-only mirror is
+  proved against a production build, both halves.
+
+**What would reopen it**, in order of how much it would settle: a mentor
+asking for it after a real mock interview; or a mock-interview surface that
+needs the interviewer to type into the candidate's editor rather than talk
+over it — "fix this line for me" is the use nobody has yet reported needing.
+
+Until one of those, building it would be building a transport for a
+requirement nobody has stated, in a product where every other live surface
+deliberately avoids one.
 
 ---
 

@@ -305,18 +305,28 @@ export async function addAssessmentProblem(
      */
 
     /**
-     * Phase 12p. The fourth rule of this shape, and the kind that was
-     * missing one: a sitting chooses ONE language for the whole paper and
-     * the exam submit route only accepts a toolchain language, so a SQL
-     * question would be a C++ editor over a problem that wants a query —
-     * and the candidate would discover it mid-sitting. Refused here and in
-     * the database (AssessmentProblem_no_sql).
+     * Phase 16o: a SQL problem IS pinnable now, and the refusal that used
+     * to be here is gone with its trigger.
+     *
+     * Two things had to be true, and the Phase 12p refusal named both.
+     * The paper's single language: `LayoutQuestion.kind` is frozen as
+     * `SQL`, the pane offers one language and no picker, and the submit
+     * route accepts `sql17` for a SQL question and ONLY for one. And the
+     * lane: `SENSITIVE_LANES` barred a postgres node from ASSESSMENT by
+     * engine, so a pinned query would have queued a submission no node
+     * could claim — which Phase 16n ended by giving the query engine a
+     * calibration benchmark of its own.
+     *
+     * The submission is created exactly as every other is, against the
+     * pinned version and the `sql17` LanguageConfig row, so marking,
+     * rejudging and the result pages need no special case — and the exam
+     * console already lazy-loads the practice `ResultPanel`, which has
+     * known how to draw a result set since Phase 12k.
+     *
+     * Two kinds are still refused: an interactive question needs a
+     * conversation surface, and SPEC §11 keeps it out of high-stakes
+     * papers until it has run cleanly through two practice contests.
      */
-    if (problem.liveVersion.ioMode === "SQL") {
-      throw new ValidationError(
-        "A SQL problem is not sat in an assessment yet: a sitting gives every question the same code editor and submits every answer in one programming language. Put it in a contest or leave it in practice.",
-      );
-    }
 
     try {
       const row = await db.assessmentProblem.create({

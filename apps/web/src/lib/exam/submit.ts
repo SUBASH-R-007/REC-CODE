@@ -6,6 +6,7 @@ import {
   countEditedLines,
   debugOverBudgetInExam,
   questionLanguages,
+  SQL_LANGUAGE_KEY,
   type AttemptLayout,
 } from "@recx/shared";
 import { audit } from "@/lib/audit";
@@ -142,6 +143,13 @@ export async function submitAttempt(
      * disagree about what was asked.
      */
     if (question?.kind === "ANSWER") return [ANSWER_LANGUAGE_KEY];
+    /**
+     * Phase 16o, the same rule in the same place: a SQL question accepts
+     * exactly `sql17` and nothing else, and `sql17` is refused on every
+     * other kind. Either direction means the client and the frozen layout
+     * disagree about what was asked.
+     */
+    if (question?.kind === "SQL") return [SQL_LANGUAGE_KEY];
     return questionLanguages({ question: question?.languages, paper: paperLanguages });
   };
   const refused = answers.find(

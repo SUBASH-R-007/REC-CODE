@@ -522,10 +522,25 @@ export async function startOrResumeAttempt(args: {
        * there is nothing for it to narrow — and the kind is what the
        * surfaces read.
        */
-      kind: problem.problemVersion.ioMode === "OUTPUT_ONLY" ? ("ANSWER" as const) : ("CODE" as const),
+      /**
+       * Phase 16o. A SQL question is answered in one language that is not a
+       * toolchain, so like an output-only question its narrowing is
+       * ignored — there is nothing for it to narrow — and the KIND is what
+       * the surfaces read. Frozen here with everything else: a problem
+       * republished mid-sitting must not turn a query editor into a C++
+       * one under somebody part way through.
+       */
+      kind:
+        problem.problemVersion.ioMode === "OUTPUT_ONLY"
+          ? ("ANSWER" as const)
+          : problem.problemVersion.ioMode === "SQL"
+            ? ("SQL" as const)
+            : ("CODE" as const),
       editBudget: problem.problemVersion.maxEditedLines ?? undefined,
       languages:
-        problem.problemVersion.ioMode === "OUTPUT_ONLY" || problem.allowedLanguages.length === 0
+        problem.problemVersion.ioMode === "OUTPUT_ONLY" ||
+        problem.problemVersion.ioMode === "SQL" ||
+        problem.allowedLanguages.length === 0
           ? undefined
           : questionLanguages({ question: problem.allowedLanguages, paper: accepted }),
     })),

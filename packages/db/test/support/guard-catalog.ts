@@ -94,7 +94,7 @@ export const GUARD_FUNCTIONS = [
   "recx_refuse_debug_assessment_problem",
   // 20261101161000_phase12n_assessment_rule (dropped in 20261110120000; see DROPPED_GUARDS)
   "recx_refuse_output_only_assessment_problem",
-  // 20261101170000_phase12p_sql_assessment_rule
+  // 20261101170000_phase12p_sql_assessment_rule (dropped in 20261110210000; see DROPPED_GUARDS)
   "recx_refuse_sql_assessment_problem",
   // 20261101180000_phase12q_sql_contest_rule
   "recx_refuse_sql_contest_problem",
@@ -341,6 +341,12 @@ export const GUARD_TRIGGERS: readonly GuardTrigger[] = [
      * a query. Lifting this needs an exam path with a language per
      * question — which would lift all four — and a line in the gate log
      * that this entry makes compulsory.
+     */
+    /**
+     * Phase 12p, and DROPPED in Phase 16o -- `DROPPED_GUARDS` carries the
+     * reason. It stays listed here because the migration that created it
+     * is still held to having created it properly; the live database is
+     * checked for its ABSENCE instead of its presence.
      */
     name: "AssessmentProblem_no_sql",
     timing: "BEFORE INSERT OR UPDATE",
@@ -794,6 +800,22 @@ export const DROPPED_GUARDS: ReadonlyArray<{
   },
   {
     kind: "trigger",
+    name: "AssessmentProblem_no_sql",
+    table: "AssessmentProblem",
+    createdBy: "20261101170000_phase12p_sql_assessment_rule",
+    droppedBy: "20261110210000_phase16o_sql_assessments",
+    why:
+      "Phase 12p refused the pin for two reasons and Phase 16h found a third. The paper's single language: Phase 13a gave a sitting a language per question and Phase 16o gave it a question KIND, frozen in the layout, so a SQL question reaches a candidate as a query editor with one language, no picker, and the same three sentences about the dialect, the single statement and the read-only copy of the data that they read in practice. The LANE: SENSITIVE_LANES barred a postgres node from ASSESSMENT by engine, so a pinned query would have queued a submission no node could claim -- Phase 16n gave the query engine a calibration benchmark of its own and ended that. The submission is created against the pinned version and the sql17 LanguageConfig row like every other, so marking and rejudging needed no special case.",
+  },
+  {
+    kind: "function",
+    name: "recx_refuse_sql_assessment_problem",
+    createdBy: "20261101170000_phase12p_sql_assessment_rule",
+    droppedBy: "20261110210000_phase16o_sql_assessments",
+    why: "The function behind AssessmentProblem_no_sql; see that entry.",
+  },
+  {
+    kind: "trigger",
     name: "AssessmentProblem_no_debug_budget",
     table: "AssessmentProblem",
     createdBy: "20261101151000_phase12m_assessment_rule",
@@ -818,7 +840,7 @@ export const DROPPED_GUARDS: ReadonlyArray<{
 ];
 
 /** The last migration whose CHECK constraints this list is complete for (later migrations add theirs here). */
-export const CHECK_CATALOG_THROUGH = "20261110180000_phase16j_second_factor";
+export const CHECK_CATALOG_THROUGH = "20261110210000_phase16o_sql_assessments";
 
 /** Every hand-written CHECK constraint (Prisma generates none), by the migration that creates it. */
 export const HAND_WRITTEN_CHECKS: ReadonlyArray<{ name: string; table: string; migration: string }> = [

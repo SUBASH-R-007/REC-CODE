@@ -99,52 +99,96 @@ describe("the student surface only formats SQL", () => {
     expect(resultView).not.toContain("JSON.parse");
   });
 });
-describe("not sat in an assessment yet, and not quietly (Phase 12p)", () => {
-  it("a trigger refuses the pin, because a sitting has one editor and one language", () => {
+/**
+ * Phase 16o lifted the refusal this block used to assert, and the fence
+ * follows the RULE rather than the sentence — a lifted refusal with no
+ * surface behind it is exactly the regression the original one existed to
+ * prevent. The shape is 16f's and 16g's, for the third of the four kinds.
+ *
+ * Two things had to be true, and Phase 12p's text named only one of them.
+ * The paper's single language, which Phase 13a ended. And the LANE: Phase
+ * 16h found that `lanes.ts` barred a postgres node from ASSESSMENT by
+ * engine, so a pinned query would have queued a submission no node could
+ * claim — which is why 16n had to come first.
+ */
+describe("sat in an assessment, and only because the sitting knows the kind (Phase 16o)", () => {
+  it("the original refusal is still on the record, in the migration that made it", () => {
     const migration = readRepoFile(
       "packages/db/prisma/migrations/20261101170000_phase12p_sql_assessment_rule/migration.sql",
     );
     expect(migration).toContain("AssessmentProblem_no_sql");
     expect(migration).toContain("not sat in an assessment yet");
     expect(migration).toMatch(/CREATE TRIGGER[\s\S]*ON "public"\."AssessmentProblem"/);
-    // A contest's arena links to the ordinary workspace, so it needs no rule
-    // — the same reason the other three triggers are not on ContestProblem.
+    // A contest's arena links to the ordinary workspace, so it needed no
+    // rule — the same reason the other triggers are not on ContestProblem.
     expect(migration).not.toMatch(/ON "public"\."ContestProblem"/);
   });
 
-  it("the action says so in a sentence first", () => {
-    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
-    expect(action).toContain("A SQL problem is not sat in an assessment yet");
-  });
-
-  it("the trigger and its function are catalogued, so lifting the rule fails the build", () => {
+  it("the refusal and its trigger are recorded as dropped, not quietly deleted", () => {
+    const migration = readRepoFile(
+      "packages/db/prisma/migrations/20261110210000_phase16o_sql_assessments/migration.sql",
+    );
+    expect(migration).toContain("AssessmentProblem_no_sql");
+    expect(migration).toMatch(/DROP TRIGGER/);
+    expect(migration).toMatch(/DROP FUNCTION/);
     const catalog = readRepoFile("packages/db/test/support/guard-catalog.ts");
+    // Still catalogued (the creating migration is held to it) AND listed as
+    // dropped, which is what makes removing a guard a written decision.
     expect(catalog).toContain("AssessmentProblem_no_sql");
     expect(catalog).toContain("recx_refuse_sql_assessment_problem");
+    expect(catalog).toContain("DROPPED_GUARDS");
+    expect(catalog).toContain("20261110210000_phase16o_sql_assessments");
   });
 
-  it("every kind the exam engine cannot sit is refused, not just this one", () => {
-    /**
-     * Three now, not four: Phase 16f lifted output-only, which a sitting
-     * CAN hold since the layout freezes a question kind and the view, the
-     * Run route and the submit route each read it. The remaining three
-     * still read the same on purpose — one sentence per kind, in the one
-     * place a person is choosing the question — and each is lifted the
-     * same way, by building the surface it names.
-     */
+  it("the lane had to be lifted first, and it was lifted by a benchmark", () => {
+    // Without this, the pin would queue a submission no node may claim.
+    const lanes = readRepoFile("apps/web/src/lib/judge/lanes.ts");
+    expect(lanes).not.toContain("the SQL engine has no calibration benchmark yet");
+    expect(lanes).toContain("Phase 16n");
+    const calibration = readRepoFile("apps/sql-judge/src/calibration.ts");
+    expect(calibration).toContain("SQL_CALIBRATION_SOURCE");
+    // And the node has to be LISTENING on the lane it may now serve.
+    expect(readRepoFile("apps/sql-judge/src/config.ts")).toContain("judge-sql-assessment");
+  });
+
+  it("the paper freezes the kind when it is laid out, from the version's own ioMode", () => {
+    const start = readRepoFile("apps/web/src/lib/exam/start.ts");
+    expect(start).toMatch(/ioMode === "SQL"[\s\S]{0,80}"SQL"/);
+  });
+
+  it("the candidate gets a query editor, one language and the practice sentences", () => {
+    const question = readRepoFile("apps/web/src/components/exam/exam-question.tsx");
+    expect(question).toContain('question.kind === "SQL"');
+    expect(question).toContain("SQL_NOTICES");
+    const view = readRepoFile("apps/web/src/server/queries/exam.ts");
+    // One entry, so the pane renders its single-language branch rather than
+    // a dropdown of one — and the editor takes its grammar from it.
+    expect(view).toContain("SQL_LANGUAGE_VIEW");
+    expect(view).toMatch(/kind === "SQL"[\s\S]{0,40}SQL_LANGUAGE_KEY/);
+  });
+
+  it("Run serves it, unlike an output-only question, and accepts only sql17", () => {
+    const run = readRepoFile("apps/web/src/app/api/exam/[attemptId]/run/route.ts");
+    expect(run).toMatch(/question\.kind === "SQL"[\s\S]{0,40}SQL_LANGUAGE_KEY/);
+    // An ANSWER question is still refused there: it has no program to run.
+    expect(run).toContain('question.kind === "ANSWER"');
+  });
+
+  it("submit accepts sql17 for a SQL question and only for one", () => {
+    const submit = readRepoFile("apps/web/src/lib/exam/submit.ts");
+    expect(submit).toMatch(/question\?\.kind === "SQL"[\s\S]{0,60}SQL_LANGUAGE_KEY/);
+  });
+
+  it("one kind is still refused, and it is a date rather than a surface", () => {
     const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
-    for (const sentence of [
-      "An interactive problem is not sat in an assessment yet",
-      "A SQL problem is not sat in an assessment yet",
-    ]) {
-      expect(action, "the pin refusals are one family").toContain(sentence);
+    expect(action).toContain("An interactive problem is not sat in an assessment yet");
+    for (const lifted of [
+      ["output-only was lifted in Phase 16f", "An output-only problem is not sat in an assessment yet"],
+      ["debugging was lifted in Phase 16g", "A debugging problem is not sat in an assessment yet"],
+      ["SQL was lifted in Phase 16o", "A SQL problem is not sat in an assessment yet"],
+    ] as const) {
+      expect(action, lifted[0]).not.toContain(lifted[1]);
     }
-    expect(action, "output-only was lifted in Phase 16f").not.toContain(
-      "An output-only problem is not sat in an assessment yet",
-    );
-    expect(action, "debugging was lifted in Phase 16g").not.toContain(
-      "A debugging problem is not sat in an assessment yet",
-    );
   });
 });
 describe("the catalogue names the kind, in the shared words (Phase 12p)", () => {

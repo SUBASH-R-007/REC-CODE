@@ -5,6 +5,7 @@ import {
   LANGUAGE_NOT_ACCEPTED_MESSAGE,
   LIMITS,
   SNAPSHOT_MAX_BYTES,
+  SQL_LANGUAGE_KEY,
   acceptsLanguage,
 } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
@@ -132,7 +133,17 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
    */
   // The QUESTION's list (Phase 13c), which is the paper's unless the
   // question narrows it. Asked of the layout, never of the current rows.
-  const accepted = await languagesOfQuestion(layout, question.questionId);
+  /**
+   * Phase 16o. A SQL question HAS a Run — it has sample datasets, and the
+   * practice surface runs a query against them — so unlike an ANSWER
+   * question it is not refused above. What it does not have is a choice of
+   * language: `languagesOfQuestion` returns toolchain keys, and `sql17` is
+   * not one, so the accepted set for this kind is stated here rather than
+   * derived. The same single value `submitAttempt` accepts, for the same
+   * reason.
+   */
+  const accepted =
+    question.kind === "SQL" ? [SQL_LANGUAGE_KEY] : await languagesOfQuestion(layout, question.questionId);
   if (!acceptsLanguage(accepted, body.data.language)) {
     return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
   }

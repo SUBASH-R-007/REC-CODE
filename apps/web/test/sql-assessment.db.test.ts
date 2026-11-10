@@ -3,18 +3,25 @@ import { freeDisplayCode } from "./support/display-code";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
- * A SQL problem is not sat in an assessment (Phase 12p), against a real
+ * A SQL problem IS sat in an assessment (Phase 16o), against a real
  * PostgreSQL.
  *
- * The fourth rule of a shape this codebase already had three times —
- * interactive (12l), debugging (12m), output-only (12n) — and the one kind
- * that was missing it. A sitting chooses ONE language for the whole paper
- * and `/api/exam/[attemptId]/submit` only accepts a toolchain language, so
- * a SQL question would be a C++ editor over a problem that wants a query,
- * and the candidate would discover that mid-sitting.
+ * Phase 12p refused the pin with a trigger, as the three kinds before it
+ * were refused — interactive (12l), debugging (12m), output-only (12n) —
+ * because a sitting chose ONE language for the whole paper and
+ * `/api/exam/[attemptId]/submit` accepted only a toolchain language. Phase
+ * 16h then found a clause 12p had not written down: `SENSITIVE_LANES`
+ * barred a `postgres` node from ASSESSMENT **by engine**, so a pinned query
+ * would have queued a submission no node could claim.
  *
- * The pin is refused on INSERT *and* on UPDATE: a paper that cannot hold a
- * SQL question must not be able to acquire one by having a row repointed.
+ * Both are gone — 13a gave a sitting a language per question, 16n gave the
+ * query engine a calibration benchmark, 16o froze the kind — so this file
+ * asserts the ACCEPTANCE, and that the guard is gone from the LIVE
+ * database rather than merely dropped in a migration.
+ *
+ * What it still asserts unchanged: a pinned question cannot be REPOINTED.
+ * That was the write-once rule all along, and since the kind trigger went
+ * it is the only rule left on this table.
  *
  * Opt-in: RECX_DB_TESTS=1.
  */
@@ -122,7 +129,18 @@ describe.skipIf(!ENABLED)("a SQL problem's assessment pin, against recx_test", (
     }
   }, 60_000);
 
-  it("refuses the pin of a SQL version, by trigger", async () => {
+  /**
+   * Phase 16o. This test asserted the opposite until the lane and the
+   * surface both existed, and the refusal it checked is the thing that is
+   * gone: `AssessmentProblem_no_sql` and its function are dropped, recorded
+   * in `DROPPED_GUARDS` rather than deleted.
+   *
+   * It asserts the ACCEPTANCE against the real tables because a dropped
+   * trigger is not the same claim as a working pin: the row has to exist,
+   * carry the SQL version it names, and still be subject to every other
+   * rule on the table — which the two tests below are about.
+   */
+  it("accepts the pin of a SQL version, now that a sitting can hold one", async () => {
     const v = await frozen({
       ioMode: "SQL",
       compareMode: "ROWS",
@@ -130,21 +148,46 @@ describe.skipIf(!ENABLED)("a SQL problem's assessment pin, against recx_test", (
       sqlOrdered: false,
     });
     expect(v.ioMode).toBe("SQL");
-    await expect(
-      db.assessmentProblem.create({
-        data: { assessmentId, problemVersionId: v.id, position: 1, points: 100 },
-      }),
-    ).rejects.toThrow(/is a SQL problem, which is not sat in an assessment yet/);
+    const row = await db.assessmentProblem.create({
+      data: { assessmentId, problemVersionId: v.id, position: 1, points: 100 },
+      select: { id: true, problemVersionId: true },
+    });
+    expect(row.problemVersionId).toBe(v.id);
+    // And it is really there, read back rather than inferred from the
+    // create's return value.
+    const stored = await db.assessmentProblem.findUniqueOrThrow({
+      where: { id: row.id },
+      select: { problemVersionId: true, position: true },
+    });
+    expect(stored).toEqual({ problemVersionId: v.id, position: 1 });
+  });
+
+  it("has no trigger left to refuse it, and the catalogue says so", async () => {
+    // The guard is gone from the LIVE database, which is a different
+    // statement from the migration having a DROP in it.
+    const triggers = await db.$queryRawUnsafe<{ tgname: string }[]>(
+      `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname = $1`,
+      "AssessmentProblem_no_sql",
+    );
+    expect(triggers).toEqual([]);
+    const fns = await db.$queryRawUnsafe<{ proname: string }[]>(
+      `SELECT proname FROM pg_proc WHERE proname = $1`,
+      "recx_refuse_sql_assessment_problem",
+    );
+    expect(fns).toEqual([]);
   });
 
   it("cannot acquire one by repointing a row either, and says which rule stopped it", async () => {
-    // A paper may hold an ordinary problem; it must not be able to become a
-    // paper with a SQL question in it by moving the pointer. It cannot, and
-    // not because of this phase's trigger: `AssessmentProblem` already
-    // freezes assessmentId, problemVersionId and position, so the UPDATE
-    // never reaches the kind check. The new trigger covers UPDATE anyway,
-    // the way its three siblings do — if that older rule is ever relaxed,
-    // the kind rule must not be relaxed with it.
+    /**
+     * A pinned question must not change underneath a candidate, whatever
+     * kind the new one is. `AssessmentProblem` freezes assessmentId,
+     * problemVersionId and position, so a repoint is refused by THAT rule.
+     *
+     * It mattered less while the kind trigger also stood; since Phase 16o
+     * dropped that trigger this is the only rule left here, which makes
+     * this test the one that holds the line. The refusal must keep naming
+     * the write-once rule rather than any kind rule.
+     */
     const ordinary = await frozen({});
     const sql = await frozen({
       ioMode: "SQL",

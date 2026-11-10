@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { ANSWER_LABELS, ANSWER_NOTICES, EDITOR_KEYMAP_NOTICES } from "@recx/shared";
+import { ANSWER_LABELS, ANSWER_NOTICES, EDITOR_KEYMAP_NOTICES, SQL_NOTICES } from "@recx/shared";
 // The deep path, not the barrel: this is a client component on a page
 // with a 160 KB budget. See the note in readiness-check.tsx.
 import { countEditedLines, debugChipLabel, DEBUG_NOTICES } from "@recx/shared/debug-problem";
@@ -214,6 +214,19 @@ export function ExamQuestion({
           they can see the number move while they work rather than after
           the clock has stopped.
         */}
+        {/*
+          Phase 16o. A SQL question in a sitting reads the SAME three
+          sentences the practice workspace shows — the dialect, the single
+          statement and the read-only copy of the data — because a
+          candidate meeting this kind for the first time under exam
+          conditions should not be told something different from what they
+          practised against. `SQL_NOTICES` is that copy, shared.
+        */}
+        {question.kind === "SQL" ? (
+          <p className="border-b border-border px-4 py-2 text-xs text-text-secondary">
+            {SQL_NOTICES.dialect} {SQL_NOTICES.oneStatement} {SQL_NOTICES.readOnly}
+          </p>
+        ) : null}
         {budget !== null ? (
           <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2 text-xs">
             <span className="font-medium text-text">{debugChipLabel(budget)}</span>

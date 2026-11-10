@@ -11,6 +11,7 @@ import { CONVEYOR_SHIFT } from "./conveyor-shift";
 import { EXACT_CHANGE_PAIR } from "./exact-change-pair";
 import { HANDLE_MAKER } from "./handle-maker";
 import { LAB_POWER_BUDGET } from "./lab-power-budget";
+import { LAB_SLOT_PLAN } from "./lab-slot-plan";
 import { NO_NEIGHBOUR_SEATING } from "./no-neighbour-seating";
 import { PLAYLIST_FOLD } from "./playlist-fold";
 import { SECOND_SWIPE } from "./second-swipe";
@@ -32,6 +33,7 @@ export const AUTHORED_PROBLEMS: readonly AuthoredProblem[] = [
   SESSION_ORDER,
   EXACT_CHANGE_PAIR,
   NO_NEIGHBOUR_SEATING,
+  LAB_SLOT_PLAN,
 ];
 
 /** Hints and editorial for every seeded problem, two-sum included. */

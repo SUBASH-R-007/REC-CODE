@@ -107,7 +107,15 @@ export function questionSeed(attemptSeed: number, position: number): number {
  * validates one. One field, read in the four places that care, is the
  * smaller change and the honest one.
  */
-export const EXAM_QUESTION_KINDS = ["CODE", "ANSWER"] as const;
+/**
+ * Phase 16o adds `SQL`, by the same argument that produced `ANSWER`.
+ * `sql17` is a `SubmitLanguageKey` and deliberately not in
+ * `LANGUAGE_CATALOG`, so that nothing treats a query as a toolchain —
+ * widening `LanguageKey` to carry it would spread "this might not be a
+ * program" through every route that validates one. A kind, read in the
+ * four places that care, is the smaller change and the honest one.
+ */
+export const EXAM_QUESTION_KINDS = ["CODE", "ANSWER", "SQL"] as const;
 export type ExamQuestionKind = (typeof EXAM_QUESTION_KINDS)[number];
 
 export interface LayoutQuestion {

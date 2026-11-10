@@ -13,6 +13,7 @@ export * from "./progress";
 export * from "./revision";
 export * from "./discussion";
 export * from "./interview-archive";
+export * from "./interview-bootstrap";
 export * from "./recommend";
 export * from "./mock-interview";
 export * from "./written";

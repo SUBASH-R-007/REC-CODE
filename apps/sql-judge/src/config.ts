@@ -52,7 +52,17 @@ export const sqlJudgeEnvShape = {
   RECX_SLOTS: z.coerce.number().int().min(1).max(32).default(2),
   RECX_QUEUES: z
     .string()
-    .default("judge-sql-practice,judge-sql-run")
+    /**
+     * Every SQL lane (Phase 16o). It was practice and run only, because
+     * `lanes.ts` barred a SQL node from ASSESSMENT and CONTEST by engine
+     * and a node subscribed to a queue it could never claim from would
+     * burn an attempt on every refusal. Phase 16n gave the engine a
+     * calibration benchmark and lifted that bar, and Phase 16o made a
+     * paper able to hold a query — so a default that still excluded the
+     * two would leave an exam submission queued with nobody listening,
+     * which is the state this whole pair of phases existed to end.
+     */
+    .default("judge-sql-assessment,judge-sql-contest,judge-sql-practice,judge-sql-rejudge,judge-sql-run")
     .transform((raw) => [...new Set(raw.split(",").map((q) => q.trim()).filter(Boolean))])
     .pipe(
       z
