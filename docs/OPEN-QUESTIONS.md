@@ -4627,3 +4627,40 @@ sitting, the sitting's session, problem reports and consent records. Every
 one was real and none was catalogued, so a later migration could have
 dropped any of them with every fence green. They are all listed now and the
 cut-off moved to this phase's migration.
+
+## The unit of a question pool is the passage group, not the question (Phase 16k)
+
+`docs/ROADMAP.md` §1.2 asks for "enough questions per AptitudeArea for the
+six patterns to draw a fresh paper twice over", and the obvious reading is a
+count: for each topic, twice the largest number any one pattern draws. The
+bank was authored to that bar — 192 questions, every topic at or above twice
+its largest single-pattern draw — and four of the six patterns still could
+not be filled.
+
+`buildMockLayout` draws a passage-grouped topic in WHOLE GROUPS and never
+splits one. Two passages of eight reading-comprehension questions are
+sixteen questions and cannot make a section of six. The error message said
+so exactly:
+
+> verbal needs 6 READING_COMPREHENSION, and the 16 available come in passage
+> groups that cannot total 6 without splitting one
+
+The patterns ask for sections of 6 and of 8, so the pool now holds groups of
+8, 8, 3, 3 and 3: eight is either large group, and six is any two of the
+three small ones. Both sizes are formable more than once, which is what
+"twice over" means once the unit is the group.
+
+**What this changes for anybody adding to the bank.** A count per topic is
+the wrong check for a passage-grouped topic, and a fence that counted would
+have passed the broken bank. So the fence runs the real draw instead
+(`apps/web/test/aptitude-bank.test.ts`), for every seeded pattern, on two
+seeds. It is a slower test and a correct one.
+
+**And a second thing the same work turned up.** A published or retired
+aptitude question is never deleted, by design. That makes a database that
+has imported this bank unable to import it again, which is fine for a
+deployment and awkward for a test — so the pipeline test generates its own
+rows and never publishes them, and the bank's own proof needs no database at
+all. The first version of that test published the real bank into recx_test
+and could not clean up; 201 rows had to be retired by hand. Recorded so the
+next person does not write it that way.

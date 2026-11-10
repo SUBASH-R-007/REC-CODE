@@ -2014,6 +2014,70 @@ recovery code is the row worth noticing in a weekly read.
 
 ---
 
+### 2.23 The aptitude question bank (Phase 16k)
+
+Six mock patterns have been seeded since Phase 7 and, until this phase,
+**nothing seeded a single question** — so a student who started a TCS-NQT
+mock sat down in front of sections, timers and cutoffs with no questions in
+them. That was the starkest gap in the product: not a missing improvement, a
+feature that could not work.
+
+`apps/web/content/aptitude/*.csv` is 201 questions written for this
+platform, across all 29 topics. They are CSVs and not a seed module because
+the seeder already records the decision — the questions "are a content
+programme with named owners and are imported from CSV rather than seeded" —
+and this honours it: they go in through the same pipeline a faculty member
+uses.
+
+**Importing them.**
+
+```bash
+cd apps/web && npx pnpm@9.15.9 import-aptitude content/aptitude --as RECADMIN01
+```
+
+`--as` names the ADMIN or SUPER_ADMIN the import is recorded under. Each
+file is its own import and each ROW its own transaction, so one bad row never
+discards a file; a failed row prints its line and its reasons, and the same
+reasons are on the import's page under `/admin/aptitude`.
+
+Re-running is safe and creates nothing: the duplicate detector hashes the
+stem, the options and the key (not the explanation, so improving the working
+is not a new question).
+
+**They arrive as DRAFT, and that is not an oversight.** Publishing is a
+second person's job — `publishAptitudeQuestion` refuses the author of the
+question, because *"a worked explanation nobody else has read is a worked
+explanation nobody has checked"*. These were written by an assistant and
+every row says so (`origin` is AI_ASSISTED), so a reviewer opening one is
+told where it came from. Review and publish at `/admin/aptitude`.
+
+**What this does and does not close.** `docs/ROADMAP.md` §1.2 asks for two
+things. The bank is the first: every one of the six patterns can now draw a
+full paper twice over, which `apps/web/test/aptitude-bank.test.ts` proves by
+running the real draw rather than by counting. The second — a per-term
+authoring quota with a named owner — is a department decision and is not
+code. §1.2 stays open for that half, and for the 450-problem coding target
+the same entry names.
+
+**Two things worth knowing before adding to the bank.**
+
+*A passage is drawn whole.* `buildMockLayout` never splits a passage group,
+so a section needing 6 reading-comprehension questions cannot be served by
+two groups of 8 — the pool has to be able to TOTAL the number asked for from
+whole groups. The patterns ask for sections of 6 and of 8, which is why the
+bank holds groups of 8, 8, 3, 3 and 3. Counting questions per topic gets
+this wrong, and the draw test is what caught it.
+
+*A published question is never deleted.* Retiring is the only way back
+(`recx_refuse_published_question_change`): answer rows reference it and past
+results must stay honest. So review before publishing, and expect a
+mistaken question to be retired rather than removed. It also means a
+database that has imported this bank cannot import it again — the content
+hash is already there — which is why `aptitude-import.db.test.ts` tests the
+pipeline on rows it generates rather than on these files.
+
+---
+
 ## 3. Gate log
 
 Each phase closes only when the gate (§1.6) is green on Windows and Linux.
@@ -2913,3 +2977,8 @@ coordinator from actual runs — never in advance.
 | 16i+16j | 2026-11-10 | Gate 7/7 on Linux, both phases together | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. 5,363 web tests (198 files, none skipped with RECX_DB_TESTS=1), 1,445 repo fences, 1,770 shared, 297 db-package, 276 isolate integration cases on real sandbox boxes. Windows bundle budgets met and `/login` still serves with no script at all, which the LMS link had to not break | Claude |
 | 16i+16j | 2026-11-10 | What the gate caught that nothing local could: a route may export only route fields | **FIXED.** `start/route.ts` exported the three OIDC cookie names, and Next refuses anything but a route field -- *"OIDC_STATE_COOKIE is not a valid Route export field"*. `tsc --noEmit` cannot see it: the check lives in the types Next GENERATES during a build, so only `next build` and the gate's typecheck after it do. The names moved to `lib/auth/oidc-cookies.ts` with the reason written in it. The lesson for every later phase: a constant shared by two route handlers lives beside them, never inside one | Claude |
 | 16j | 2026-11-10 | Three defects found by reviewing my own work before the gate, not by the gate | **FIXED, each with a fence checked against the broken code.** (1) `/account/two-factor` promised "this setup expires in 15 minutes" and nothing enforced it, so an unconfirmed secret that had been on a screen stayed usable indefinitely; now enforced and the stale row deleted. (2) After the enforcement moved off `requireUser`, four places still said an un-enrolled admin "reaches only /account/two-factor" -- a dashboard and profile still open; corrected, and `second-factor-scope.test.ts` pins the guards AND the sentences so they cannot drift again. (3) Two guarantees `docs/RUNBOOK.md` tells an operator to rely on -- all three LMS names or none, and a 32-byte key -- were implemented and untested; `env.test.ts` covers both, and the policy switch's refusal without a key is covered too | Claude |
+| 16k | 2026-11-10 | The six mock patterns had no questions at all -- `docs/ROADMAP.md` 1.2 | **HALF DONE, and the half that is code.** 201 questions written for this platform across all 29 topics, as CSVs under `apps/web/content/aptitude/`, imported through the same pipeline a faculty member uses (`scripts/import-aptitude.ts`, `via: cli:<operator>` because `AptitudeImport_via_check` accepts nothing else). Every one of the six seeded patterns now draws a full paper twice over, proved by running the real draw rather than by counting. They arrive DRAFT with origin AI_ASSISTED and a second person publishes them -- `publishAptitudeQuestion` refuses the author. The other half of 1.2, a per-term authoring quota with a named owner, is a department decision and not code | Claude |
+| 16k | 2026-11-10 | Counting questions per topic is the WRONG check, and it passed a broken bank | **FOUND BY THE DRAW, recorded in `docs/OPEN-QUESTIONS.md`.** The bank met the obvious reading of 1.2 -- every topic at twice its largest single-pattern draw -- and four of six patterns still could not be filled: `buildMockLayout` draws a passage-grouped topic in WHOLE GROUPS, so two passages of eight reading-comprehension questions cannot make a section of six. Nine more questions in three small passages fixed it (groups of 8, 8, 3, 3, 3: eight is either large group, six is any two small ones). The fence now runs the real draw for every pattern on two seeds instead of counting | Claude |
+| 16k | 2026-11-10 | Four defects in the questions themselves, caught before anything was committed | **FIXED.** A divisibility question keyed 2 whose working said 8; a numeric question keyed 70 whose working said 62.5; three reasoning items whose clues contradicted each other (six-in-a-row with an impossible gap, seven-in-a-row likewise, and three taps whose rates made the question vacuous); and ten sentence-correction items sharing one stem, which in a shuffled section reads as a bug. The checker that found most of them is the rule that the keyed option must appear in its own explanation -- cheap, and it works because every explanation here states the answer it reaches | Claude |
+| 16k | 2026-11-10 | A published aptitude question is never deleted, and the first test design ignored that | **CORRECTED.** `recx_refuse_published_question_change` refuses a DELETE of a PUBLISHED or RETIRED question: answer rows reference it and past results must stay honest. The first version of the pipeline test imported and published the real bank into recx_test, could not clean up, and left 201 rows that had to be retired by hand -- after which the content-hash duplicate detector made the suite unrunnable. It now generates its own rows and never publishes them, and the bank's own proof needs no database. `docs/RUNBOOK.md` 2.23 says both things where an operator would be standing | Claude |
+| 16k | 2026-11-10 | Gate 7/7 on Linux for the aptitude bank | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. 5,384 web tests (none skipped with RECX_DB_TESTS=1), 1,445 repo fences, 1,770 shared, 297 db-package, 276 isolate integration cases. The bank's own 17 checks run without a database -- every row parsed by the product's own CSV reader, every question put through the real publish gate, and the real draw run for all six patterns on two seeds | Claude |

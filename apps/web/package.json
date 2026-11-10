@@ -14,7 +14,8 @@
     "seed": "tsx --conditions=react-server scripts/seed.ts",
     "postinstall": "node scripts/copy-monaco.mjs",
     "judge-node": "tsx --conditions=react-server scripts/judge-node.ts",
-    "validate-and-publish": "tsx --conditions=react-server scripts/validate-and-publish.ts"
+    "validate-and-publish": "tsx --conditions=react-server scripts/validate-and-publish.ts",
+    "import-aptitude": "tsx --conditions=react-server scripts/import-aptitude.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.0",

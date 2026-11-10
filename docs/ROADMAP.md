@@ -93,6 +93,23 @@ curated.
 needs faculty time, not engineering time. SPEC §7 forbids sourcing it by
 scraping LeetCode, GeeksforGeeks, InterviewBit or anywhere else.
 
+**THE APTITUDE HALF IS BUILT (Phase 16k).** 201 questions written for this
+platform, across all 29 topics, as CSVs under `apps/web/content/aptitude/`
+and imported through the pipeline a faculty member uses
+(`docs/RUNBOOK.md` §2.23). Every one of the six patterns now draws a full
+paper twice over — proved by running the real draw for each of them on two
+seeds, not by counting, because counting gets it wrong: a passage group is
+drawn whole, so sixteen reading-comprehension questions in two groups of
+eight cannot fill a section of six. `docs/OPEN-QUESTIONS.md` has that story.
+
+They arrive as DRAFT with `origin` AI_ASSISTED, and a second person
+publishes them — the publish action refuses the author of a question, which
+is the rule that makes the review real. So what remains of §1.2 is the two
+things this phase cannot do: the per-term quota with a named owner, which is
+a department decision, and the 450 authored coding problems, which is the
+other half of the content programme and is untouched (eleven authored, one
+published).
+
 ### 1.3 The join from the web app to a student's screen is unproven
 
 `isolate-integration` proves 276 cases on real sandbox boxes, and the judge
