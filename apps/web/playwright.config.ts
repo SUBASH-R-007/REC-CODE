@@ -175,5 +175,26 @@ export default defineConfig({
       outputDir: "./test-results/kinds",
       fullyParallel: false,
     },
+    /**
+     * Phase 16m: the one surface the axe sweep never drew (`docs/ROADMAP.md`
+     * §3.6) — the student assistant panel, which renders only where the
+     * helper is switched ON with a model and a key on the server.
+     *
+     * Its own project rather than part of `a11y`, because `a11y` is in no
+     * gate for needing a live stack and this needs MORE than that: a
+     * super-admin to turn a deployment setting on for the duration of one
+     * test, and an external model to answer. Run it by name,
+     * `--project=assistant-a11y`, with `E2E_AI=1`.
+     *
+     * (It would not join `a11y` by accident either: that project's
+     * testMatch anchors on a path separator, so `assistant-a11y.spec.ts`
+     * does not match it.)
+     */
+    {
+      name: "assistant-a11y",
+      testMatch: /assistant-a11y\.spec\.ts$/,
+      outputDir: "./test-results/assistant-a11y",
+      fullyParallel: false,
+    },
   ],
 });

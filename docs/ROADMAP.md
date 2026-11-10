@@ -129,6 +129,29 @@ journey, the keyboard journey's Run and Submit, and
 
 *Size:* one session, with somebody present.
 
+**DONE (2026-11-10), and it was an attended afternoon rather than an hour.**
+All three are green with a worker attached: the authoring journey 3/3
+including its 15.2-minute walk, the keyboard journey in 49.5 s with Run
+Accepted, a wrong Submit naming its failing case and a correct Submit
+Accepted, and the kinds project including the contest case. The join is
+proved on this deployment: web → BullMQ → worker → result → the verdict on
+the page.
+
+This entry was also RIGHT about the thing I first said it was wrong about: a
+node returns from OFFLINE on its own next heartbeat, but a QUARANTINED one
+does not and must be returned through `/admin/judge`. I had generalised from
+one branch of `planNodeTransition`.
+
+What the afternoon went on was not the join. It was two things that are not
+the product and are now written down in `docs/RUNBOOK.md` §3: **no scheduler
+running**, so a run orphaned by a server restart sat `JUDGING` and the
+per-user in-flight cap of one refused every new run; and then, with the
+scheduler up, its node sweep marking the node OFFLINE because `next dev`
+under Playwright load cannot answer a heartbeat. Three spec defects came out
+of running it, each of which would have failed a passing product on a loaded
+host, and one of which — global setup writing a signed-OUT session without
+complaining — had been silently possible all along.
+
 ### 1.4 The deployment topology has never been started
 
 `deploy/` holds `compose.app.yml`, `compose.db.yml`, `compose.judge.yml`,
@@ -193,6 +216,23 @@ shows a recent "last email sent".
 
 *Size:* a deployment setting and one person's afternoon.
 
+**The CODE half is now proved (Phase 16p), and it had never been run.** This
+entry reads as pure deployment, and under it was a hole: the outbox, the
+drain and `createMailTransport`'s `smtp` case had never carried a message,
+because a development checkout sets `MAIL_TRANSPORT=log` and the only
+alternative was a real relay with real credentials. So the part most likely
+to be wrong was the part nobody could try.
+
+`scripts/dev/mail-sink.mjs` is a loopback-only SMTP sink, and the whole path
+has now carried a test email end to end: enqueue, drain, nodemailer, the
+short timeouts, `MAIL_FROM`, and the page reading `sentAt` back.
+`docs/RUNBOOK.md` §2.26 is the procedure.
+
+**What stays open is exactly what this entry says and nothing more:** a real
+relay. SPF, DKIM, a provider's rate limit and whether the college's mail
+server accepts the envelope cannot be answered by a sink, and are a
+credential and an afternoon rather than code.
+
 ### 1.7 The interview archive is empty
 
 SPEC §6 calls the moderated `InterviewExperience` archive load-bearing rather
@@ -229,7 +269,7 @@ surface:
 
 | Kind | What it still needs |
 |---|---|
-| **SQL** | **Not a surface problem, and this entry was wrong (Phase 16h).** `SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]` and `lanes.ts` bars the SQL engine from both by name — "a query's limit is the database's own `statement_timeout`" — so a SQL question in a paper would queue a submission **no node may claim**. Lifting it needs a calibration benchmark for the SQL engine, and the honest difficulty is that what CPU calibration measures does not exist for a query. A phase with a measurement question in it. |
+| **SQL** | **Not a surface problem, and this entry was wrong (Phase 16h).** `SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]` and `lanes.ts` bars the SQL engine from both by name — "a query's limit is the database's own `statement_timeout`" — so a SQL question in a paper would queue a submission **no node may claim**. Lifting it needs a calibration benchmark for the SQL engine, and the honest difficulty is that what CPU calibration measures does not exist for a query. A phase with a measurement question in it. **The benchmark is BUILT (Phase 16n)** and the lane is lifted: a SQL node that reports one is judged by the same rule every other node is. The measurement question was answered by asking what a calibration is FOR — not scaling a limit, but noticing that one node is slower than its neighbours — so it measures per-row throughput on the judging cluster, scored from the FASTEST of five runs because wall time is the only thing a query offers and wall-time noise is one-sided. **What is left is the surface**, and it is the shape of 16f and 16g: `/api/exam/[attemptId]/submit` accepts `answer1` and every `LANGUAGE_CATALOG` key and not `sql17`, so `AssessmentProblem_no_sql` stands until a sitting can carry a query and show a result set. `docs/RUNBOOK.md` §2.27, `docs/OPEN-QUESTIONS.md`. |
 | **Output-only** | ~~An answer box rather than an editor, with `answer1` carried the same way.~~ **Built (Phase 16f):** `LayoutQuestion.kind` is frozen as `ANSWER` at start; the view renders a textarea with no picker and no Run; the submit route accepts `answer1` for an ANSWER question and only for one. |
 | **Debugging** | ~~An edit budget a sitting can refuse without destroying work a candidate can no longer redo.~~ **Built (Phase 16g):** the whole hand-in is refused, not one answer — nothing finalised, the clock still running, the question named — with the budget frozen in the layout and a live count in the pane. |
 | **Interactive** | **Blocked on a date, not on code (Phase 16h).** SPEC §11: "keep them out of high-stakes assessments until they have run cleanly through two practice contests" — and no contest has been run with real students on this deployment, so the condition is unmeetable before launch. The conversation surface is real work and sits second in line behind it. |
@@ -373,6 +413,21 @@ identifies a student.
 
 *Size:* small, and it has a privacy question to settle first.
 
+**BUILT (Phase 16l), and the entry was half wrong about the gap.** Vitals
+could not be read by cohort, and they could not be read AT ALL: the
+histograms had accumulated since Phase 10d with no surface and no query.
+`/super/vitals` is both halves — the p75 bucket per metric per route for a
+day, the sample count behind every cell, and a cohort filter.
+
+The privacy question was already settled here, for percentiles:
+`cohortKeyFor` is the batch year and deliberately not the department,
+because a department's final years can be under thirty at a small college.
+So the cohort is the batch year, which answers *"is this year's intake
+seeing it, or everybody?"* and **not** *"is it one lab?"* — that needs a
+location signal this platform does not collect, and saying so is more useful
+than a label that implies otherwise. `docs/RUNBOOK.md` §2.24 is the page,
+and `docs/OPEN-QUESTIONS.md` records the decision and the residual risk.
+
 ### 3.5 Capacity has never been exercised above a 200-submission burst
 
 `docs/CAPACITY.md` carries the real arithmetic: ~5 slot-seconds per average
@@ -404,6 +459,23 @@ than skip silently if the tab is absent.
 
 *Size:* one spec and one fixture.
 
+**BUILT (Phase 16m), and NOT RUN here.** `e2e/assistant-a11y.spec.ts` and
+`--project=assistant-a11y`: a super-admin switches the helper on through the
+real form, the student opens the Assistant tab, the panel is scanned idle
+and with an answer on screen, and it goes back off in a `finally`. With
+`E2E_AI=1` a missing tab FAILS, as this entry asked.
+
+It has not been run on this deployment, for exactly the reason the sweep
+never drew the panel: no model is configured and there is no `AI_API_KEY`.
+That is the remaining half of this entry and it is a deployment setting, not
+code — `docs/RUNBOOK.md` §2.25 is the command, and
+`docs/OPEN-QUESTIONS.md` records the state.
+
+The "fixture" this entry asked for turned out not to exist: the control is a
+select that reads back as a sentence, with a Save and an audited reason,
+because Phase 15g decided turning the assistant on is not a small act. The
+spec drives that form rather than the action behind it.
+
 ### 3.7 Keep CI readable now that it runs
 
 The first CI run in eighty-three commits (2026-11-08) found two real
@@ -413,6 +485,13 @@ failures, both of which had been failing since the phase that introduced them
 
 `.github/dependabot.yml` exists and has never produced a run for the same
 reason. It will start now. Someone should own the weekly group.
+
+**No code remains (Phase 16m).** §3.7's engineering landed with
+`tests/repo/toolchain-pins.test.ts`. What is left is a standing human duty —
+read the weekly dependency group, and treat a major-version bump as a phase
+rather than a merge — and it needs a NAMED person, which a roadmap sentence
+is not. Recorded in `docs/OPEN-QUESTIONS.md` so it is asked for rather than
+assumed.
 
 The lesson worth keeping: **a gate that nobody runs is not a gate.** The
 seven-step Linux gate runs on a laptop with a seeded database; CI migrates

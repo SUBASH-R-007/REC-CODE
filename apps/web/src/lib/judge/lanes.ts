@@ -26,16 +26,26 @@ import {
  *
  * A node that is not ONLINE serves no lane at all.
  *
- * Phase 12k: rule (a) is a hello-world CPU benchmark, which the SQL engine
- * does not run and could not interpret — a query's limit is the database's
- * own `statement_timeout`, not a scaled C++ time. A `postgres` node
- * therefore reports no calibration and is told so in words, rather than
- * being told its calibration is "missing" as though somebody forgot to
- * send it. The CONSEQUENCE is deliberately unchanged: it still withholds
- * the sensitive lanes. A slow cluster really can turn a passing query into
- * a timeout, so the fleet needs a benchmark for the query engine before an
- * exam may be judged on one — and until that exists, saying so plainly and
- * refusing the lane is the honest state. (docs/OPEN-QUESTIONS.md.)
+ * Phase 12k read rule (a) as a hello-world CPU benchmark, which the SQL
+ * engine does not run and could not interpret — a query's limit is the
+ * database's own `statement_timeout`, not a scaled C++ time — so a
+ * `postgres` node reported no calibration, was told so in words, and was
+ * refused the sensitive lanes until a benchmark for the query engine
+ * existed.
+ *
+ * **Phase 16n built it** (`apps/sql-judge/src/calibration.ts`): per-row CPU
+ * throughput on the cluster that will judge, measured through the same
+ * sandbox, the same student role and the same `statement_timeout` a
+ * candidate's query gets. So rule (a) now applies to a SQL node exactly as
+ * it applies to an isolate one, with no special case here at all — and the
+ * fleet median it is compared against is over nodes of the SAME ENGINE
+ * (the heartbeat route), so a query score is never measured against a C++
+ * one.
+ *
+ * What the benchmark is for, since it is not for scaling a limit: to notice
+ * that one node is materially slower than its neighbours. A 5-second
+ * statement timeout set with a healthy cluster in mind is a different exam
+ * on a cluster half the speed. (docs/OPEN-QUESTIONS.md.)
  */
 
 /** Calibration is refreshed every 6 h (LIMITS.calibration.intervalMs) and goes stale after 6.5 h. */
@@ -91,7 +101,12 @@ export function sensitiveLaneEligibility(input: {
   otherOnlineScores: readonly (number | null)[];
   now: Date;
   allowUnhardened: boolean;
-  /** The node's engine. "postgres" has no CPU benchmark (Phase 12k). */
+  /**
+   * The node's engine. Kept on the input although rule (a) no longer
+   * branches on it (Phase 16n): the heartbeat route uses it to take the
+   * fleet median over nodes of the same engine, and a caller that passes
+   * health without an engine would otherwise look correct.
+   */
   driver?: string;
 }): LaneEligibility {
   const { health, now } = input;
@@ -99,13 +114,17 @@ export function sensitiveLaneEligibility(input: {
 
   // (a) calibration
   const score = health.calibrationScore;
-  if (input.driver === "postgres") {
+  if (!isUsableScore(score) || health.calibratedAt === null) {
+    /**
+     * The engine still shapes the SENTENCE, because it decides which process
+     * an operator should go and look at — the SQL judge or the isolate
+     * worker. It no longer shapes the DECISION (Phase 16n).
+     */
     restrictions.push(
-      "the SQL engine has no calibration benchmark yet: a query's limit is the database's own statement_timeout, " +
-        "so this node does not serve ASSESSMENT or CONTEST",
+      input.driver === "postgres"
+        ? "calibration missing: the SQL judge has not reported a benchmark for this cluster"
+        : "calibration missing: no calibration benchmark has been reported",
     );
-  } else if (!isUsableScore(score) || health.calibratedAt === null) {
-    restrictions.push("calibration missing: no calibration benchmark has been reported");
   } else {
     const age = now.getTime() - health.calibratedAt.getTime();
     if (age > CALIBRATION_STALE_AFTER_MS) {

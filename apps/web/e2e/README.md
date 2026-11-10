@@ -67,6 +67,8 @@ server's routes: the student pages, and for staff `/admin`, `/admin/problems`,
 | `E2E_BASE_URL` | `http://localhost:3000` | the running stack |
 | `E2E_JUDGE` | unset | `1` = a judge worker is attached: run the verdict steps and the `authoring` project |
 | `E2E_ADMIN` | unset | `0` = do not sign the staff accounts in (only for runs without staff pages) |
+| `E2E_AI` | unset | `1` = the AI helper has a model and a key on the server: run the `assistant-a11y` project |
+| `E2E_AI_SLUG` | `two-sum` | problem the assistant panel is opened on |
 | `E2E_WARM` | unset | `0` = skip warming routes in global setup |
 | `E2E_WORKERS` | `2` | Playwright workers |
 | `E2E_PROBLEM` | `two-sum` | problem the keyboard journey and the `/judge` footer test open |

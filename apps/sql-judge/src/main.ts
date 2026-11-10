@@ -10,6 +10,7 @@ import {
   type JudgeNodeStatus,
 } from "@recx/shared";
 import { HttpSqlJudgeApi, isRefusal, type SqlJudgeApi } from "./api";
+import { runSqlCalibration, type SqlCalibrationResult } from "./calibration";
 import { ConfigError, loadDevEnvFile, parseConfig, type SqlJudgeConfig } from "./config";
 import { InfraError, ProtocolMismatchError, errorMessage } from "./errors";
 import { checkCluster } from "./hardening";
@@ -91,6 +92,15 @@ async function main(): Promise<void> {
   for (const failure of selfCheck.failures) logger.error({ selfCheck: true }, failure);
   logger.info({ ok: selfCheck.ok, cases: selfCheck.failures.length }, "self-check complete");
 
+  /**
+   * And the calibration benchmark (Phase 16n). Before the first heartbeat,
+   * so a node never reports itself uncalibrated once and then calibrated
+   * ten seconds later -- the fleet median is read on every heartbeat, and a
+   * null arriving first would withhold the sensitive lanes from every OTHER
+   * node for one tick by moving nothing but the count.
+   */
+  let calibration: SqlCalibrationResult = await runSqlCalibration({ sandbox, logger });
+
   const api: SqlJudgeApi = new HttpSqlJudgeApi({
     appUrl: config.RECX_APP_URL,
     nodeId: config.RECX_NODE_ID,
@@ -119,8 +129,8 @@ async function main(): Promise<void> {
         languages: [SQL_LANGUAGE_KEY],
         slots: config.RECX_SLOTS,
         busySlots: busy,
-        calibrationScore: null,
-        calibratedAt: null,
+        calibrationScore: calibration.score,
+        calibratedAt: calibration.at,
         selfCheck: {
           ok: selfCheck.ok,
           at: selfCheck.ranAt.toISOString(),
@@ -139,16 +149,23 @@ async function main(): Promise<void> {
   await beat();
   const heartbeat = setInterval(() => void beat(), JUDGE_HEARTBEAT_MS);
 
-  // The self-check is re-run on the same cadence the isolate worker uses,
-  // so a cluster somebody loosened by hand stops serving sensitive lanes.
-  const selfCheckTimer = setInterval(
+  /**
+   * The self-check and the calibration are re-run on the same cadence the
+   * isolate worker uses (both LIMITS are 6 h, and that worker uses one
+   * timer for both), so a cluster somebody loosened by hand stops serving
+   * sensitive lanes and a cluster that has been throttled stops looking
+   * like its neighbours.
+   */
+  const maintenanceTimer = setInterval(
     () =>
-      void runSelfCheck(sandbox)
-        .then((result) => {
-          selfCheck = result;
-          for (const failure of result.failures) logger.error({ selfCheck: true }, failure);
-        })
-        .catch((error: unknown) => logger.warn({ err: errorMessage(error) }, "self-check could not run")),
+      void (async () => {
+        const result = await runSelfCheck(sandbox);
+        selfCheck = result;
+        for (const failure of result.failures) logger.error({ selfCheck: true }, failure);
+        calibration = await runSqlCalibration({ sandbox, logger });
+      })().catch((error: unknown) =>
+        logger.warn({ err: errorMessage(error) }, "maintenance re-run could not complete"),
+      ),
     LIMITS.selfCheck.intervalMs,
   );
 
@@ -172,7 +189,7 @@ async function main(): Promise<void> {
 
   const stop = async () => {
     clearInterval(heartbeat);
-    clearInterval(selfCheckTimer);
+    clearInterval(maintenanceTimer);
     await Promise.all(workers.map((w) => w.close()));
     await connection.quit().catch(() => undefined);
     logger.info("stopped");

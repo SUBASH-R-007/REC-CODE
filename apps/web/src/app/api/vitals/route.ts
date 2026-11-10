@@ -2,9 +2,11 @@ import {
   VITALS_TTL_SECONDS,
   campusDay,
   VITAL_MAX,
+  isVitalCohort,
   isVitalMetric,
   isVitalRoute,
   vitalBucket,
+  vitalsCohortKey,
   vitalsKey,
   type VitalMetric,
   type VitalRoute,
@@ -53,6 +55,8 @@ interface Accepted {
   metric: VitalMetric;
   route: VitalRoute;
   value: number;
+  /** Phase 16l: the batch year, or null when the page did not name one. */
+  cohort: string | null;
 }
 
 /**
@@ -63,15 +67,33 @@ interface Accepted {
  * stripped, so a field somebody adds client-side cannot start arriving
  * unnoticed.
  */
-function parse(body: unknown): Accepted | null {
+function parse(body: unknown, nowYear: number): Accepted | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
   const keys = Object.keys(body);
-  if (keys.length !== 3) return null;
-  const { metric, route, value } = body as Record<string, unknown>;
+  /**
+   * Three keys, or four with the fourth being `cohort` (Phase 16l). Still a
+   * closed set rather than "at least these": a field somebody adds
+   * client-side must not start arriving unnoticed, which is why the count
+   * is checked and the names are named.
+   */
+  if (keys.length === 4) {
+    if (!keys.includes("cohort")) return null;
+  } else if (keys.length !== 3) {
+    return null;
+  }
+  const { metric, route, value, cohort } = body as Record<string, unknown>;
   if (typeof metric !== "string" || typeof route !== "string" || typeof value !== "number") return null;
   if (!isVitalMetric(metric) || !isVitalRoute(route)) return null;
   if (!Number.isFinite(value) || value < 0 || value > VITAL_MAX[metric]) return null;
-  return { metric, route, value };
+  /**
+   * The cohort is a batch year inside a closed window, for the same reason
+   * the route must be one of a closed list: the caller is unauthenticated,
+   * so it never chooses the key. A label outside the window is dropped
+   * rather than refusing the whole report -- the unlabelled histogram is
+   * the one every budget is read from, and it should still get the sample.
+   */
+  const labelled = keys.length === 4 && isVitalCohort(cohort, nowYear) ? cohort : null;
+  return { metric, route, value, cohort: labelled };
 }
 
 async function readBody(request: Request): Promise<unknown> {
@@ -87,7 +109,8 @@ async function readBody(request: Request): Promise<unknown> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const report = parse(await readBody(request).catch(() => null));
+  const now = new Date();
+  const report = parse(await readBody(request).catch(() => null), now.getUTCFullYear());
   if (!report) return new Response(null, NO_CONTENT);
 
   /**
@@ -105,12 +128,25 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const client = redis();
-    const key = vitalsKey(campusDay(new Date()), report.metric, report.route);
-    await client.hincrby(key, vitalBucket(report.metric, report.value), 1);
-    // Set on every write, so a key that keeps being written keeps being
-    // extended and one that stops disappears on its own. Retention becomes a
-    // property of the data rather than a job somebody has to remember.
-    await client.expire(key, VITALS_TTL_SECONDS);
+    const day = campusDay(now);
+    const bucket = vitalBucket(report.metric, report.value);
+    /**
+     * The unlabelled histogram ALWAYS, and the cohort one as well when the
+     * page named a cohort (Phase 16l). Two writes rather than one key with
+     * a cohort field, so everything that read this data before the cohort
+     * existed reads exactly what it did before.
+     */
+    const keys = [vitalsKey(day, report.metric, report.route)];
+    if (report.cohort !== null) {
+      keys.push(vitalsCohortKey(day, report.metric, report.route, report.cohort));
+    }
+    for (const key of keys) {
+      await client.hincrby(key, bucket, 1);
+      // Set on every write, so a key that keeps being written keeps being
+      // extended and one that stops disappears on its own. Retention becomes
+      // a property of the data rather than a job somebody has to remember.
+      await client.expire(key, VITALS_TTL_SECONDS);
+    }
   } catch (error) {
     // Redis is transport here as everywhere else: a vitals write that fails
     // is a missing data point, never a failed page load. The beacon is sent

@@ -92,17 +92,24 @@ export function NodeCard({ node }: { node: AdminNodeRow }) {
           <span className={node.heartbeatStale ? "font-medium text-danger" : undefined}>{ago(node.heartbeatAgeMs)}</span>
         </Item>
         <Item term="Calibration">
-          {sql ? (
-            // Not a gap in this node's reporting: the SQL engine has no
-            // hello-world benchmark, because a query's limit is the
-            // database's statement_timeout rather than a scaled C++ time.
-            <span className="text-muted">Not measured for the SQL engine</span>
-          ) : node.calibrationScore === null ? (
+          {node.calibrationScore === null ? (
             <span className="text-muted">Not measured</span>
           ) : (
             <>
               <span className="font-mono">{node.calibrationScore.toFixed(1)}</span>
               <span className="text-text-secondary"> · {ago(node.calibrationAgeMs)}</span>
+              {/*
+               * The UNIT, for a SQL node only. Phase 16n gave the query
+               * engine a benchmark of its own, so a postgres node reports a
+               * score like every other node — but it counts rows per second
+               * where an isolate node counts work units per CPU second, and
+               * the two are nowhere near each other in magnitude. Somebody
+               * reading one node's million beside another's six hundred
+               * million needs to know they are different measurements
+               * rather than a fleet in trouble. (The deviation below is
+               * taken within an engine, so it is comparable either way.)
+               */}
+              {sql ? <span className="block text-xs text-muted">rows per second (the query benchmark)</span> : null}
               <span className={cn("block text-xs", node.calibrationOutlier ? "font-medium text-danger" : "text-muted")}>
                 {formatSignedRate(node.calibrationDeviation)} vs fleet median
                 {node.calibrationOutlier ? ` (over ${maxDeviation})` : ""}

@@ -6,6 +6,7 @@ import {
   Activity,
   Database,
   Flag,
+  Gauge,
   Gavel,
   KeyRound,
   LayoutDashboard,
@@ -33,6 +34,7 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   "/super/impersonate": UserCog,
   "/super/flags": Flag,
   "/super/integrity": ShieldAlert,
+  "/super/vitals": Gauge,
   "/super/jobs": Activity,
   "/super/data": Database,
 };

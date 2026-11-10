@@ -74,6 +74,10 @@ describe("super navigation", () => {
       // and overturn-rate reporting "load-bearing, not nice-to-haves", so it
       // is a nav entry and not a page somebody has to know the URL of.
       "/super/integrity",
+      // Phase 16l: the field-vitals read surface. A nav entry because the
+      // histograms had accumulated since Phase 10d with nothing that could
+      // read them -- a page nobody can find is the same gap again.
+      "/super/vitals",
       "/super/jobs",
       "/super/data",
     ]);
@@ -95,15 +99,15 @@ describe("super navigation", () => {
 describe("every /super layout and page guards itself", () => {
   const pages = files(SUPER_DIR, /^(page|layout)\.tsx$/);
 
-  it("finds the layout and the sixteen pages", () => {
-    // 16 pages + the layout. /super/integrity arrived with Phase 6e,
-    // /super/calendar with Phase 8a, /super/settings/inactivity with 8b and
-    // /super/settings/ai with 12b.
+  it("finds the layout and the seventeen pages", () => {
+    // 17 pages + the layout. /super/integrity arrived with Phase 6e,
+    // /super/calendar with Phase 8a, /super/settings/inactivity with 8b,
+    // /super/settings/ai with 12b and /super/vitals with 16l.
     // The count is deliberately hard-coded:
     // the per-page assertion below only checks the pages it FINDS, so
     // without this a new /super page that forgot its guard would be caught
     // and a new /super page that was never discovered would not.
-    expect(pages.length).toBe(17);
+    expect(pages.length).toBe(18);
   });
 
   it.each(pages.map((p) => [path.relative(SUPER_DIR, p)]))("%s calls requireSuperAdminPage()", (rel) => {

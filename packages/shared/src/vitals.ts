@@ -173,6 +173,46 @@ export interface VitalReport {
 }
 
 /**
+ * The cohort a vitals report may carry (Phase 16l, ROADMAP §3.4).
+ *
+ * Vitals have never had a user id, which is the whole posture — so "which
+ * students see a slow editor" was unanswerable, and `docs/OPEN-QUESTIONS.md`
+ * recorded it as such. A COHORT answers the useful half of that without
+ * adding anything that identifies a student.
+ *
+ * It is the BATCH YEAR and nothing else, because that is what `cohortKeyFor`
+ * already means in this repository and the reasoning there applies
+ * unchanged: a department's final years can be under thirty at a small
+ * college, so a department-and-batch label would be a small group wearing a
+ * cohort's name. One definition of "cohort", not two.
+ *
+ * What that buys: "is this year's intake seeing it, or everybody?" What it
+ * does NOT buy, said plainly because §3.4 hoped for it: "is it one lab?" A
+ * lab-level answer needs a location signal, and this platform collects none.
+ */
+export const VITAL_COHORT_UNKNOWN = "UNKNOWN";
+
+/**
+ * The window of batch years a report may name.
+ *
+ * A closed range for the same reason `VITAL_ROUTES` is a closed list: the
+ * caller is unauthenticated, so it must never choose the key. Eight years
+ * back covers anybody still on the rolls and six forward covers an intake
+ * recorded early.
+ */
+export const VITAL_COHORT_YEARS_BACK = 8;
+export const VITAL_COHORT_YEARS_FORWARD = 6;
+
+/** Is this a cohort label this endpoint will store, for a report made now? */
+export function isVitalCohort(value: unknown, nowYear: number): value is string {
+  if (typeof value !== "string") return false;
+  if (value === VITAL_COHORT_UNKNOWN) return true;
+  if (!/^\d{4}$/.test(value)) return false;
+  const year = Number(value);
+  return year >= nowYear - VITAL_COHORT_YEARS_BACK && year <= nowYear + VITAL_COHORT_YEARS_FORWARD;
+}
+
+/**
  * The Redis key: one hash per metric per route per DAY.
  *
  * The day is in the key rather than a field so the whole day expires at
@@ -181,6 +221,23 @@ export interface VitalReport {
  */
 export function vitalsKey(day: string, metric: VitalMetric, route: VitalRoute): string {
   return `vitals:${day}:${metric}:${route}`;
+}
+
+/**
+ * The same histogram, narrowed to one cohort (Phase 16l).
+ *
+ * A SECOND key rather than a field on the first, so the unlabelled histogram
+ * stays exactly what it was — every budget and every reader that existed
+ * before this phase is untouched, and a report with no cohort is still
+ * counted. A cohort key is only ever an extra write.
+ */
+export function vitalsCohortKey(
+  day: string,
+  metric: VitalMetric,
+  route: VitalRoute,
+  cohort: string,
+): string {
+  return `vitals:${day}:${metric}:${route}:c:${cohort}`;
 }
 
 /**

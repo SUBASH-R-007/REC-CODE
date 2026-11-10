@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { PROBLEM_KIND_HINT, PROBLEM_KIND_LABEL, type ProblemKind } from "@recx/shared";
 import { ACCOUNTS } from "./support/accounts";
 import { openPage } from "./support/page";
-import { contextAs } from "./support/session";
+import { contextAs, expectLandedOn } from "./support/session";
 
 /**
  * Phase 12p, slice 2: the problem kinds of Phase 12k–12n, read in a real
@@ -99,14 +99,25 @@ async function slugOfKind(
  * A screenshot that survives the run: written under the project's
  * outputDir and attached from there, so the evidence for a RUNBOOK row is
  * a file somebody can open rather than a blob inside one HTML report.
+ *
+ * Its own timeout, and a generous one. This is EVIDENCE CAPTURE and not an
+ * assertion: every claim this spec makes is an `expect` before or after it,
+ * and a screenshot that is slow proves nothing about the product. On a host
+ * running the dev server, a judge worker and this browser at once, the
+ * 20-second default expired on a Monaco page where the assertion one line
+ * above had just passed — so the capture failed the test and three more
+ * never ran. The timeout belongs on the capture, where being slow is not a
+ * defect, rather than on the assertions, where it is.
  */
+const SHOT_TIMEOUT_MS = 90_000;
+
 async function shot(
   page: import("@playwright/test").Page,
   testInfo: import("@playwright/test").TestInfo,
   name: string,
 ): Promise<void> {
   const file = testInfo.outputPath(name);
-  await page.screenshot({ path: file });
+  await page.screenshot({ path: file, timeout: SHOT_TIMEOUT_MS });
   await testInfo.attach(name, { path: file, contentType: "image/png" });
 }
 
@@ -409,17 +420,40 @@ test.describe("the problem kinds, in a browser", () => {
     await editor.click();
     await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.insertText("select id, name from students order by id;");
-    const coloured = await page.evaluate(() => {
-      const content = document.querySelector(".cm-content") as HTMLElement | null;
-      if (!content) return { ok: false, why: "no .cm-content" };
-      const plain = getComputedStyle(content).color;
-      const spans = [...content.querySelectorAll("span")] as HTMLElement[];
-      const hit = spans.find((s) => /^(select|from|order|by)$/i.test(s.textContent ?? ""));
-      if (!hit) return { ok: false, why: `no keyword span among ${spans.length}`, plain };
-      const colour = getComputedStyle(hit).color;
-      return { ok: colour !== plain, why: `${hit.textContent}: ${colour} vs ${plain}`, plain, colour };
-    });
-    expect(coloured.ok, `SQL keywords are not tokenised: ${coloured.why}`).toBe(true);
+    /**
+     * POLLED, not sampled once. The SQL grammar arrives as a dynamically
+     * imported chunk — which is the thing this assertion exists to catch —
+     * so at the instant the last character is typed the highlighter may not
+     * have run yet, and CodeMirror renders an unhighlighted line as a bare
+     * text node with no `span` at all. Sampling once read "no keyword span
+     * among 0" on a loaded host and failed a passing product (this test has
+     * passed before: `docs/RUNBOOK.md` §3, 12p.2).
+     *
+     * It still fails if the chunk never loads: the poll runs out and the
+     * reason carries the last reading.
+     */
+    const tokenised = () =>
+      page.evaluate(() => {
+        const content = document.querySelector(".cm-content") as HTMLElement | null;
+        if (!content) return { ok: false, why: "no .cm-content" };
+        const plain = getComputedStyle(content).color;
+        const spans = [...content.querySelectorAll("span")] as HTMLElement[];
+        const hit = spans.find((s) => /^(select|from|order|by)$/i.test(s.textContent ?? ""));
+        if (!hit) return { ok: false, why: `no keyword span among ${spans.length}`, plain };
+        const colour = getComputedStyle(hit).color;
+        return { ok: colour !== plain, why: `${hit.textContent}: ${colour} vs ${plain}`, plain, colour };
+      });
+    let last = await tokenised();
+    await expect
+      .poll(
+        async () => {
+          last = await tokenised();
+          return last.ok;
+        },
+        { message: "the SQL grammar chunk colours a keyword", timeout: 60_000 },
+      )
+      .toBe(true);
+    expect(last.ok, `SQL keywords are not tokenised: ${last.why}`).toBe(true);
 
     await shot(page, testInfo, "sql-narrow.png");
 
@@ -458,6 +492,20 @@ test.describe("the problem kinds, in a browser", () => {
     // ── A contest that is running now, holding one of each ──
     await openPage(admin, "/admin/contests");
     await admin.getByRole("link", { name: "New contest" }).click();
+    /**
+     * WAIT for the navigation this form depends on, rather than racing it.
+     * "New contest" is a client-side `Link`, and a client navigation to a
+     * route the dev server has not compiled yet takes however long the
+     * compile takes — measured at over twenty seconds on this host, against
+     * the 20 s action timeout the next line inherits. The `fill` then failed
+     * with "Timeout 20000ms exceeded" on a page that was about to arrive,
+     * and the one test left after it never ran.
+     *
+     * `expectLandedOn` is the suite's own helper for exactly this and
+     * carries 60 s. It makes the navigation an assertion instead of an
+     * assumption, which is also strictly more than the test said before.
+     */
+    await expectLandedOn(admin, "/admin/contests/new");
     await admin.getByLabel("Title").fill(TITLE);
     await admin.getByLabel("Address").fill(SLUG);
     await admin.getByLabel("Starts").fill(istInput(new Date(Date.now() - 5 * 60_000)));
@@ -601,6 +649,8 @@ test.describe("the problem kinds, in a browser", () => {
 
     await openPage(admin, "/admin/contests");
     await admin.getByRole("link", { name: "New contest" }).click();
+    // The same wait as above, for the same reason.
+    await expectLandedOn(admin, "/admin/contests/new");
     await admin.getByLabel("Title").fill(title);
     await admin.getByLabel("Address").fill(slug);
     await admin.getByLabel("Starts").fill(istInput(new Date(Date.now() - 5 * 60_000)));

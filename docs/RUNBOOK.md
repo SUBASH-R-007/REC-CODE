@@ -1679,8 +1679,8 @@ reproducible by definition.
 |---|---|
 | **Engines** table, a red row | work is waiting on that engine and no node of it is online. This is the state the `JudgeEngineBacklog` alert fires on |
 | a node whose Engine says `postgres` | its **Judge / engine** row is the judge's version and PostgreSQL's, not isolate's |
-| Calibration: "Not measured for the SQL engine" | not a gap in that node's reporting. The SQL engine has no hello-world benchmark, because a query's limit is the database's own `statement_timeout` |
-| a SQL node that never serves ASSESSMENT or CONTEST | deliberate, and the restriction says so in words. Until there is a benchmark for the query engine, an exam is not judged on one |
+| a SQL node's Calibration in millions, beside an isolate node's in hundreds of millions | two different measurements, both labelled. Phase 16n gave the query engine its own benchmark: a SQL node's score is ROWS PER SECOND and an isolate node's is work units per CPU second. The deviation under each is taken within its own engine, so it is comparable either way |
+| Calibration: "Not measured" on a SQL node | a gap in that node's reporting, exactly as it would be on an isolate node -- the SQL judge has not sent a benchmark, or every run of it timed out. It withholds ASSESSMENT and CONTEST from that node. Before Phase 16n this was the permanent state of every SQL node |
 
 The lane figures above the table are the SUM of both engines' queues. A
 lane that looks busy with the Engines table showing one engine idle is one
@@ -2075,6 +2075,180 @@ mistaken question to be retired rather than removed. It also means a
 database that has imported this bank cannot import it again — the content
 hash is already there — which is why `aptitude-import.db.test.ts` tests the
 pipeline on rows it generates rather than on these files.
+
+---
+
+### 2.24 Reading the field vitals (Phase 16l)
+
+`/super/vitals`. One page load in four reports a web-vitals metric, and
+until this phase the histograms accumulated in Redis with no surface at
+all — collected since Phase 10d, retained five weeks, never read.
+`docs/ROADMAP.md` §3.4 called that "cannot be read by cohort"; the wider
+half was that it could not be read.
+
+**What the page shows.** For one campus day, the 75th-percentile BUCKET per
+metric per route, with the number of samples behind each cell. A bucket and
+not a number on purpose: the ladders in `packages/shared/src/vitals.ts` were
+chosen so `docs/CAPACITY.md`'s budgets are boundaries, so "the p75 is in the
+2000–2500 bucket" is answerable from the counts and a single interpolated
+figure would not be.
+
+**The cohort filter** is a BATCH YEAR and nothing else — the same definition
+`cohortKeyFor` uses for placement percentiles, and for the reason recorded
+there: a department's final years can be under thirty at a small college, so
+a department-and-batch label would be a small group wearing a cohort's name.
+
+So the page answers *"is this year's intake seeing it, or everybody?"* It
+does **not** answer *"is it one lab?"*, which §3.4 hoped for: that needs a
+location, and nothing in this platform collects one.
+
+**What is still true after this phase.** No user id, no session, nothing that
+identifies a student — `docs/SECURITY.md` §7. The endpoint stays
+unauthenticated, which is what lets it see the slowest page load there is: a
+student signing in on campus wifi.
+
+**If the page is empty.** A quiet day, a day before the deployment was used,
+or a Redis that was restarted all look the same. The sample count says
+which: zero samples with a live deployment means the beacons are not
+arriving, and the first thing to check is that the page being measured is
+under the student shell (the exam surface sends none, deliberately).
+
+---
+
+### 2.25 Scanning the assistant panel (Phase 16m)
+
+`docs/ROADMAP.md` §3.6 listed one genuinely unscanned surface after 260 axe
+scans over 65 pages: the student assistant panel. It renders only where the
+AI helper is switched on with a model and an API key on the server, and this
+deployment's is off, so no sweep has ever drawn it.
+
+```bash
+E2E_AI=1 npx playwright test --project=assistant-a11y
+```
+
+**What it needs**, and it is more than the rest of the suite: a live stack, a
+model configured on `/super/settings/ai`, and `AI_API_KEY` set for the web
+app. Without `E2E_AI=1` the spec skips and annotates.
+
+**What it does.** A super-admin switches the helper on through the real form
+— the select, the Save and the audited reason, because turning it on sends a
+student's draft code to a third party and Phase 15g made that a sentence
+somebody has to agree with. The student then opens a practice problem, opens
+the Assistant tab, and the panel is scanned twice: idle, and with an answer
+on screen.
+
+**It fails rather than skips when the tab is absent.** That is deliberate and
+§3.6 asked for it: the panel not rendering is the likeliest thing to go
+wrong, and a spec that passed because it could not find its target would be
+worse than no spec.
+
+**It switches the helper back off in a `finally`,** including after a failed
+scan, and annotates a warning if it could not. A test that left a deployment
+setting changed is the kind of thing nobody looks for.
+
+**Why the `journey` student and not `student`.** Asking marks a FIRST solve
+assisted. `journey` has already solved the problem the spec opens; `student`
+reads only, by design (`e2e/support/accounts.ts`).
+
+---
+
+### 2.26 Carrying a message end to end without a relay (Phase 16p)
+
+`docs/ROADMAP.md` §1.6 is a deployment setting, and it had a hole under it:
+the outbox, the scheduler's drain and `createMailTransport`'s `smtp` case
+had never carried a message. A development checkout sets
+`MAIL_TRANSPORT=log`, and the only alternative was a real relay with real
+credentials — so the part most likely to be wrong was the part nobody could
+try.
+
+`scripts/dev/mail-sink.mjs` is an SMTP sink. It speaks the minimum of
+RFC 5321 that nodemailer uses, writes each message to a file, listens on the
+loopback address only and authenticates nothing. It is not a mail server.
+
+```bash
+node scripts/dev/mail-sink.mjs
+```
+
+Then, in the gitignored `apps/scheduler/.env.local`:
+
+```
+MAIL_TRANSPORT=smtp
+SMTP_URL=smtp://127.0.0.1:1025
+```
+
+Restart the scheduler, sign in as a super-admin, and press **Send me a test
+email** on `/super/settings/integrations`. The outbox row is drained on the
+scheduler's next tick, the sink prints the subject and writes the `.eml`, and
+the page's *"Last email sent"* moves to a time a minute old.
+
+**What this proves and what it does not.** It proves the whole path: the
+enqueue, the drain's claim and bookkeeping, nodemailer, the short timeouts,
+`MAIL_FROM`, and the page reading `EmailOutbox.sentAt` back. It does NOT
+prove anything about a real relay — SPF, DKIM, a provider's rate limit, or
+whether the college's mail server accepts the envelope. §1.6 stays open on
+that, and it is a credential and an afternoon rather than code.
+
+**On addresses.** The sink's log masks the local part, and it refuses an
+output directory inside the repository, so a real address cannot be
+committed by accident. The `.eml` itself holds the recipient — that is what
+it is for — so the directory it writes to is outside the checkout.
+
+---
+
+### 2.27 The SQL engine's calibration benchmark (Phase 16n)
+
+A judge node is refused ASSESSMENT and CONTEST unless its calibration score
+is within 10 % of the fleet median for its engine. The SQL engine had no
+benchmark, so a `postgres` node reported none and was refused both lanes by
+name — which is what made `docs/ROADMAP.md` §2.1's SQL row true: a SQL
+question pinned into a paper would queue a submission **no node may claim**.
+
+**What the benchmark is for.** Not to scale a time limit: a query's limit is
+`statement_timeout`, a wall-clock number the database enforces, and nothing
+scales it per node. It is to notice that one node is materially slower than
+its neighbours, because a five-second limit set with a healthy cluster in
+mind is a different exam on a cluster half the speed.
+
+**What it measures.** Per-row CPU throughput on the cluster that will judge,
+through the sandbox a candidate's query runs in — the same ephemeral schema,
+the same student role, the same READ ONLY transaction and the same
+`statement_timeout`. One statement, a million rows of `md5()` summed, work
+units per second of the fastest of five runs.
+
+**Three things about it worth knowing.**
+
+*It verifies itself.* `md5()` is 32 characters for every row, so the answer
+is exactly 32,000,000. A cluster that says anything else did not run the
+benchmark, and the node reports NO score rather than a meaningless one.
+
+*The fastest run, not the median.* The isolate benchmark reports a median of
+CPU times, and CPU time is already immune to a busy host. This one can only
+measure wall time, and wall time is noisy upwards only. Five runs on a
+laptop that was also running a dev server, a judge worker and a browser:
+1813, 1880, 1036, 992, 994 ms. The fastest two agree to 0.2 %; a mean would
+have measured the browser.
+
+*It is self-limiting.* The benchmark runs under the same five-second
+`statement_timeout` a candidate gets, so a cluster that cannot finish it
+times out, reports no score, and is refused the sensitive lanes. No new knob
+and no new failure mode.
+
+**Reading it.** `/admin/judge` shows the score and the lane restrictions. A
+SQL node that reports none now says *"calibration missing: the SQL judge has
+not reported a benchmark for this cluster"* — the process to go and look at,
+rather than the engine's old "there is no benchmark yet", which there now is.
+
+**Checking it against a real cluster:**
+
+```bash
+RECX_SQL_TESTS=1 npx pnpm@9.15.9 --filter @recx/sql-judge test
+```
+
+`calibration.db.test.ts` runs it through the real sandbox, checks the
+checksum, asserts the head-room through the score rather than through one
+run's wall time, measures the same host twice and requires the two to agree
+inside the deviation the fleet allows, and asserts that no schema is left
+behind — it runs unattended every six hours.
 
 ---
 
@@ -2983,3 +3157,26 @@ coordinator from actual runs — never in advance.
 | 16k | 2026-11-10 | A published aptitude question is never deleted, and the first test design ignored that | **CORRECTED.** `recx_refuse_published_question_change` refuses a DELETE of a PUBLISHED or RETIRED question: answer rows reference it and past results must stay honest. The first version of the pipeline test imported and published the real bank into recx_test, could not clean up, and left 201 rows that had to be retired by hand -- after which the content-hash duplicate detector made the suite unrunnable. It now generates its own rows and never publishes them, and the bank's own proof needs no database. `docs/RUNBOOK.md` 2.23 says both things where an operator would be standing | Claude |
 | 16k | 2026-11-10 | Gate 7/7 on Linux for the aptitude bank | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. 5,384 web tests (none skipped with RECX_DB_TESTS=1), 1,445 repo fences, 1,770 shared, 297 db-package, 276 isolate integration cases. The bank's own 17 checks run without a database -- every row parsed by the product's own CSV reader, every question put through the real publish gate, and the real draw run for all six patterns on two seeds | Claude |
 | 16i+16j | 2026-11-10 | CI's E2E job failed once on a Next.js invariant, and it is recorded rather than re-run | OBSERVED, NOT DIAGNOSED. `/mentor/doubts` answered 500 in one of its four axe variants on CI; the server-side cause in the log is `InvariantError: Expected clientReferenceManifest to be defined. This is a bug in Next.js.` The other three variants passed in the same run, every other CI job passed, and the Linux gate -- including the production build the E2E job serves -- is green. Nothing in either phase touches that route's render path. `docs/OPEN-QUESTIONS.md` records what is known, what is not, and what to look at if it recurs; making the target quiet is explicitly not the answer | Claude |
+| 16l | 2026-11-10 | Field vitals could not be read by cohort -- and could not be read at all (`docs/ROADMAP.md` 3.4) | **DONE.** The histograms have accumulated in Redis since Phase 10d with no surface: collected, retained five weeks, never read. `/super/vitals` reads them -- the p75 BUCKET per metric per route for one campus day, with the sample count behind each cell, and a cohort filter. A bucket rather than a number because the ladders were chosen so CAPACITY.md's budgets are boundaries | Claude |
+| 16l | 2026-11-10 | The cohort is the batch year, reusing the definition the percentiles already settled | DECIDED. 3.4 suggested "(batch, department)"; `cohortKeyFor` already chose batch-and-not-department because a department's final years can be under thirty at a small college. One definition of cohort, not two -- so the data answers "is this year's intake seeing it" and NOT "is it one lab", which needs a location signal this platform deliberately does not collect. Recorded in `docs/OPEN-QUESTIONS.md` with the residual risk that a page sends its own label | Claude |
+| 16l | 2026-11-10 | A second key rather than a field, so nothing that read this data before is wrong now | DELIBERATE. A cohort report writes the unlabelled histogram AND a cohort-scoped one. Every budget and every reader from before the phase sees exactly what it saw; a report with no cohort still counts; and a cohort outside the closed year window is dropped while the sample is still counted, because refusing the whole report would let a bad label cost a measurement | Claude |
+| 16m | 2026-11-10 | The join from the web app to a student's screen, driven from the keyboard (`docs/ROADMAP.md` 1.3) | **PASS, 1 passed in 49.5 s.** `--project=keyboard` with `E2E_JUDGE=1`: Run returns *"Run result: Accepted."*, a wrong Submit names the failing case, and a correct Submit returns Accepted -- every interaction a key press, no mouse anywhere. With the authoring journey (3/3, including the 15.2-minute walk) and the kinds project, 1.3's bar is met: the web app, the queue, the worker, the verdict stream and the rendered result, end to end on this deployment | Claude |
+| 16m | 2026-11-10 | Why 1.3 had looked broken for two runs, and neither cause was the product | **DIAGNOSED.** (1) No scheduler was running, so a `RunRequest` left `JUDGING` when I restarted a server mid-flight stayed that way -- the per-user in-flight cap of 1 then refused every new run with *"Your previous run is still in progress."*, which the page said in a toast the spec does not read. Starting `apps/scheduler` fixed it in one tick: *"judge lease lapsed; returned to QUEUED"*, requeued, judged AC. The reconciler exists for exactly this and I had not been running it. (2) With the scheduler up, its node sweep then marked `dev-judge-3` OFFLINE twice, because `next dev` under Playwright load cannot answer a heartbeat -- and a claim landed 0.07 s before the heartbeat recovered, refused `NOT_CLAIMABLE` by `claimJob`'s first line. The run was judged 15 s later by the reconciler's next tick; the page just had nothing to show by then. The suite runs with no scheduler and the orphan cleared | Claude |
+| 16m | 2026-11-10 | The one surface 260 axe scans never drew (`docs/ROADMAP.md` 3.6) | **BUILT, NOT RUN.** `e2e/assistant-a11y.spec.ts` and its own `--project=assistant-a11y`: a super-admin switches the helper on through the real form, the student opens the Assistant tab, and the panel is scanned idle and with an answer on screen, then switched back off in a `finally`. It has NOT been run on this deployment, because the helper has no model and no `AI_API_KEY` here -- which is the same reason the sweep never drew the panel. `docs/RUNBOOK.md` 2.25 is the command | Claude |
+| 16m | 2026-11-10 | It fails rather than skips when the tab is absent | DELIBERATE, and 3.6 asked for it in as many words. With `E2E_AI=1` the missing tab is a failure: the panel not rendering is the likeliest thing to go wrong on this surface, and a spec that passed because it could not find its target would be worse than no spec. Without the flag it skips and annotates, because CI has no model | Claude |
+| 16m | 2026-11-10 | A test must not leave a deployment setting changed | DELIBERATE. The helper goes back off in a `finally`, after a failed scan as much as a passing one, and the spec annotates a warning if it could not -- an operator has to know the setting may still be on. It also reads the saved value back from the control rather than trusting a toast, which says only that a request was sent | Claude |
+| 16m | 2026-11-10 | A `page.screenshot` timeout failed a kinds test whose assertion had just passed | **FIXED, and it was not the product.** `problem-kinds.spec.ts`'s `shot()` is evidence capture: every claim is an `expect` around it. On a host running the dev server, a judge worker and the browser at once the 20 s default expired on a Monaco page one line after the counter assertion passed, failing the test and leaving three more unrun. `countEditedLines` is a `useMemo` on the source, so there was no render loop to find. The capture now carries its own 90 s timeout -- on the capture, where being slow is not a defect, and not on any assertion | Claude |
+| 16m | 2026-11-10 | A dynamically imported grammar chunk was raced by the assertion that exists to catch it | **FIXED (the test).** `problem-kinds.spec.ts`'s SQL case types a query and reads back whether a keyword is a coloured span -- "typed rather than assumed, so this fails if the lang chunk never loads". It SAMPLED once, immediately after the last keystroke, and CodeMirror renders an unhighlighted line as a bare text node with no span at all: it read "no keyword span among 0" and failed a passing product. It polls for 60 s now and still fails if the chunk never loads, with the last reading in the message. It passed in 1.7 min on the re-run | Claude |
+| 16m | 2026-11-10 | A client-side navigation was raced by the form that depends on it | **FIXED (the test).** The same spec clicked **New contest** and then filled "Title" with the 20 s `actionTimeout` -- but a client `Link` to a route `next dev` has not compiled waits for the compile, measured at over 20 s on this host. The `fill` failed on a page that was about to arrive, and the one test after it never ran. Both clicks now wait on `expectLandedOn(admin, "/admin/contests/new")`, the suite's own 60 s helper, which also makes the navigation an assertion rather than an assumption. Direct navigation to the route was 200 with every label present, which is how it was ruled out as a product defect | Claude |
+| 16m | 2026-11-10 | Global setup could write a signed-OUT session and say nothing | **FOUND AND FIXED.** `signInWithForm` succeeds when the page LEAVES `/login`, which it can do without a session: a seven-account setup against `next dev` wrote `{"cookies":[],"origins":[]}` for the student and raised nothing. The first spec then failed with *"the catalogue shows none of the four named kinds -- seed one"*, because an unauthenticated `/problems` IS the sign-in page and a sign-in page has no rows -- so the message sent me to the seed, the catalogue and the kinds before the session. Global setup now refuses to write a state with no `recx_` cookie, naming the account and pointing at `E2E_ACCOUNTS`. The same account signed in alone succeeded immediately | Claude |
+| 16m | 2026-11-10 | `.github/dependabot.yml` has an owner, and it is a person (`docs/ROADMAP.md` 3.7) | NO CODE REMAINS. 3.7's engineering was done when `toolchain-pins.test.ts` started refusing the second CI failure structurally. What is left is that somebody must read the weekly group -- a standing human duty, recorded in `docs/OPEN-QUESTIONS.md` rather than left as a sentence in a roadmap nobody is accountable to | Claude |
+| 16n | 2026-11-10 | The SQL engine had no calibration benchmark, so no SQL node could serve an exam (`docs/ROADMAP.md` 2.1) | **BUILT.** `apps/sql-judge/src/calibration.ts`: one statement, a million rows of md5() summed, run five times through the sandbox a candidate's query runs in, scored as work units per second of the FASTEST run. The node reports it on every heartbeat and re-measures on the same six-hour cadence as its self-check. `lanes.ts` has no engine special case left -- rule (a) applies to a SQL node exactly as it applies to an isolate one, and the fleet median was already taken per engine (12k) | Claude |
+| 16n | 2026-11-10 | The fastest run and not the median, which is the opposite of the isolate benchmark | DELIBERATE, and the reason is in the units. The isolate benchmark measures CPU time, which a busy host does not inflate; a query can only be measured in WALL time, because wall time is what `statement_timeout` compares against, and wall time is noisy upwards only. Five runs measured through the real path while a Playwright suite ran: 1813, 1880, 1036, 992, 994 ms. The fastest two agree to 0.2 %, inside the 10 % the fleet allows; a mean would have measured the browser | Claude |
+| 16n | 2026-11-10 | The benchmark verifies itself, and is self-limiting | DELIBERATE. md5() returns 32 characters per row, so the answer is exactly 32,000,000: a cluster that says anything else did not run the benchmark, and the node reports NO score rather than a meaningless one. And it runs under the same five-second `statement_timeout` a candidate's query gets, so a cluster too slow to finish it times out, reports nothing, and is refused ASSESSMENT and CONTEST -- with no new knob and no new failure mode | Claude |
+| 16n | 2026-11-10 | What the benchmark does NOT measure, said rather than discovered later | NAMED. No large hash join and no on-disk sort. No judged query produces one: `SQL_LIMITS.rows` caps a result set at 2,000 and an author's setup script at 64 KB, so what bounds a judged query is per-row work. A benchmark built around `work_mem` would have measured something no candidate can reach, and measured it badly -- the mixed join-and-sort shape tried first varied 9 % between sizes where this one varies 2 % | Claude |
+| 16n | 2026-11-10 | A collation could have changed the score, and nearly did | FOUND WHILE SIZING IT. The first shape filtered on `md5(i::text) < 'f'`, a TEXT comparison -- so two clusters with different collations would have reported different speeds for identical hardware, and the fleet median would have been comparing locales. The benchmark compares nothing: it sums `length(md5(...))`, which is also what makes the checksum fixed | Claude |
+| 16n | 2026-11-10 | The lane is lifted; the PIN is not | STATED. A SQL question still cannot be pinned into an assessment: `AssessmentProblem_no_sql` stands, because the exam submit route accepts `answer1` and every `LANGUAGE_CATALOG` key and NOT `sql17`. That is the surface half of 2.1 and it is the next slice, the same shape as 16f (output-only) and 16g (debugging). This phase removed the engine-shaped blocker under it | Claude |
+| 16p | 2026-11-10 | The mail path had never carried a message (`docs/ROADMAP.md` 1.6) | **PASS, end to end.** 1.6 reads as a pure deployment setting and had a hole under it: the outbox, the scheduler's drain and `createMailTransport`'s `smtp` case had never sent anything, because a development checkout sets `MAIL_TRANSPORT=log` and the only alternative was a real relay with real credentials -- so the part most likely to be wrong was the part nobody could try. `scripts/dev/mail-sink.mjs` (loopback only, authenticates nothing, refuses an output directory inside the repository) accepted one: **Send me a test email** on `/super/settings/integrations`, and "Last email sent" moved from "--" to a time **within 10 s** of the click. The sink logged the subject and the masked recipient and wrote a well-formed `.eml` with the configured `MAIL_FROM`. `docs/RUNBOOK.md` 2.26 | Claude |
+| 16p | 2026-11-10 | What the sink does NOT prove, said rather than implied | NAMED. Nothing about a real relay: SPF, DKIM, a provider's rate limit, or whether the college's mail server accepts the envelope. 1.6 stays open on exactly that, and it is a credential and an afternoon rather than code. What it closed is the engineering half, which the entry did not know was open | Claude |
+| 16p | 2026-11-10 | A sink cannot keep the "never log a recipient" rule in the file, so it keeps it everywhere else | DELIBERATE. `apps/scheduler/src/mail.ts` holds the rule that no transport logs a recipient, and a sink's whole purpose is to show you the message -- so the `.eml` carries the address. What the sink PRINTS masks the local part, and it refuses an output directory inside the checkout, so a real address cannot be committed by accident | Claude |
+| 1.3+16l+16m+16n+16p | 2026-11-10 | Gate 7/7 on Linux for the five entries together | **GREEN.** lint, typecheck, test, build, migrate-test-db, services-tests, isolate-integration. With `RECX_DB_TESTS=1 RECX_REDIS_TESTS=1`: **5,406** web tests (201 files, none skipped), 1,446 repo fences, 1,770 shared, 297 db-package, 87 scheduler, and **276** isolate integration cases on real sandbox boxes. Windows the same plus the size budgets: 2,943 tests, every budget met, `/login` still served with no script at all. The SQL judge's new calibration suite ran against the real cluster separately (`RECX_SQL_TESTS=1`, **81 passed**): the benchmark through the sandbox, its checksum, its head-room, its repeatability inside the fleet's deviation, and no schema left behind | Claude |

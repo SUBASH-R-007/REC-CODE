@@ -225,13 +225,19 @@ at exactly the moment it should. `JudgeEngineBacklog` is the rule for the
 state the sum hides: one engine stopped while the lane total still looks
 survivable.
 
-*Calibration* is a hello-world CPU benchmark, which the SQL engine does
-not run. A `postgres` node is told so in words rather than being told its
-calibration is "missing", and the fleet median is taken over nodes of the
-same engine, because a CPU score from a database host measures nothing a
-C++ time limit is derived from. The consequence is unchanged: a SQL node
-does not serve ASSESSMENT or CONTEST, and that is the honest state until
-the query engine has a benchmark of its own.
+*Calibration* is a benchmark PER ENGINE. For isolate it is a hello-world
+CPU loop scored in work units per CPU second; for `postgres` it is a
+fixed million-row query scored in rows per second (Phase 16n,
+`apps/sql-judge/src/calibration.ts`). The fleet median is taken over nodes
+of the same engine, because neither number means anything beside the other.
+
+What the comparison is FOR is the same in both cases, and it is not scaling
+a limit: a query's limit is the database's own `statement_timeout`, which
+nothing scales per node. It is to notice that one node is materially slower
+than its neighbours — a five-second limit set with a healthy cluster in mind
+is a different exam on a cluster half the speed. So a SQL node that reports
+a benchmark serves ASSESSMENT and CONTEST like any other, and one that
+reports none is refused them like any other.
 
 *A node's identity* gained one column, `JudgeNode.engineVersion`. The
 heartbeat had carried it since slice 2 and nothing stored it; folding it

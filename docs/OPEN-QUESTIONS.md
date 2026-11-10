@@ -4703,3 +4703,151 @@ to see whether the race disappears, which would localise it without guessing.
 *What would be wrong to do:* mark the target non-gating to make it quiet. It
 is already in the REPORTED set — the failure is the page not loading at all,
 which is worth failing a run over however the 500 arises.
+
+## Vitals by cohort answers "which intake", not "which lab" (Phase 16l)
+
+`docs/ROADMAP.md` §3.4 asked for a cohort on a field-vitals report —
+"(batch, department)" — to answer *"is it one lab?"*, and said the privacy
+question had to be settled first. It was already settled in this repository,
+for a different surface, and reusing that answer is better than inventing a
+second one.
+
+`cohortKeyFor` (packages/shared/src/percentile.ts) is the batch year and
+deliberately not the department:
+
+> a cohort of one department's final years can be under thirty at a small
+> college, and "too small to rank" would then be the answer for a whole
+> department rather than a real limit
+
+That reasoning transfers unchanged, so the vitals cohort IS the batch year.
+The consequence, stated rather than discovered later: the data answers "is
+this year's intake seeing it, or everybody?" and cannot answer "is it one
+lab." A lab-level answer needs a location signal, and `docs/PROCTORING.md`
+§5 is the reason there is none to borrow.
+
+**Two things that fell out of doing it.**
+
+*The second key, not a second field.* A cohort report writes the unlabelled
+histogram AND a cohort one. Everything that read this data before the phase
+reads exactly what it read before, a report with no cohort still counts, and
+no budget moved. A cohort field on the existing hash would have been one
+write instead of two and would have made every existing reader wrong.
+
+*The caller still never chooses the key.* The cohort is a four-digit year
+inside a closed window, checked the way `VITAL_ROUTES` is checked, because
+the endpoint is unauthenticated. A label outside the window is DROPPED and
+the sample is still counted in the unlabelled histogram — refusing the whole
+report would let a bad label cost a measurement.
+
+**The residual risk, named.** The page sends its own cohort, so a student
+could send a neighbouring year's and shift counts between two buckets. That
+is data vandalism of the most boring kind: it cannot identify anybody, it
+cannot touch the unlabelled histogram every budget is read from, and the
+alternative — reading the session on the beacon — would mean the endpoint
+knowing who sent each report, which is the one property it was built not to
+have.
+
+## The assistant panel is scanned but has never been drawn here (Phase 16m)
+
+`docs/ROADMAP.md` §3.6 asked for one spec and one fixture. The spec exists
+(`apps/web/e2e/assistant-a11y.spec.ts`, `--project=assistant-a11y`) and the
+fixture turned out to be a deployment setting rather than a fixture: the
+panel renders only where the AI helper is switched on with a model and an
+`AI_API_KEY` on the server.
+
+**So the spec has been written and not run, and this is the honest state**
+rather than a gap to be quiet about. It is the same reason the sweep never
+drew the panel: there is no model configured on this deployment and no key.
+The first deployment that configures one can run it with one command
+(`docs/RUNBOOK.md` §2.25), and the spec will fail loudly if the tab does not
+appear — which is the behaviour §3.6 asked for and the opposite of what a
+skip would do.
+
+**What writing it found, which was not a11y at all.** The §3.6 entry assumed
+a toggle. The control is a `<select>` that reads back as a sentence, followed
+by a Save and an audited reason, because Phase 15g decided that turning the
+assistant on is not a small act — it starts sending students' draft code to
+a third party. A spec that had called the server action directly would have
+proved the panel renders and nothing about whether a super-admin can get it
+there, so it drives the form.
+
+**And one real defect in another spec, found by running it.** See the gate
+log: `problem-kinds.spec.ts`'s screenshot helper could fail a test whose
+assertion had just passed, and take three more tests with it, because
+evidence capture shared the assertion timeout.
+
+## Dependabot's weekly group needs a person, not a phase (Phase 16m)
+
+`docs/ROADMAP.md` §3.7 ends "Someone should own the weekly group." That is
+the whole of what is left of §3.7: its engineering landed when
+`tests/repo/toolchain-pins.test.ts` started refusing the second of the two CI
+failures structurally, and `.github/dependabot.yml` has existed all along.
+
+Recorded here because a sentence in a roadmap is not an owner. **This needs a
+named person in the placement cell or the maintaining team**, with one duty:
+read the weekly dependency group, and treat a major-version bump as a phase
+rather than a merge. Nothing in the repository can do it, and nothing in the
+repository should pretend to.
+
+The lesson §3.7 itself draws is the one to keep: *a gate that nobody runs is
+not a gate.* The first CI run in eighty-three commits found two real
+failures that had been failing since the phase that introduced them.
+
+## What a calibration benchmark means for a query engine (Phase 16n)
+
+`docs/ROADMAP.md` §2.1 said the honest difficulty was that "what CPU
+calibration measures does not exist for a query", and that was the right
+thing to be stuck on. The way out was to ask what the calibration is FOR
+rather than what it measures.
+
+It is not for scaling a time limit. A C++ time limit is derived from a
+measured model solution and a node's score; a query's limit is
+`statement_timeout`, a wall-clock number the database enforces, and nothing
+scales it per node. What the fleet actually uses the score for is the
+comparison: **is this node like the others?** A five-second limit set with a
+healthy cluster in mind is a different exam on a cluster half the speed, and
+that question is perfectly answerable for a database.
+
+So the benchmark measures per-row CPU throughput on the cluster that will
+judge, through the sandbox a candidate's query runs in. The decisions under
+it, and what each one cost:
+
+**The fastest run, not the median.** The opposite of the isolate benchmark,
+and for a reason in the units: CPU time is immune to a busy host, wall time
+is not, and wall time is the only thing a query offers. Noise in wall time
+is one-sided — it only ever makes a run slower — so the fastest of several
+is the run least disturbed, which is the one that answers "how fast is this
+cluster". Five runs through the real path, on a laptop also running a dev
+server, a judge worker and a browser: 1813, 1880, 1036, 992, 994 ms.
+
+**No join and no sort, stated rather than left to be discovered.** The first
+shape was a hash join of two 200,000-row series with a `count(DISTINCT)` on
+top, on the reasoning that a judged query does joins and sorts. Its scores
+varied 9 % between sizes where the final shape varies 2 %, and more
+importantly it was measuring the wrong thing: `SQL_LIMITS.rows` caps a
+result set at 2,000 and an author's setup script at 64 KB, so no judged query
+builds a large hash table or spills a sort. A benchmark around `work_mem`
+would have measured something no candidate can reach.
+
+**A collation nearly got into the score.** The second shape filtered on
+`md5(s.i::text) < 'f'` — a text comparison, and therefore collation
+dependent. Two clusters with different collations would have reported
+different speeds for identical hardware and the fleet median would have been
+comparing locales. The benchmark now compares nothing at all; it sums
+`length(md5(...))`, which has the second virtue of fixing the answer at
+exactly 32 × the work units, so the statement verifies itself.
+
+**It is self-limiting, which removed a knob.** The benchmark runs under the
+same five-second `statement_timeout` a candidate's query gets. A cluster too
+slow to finish it times out, contributes no sample, reports a null score, and
+is refused the sensitive lanes by the rule that was already there. The first
+draft had a separate, longer timeout for the benchmark; it was deleted,
+because a cluster that needs more than a candidate gets is not a cluster to
+sit an exam on.
+
+**What this does NOT lift.** The pin. `AssessmentProblem_no_sql` still
+refuses a SQL question in a paper, because `/api/exam/[attemptId]/submit`
+accepts `answer1` and every `LANGUAGE_CATALOG` key and not `sql17`. That is
+the surface half of §2.1 and it is the next slice, with 16f and 16g as its
+template. This phase removed the engine-shaped blocker under it, which is
+the half nobody could see a way through.

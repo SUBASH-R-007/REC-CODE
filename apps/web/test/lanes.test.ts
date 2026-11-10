@@ -121,24 +121,55 @@ describe("sensitive-lane eligibility", () => {
   });
 });
 
-describe("a SQL node's eligibility (Phase 12k)", () => {
-  /** A SQL node: self-checked and cluster-hardened, and never calibrated. */
+describe("a SQL node's eligibility (Phase 16n)", () => {
+  /**
+   * Phase 12k refused a SQL node the sensitive lanes whatever it reported,
+   * because nothing could interpret a query score. Phase 16n gave the SQL
+   * engine a benchmark (`apps/sql-judge/src/calibration.ts`), so rule (a)
+   * applies to it exactly as it applies to an isolate node — and there is no
+   * special case left in the module under test. These cases are therefore
+   * about the ABSENCE of one: a SQL node is judged by the ordinary rules,
+   * and says the ordinary things when it fails them.
+   */
+  /** A SQL node that has not reported a benchmark. */
   const sqlHealth = () => health({ calibrationScore: null, calibratedAt: null });
 
-  it("is refused the sensitive lanes, and told why in words about the ENGINE", () => {
-    const decision = decide(sqlHealth(), [], false, "postgres");
-    expect(decision.sensitiveLanesOk).toBe(false);
-    const [reason] = decision.restrictions;
-    expect(reason).toContain("no calibration benchmark yet");
-    expect(reason).toContain("statement_timeout");
-    // Not the isolate wording: nobody forgot to send anything.
-    expect(decision.restrictions.join(" ")).not.toContain("calibration missing");
+  it("is eligible once it reports a calibration, like any other node", () => {
+    expect(decide(health(), [], false, "postgres")).toEqual({ sensitiveLanesOk: true, restrictions: [] });
   });
 
-  it("is refused even when it reports a score, because nothing interprets one yet", () => {
-    const decision = decide(health(), [1000], false, "postgres");
+  it("is refused when it reports none, in the ordinary words", () => {
+    const decision = decide(sqlHealth(), [], false, "postgres");
     expect(decision.sensitiveLanesOk).toBe(false);
-    expect(decision.restrictions).toHaveLength(1);
+    /**
+     * "calibration missing", like any other node -- and the SQL JUDGE by
+     * name, because that is the process an operator has to go and look at.
+     */
+    expect(decision.restrictions).toEqual([
+      "calibration missing: the SQL judge has not reported a benchmark for this cluster",
+    ]);
+    /**
+     * And NOT the Phase 12k sentence. There is a benchmark now, so "the SQL
+     * engine has no calibration benchmark yet" would send an operator
+     * looking for a phase that has already happened instead of at the node
+     * that is not reporting.
+     */
+    expect(decision.restrictions.join(" ")).not.toContain("no calibration benchmark yet");
+  });
+
+  it("is refused when its score deviates from the fleet, like any other node", () => {
+    // The heartbeat route takes the median over nodes of the SAME ENGINE, so
+    // these are other SQL nodes' scores in query units.
+    const decision = decide(health({ calibrationScore: 500_000 }), [1_200_000, 1_250_000], false, "postgres");
+    expect(decision.sensitiveLanesOk).toBe(false);
+    expect(decision.restrictions[0]).toMatch(/deviates/);
+  });
+
+  it("is refused when its calibration went stale, like any other node", () => {
+    const stale = new Date(NOW.getTime() - CALIBRATION_STALE_AFTER_MS - 1);
+    expect(decide(health({ calibratedAt: stale }), [], false, "postgres").restrictions[0]).toMatch(
+      /calibration is stale/,
+    );
   });
 
   it("still reports its self-check and its cluster hardening", () => {

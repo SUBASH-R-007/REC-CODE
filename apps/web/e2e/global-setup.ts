@@ -54,9 +54,34 @@ async function signIn(baseURL: string, channel: string | undefined, acct: Accoun
       await openPage(page, path, { waitUntil: "load" });
     }
 
+    const state = await context.storageState();
+    /**
+     * A state with no session cookie is not a signed-in state, and writing
+     * one is worse than failing here.
+     *
+     * `signInWithForm` succeeds when the page LEAVES /login, which it does
+     * for reasons other than a session: on this host, a seven-account setup
+     * against `next dev` once wrote `{"cookies":[],"origins":[]}` for the
+     * student without raising anything. The first spec then failed with
+     * *"the catalogue shows none of the four named kinds — seed one"*,
+     * because an unauthenticated /problems is the sign-in page and a
+     * sign-in page has no rows — a message that sent me to the seed, the
+     * catalogue and the problem kinds before the session.
+     *
+     * So the sign-in is checked by its RESULT. The account is named; the
+     * password never appears.
+     */
+    if (!state.cookies.some((cookie) => cookie.name.startsWith("recx_"))) {
+      throw new Error(
+        `Sign-in for ${acct.identifier} left no session cookie, so every spec using it would run signed out. ` +
+          `The page left /login without one — look at the server's log for /api/auth/login. ` +
+          `Signing in fewer accounts (E2E_ACCOUNTS=${acct.key}) is the usual fix on a development host.`,
+      );
+    }
+
     // Written atomically: another run may be reading the previous file.
     const tmp = `${acct.storageState}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(await context.storageState()));
+    writeFileSync(tmp, JSON.stringify(state));
     await replaceFile(tmp, acct.storageState);
     await context.close();
   } finally {

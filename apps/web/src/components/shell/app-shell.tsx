@@ -1,4 +1,5 @@
 import type { Role, User } from "@recx/db";
+import { cohortKeyFor } from "@recx/shared";
 import { db } from "@/lib/db";
 import { NotificationsBell } from "@/components/shell/notifications-bell";
 import { PaletteLauncher } from "@/components/shell/palette-launcher";
@@ -112,7 +113,13 @@ export async function AppShell({ user, children }: { user: User; children: React
         down page should make exactly the requests its own protocol
         describes.
       */}
-      <VitalsReporter />
+      {/*
+        Phase 16l. The shell is the one place that has the viewer's row, so
+        it is where the cohort comes from -- the endpoint stays
+        session-free, which is the property that lets it see a signed-out
+        page load at all.
+      */}
+      <VitalsReporter cohort={cohortKeyFor(user.batchYear)} />
     </div>
   );
 }

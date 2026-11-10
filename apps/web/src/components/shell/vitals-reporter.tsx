@@ -14,9 +14,13 @@ import { VITALS_SAMPLE_RATE, vitalRouteOf, type VitalMetric } from "@recx/shared
  * a stray POST during an attempt is a thing an invigilator would have to
  * explain.
  *
- * It reports a METRIC, a VALUE and a ROUTE PATTERN. There is no user id,
- * here or at the endpoint, so this cannot become a record of which pages a
- * student visited and when.
+ * It reports a METRIC, a VALUE, a ROUTE PATTERN and -- since Phase 16l --
+ * a COHORT, which is the viewer's batch year and nothing else. There is
+ * still no user id, here or at the endpoint, so this cannot become a record
+ * of which pages a student visited and when: a batch is on the order of a
+ * thousand people, and `cohortKeyFor` is the same definition the placement
+ * percentiles use (packages/shared/src/percentile.ts has the reasoning for
+ * why it is the batch and deliberately not the department).
  *
  * **The attribution, stated because it is a real limitation.** LCP, FCP and
  * TTFB are document-level, and CLS and INP accumulate across a document's
@@ -30,8 +34,8 @@ import { VITALS_SAMPLE_RATE, vitalRouteOf, type VitalMetric } from "@recx/shared
 
 const ENDPOINT = "/api/vitals";
 
-function send(metric: VitalMetric, value: number, route: string): void {
-  const body = JSON.stringify({ metric, value, route });
+function send(metric: VitalMetric, value: number, route: string, cohort: string | null): void {
+  const body = JSON.stringify(cohort === null ? { metric, value, route } : { metric, value, route, cohort });
   try {
     /**
      * `sendBeacon` because the page is usually being unloaded when a metric
@@ -53,7 +57,7 @@ function send(metric: VitalMetric, value: number, route: string): void {
   );
 }
 
-export function VitalsReporter(): null {
+export function VitalsReporter({ cohort = null }: { cohort?: string | null }): null {
   const pathname = usePathname();
 
   useEffect(() => {
@@ -73,7 +77,7 @@ export function VitalsReporter(): null {
       const { onCLS, onFCP, onINP, onLCP, onTTFB } = await import("web-vitals");
       if (cancelled) return;
       const report = (metric: VitalMetric) => (entry: { value: number }) => {
-        if (!cancelled) send(metric, entry.value, route);
+        if (!cancelled) send(metric, entry.value, route, cohort);
       };
       onLCP(report("LCP"));
       onCLS(report("CLS"));

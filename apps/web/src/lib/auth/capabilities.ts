@@ -302,6 +302,14 @@ export const SUPER_ADMIN_SUPPORTING_ACTIONS: readonly ActionRef[] = Object.freez
 export const SUPER_ADMIN_SUPPORTING_PAGES: readonly PageRef[] = Object.freeze([
   "app/super/page.tsx",
   "app/super/jobs/page.tsx",
+  /**
+   * Phase 16l: the field-vitals read surface. Super-only and not one of the
+   * twelve, because it is a READ of a histogram that holds no identity --
+   * no user id, no session, and a cohort that is a batch year. It is here
+   * rather than under a capability for the same reason /super/jobs is: it
+   * grants nothing and changes nothing.
+   */
+  "app/super/vitals/page.tsx",
   "app/super/settings/integrations/page.tsx",
 ] as const);
 
