@@ -519,6 +519,33 @@ the honest operational recommendation. The measured evidence behind it is a
 *Done when* a staggered 1,000-student mock has been run on the real topology
 and the p95 queue waits are recorded. This depends on §1.4.
 
+**1,000 jobs have now been run twice on ONE host (Phase 16x)** —
+uniformly over 300 s and all at once — and `docs/CAPACITY.md` §6.2 C, D
+and §6.2a carry the tables. 2,000 jobs judged, **zero internal errors**,
+every verdict AC, and at saturation the lanes drained in exactly the
+allocator's designed order.
+
+Two things came out of it that the 200-job evidence could not show.
+
+**The cost of RUN's hard reservation scales with the backlog.** At
+saturation RUN drains early and its two reserved slots then sit idle while
+PRACTICE still has a queue: 144.5 s of idle-slot time against 20.1 s in the
+200-job run, about 21 % of the run's total work. That is a real number to
+take to a real fleet.
+
+**And §6.2's gate targets cannot be read across machine-states.** Re-running
+the ORIGINAL 200-job profile tonight breaches two of the three targets that
+the same profile met on 2026-10-10 — this laptop is measurably slower than
+it was (calibration 535 M against 629 M) — so the breaches in the 1,000-job
+run are not a volume effect and must not be read as one.
+
+**The entry stays open, and is still right to.** One laptop with a dev
+server on it cannot settle thresholds; it can only show that the pipeline
+carries 1,000 jobs without losing or mis-judging one, which it does.
+Getting to 1,000 also found three defects in the load harness itself
+(Phase 16w) — it could not enqueue SQL work at all, its run marker was a
+syntax error in SQL, and it counted slots a workload could never use.
+
 ### 3.6 Coverage the axe run does not reach
 
 The accessibility sweep is 260 scans over 65 pages, with `none` on every one.

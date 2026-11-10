@@ -286,6 +286,86 @@ is measured (§6.3); on this evidence it is conservative by roughly 4–7×.
 The honest operational recommendation in §3 (stagger a 5,000-student mock in
 slots of 1,000–1,200, or provision ~21 slots) stands until then.
 
+**Machine and fleet, 2026-11-11** (the C and D runs below): the same
+laptop, **two** ONLINE nodes — `dev-judge-3` with `RECX_SLOTS=8` (isolate,
+calibration **535,331,906**, self-check 12/12) and `sql-dev-1` with
+`RECX_SLOTS=2` (postgres, PostgreSQL 17.11, calibration **1,404,494 rows/s**,
+Phase 16n). The workload is `cpp20,py312`, so the SQL node's two slots can
+take none of it and the capacity figure counts **8**, not 10 (Phase 16w).
+Web app in `next dev`; **no scheduler running**. Raw reports:
+`docs/capacity/2026-11-11-burst-1000-*.json`.
+
+**C. 1,000 submissions arriving uniformly over 300 s** (≈ 3.3 per second —
+the same arrival rate as A, five times the volume).
+`npx tsx ../../scripts/load/burst.ts --count 1000 --spread 300 --languages cpp20,py312 --json … --markdown`
+
+| Lane | Jobs | Done | Wait p50 | Wait p95 | Wait max | Service p50 | Service mean | End-to-end p95 | IE | Verdicts |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ASSESSMENT | 150 | 150 | 622 ms | 1.74 s | 2.87 s | 781 ms | 979 ms | 3.34 s | 0 | AC 150 |
+| CONTEST | 150 | 150 | 707 ms | 1.78 s | 3.45 s | 774 ms | 964 ms | 3.74 s | 0 | AC 150 |
+| RUN | 250 | 250 | 239 ms | 1.42 s | 4.09 s | 822 ms | 965 ms | 3.34 s | 0 | AC 250 |
+| PRACTICE | 450 | 450 | 885 ms | 7.83 s | 10.1 s | 709 ms | 951 ms | 9.40 s | 0 | AC 450 |
+
+Makespan 301.1 s, **199.3 jobs/min**, mean slot time per job 960 ms. Every
+one of the thousand came back AC with **no internal errors**.
+
+**D. The same 1,000 all at once** (saturation).
+`… --count 1000 --instant --languages cpp20,py312 --json … --markdown`
+
+| Lane | Jobs | Done | Wait p50 | Wait p95 | Wait max | Service p50 | Service mean | End-to-end p95 | IE | Verdicts |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ASSESSMENT | 150 | 150 | 43.7 s | 77.6 s | 82.6 s | 1.39 s | 1.60 s | 78.3 s | 0 | AC 150 |
+| RUN | 250 | 250 | 95.5 s | 134.8 s | 138.8 s | 1.39 s | 1.58 s | 136.0 s | 0 | AC 250 |
+| CONTEST | 150 | 150 | 170.4 s | 199.3 s | 202.2 s | 933 ms | 1.15 s | 200.3 s | 0 | AC 150 |
+| PRACTICE | 450 | 450 | 214.0 s | 277.3 s | 282.1 s | 1.03 s | 1.23 s | 278.0 s | 0 | AC 450 |
+
+Makespan 285.0 s, **210.6 jobs/min**, mean slot time per job 1.36 s. The
+rows are in **drain order**, and that order is the allocator's policy made
+visible at five times the volume: ASSESSMENT first, then RUN, then CONTEST,
+then PRACTICE. Nothing was lost, nothing errored, and no lane was skipped.
+
+### 6.2a What the 1,000-job runs changed, and what they did not
+
+**They did not confirm A and B's gate targets, and they did not break
+them either — because the comparison is not like for like.** The honest
+reading, in order:
+
+*Re-running A's own profile tonight breaches two of the three targets.* 200
+jobs, 60 s, same mix: ASSESSMENT p95 **2.21 s** against a < 2 s target
+(A measured 292 ms), PRACTICE p95 4.03 s (passes), and the starvation
+detector says **YES**, 9.35 s (A said none). So the breaches in run C are
+not a volume effect. This machine is slower than it was on 2026-10-10 —
+calibration 535,331,906 against 629,326,621, mean slot time 1.06 s against
+0.727 s — and §6.2's targets are being read against numbers from a
+different machine-state. A's own line *"no CPU pinning, no frequency
+control"* is the reason, and the lesson is that these thresholds are only
+meaningful against a run of the same profile on the same day.
+
+*The one finding that IS about volume is the cost of RUN's reservation.*
+RUN hard-reserves 2 of the 8 slots. At saturation RUN drains by 138 s and
+those two slots then sit idle while PRACTICE still has a backlog: the
+detector reports **144.5 s** in which a slot — RUN's — was free with
+PRACTICE waiting. The 200-submission run B reported the same effect at
+**20.1 s** and called it "the reservation working as designed", which it is.
+What the larger run shows is its SIZE: 144.5 s × 2 slots ≈ 289
+slot-seconds, about 21 % of the run's total work, and roughly half the gap
+between the 170 s of arithmetic work and the 285 s makespan. **A 200-job
+burst cannot see this; that is what §3.5 was asking for.**
+
+*The sub-10-second starvation figure is probably the detector, not the
+allocator.* Excluding RUN's reservation it is 9.35 s, 11.6 s and 9.04 s
+across three runs of three different sizes — flat where a real policy
+failure would scale with the backlog. It is most likely slot churn between
+jobs being counted as "free". Named rather than explained: settling it
+needs the allocator's own instrumentation, not another burst.
+
+**What this means for §3.5.** The entry asks for a staggered 1,000-student
+mock *on the real topology*, and it is still right to: one laptop with a
+dev server on it cannot tell you whether the thresholds hold, only that the
+pipeline carries 1,000 jobs without losing or mis-judging one. It does
+carry them — 2,000 judged across the two runs with **zero** internal errors
+— and the RUN-reservation cost is a real number to take to the real fleet.
+
 ### 6.3 Still to measure
 
 * Slot-seconds per submission by language and problem size (median, p95),
@@ -294,7 +374,15 @@ slots of 1,000–1,200, or provision ~21 slots) stands until then.
 * Jobs per student-hour in a real practice week and a mock contest.
 * Slots an 8-core production host sustains, pinned, before calibration drifts.
 * Queue wait at the p95 under a synthetic 5,000-student burst on a
-  production-shaped fleet.
+  production-shaped fleet. (1,000 jobs on ONE host: §6.2 C and D. Five
+  thousand, and a fleet shaped like production, are still open.)
+* Why the starvation detector reports a flat ~9-11 s "a usable slot was
+  free" at 200, 1,000-spread and 1,000-instant alike (§6.2a). A real policy
+  failure would scale with the backlog; this does not, so it is probably
+  slot churn being counted. It needs the allocator's own instrumentation.
+* What RUN's hard reservation costs on a fleet big enough for it to matter.
+  On 8 slots at saturation it left two slots idle for 144.5 s with PRACTICE
+  waiting — about 21 % of the run's work.
 * Resident memory per slot on a pinned production host, against the 2 GB
   planning figure in §2b.
 * `cs8` compile and run cost, which §6.1 predates.

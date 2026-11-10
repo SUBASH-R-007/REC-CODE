@@ -118,7 +118,12 @@ REDIS_URL=${existing.REDIS_URL ?? "redis://127.0.0.1:6379"}
 RECX_SQL_OWNER_URL=${ownerUrl}
 RECX_SQL_STUDENT_URL=${studentUrl}
 RECX_SLOTS=${existing.RECX_SLOTS ?? "2"}
-RECX_QUEUES=${existing.RECX_QUEUES ?? "judge-sql-practice,judge-sql-run"}
+# Every SQL lane since Phase 16o. It was practice and run, because
+# \`lanes.ts\` barred a postgres node from ASSESSMENT and CONTEST by engine;
+# 16n gave the engine a calibration benchmark and 16o made a paper able to
+# hold a query, so a dev node that still listened to two of five could not
+# judge the thing those phases built.
+RECX_QUEUES=${existing.RECX_QUEUES ?? "judge-sql-assessment,judge-sql-contest,judge-sql-practice,judge-sql-rejudge,judge-sql-run"}
 # A developer's cluster is not hardened to production's standard; the judge
 # still refuses outright if the database holds application tables.
 RECX_DEV_ALLOW_UNHARDENED_CLUSTER=1

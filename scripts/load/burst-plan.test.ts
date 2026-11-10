@@ -19,6 +19,7 @@ import {
   type BurstFixtures,
   type JobOutcome,
 } from "./burst-plan";
+import { ANSWER_LANGUAGE_KEY, SQL_LANGUAGE_KEY } from "../../packages/shared/src/index";
 
 const FIXTURES: BurstFixtures = {
   students: [
@@ -171,6 +172,17 @@ describe("the plan", () => {
   it("marks sources harmlessly at the end", () => {
     expect(withBurstMarker("int main(){}\n\n", "cpp20", RUN_ID, 4)).toBe(`int main(){}\n// recx-burst:${RUN_ID} #4\n`);
     expect(withBurstMarker("print(1)", "pypy310", RUN_ID, 0)).toBe(`print(1)\n# recx-burst:${RUN_ID} #0\n`);
+    /**
+     * Phase 16w. `//` is not a SQL comment, and an output-only submission
+     * IS the answer — so one language needs a different prefix and one
+     * needs no marker at all. The first cost twelve CE verdicts on the
+     * first burst that could reach the SQL judge; the second had never been
+     * judged, so it had never shown.
+     */
+    expect(withBurstMarker("select 1", SQL_LANGUAGE_KEY, RUN_ID, 7)).toBe(
+      `select 1\n-- recx-burst:${RUN_ID} #7\n`,
+    );
+    expect(withBurstMarker("42\n", ANSWER_LANGUAGE_KEY, RUN_ID, 9)).toBe("42\n");
     expect(newRunId(new Date("2026-10-10T08:15:00.123Z"), "a1b2c3")).toBe(RUN_ID);
   });
 });

@@ -35,7 +35,15 @@ import { fileURLToPath } from "node:url";
 import type { Queue } from "bullmq";
 import type { Redis } from "ioredis";
 import { createPrismaClient, type Db } from "../../packages/db/src/index";
-import { LIMITS, QUEUE_NAME, judgeJobOptions, type JobKind, type JudgeJobData } from "../../packages/shared/src/index";
+import {
+  LIMITS,
+  isSqlLanguage,
+  judgeJobOptions,
+  queueNameFor,
+  type JobKind,
+  type JudgeEngine,
+  type JudgeJobData,
+} from "../../packages/shared/src/index";
 import {
   BURST_LANES,
   USAGE,
@@ -145,11 +153,36 @@ async function loadFixtures(db: Db, languages: string[] | null): Promise<BurstFi
 
 interface Fleet {
   nodes: { id: string; slots: number; sensitiveLanesOk: boolean; languages: string[] }[];
+  /** Nodes that report at least one of the workload's languages. */
+  usable: { id: string; slots: number }[];
   slots: number;
   runReserved: number;
 }
 
-async function loadFleet(db: Db, slotsOverride: number | null): Promise<Fleet> {
+/**
+ * The fleet, and the slots that can take THIS workload (Phase 16w).
+ *
+ * `slots` used to be every ONLINE node's slots added up, with no regard for
+ * what the nodes can run. That was harmless while one engine existed. It is
+ * not now: a `postgres` node reports only `sql17`, so on a `cpp20,py312`
+ * burst its slots can never be used — and counting them inflated both the
+ * capacity and `fleetRunReserve`'s hard reservation, which is a share OF
+ * the slot count.
+ *
+ * It mattered in the first 1,000-job run: ten slots were reported where
+ * eight could do the work, the RUN reservation came out as 3 instead of 2,
+ * and the starvation detector concluded PRACTICE had waited 28.2 s "while a
+ * usable slot was free" — the free slots being the SQL node's, which no
+ * PRACTICE job in that run could have used. The arithmetic, not the
+ * allocator, was wrong.
+ *
+ * A node counts when it reports a language this workload uses, which is
+ * exactly the condition under which it could claim one of these jobs — the
+ * same test the "no ONLINE node reports these languages" warning makes.
+ * `--slots N` still overrides everything, for measuring a fleet that is not
+ * the one in front of you.
+ */
+async function loadFleet(db: Db, slotsOverride: number | null, workloadLanguages: readonly string[]): Promise<Fleet> {
   const rows = await db.judgeNode.findMany({
     where: { status: "ONLINE" },
     orderBy: { id: "asc" },
@@ -161,8 +194,18 @@ async function loadFleet(db: Db, slotsOverride: number | null): Promise<Fleet> {
     sensitiveLanesOk: n.sensitiveLanesOk,
     languages: Array.isArray(n.languages) ? n.languages.filter((l): l is string => typeof l === "string") : [],
   }));
-  const slots = slotsOverride ?? nodes.reduce((sum, n) => sum + n.slots, 0);
-  return { nodes, slots, runReserved: fleetRunReserve(slotsOverride === null ? nodes.map((n) => n.slots) : [slotsOverride]) };
+  const wanted = new Set(workloadLanguages);
+  const usable = (wanted.size === 0 ? nodes : nodes.filter((n) => n.languages.some((l) => wanted.has(l)))).map((n) => ({
+    id: n.id,
+    slots: n.slots,
+  }));
+  const slots = slotsOverride ?? usable.reduce((sum, n) => sum + n.slots, 0);
+  return {
+    nodes,
+    usable,
+    slots,
+    runReserved: fleetRunReserve(slotsOverride === null ? usable.map((n) => n.slots) : [slotsOverride]),
+  };
 }
 
 // ── Clocks ──────────────────────────────────────────────────────────────
@@ -192,7 +235,7 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-async function insertAndEnqueue(db: Db, queues: Map<BurstLane, Queue<JudgeJobData>>, job: PlannedJob): Promise<Inserted> {
+async function insertAndEnqueue(db: Db, queues: Map<string, Queue<JudgeJobData>>, job: PlannedJob): Promise<Inserted> {
   const queuedAt = new Date();
   const c = job.candidate;
   let id: string;
@@ -241,7 +284,9 @@ async function insertAndEnqueue(db: Db, queues: Map<BurstLane, Queue<JudgeJobDat
   const kind: JobKind = job.kind;
   let enqueued = false;
   try {
-    await queues.get(job.lane)!.add("judge", { kind, id }, judgeJobOptions(job.lane, id));
+    const queue = queues.get(queueKey(engineOf(job.candidate.language), job.lane));
+    if (!queue) throw new Error(`no queue for ${engineOf(job.candidate.language)} ${job.lane}`);
+    await queue.add("judge", { kind, id }, judgeJobOptions(job.lane, id));
     enqueued = true;
   } catch (error) {
     log(`enqueue failed for ${kind} ${id} (the reconciler will pick it up): ${(error as Error).message}`);
@@ -255,10 +300,36 @@ async function insertAndEnqueue(db: Db, queues: Map<BurstLane, Queue<JudgeJobDat
   return { job, id, queuedAt: queuedAt.getTime(), enqueued };
 }
 
+/**
+ * Which engine judges a job, and therefore which QUEUE it belongs in
+ * (Phase 16w).
+ *
+ * The harness used to build one queue per lane from `QUEUE_NAME`, the
+ * isolate map, and nothing told it that a `sql17` job belongs on
+ * `judge-sql-<lane>` instead. Its own fixtures include SQL problems and
+ * `sql17` in the language set, so `--languages sql17` enqueued work on a
+ * queue the SQL judge does not read and the isolate node cannot claim —
+ * and the burst reported a TIMEOUT rather than a mistake. Twenty
+ * assessment-lane SQL jobs sat unjudged for ten minutes before the Redis
+ * keys said where they had gone.
+ *
+ * `sql17` is the one language the postgres engine serves, which is the same
+ * thing `engineForIoMode` says about a SQL problem — and the language is
+ * what a planned job carries.
+ */
+function engineOf(language: string): JudgeEngine {
+  return isSqlLanguage(language) ? "postgres" : "isolate";
+}
+
+/** The key the queue map is held under: one queue per engine AND lane. */
+function queueKey(engine: JudgeEngine, lane: BurstLane): string {
+  return `${engine}:${lane}`;
+}
+
 /** Fire each job at its arrival offset, at most `concurrency` writes in flight. */
 async function runSchedule(
   db: Db,
-  queues: Map<BurstLane, Queue<JudgeJobData>>,
+  queues: Map<string, Queue<JudgeJobData>>,
   plan: readonly PlannedJob[],
   concurrency: number,
 ): Promise<Inserted[]> {
@@ -310,7 +381,7 @@ async function waitForCompletion(db: Db, rows: readonly Inserted[], options: Bur
 
 async function collectOutcomes(
   db: Db,
-  queues: Map<BurstLane, Queue<JudgeJobData>>,
+  queues: Map<string, Queue<JudgeJobData>>,
   rows: readonly Inserted[],
   offsets: { dbMs: number; redisMs: number },
 ): Promise<JobOutcome[]> {
@@ -346,7 +417,12 @@ async function collectOutcomes(
     } else {
       const r = runs.get(row.id);
       // RunRequest has no startedAt: use when a worker fetched the job (BullMQ processedOn).
-      const job = await queues.get("RUN")!.getJob(row.id);
+      // From the engine's OWN run queue (Phase 16w) — a SQL run is on
+      // `judge-sql-run`, and reading the isolate one reported no start time
+      // at all, which the table showed as a missing service time.
+      const job = await queues
+        .get(queueKey(engineOf(row.job.candidate.language), "RUN"))!
+        .getJob(row.id);
       outcomes.push({
         seq: row.job.seq,
         lane: row.job.lane,
@@ -394,9 +470,21 @@ function describePlan(plan: readonly PlannedJob[], fixtures: BurstFixtures, flee
   const languages = [...new Set(fixtures.candidates.map((c) => c.language))].sort();
   const problems = [...new Set(fixtures.candidates.map((c) => c.slug))].sort();
   log(`students ${fixtures.students.length}; problems ${problems.join(", ")}; languages ${languages.join(", ")}`);
+  const usableIds = new Set(fleet.usable.map((n) => n.id));
   log(
-    `fleet: ${fleet.nodes.length} ONLINE node(s), ${fleet.slots} slot(s) (RUN hard-reserves ${fleet.runReserved})` +
-      (fleet.nodes.length ? `: ${fleet.nodes.map((n) => `${n.id}×${n.slots}${n.sensitiveLanesOk ? "" : " (no ASSESSMENT/CONTEST)"}`).join(", ")}` : ""),
+    `fleet: ${fleet.nodes.length} ONLINE node(s), ${fleet.slots} slot(s) usable by this workload ` +
+      `(RUN hard-reserves ${fleet.runReserved})` +
+      (fleet.nodes.length
+        ? `: ${fleet.nodes
+            .map(
+              (n) =>
+                `${n.id}×${n.slots}${n.sensitiveLanesOk ? "" : " (no ASSESSMENT/CONTEST)"}` +
+                // Phase 16w: say which nodes the capacity figure counts, so a
+                // slot that cannot take this work is never read as one that can.
+                (usableIds.has(n.id) ? "" : " (not this workload's languages)"),
+            )
+            .join(", ")}`
+        : ""),
   );
   if ((counts.ASSESSMENT > 0 || counts.CONTEST > 0) && !fleet.nodes.some((n) => n.sensitiveLanesOk)) {
     log("warning: no ONLINE node may serve ASSESSMENT/CONTEST right now — those jobs will wait until one can (or time out)");
@@ -416,7 +504,8 @@ async function main() {
   const target = assertSafeTarget(process.env);
   const db = createPrismaClient({ url: target.databaseUrl });
   let redis: Redis | null = null;
-  const queues = new Map<BurstLane, Queue<JudgeJobData>>();
+  // Keyed by `<engine>:<lane>` since Phase 16w, not by lane alone.
+  const queues = new Map<string, Queue<JudgeJobData>>();
   try {
     if (options.cleanup) {
       await cleanup(db, options.cleanup);
@@ -425,7 +514,7 @@ async function main() {
     const fixtures = await loadFixtures(db, options.languages);
     const runId = newRunId();
     const plan = planBurst(options, fixtures, runId);
-    const fleet = await loadFleet(db, options.slots);
+    const fleet = await loadFleet(db, options.slots, [...new Set(plan.map((j) => j.candidate.language))]);
     describePlan(plan, fixtures, fleet, options, runId);
 
     if (options.dryRun) {
@@ -442,7 +531,12 @@ async function main() {
     if (fleet.slots === 0) throw new UsageError("no ONLINE judge node: start a worker first (or pass --slots for the analysis)");
 
     redis = new IORedis(target.redisUrl, { maxRetriesPerRequest: null });
-    for (const lane of BURST_LANES) queues.set(lane, new BullQueue<JudgeJobData>(QUEUE_NAME[lane], { connection: redis }));
+    // One queue per ENGINE per lane (Phase 16w): ten, not five.
+    for (const engine of ["isolate", "postgres"] as const) {
+      for (const lane of BURST_LANES) {
+        queues.set(queueKey(engine, lane), new BullQueue<JudgeJobData>(queueNameFor(engine, lane), { connection: redis }));
+      }
+    }
 
     const dbClock = await clockOffset(async () => {
       const rows = await db.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;

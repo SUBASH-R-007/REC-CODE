@@ -6,6 +6,7 @@
  * exactly the rows a real run would insert.
  */
 import { randomBytes } from "node:crypto";
+import { SQL_LANGUAGE_KEY, isAnswerLanguage } from "../../packages/shared/src/index";
 import { createRequire } from "node:module";
 import { JUDGE_LANES, LANE_ALLOCATION, type JudgeLane } from "../../packages/shared/src/index";
 
@@ -307,10 +308,41 @@ export function burstMarker(runId: string): string {
 }
 
 const HASH_COMMENT_LANGUAGES = new Set(["py312", "pypy310"]);
+/** `//` is not a SQL comment; `--` is. */
+const DASH_COMMENT_LANGUAGES = new Set([SQL_LANGUAGE_KEY]);
 
-/** Append "// recx-burst:<run> #<seq>" (or "# …" for Python): harmless to every language, unique per job. */
+/**
+ * The comment prefix a language actually has, or null where a marker must
+ * not be added at all.
+ *
+ * This used to be `//` for everything but Python, with a comment claiming
+ * the marker was "harmless to every language" (Phase 16w). It was not:
+ *
+ *   * `sql17` has no `//` comment, so the appended line made every SQL
+ *     submission a syntax error. Twelve assessment-lane SQL jobs came back
+ *     **CE 12** the first time the harness could route them to the SQL
+ *     judge at all, and that is how this was found;
+ *   * `answer1` is not a program. An output-only submission IS the answer,
+ *     compared token by token against the expected output, so appending
+ *     anything to it makes it wrong. It never showed, because no node
+ *     reports `answer1` and the jobs were never judged.
+ */
+function markerPrefix(language: string): string | null {
+  if (isAnswerLanguage(language)) return null;
+  if (HASH_COMMENT_LANGUAGES.has(language)) return "#";
+  if (DASH_COMMENT_LANGUAGES.has(language)) return "--";
+  return "//";
+}
+
+/**
+ * Append "// recx-burst:<run> #<seq>", in the comment syntax the language
+ * has, so a burst's rows are identifiable and each one is unique. Returns
+ * the source UNCHANGED for a language where a marker would change the
+ * answer.
+ */
 export function withBurstMarker(source: string, language: string, runId: string, seq: number): string {
-  const prefix = HASH_COMMENT_LANGUAGES.has(language) ? "#" : "//";
+  const prefix = markerPrefix(language);
+  if (prefix === null) return source;
   return `${source.replace(/\s*$/, "")}\n${prefix} ${burstMarker(runId)} #${seq}\n`;
 }
 
