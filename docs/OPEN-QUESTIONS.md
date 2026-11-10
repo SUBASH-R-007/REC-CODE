@@ -4465,3 +4465,49 @@ Dropping just that answer would be the same thing with extra steps.
 **The remaining two.** SQL needs its lane and a result set; interactive needs
 a conversation surface, and SPEC §11 keeps it out of high-stakes papers until
 it has run cleanly through two practice contests.
+
+## The last two exam kinds are not blocked on a surface (Phase 16h)
+
+Phases 16f and 16g lifted output-only and debugging, each by building the
+one surface its refusal named. `docs/ROADMAP.md` §2.1 and §2.4 described the
+remaining two the same way — "SQL needs its lane and a result set",
+"interactive needs a conversation surface" — and that description is wrong
+about both. Writing it down so the next reader does not start with the
+surface and discover the real blocker afterwards.
+
+**SQL: the ASSESSMENT lane is one no SQL node may claim.**
+`SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]`, and a node may serve them
+only while calibrated, hardened and self-checked. `lanes.ts` bars the SQL
+engine from both by name, with the reason in the code:
+
+> the SQL engine has no calibration benchmark yet: a query's limit is the
+> database's own `statement_timeout`, so this node does not serve ASSESSMENT
+> or CONTEST
+
+Phase 12q worked this out for contests and recorded it on
+`ContestProblem_no_sql`. It applies identically to an assessment: a SQL
+question pinned into a paper would queue an ASSESSMENT-lane submission that
+**no node in the fleet may claim**, and the candidate's answer would sit
+unjudged. The surface work the roadmap named is real and is the smaller
+half.
+
+*What lifting it actually needs:* a calibration benchmark for the SQL
+engine — and the honest difficulty is that the thing CPU calibration
+measures does not exist here. An isolate node's score is a one-second CPU
+benchmark compared against the fleet median, and a node more than 10% off
+is barred. A query's cost is the database's, bounded by a statement timeout
+rather than by this node's processor, so "10% off the fleet median" has no
+meaning yet. Inventing a number to satisfy the gate would be inventing a
+safety signal, which is the one thing this project refuses to do with the
+judge. It is a phase with a measurement question in it, not a surface.
+
+**Interactive: SPEC §11 sets a condition that has not happened.** *"keep
+them out of high-stakes assessments until they have run cleanly through two
+practice contests."* No contest has been run with real students on this
+deployment, so the condition is not merely unmet — it is unmeetable before
+launch. The conversation surface is real work too, and it is second in line
+behind a condition no amount of code satisfies.
+
+**So both refusals stay, and the roadmap's §2 table is corrected rather
+than worked around.** Two of four lifted is the honest state, and the two
+that remain are blocked on a measurement and on a date, not on a pane.

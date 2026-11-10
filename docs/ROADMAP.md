@@ -196,10 +196,10 @@ surface:
 
 | Kind | What it still needs |
 |---|---|
-| **SQL** | `sql17` as a key an exam accepts (it is a `SubmitLanguageKey`, deliberately outside `LANGUAGE_CATALOG`), the submission routed to the SQL engine's lane, and a result set rendered rather than a diff. A SQL question narrows its per-question set to exactly `["sql17"]`, which is the shape that would carry it. |
+| **SQL** | **Not a surface problem, and this entry was wrong (Phase 16h).** `SENSITIVE_LANES` is `["ASSESSMENT", "CONTEST"]` and `lanes.ts` bars the SQL engine from both by name — "a query's limit is the database's own `statement_timeout`" — so a SQL question in a paper would queue a submission **no node may claim**. Lifting it needs a calibration benchmark for the SQL engine, and the honest difficulty is that what CPU calibration measures does not exist for a query. A phase with a measurement question in it. |
 | **Output-only** | ~~An answer box rather than an editor, with `answer1` carried the same way.~~ **Built (Phase 16f):** `LayoutQuestion.kind` is frozen as `ANSWER` at start; the view renders a textarea with no picker and no Run; the submit route accepts `answer1` for an ANSWER question and only for one. |
 | **Debugging** | ~~An edit budget a sitting can refuse without destroying work a candidate can no longer redo.~~ **Built (Phase 16g):** the whole hand-in is refused, not one answer — nothing finalised, the clock still running, the question named — with the budget frozen in the layout and a live count in the pane. |
-| **Interactive** | A conversation surface, which the exam tree does not have and should not grow casually. SPEC §6 also keeps interactive problems out of high-stakes assessments until they have run cleanly through two practice contests, so this one is last on purpose. |
+| **Interactive** | **Blocked on a date, not on code (Phase 16h).** SPEC §11: "keep them out of high-stakes assessments until they have run cleanly through two practice contests" — and no contest has been run with real students on this deployment, so the condition is unmeetable before launch. The conversation surface is real work and sits second in line behind it. |
 
 A contest needs none of this: the arena renders the problem list, the clock
 and the score and links to `/problems/<slug>`, so a contest participant gets
