@@ -123,35 +123,51 @@ describe("the languages a debugging problem is offered in", () => {
   });
 });
 
-describe("not sat in an assessment yet, and not quietly", () => {
-  it("a trigger refuses the pin, because a sitting cannot refuse a submission", () => {
+/**
+ * Phase 16g lifted this refusal. The fence follows the RULE rather than
+ * the sentence: a budget that is no longer enforced anywhere would be the
+ * regression the refusal existed to prevent, and it would be invisible.
+ */
+describe("sat in an assessment, and only because the hand-in can be refused", () => {
+  it("the refusal and its trigger are recorded as dropped, not quietly deleted", () => {
     const migration = readRepoFile(
-      "packages/db/prisma/migrations/20261101151000_phase12m_assessment_rule/migration.sql",
+      "packages/db/prisma/migrations/20261110150000_phase16g_debug_assessments/migration.sql",
     );
     expect(migration).toContain("AssessmentProblem_no_debug_budget");
-    expect(migration).toContain("not sat in an assessment yet");
-    expect(migration).toMatch(/CREATE TRIGGER[\s\S]*ON "public"\."AssessmentProblem"/);
-    // A contest needs no rule: its arena sends the student to the ordinary
-    // workspace, and its submissions go through submitSolution.
-    expect(migration).not.toMatch(/ON "public"\."ContestProblem"/);
-  });
-
-  it("the action says so in a sentence first", () => {
-    const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
-    expect(action).toContain("A debugging problem is not sat in an assessment yet");
-  });
-
-  it("the trigger and its function are catalogued, so lifting the rule fails the build", () => {
+    expect(migration).toMatch(/DROP TRIGGER/);
     const catalog = readRepoFile("packages/db/test/support/guard-catalog.ts");
     expect(catalog).toContain("AssessmentProblem_no_debug_budget");
     expect(catalog).toContain("recx_refuse_debug_assessment_problem");
+    expect(catalog).toContain("20261110150000_phase16g_debug_assessments");
   });
 
-  it("and the exam path, which cannot refuse one, is left alone", () => {
-    // submitAttempt writes every answered question at the end of the
-    // sitting; a budget check there would throw away work the candidate
-    // can no longer redo, which is why the pin is refused instead.
-    expect(readRepoFile("apps/web/src/lib/exam/submit.ts")).not.toContain("maxEditedLines");
+  it("the budget is frozen into the paper, not read live", () => {
+    // An author moving it mid-sitting must not change the rule the
+    // candidate was given, in either direction.
+    expect(readRepoFile("apps/web/src/lib/exam/start.ts")).toContain("maxEditedLines");
+    expect(readRepoFile("packages/shared/src/exam-randomise.ts")).toContain("editBudget");
+  });
+
+  it("the hand-in is refused, and the whole of it, with the question named", () => {
+    const submit = readRepoFile("apps/web/src/lib/exam/submit.ts");
+    expect(submit).toContain("over_edit_budget");
+    expect(submit).toContain("countEditedLines");
+    expect(submit).toContain("debugOverBudgetInExam");
+    // Nothing is dropped and nothing is marked down: the refusal returns
+    // before anything is finalised.
+    expect(submit).toMatch(/submitted: false[\s\S]{0,120}over_edit_budget/);
+  });
+
+  it("the candidate sees the count while they work, not after the clock stops", () => {
+    const pane = readRepoFile("apps/web/src/components/exam/exam-question.tsx");
+    expect(pane).toContain("countEditedLines");
+    expect(pane).toContain("changed so far");
+  });
+
+  it("the route says which question, because the whole hand-in was refused", () => {
+    const route = readRepoFile("apps/web/src/app/api/exam/[attemptId]/submit/route.ts");
+    expect(route).toContain("over_edit_budget");
+    expect(route).toContain("result.overBudget");
   });
 });
 

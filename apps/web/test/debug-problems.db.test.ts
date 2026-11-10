@@ -238,8 +238,14 @@ describe.skipIf(!ENABLED)("debugging problems against recx_test", () => {
     });
   });
 
-  describe("not sat in an assessment yet", () => {
-    it("refuses the pin, by trigger", async () => {
+  /**
+   * Phase 16g. This block asserted the opposite: the trigger refused the
+   * pin because a sitting could not refuse one answer without throwing
+   * away work. The whole HAND-IN is refused instead, with the sitting
+   * still live, so the pin is taken.
+   */
+  describe("sat in an assessment, since Phase 16g", () => {
+    it("takes the pin", async () => {
       const v = await version({ maxEditedLines: 2, status: "PUBLISHED" });
       await db.starterCode.create({ data: { problemVersionId: v.id, language: "cpp20", code: BROKEN } });
       await db.$executeRawUnsafe(`UPDATE "ProblemVersion" SET "frozenAt" = now() WHERE id = $1`, v.id);
@@ -258,11 +264,12 @@ describe.skipIf(!ENABLED)("debugging problems against recx_test", () => {
         select: { id: true },
       });
       try {
-        await expect(
-          db.assessmentProblem.create({
-            data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
-          }),
-        ).rejects.toThrow(/not sat in an assessment yet/);
+        const pinned = await db.assessmentProblem.create({
+          data: { assessmentId: assessment.id, problemVersionId: v.id, position: 1, points: 100 },
+          select: { id: true },
+        });
+        expect(pinned.id).toBeTruthy();
+        await db.$executeRawUnsafe(`DELETE FROM "AssessmentProblem" WHERE id = $1`, pinned.id);
       } finally {
         await db.$executeRawUnsafe(`DELETE FROM "Assessment" WHERE id = $1`, assessment.id);
       }

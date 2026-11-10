@@ -149,6 +149,12 @@ export interface ExamQuestionView {
    * picker and no Run. Frozen in the layout at start, read here.
    */
   readonly kind: ExamQuestionKind;
+  /**
+   * Phase 16g. A debugging question's edit budget, frozen in the layout.
+   * The pane shows the rule and a live count against the starter, so the
+   * refusal at hand-in is never the first time a candidate hears it.
+   */
+  readonly editBudget?: number;
 }
 
 export function ExamSession({

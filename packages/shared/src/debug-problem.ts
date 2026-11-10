@@ -164,6 +164,22 @@ export function debugOverBudget(changed: number, budget: number): string {
   );
 }
 
+/**
+ * The sentence a candidate reads when a hand-in is refused for a budget
+ * (Phase 16g).
+ *
+ * It names the QUESTION, because a sitting refuses the whole hand-in and
+ * the candidate has to know which one to go back to — and the clock is
+ * still running, which is the only reason refusing is the right answer
+ * here rather than dropping that one answer silently.
+ */
+export function debugOverBudgetInExam(position: number, changed: number, budget: number): string {
+  return (
+    `Question ${position} changes ${lines(changed)} and allows ${budget}. ` +
+    "Nothing has been handed in yet — go back to it, fix the program that is there rather than replacing it, and hand in again."
+  );
+}
+
 export const DEBUG_REFUSALS = Object.freeze({
   noProgram:
     "This question gives you a program to repair, and there is none in that language. Choose one of the languages the editor offers.",

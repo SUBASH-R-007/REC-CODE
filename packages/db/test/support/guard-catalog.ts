@@ -762,6 +762,22 @@ export const DROPPED_GUARDS: ReadonlyArray<{
       "Phase 12n refused the pin because a sitting built one editor for every question and submitted every answer in one language. Phase 13a gave it a language per question; Phase 16f gave it a question KIND, frozen in the layout, that the view, the Run route and the submit route each read. An output-only question reaches a candidate as an answer box with no language picker and no Run — which is what the refusal was protecting them from not having.",
   },
   {
+    kind: "trigger",
+    name: "AssessmentProblem_no_debug_budget",
+    table: "AssessmentProblem",
+    createdBy: "20261101151000_phase12m_assessment_rule",
+    droppedBy: "20261110150000_phase16g_debug_assessments",
+    why:
+      "Phase 12m refused the pin because a sitting submits every answer at the end and cannot refuse ONE without throwing away work. Refusing the whole HAND-IN is a different thing, and the shape the language rule beside it already had: nothing is finalised, the clock is still running, and the candidate is told which question to go back to. The budget is frozen in the layout, the pane shows a live count on the same lines the server counts, and submitAttempt counts against the starter for the language the answer is written in.",
+  },
+  {
+    kind: "function",
+    name: "recx_refuse_debug_assessment_problem",
+    createdBy: "20261101151000_phase12m_assessment_rule",
+    droppedBy: "20261110150000_phase16g_debug_assessments",
+    why: "The function behind AssessmentProblem_no_debug_budget; see that entry.",
+  },
+  {
     kind: "function",
     name: "recx_refuse_output_only_assessment_problem",
     createdBy: "20261101161000_phase12n_assessment_rule",

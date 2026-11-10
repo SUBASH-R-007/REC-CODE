@@ -139,6 +139,16 @@ export interface LayoutQuestion {
    * editor into an answer box under somebody who is part way through.
    */
   readonly kind?: ExamQuestionKind;
+  /**
+   * A debugging question's edit budget, frozen with everything else
+   * (Phase 16g). Absent means the question has none, which is almost every
+   * question.
+   *
+   * Frozen for the same reason the version ids are: an author raising or
+   * lowering the budget while somebody is sitting must not change the rule
+   * the candidate was given, in either direction.
+   */
+  readonly editBudget?: number;
 }
 
 /**
@@ -230,6 +240,8 @@ export interface AssessmentQuestionInput {
   readonly languages?: readonly string[];
   /** Phase 16f: `ANSWER` for an output-only question. Absent means CODE. */
   readonly kind?: ExamQuestionKind;
+  /** Phase 16g: a debugging question's edit budget. Absent means no budget. */
+  readonly editBudget?: number;
 }
 
 /** An MCQ of the paper, as the assessment stores it (Phase 12r). */
@@ -329,6 +341,8 @@ function codingQuestions(sequence: readonly AssessmentQuestionInput[], seed: num
     // byte-identical to one from before this field for every ordinary
     // question.
     ...(question.kind === undefined || question.kind === "CODE" ? {} : { kind: question.kind }),
+    // Phase 16g, written only when there is one.
+    ...(question.editBudget === undefined || question.editBudget === null ? {} : { editBudget: question.editBudget }),
     // Keyed on the question's own source position, not its shuffled index,
     // so a candidate's test order for a given problem is stable even if the
     // order resolution ever changes.
@@ -420,6 +434,17 @@ export function parseAttemptLayout(value: unknown): AttemptLayout {
      */
     if (question.kind !== undefined && !EXAM_QUESTION_KINDS.includes(question.kind as ExamQuestionKind)) {
       throw new Error("stored attempt layout has a malformed question kind");
+    }
+    /**
+     * Phase 16g. A budget that did not survive storage would be a rule the
+     * candidate was told about and the server then did not apply — so it
+     * is refused rather than dropped, like every other frozen field here.
+     */
+    if (
+      question.editBudget !== undefined &&
+      (typeof question.editBudget !== "number" || !Number.isInteger(question.editBudget) || question.editBudget < 1)
+    ) {
+      throw new Error("stored attempt layout has a malformed question edit budget");
     }
   }
   return layout as AttemptLayout;

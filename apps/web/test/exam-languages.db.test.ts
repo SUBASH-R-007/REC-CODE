@@ -539,4 +539,116 @@ describe.skipIf(!ENABLED)("a paper answered in two languages, against recx_test"
     }, 90_000);
   });
 
+
+  /**
+   * A debugging question's edit budget in a sitting (Phase 16g).
+   *
+   * Phase 12m refused these papers because "a sitting submits every answer
+   * at the end and cannot refuse one without throwing away work". The whole
+   * HAND-IN is refused instead, with nothing finalised and the clock still
+   * running — so what these three cases check is that the refusal happens,
+   * that it costs the candidate nothing, and that a fix inside the budget
+   * goes through.
+   */
+  describe("a budgeted question", () => {
+    const STARTER = "int main(){\n  int a = 1;\n  int b = 2;\n  return a + b;\n}\n";
+    /**
+     * A third revision of the same problem, so the starter the budget is
+     * counted against is one this block chose — and so the suite's own
+     * teardown, which deletes by problem, takes it away.
+     */
+    let budgetVersionId = "";
+    const BUDGET_QUESTION = "budget-q1";
+
+    beforeAll(async () => {
+      const version = await db.problemVersion.create({
+        data: {
+          problemId,
+          revision: 3,
+          title: "Nearly right",
+          statementMd: "It has one mistake.",
+          difficulty: "EASY",
+          ioMode: "STDIN",
+          timeLimitMs: 1000,
+          maxEditedLines: 1,
+          starterCodes: { create: [{ language: "cpp20", code: STARTER }] },
+          testCases: {
+            create: [
+              {
+                index: 0,
+                isSample: true,
+                input: { create: { inline: "1 2\n", sha256: `${tag}-in-3`, sizeBytes: 4 } },
+                output: { create: { inline: "4\n", sha256: `${tag}-out-3`, sizeBytes: 2 } },
+              },
+            ],
+          },
+        } as never,
+        select: { id: true },
+      });
+      await db.problemVersion.update({ where: { id: version.id }, data: { frozenAt: new Date() } });
+      budgetVersionId = version.id;
+      versionIds.push(version.id);
+    }, 90_000);
+
+    function budgetLayout() {
+      const base = layout();
+      return {
+        ...base,
+        questions: [
+          {
+            questionId: BUDGET_QUESTION,
+            problemVersionId: budgetVersionId,
+            sourcePosition: 1,
+            points: 10,
+            seed: 1,
+            editBudget: 1,
+          },
+          base.questions[1]!,
+        ],
+      };
+    }
+
+    it("refuses the whole hand-in when one question is over, and finalises nothing", async () => {
+      const guard = await sitting();
+      const rewritten = "#include <cstdio>\nint main(){\n  puts(\"3\");\n  return 0;\n}\n";
+      const result = await submitModule.submitAttempt(guard, budgetLayout() as never, [
+        { questionId: BUDGET_QUESTION, language: "cpp20", source: rewritten },
+        { questionId: questionIds[1]!, language: "py312", source: "print(3)\n" },
+      ]);
+      expect(result.submitted).toBe(false);
+      expect(result.reason).toBe("over_edit_budget");
+      // It names the question, because the whole hand-in went back.
+      expect(result.overBudget).toMatch(/Question 1/);
+      expect(result.overBudget).toMatch(/Nothing has been handed in yet/);
+      // And the OTHER question's answer was not written either: a refusal
+      // that half-submitted would be worse than no refusal.
+      expect(result.submissionIds).toEqual([]);
+      const attempt = await db.assessmentAttempt.findUniqueOrThrow({
+        where: { id: guard.attempt.id },
+        select: { status: true },
+      });
+      expect(attempt.status, "the sitting is still live, which is what makes a refusal fair").toBe("IN_PROGRESS");
+    }, 90_000);
+
+    it("takes a fix that stays inside the budget", async () => {
+      const guard = await sitting();
+      const fixed = STARTER.replace("int b = 2;", "int b = 3;");
+      const result = await submitModule.submitAttempt(guard, budgetLayout() as never, [
+        { questionId: BUDGET_QUESTION, language: "cpp20", source: fixed },
+      ]);
+      expect(result.submitted, result.reason ?? "").toBe(true);
+      expect(result.submissionIds).toHaveLength(1);
+    }, 90_000);
+
+    it("does not check a blank answer, which is simply not submitted", async () => {
+      const guard = await sitting();
+      const result = await submitModule.submitAttempt(guard, budgetLayout() as never, [
+        { questionId: BUDGET_QUESTION, language: "cpp20", source: "   \n" },
+      ]);
+      expect(result.submitted, result.reason ?? "").toBe(true);
+      expect(result.submissionIds).toEqual([]);
+      expect(result.blank).toBeGreaterThan(0);
+    }, 90_000);
+  });
+
 });

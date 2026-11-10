@@ -156,6 +156,15 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     if (result.reason === "language_not_accepted") {
       return json({ error: LANGUAGE_NOT_ACCEPTED_MESSAGE }, 400);
     }
+    /**
+     * Phase 16g. A debugging question over its edit budget. Like the two
+     * below it the attempt is left IN_PROGRESS on purpose: nothing has
+     * been finalised, the clock is still running, and the message names
+     * the question so the candidate knows where to go.
+     */
+    if (result.reason === "over_edit_budget") {
+      return json({ error: result.overBudget ?? "A question changes more lines than it allows." }, 400);
+    }
     if (result.reason === "no_language") {
       return json(
         {

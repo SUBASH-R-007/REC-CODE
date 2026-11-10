@@ -492,12 +492,13 @@ describe.skipIf(!ENABLED)("authoring an assessment against recx_test", () => {
      * sentences by `tests/repo/sql-student-surface.test.ts`, which also
      * asserts that output-only's is gone.
      */
-    it("still refuses a debugging one", async () => {
+    it("takes a debugging one, which it refused until Phase 16g", async () => {
+      // The budget is enforced at hand-in now — the whole hand-in refused,
+      // with the sitting still live — rather than by refusing the pin.
       const slug = await problemWith("debugkind", { maxEditedLines: 3 });
       const assessmentId = await draft();
       const added = await actions.addAssessmentProblem({ assessmentId, problemSlug: slug, position: 22, points: 10 });
-      expect(added.ok).toBe(false);
-      if (!added.ok) expect(added.error).toMatch(/debugging problem is not sat in an assessment/i);
+      expect(added.ok, added.ok ? "" : added.error).toBe(true);
     }, 90_000);
 
   });

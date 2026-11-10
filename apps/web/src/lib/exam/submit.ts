@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import {
   acceptsLanguage,
   ANSWER_LANGUAGE_KEY,
+  countEditedLines,
+  debugOverBudgetInExam,
   questionLanguages,
   type AttemptLayout,
 } from "@recx/shared";
@@ -53,12 +55,18 @@ export interface SubmitResult {
   readonly submissionIds: string[];
   /** Questions with nothing in them, which are simply not submitted. */
   readonly blank: number;
-  readonly reason?: "already_finished" | "no_language" | "language_not_accepted";
+  readonly reason?: "already_finished" | "no_language" | "language_not_accepted" | "over_edit_budget";
   /**
    * The language that was refused, for the route's message (Phase 13a).
    * Only set with `language_not_accepted`.
    */
   readonly refusedLanguage?: string;
+  /**
+   * The sentence for an over-budget debugging question (Phase 16g). Only
+   * set with `over_edit_budget`, and it names the question because the
+   * whole hand-in is refused and the candidate has to know where to go.
+   */
+  readonly overBudget?: string;
 }
 
 const sha256 = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -147,6 +155,50 @@ export async function submitAttempt(
       reason: "language_not_accepted",
       refusedLanguage: refused.language,
     };
+  }
+
+  /**
+   * A debugging question's edit budget, checked HERE and not at marking
+   * (Phase 16g).
+   *
+   * Phase 12m refused these papers outright, because "a sitting submits
+   * every answer at the end and cannot refuse one without throwing away
+   * work the candidate can no longer redo". That is true of refusing ONE
+   * answer. Refusing the whole hand-in is a different thing: the sitting
+   * is still live, nothing has been finalised, and the candidate can go
+   * back to the question with the clock still running — which is exactly
+   * the shape the language refusal above already has, and for the same
+   * reason.
+   *
+   * The count is taken against the STARTER for the language the answer is
+   * written in, which is what the practice workspace counts against and
+   * what the live counter in the editor shows. An answer that is still the
+   * starter counts zero and a blank one is not checked at all.
+   */
+  const budgeted = layout.questions.filter((q) => typeof q.editBudget === "number");
+  if (budgeted.length > 0) {
+    for (const question of budgeted) {
+      const answer = byQuestion.get(question.questionId);
+      if (!answer || answer.source.trim() === "") continue;
+      const starter = await db.starterCode.findFirst({
+        where: { problemVersionId: question.problemVersionId, language: answer.language },
+        select: { code: true },
+      });
+      // No starter in that language means nothing to count against. The
+      // practice path treats it the same way: the budget applies to a
+      // program the candidate was GIVEN.
+      if (!starter) continue;
+      const changed = countEditedLines(starter.code, answer.source);
+      if (changed > question.editBudget!) {
+        return {
+          submitted: false,
+          submissionIds: [],
+          blank: 0,
+          reason: "over_edit_budget",
+          overBudget: debugOverBudgetInExam(question.sourcePosition, changed, question.editBudget!),
+        };
+      }
+    }
   }
 
   const language = answers[0]?.language;

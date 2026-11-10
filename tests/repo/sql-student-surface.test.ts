@@ -135,13 +135,15 @@ describe("not sat in an assessment yet, and not quietly (Phase 12p)", () => {
     const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
     for (const sentence of [
       "An interactive problem is not sat in an assessment yet",
-      "A debugging problem is not sat in an assessment yet",
       "A SQL problem is not sat in an assessment yet",
     ]) {
       expect(action, "the pin refusals are one family").toContain(sentence);
     }
     expect(action, "output-only was lifted in Phase 16f").not.toContain(
       "An output-only problem is not sat in an assessment yet",
+    );
+    expect(action, "debugging was lifted in Phase 16g").not.toContain(
+      "A debugging problem is not sat in an assessment yet",
     );
   });
 });

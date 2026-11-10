@@ -4417,3 +4417,51 @@ needs an edit budget a sitting can refuse without destroying work a candidate
 cannot redo; interactive needs a conversation surface, and SPEC §11 keeps it
 out of high-stakes papers until it has run cleanly through two practice
 contests.
+
+## A debugging problem can be sat in an assessment (Phase 16g)
+
+**The refusal that went.** Phase 12m: *"a debugging problem's edit budget is
+refused before the row, in `submitSolution` and `runCode`. An assessment
+submits every answer at the end of the sitting and cannot refuse one without
+throwing away a candidate's work, so the pin is refused instead."*
+
+That reasoning is sound about refusing **one answer**. Refusing the whole
+**hand-in** is a different thing, and it is the shape the language rule in
+the same function already had — `submitAttempt`'s own comment says why:
+*"the whole submission is refused rather than the offending answer dropped:
+the sitting is still live at this point, so a refusal is something a
+candidate can act on (pick an accepted language and hand in again), while a
+silently dropped answer is a zero they find out about when the results come
+out."* The budget fits that sentence exactly.
+
+**What makes it safe.**
+
+*The budget is frozen into the layout.* `LayoutQuestion.editBudget` is
+written when the paper is laid out, from the version's own `maxEditedLines`.
+An author moving the budget while somebody is sitting cannot change the rule
+the candidate was given, in either direction — the same reason the version
+ids and the languages are frozen.
+
+*The candidate sees the count while they work.* The question pane shows the
+rule and a live count, computed with `countEditedLines` against the starter
+for the language the answer is written in — the same comparison the server
+makes, on the same lines (`significantLines`: trimmed, blanks dropped). A
+refusal at hand-in is never the first time they hear about it.
+
+*Nothing is dropped and nothing is marked down.* The refusal happens before
+anything is finalised. The attempt stays `IN_PROGRESS`, no submission row is
+written for any question, and the message names the question so the
+candidate knows where to go back to. A test asserts all three.
+
+*A blank answer is not checked, and an answer with no starter in that
+language has nothing to count against* — both skipped, exactly as the
+practice path skips them.
+
+**What was considered and not done.** Submitting the over-budget answer and
+letting the marking apply the rule would make it a penalty discovered at
+results, which is the outcome the original refusal was protecting against.
+Dropping just that answer would be the same thing with extra steps.
+
+**The remaining two.** SQL needs its lane and a result set; interactive needs
+a conversation surface, and SPEC §11 keeps it out of high-stakes papers until
+it has run cleanly through two practice contests.

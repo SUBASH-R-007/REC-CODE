@@ -77,15 +77,40 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     return row.id;
   };
 
+  /**
+   * EVERY candidate, by paging to exhaustion (Phase 16g).
+   *
+   * This used to be a single `limit: 500` call, which was generous when it
+   * was written and stopped being so: `recx_test` is shared and accumulates
+   * accounts, and at 554 users this suite's own students fell outside the
+   * first page. Six tests then failed with "Cannot read properties of
+   * undefined", which reads like a product fault and was a limit — the same
+   * shape as the display-code and seed-data lessons before it.
+   *
+   * The sweep's own contract makes this cheap and exact: rows come back
+   * ordered by user id, and `afterUserId` continues from one.
+   */
+  const everyCandidate = async () => {
+    const page = 500;
+    const out: Awaited<ReturnType<typeof sweepCandidates>> = [];
+    let after: string | undefined;
+    for (;;) {
+      const rows = await sweepCandidates(db as never, { now: NOW, limit: page, afterUserId: after });
+      out.push(...rows);
+      if (rows.length < page) return out;
+      after = rows.at(-1)!.userId;
+    }
+  };
+
   /** Only the quiet cohort, so another suite's rows cannot change the answer. */
   const ours = async () => {
-    const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+    const all = await everyCandidate();
     return all.filter((c) => c.batchYear === BATCH_YEAR && c.departmentCode === DEPT);
   };
 
   /** The cohort the holdback fixtures belong to. */
   const theirs = async () => {
-    const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+    const all = await everyCandidate();
     return all.filter((c) => c.batchYear === BATCH_YEAR && c.departmentCode === HOLD_DEPT);
   };
 
@@ -371,7 +396,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         select: { id: true },
       });
       assessmentIds.push(row.id);
-      const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+      const all = await everyCandidate();
       const found = all.find((c) => c.userId === id);
       expect(found?.hasAssessmentWithin72h).toBe(false);
     });
@@ -394,7 +419,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
         select: { id: true },
       });
       assessmentIds.push(row.id);
-      const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+      const all = await everyCandidate();
       expect(all.find((c) => c.userId === id)?.hasAssessmentWithin72h).toBe(false);
     });
   });
@@ -490,14 +515,24 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
 
   describe("paging", () => {
     it("pages by user id without repeating or skipping anybody", async () => {
-      const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+      const all = await everyCandidate();
       expect(all.length).toBeGreaterThan(3);
       const firstTwo = await sweepCandidates(db as never, { now: NOW, limit: 2 });
-      const rest = await sweepCandidates(db as never, {
-        now: NOW,
-        limit: 500,
-        afterUserId: firstTwo.at(-1)!.userId,
-      });
+      /**
+       * The rest, paged to exhaustion rather than in one 500-row call.
+       * The call was the whole of the remainder when this was written and
+       * is not now: `recx_test` is shared and accumulates accounts, so a
+       * fixed second page silently truncated the comparison and the test
+       * reported a paging bug that was its own.
+       */
+      const rest: Awaited<ReturnType<typeof sweepCandidates>> = [];
+      let cursor = firstTwo.at(-1)!.userId;
+      for (;;) {
+        const page = await sweepCandidates(db as never, { now: NOW, limit: 500, afterUserId: cursor });
+        rest.push(...page);
+        if (page.length < 500) break;
+        cursor = page.at(-1)!.userId;
+      }
       const paged = [...firstTwo, ...rest].map((c) => c.userId);
       expect(paged).toEqual(all.map((c) => c.userId));
       expect(new Set(paged).size).toBe(paged.length);

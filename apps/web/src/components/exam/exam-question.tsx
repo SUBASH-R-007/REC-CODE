@@ -2,6 +2,9 @@
 
 import { useId } from "react";
 import { ANSWER_LABELS, ANSWER_NOTICES, EDITOR_KEYMAP_NOTICES } from "@recx/shared";
+// The deep path, not the barrel: this is a client component on a page
+// with a 160 KB budget. See the note in readiness-check.tsx.
+import { countEditedLines, debugChipLabel, DEBUG_NOTICES } from "@recx/shared/debug-problem";
 import { CodeEditor } from "@/components/editor/code-editor";
 import type { EditorPrefs } from "@/components/editor/editor-types";
 import type { ExamLanguageView, ExamQuestionView } from "@/components/exam/exam-session";
@@ -59,7 +62,16 @@ export function ExamQuestion({
   const noteId = useId();
   const languageId = useId();
   const answerId = useId();
+  const budget = question.editBudget ?? null;
   const active = languages.find((entry) => entry.key === language) ?? languages[0];
+  /**
+   * Counted against the starter for the language this answer is written
+   * in — the same comparison `submitAttempt` makes. A question with no
+   * starter in that language has nothing to count against, which is the
+   * case the server skips too.
+   */
+  const starter = question.starters[active?.key ?? language] ?? "";
+  const changed = budget === null ? 0 : countEditedLines(starter, source);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col lg:flex-row">
@@ -195,6 +207,22 @@ export function ExamQuestion({
             </span>
           )}
         </div>
+        {/*
+          Phase 16g. A debugging question's rule and a LIVE count, on the
+          same lines the server counts (`significantLines`), so the refusal
+          at hand-in is never the first time a candidate hears it — and so
+          they can see the number move while they work rather than after
+          the clock has stopped.
+        */}
+        {budget !== null ? (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2 text-xs">
+            <span className="font-medium text-text">{debugChipLabel(budget)}</span>
+            <span className={changed > budget ? "font-semibold text-danger" : "text-text-secondary"}>
+              {changed} changed so far
+            </span>
+            <span className="text-text-secondary">{DEBUG_NOTICES.counted}</span>
+          </p>
+        ) : null}
         <p id={noteId} className="border-b border-border px-4 py-2 text-xs text-text-secondary">
           Tab indents. Press Esc then Tab to move focus out of the editor.
           {prefs.keymap !== "DEFAULT" ? ` ${EDITOR_KEYMAP_NOTICES.examDefault}` : ""}

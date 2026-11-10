@@ -267,7 +267,10 @@ export async function startOrResumeAttempt(args: {
           allowedLanguages: true,
           // Phase 16f: an OUTPUT_ONLY question is answered in a box, not
           // written in a language, and the layout freezes which it is.
-          problemVersion: { select: { ioMode: true } },
+          // Phase 16g: and a debugging question's budget is frozen with
+          // it, so an author moving it mid-sitting cannot change the rule
+          // the candidate was given.
+          problemVersion: { select: { ioMode: true, maxEditedLines: true } },
         },
       },
       /**
@@ -520,6 +523,7 @@ export async function startOrResumeAttempt(args: {
        * surfaces read.
        */
       kind: problem.problemVersion.ioMode === "OUTPUT_ONLY" ? ("ANSWER" as const) : ("CODE" as const),
+      editBudget: problem.problemVersion.maxEditedLines ?? undefined,
       languages:
         problem.problemVersion.ioMode === "OUTPUT_ONLY" || problem.allowedLanguages.length === 0
           ? undefined

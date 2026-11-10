@@ -226,12 +226,12 @@ describe("sat in an assessment, and only because the sitting knows the kind", ()
     expect(submit).toMatch(/question\?\.kind === "ANSWER"[\s\S]{0,60}ANSWER_LANGUAGE_KEY/);
   });
 
-  it("the other three kinds are still refused, each with its own sentence", () => {
+  it("the kinds still refused each keep their own sentence", () => {
     const action = readRepoFile("apps/web/src/server/actions/admin-assessments.ts");
     expect(action).toContain("An interactive problem is not sat in an assessment yet");
-    expect(action).toContain("A debugging problem is not sat in an assessment yet");
     expect(action).toContain("A SQL problem is not sat in an assessment yet");
-    // And this one is NOT, which is the change.
+    // And these two are NOT, which is what Phases 16f and 16g changed.
     expect(action).not.toContain("An output-only problem is not sat in an assessment yet");
+    expect(action).not.toContain("A debugging problem is not sat in an assessment yet");
   });
 });

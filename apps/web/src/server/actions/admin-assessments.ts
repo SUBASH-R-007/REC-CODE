@@ -277,11 +277,16 @@ export async function addAssessmentProblem(
      * candidate can no longer redo. So the pin is refused instead, here
      * and in the database (AssessmentProblem_no_debug_budget).
      */
-    if (problem.liveVersion.maxEditedLines !== null) {
-      throw new ValidationError(
-        "A debugging problem is not sat in an assessment yet: a sitting submits every answer at the end, so it cannot refuse one that changed too many lines. Put it in a contest or leave it in practice.",
-      );
-    }
+    /**
+     * Phase 16g: a debugging problem IS pinnable now.
+     *
+     * Phase 12m's reason — "a sitting submits every answer at the end, so
+     * it cannot refuse one that changed too many lines" — was about
+     * refusing ONE answer. The whole hand-in is refused instead, with the
+     * sitting still live and the question named, which is the register the
+     * language rule already used. The budget is frozen in the layout and
+     * the pane shows a live count against the starter.
+     */
 
     /**
      * Phase 16f: an output-only problem IS pinnable now, and the refusal

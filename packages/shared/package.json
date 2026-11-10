@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./consent": "./src/consent.ts",
+    "./debug-problem": "./src/debug-problem.ts",
     "./exam-browser": "./src/exam-browser.ts",
     "./harness": "./src/harness/index.ts",
     "./authoring": "./src/authoring/index.ts",

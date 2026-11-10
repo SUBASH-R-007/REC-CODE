@@ -37,6 +37,27 @@ const NOW = new Date();
 
 describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
   let db: TestDb;
+
+  /**
+   * EVERY candidate, by paging to exhaustion (Phase 16g).
+   *
+   * A single `limit: 500` call was the whole population when this suite was
+   * written. `recx_test` is shared and accumulates accounts; past the page
+   * size this suite's own student is simply not in the result, and the
+   * failure reads as "the student is not a sweep candidate" — which is true
+   * of the page and not of the database.
+   */
+  const everyCandidate = async (now: Date) => {
+    const page = 500;
+    const out: Awaited<ReturnType<typeof sweepCandidates>> = [];
+    let after: string | undefined;
+    for (;;) {
+      const rows = await sweepCandidates(db as never, { now, limit: page, afterUserId: after });
+      out.push(...rows);
+      if (rows.length < page) return out;
+      after = rows.at(-1)!.userId;
+    }
+  };
   let restoreEnv: () => void;
   let staffId = "";
   let mentorId = "";
@@ -77,7 +98,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
    */
   const sweepOne = async (userId: string, dayOffset = 0) => {
     const now = new Date(NOW.getTime() + dayOffset * 86_400_000);
-    const all = await sweepCandidates(db as never, { now, limit: 500 });
+    const all = await everyCandidate(now);
     const candidate = all.find((c) => c.userId === userId);
     expect(candidate, "the student is not a sweep candidate").toBeDefined();
     const context = await loadSweepContext(db as never, [candidate!], now);
@@ -380,7 +401,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
   describe("two instances", () => {
     it("reports a race rather than writing a second rung", async () => {
       const id = await student("g");
-      const all = await sweepCandidates(db as never, { now: NOW, limit: 500 });
+      const all = await everyCandidate(NOW);
       const candidate = all.find((c) => c.userId === id)!;
       const context = await loadSweepContext(db as never, [candidate], NOW);
       const decision = evaluate(candidate, context);
@@ -442,7 +463,7 @@ describe.skipIf(!RUN_DB_TESTS)(TITLE, () => {
     it("writes nothing at all, and the same decision enforced does write", async () => {
       const id = await student("ro");
       const now = new Date(NOW.getTime());
-      const all = await sweepCandidates(db as never, { now, limit: 500 });
+      const all = await everyCandidate(now);
       const candidate = all.find((c) => c.userId === id);
       expect(candidate, "the student is not a sweep candidate").toBeDefined();
       const context = await loadSweepContext(db as never, [candidate!], now);

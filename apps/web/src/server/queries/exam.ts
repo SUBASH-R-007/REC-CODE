@@ -158,6 +158,8 @@ export const getExamPaper = cache(async (layout: AttemptLayout): Promise<ExamPap
       // is the paper's default unless the question narrows past it.
       languageKey: kind === "ANSWER" ? ANSWER_LANGUAGE_KEY : (acceptedFor(question.questionId)[0] ?? defaultLanguage),
       kind,
+      // Phase 16g: from the FROZEN layout, like the kind beside it.
+      ...(typeof question.editBudget === "number" ? { editBudget: question.editBudget } : {}),
     });
   }
   return { questions, mcqs, languages, missing };
