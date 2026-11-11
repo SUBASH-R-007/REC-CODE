@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button, ProgressBar, VerdictBadge } from "@recx/design";
 import type { JudgeTarget, VerdictStreamState } from "@/hooks/use-verdict-stream";
@@ -92,6 +93,7 @@ export function ResultPanel({
   sampleIndexes,
   answerOnly = false,
   examPaper = false,
+  problemSlug,
 }: {
   target: JudgeTarget | null;
   sending: "submission" | "run" | null;
@@ -112,6 +114,13 @@ export function ResultPanel({
    * none.
    */
   examPaper?: boolean;
+  /**
+   * The problem's slug, which turns a finished submission into a link to its
+   * own page — where the growth of the run and its position among the other
+   * accepted solutions are (Phase 17). Absent in a sitting and on the
+   * submission page's own live panel, so neither grows a link.
+   */
+  problemSlug?: string;
 }) {
   if (sending) {
     return (
@@ -237,6 +246,23 @@ export function ResultPanel({
       {view.terminal && <TestResults view={view} />}
 
       {view.terminal && <ResultNotes view={view} />}
+
+      {/* Phase 17. Only a judged SUBMISSION has a page of its own, and only
+          the practice workspace passes a slug. */}
+      {view.terminal && view.kind === "submission" && problemSlug !== undefined && (
+        <p className="text-sm">
+          <Link
+            href={`/problems/${problemSlug}/submissions/${view.id}`}
+            className="rounded-md text-primary underline hover:no-underline"
+          >
+            How this run behaved
+          </Link>
+          <span className="text-text-secondary">
+            {" "}
+            — the growth measured from its own timings, and where it sits among the accepted solutions.
+          </span>
+        </p>
+      )}
     </div>
   );
 }

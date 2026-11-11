@@ -955,6 +955,43 @@ audited". The layout guards, and every page guards again with
 * PlatformSetting and PlatformTheme are written only by the four
   super-admin settings actions (`tests/repo/platform-setting-writes.test.ts`).
 
+## Measured growth, and a position among the others (Phase 17)
+
+Two questions a student has after an **Accepted**, answered on
+`/problems/<slug>/submissions/<id>`. `docs/COMPLEXITY.md` is the method and
+the argument for every threshold; this is where the pieces sit and why.
+
+**Nothing reads the submitted code.** The complexity of a program cannot be
+computed. What is read is the RUN: the per-case CPU ms and peak KB every
+submission already stores, fitted against the input sizes of the cases that
+ran and passed. Six curves of the form `y = a*f(n) + c`, two parameters each,
+closed form, smallest residual winning — and `c` is load-bearing, because a
+Python process spends 20-30 ms starting before the first statement runs.
+
+| Piece | Where | Why there |
+|---|---|---|
+| The fit, the ladder, the gates, the copy | `packages/shared/src/complexity.ts` | pure, no I/O; the same module the repo fences read as text |
+| The standing's shaping and its floors | `packages/shared/src/solution-standing.ts` | pure; reuses `percentile.ts`'s mid-rank definition |
+| Reading the hidden cases' sizes, and the write | `apps/web/src/lib/judge/finalize.ts` | the ONE place allowed to; see below |
+| The peer population | `apps/web/src/server/queries/solution-standing.ts` | reads `Submission` only — no name, no id, nothing identifying comes back |
+| The surface | `apps/web/src/components/workspace/solution-profile.tsx` | a server component; the practice console links to it |
+| The storage | `Submission.timeComplexity`, `.spaceComplexity`, `.complexityDetail` | the class must be `GROUP BY`-able, and an estimate beside the run that earned it stays auditable |
+
+**Why the fit happens at finalise rather than on the page.** It needs each
+case's input size, and `tests/repo/student-exposure.test.ts` R3 refuses any
+`testCase` query selecting `input` without `isSample: true`, with R5 keeping
+a student page out of every module allowed to make one. Computing it on
+render would have meant widening a security fence for a decoration. It
+happens where reading hidden test data is already the job, and what reaches
+the student is the fitted class rather than the sizes — a hidden case still
+shows its index, verdict, CPU ms and memory KB and nothing else.
+
+`measureComplexity` cannot fail a finalise: every error is caught and the
+columns are left alone. Nothing it measures reaches a verdict, a score, XP, a
+contest standing, an assessment result, a readiness component or an
+eligibility decision, and `tests/repo/complexity-posture.test.ts` asserts that
+by name in both directions.
+
 ## AdminScope and the query-shape fence (Phase 4)
 
 An ADMIN sees students by department and/or batch, through `AdminScope`

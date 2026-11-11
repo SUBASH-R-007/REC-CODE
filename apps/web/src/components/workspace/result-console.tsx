@@ -58,6 +58,14 @@ export const ResultConsole = forwardRef<
     allowCustom?: boolean;
     /** An output-only question (Phase 12n): the idle console must not promise a Run. */
     answerOnly?: boolean;
+    /**
+     * The problem this console belongs to, which turns a finished submission
+     * into a link to its full page (Phase 17). Passed by the practice
+     * workspace and by nothing else: a sitting's console must not offer a
+     * candidate a way out of the paper, and the submission page's own live
+     * panel would be linking to itself.
+     */
+    problemSlug?: string;
   }
 >(function ResultConsole(
   {
@@ -77,6 +85,7 @@ export const ResultConsole = forwardRef<
     customHint,
     allowCustom = true,
     answerOnly = false,
+    problemSlug,
   },
   headingRef,
 ) {
@@ -177,6 +186,7 @@ export const ResultConsole = forwardRef<
             stream={stream}
             sampleIndexes={sampleIndexes}
             answerOnly={answerOnly}
+            problemSlug={problemSlug}
           />
         ) : (
           <div className="space-y-3">

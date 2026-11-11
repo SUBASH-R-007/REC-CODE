@@ -615,6 +615,7 @@ export function Workspace({
             customHint={customHint}
             allowCustom={!noCustomInput}
             answerOnly={answerOnly}
+            problemSlug={slug}
           />
         </div>
 

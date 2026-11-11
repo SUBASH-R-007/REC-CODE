@@ -94,6 +94,41 @@ A reference in a language that is not enabled is reported, not run. For a
 FUNCTION problem, so is one in a language without a function harness (C,
 JavaScript, Go, Kotlin).
 
+## 3a. A ladder of input sizes, if you want growth to be readable
+
+Not a rule, and nothing refuses a problem without it. But since Phase 17 a
+student can see **how their own run's time and memory grew with the size of
+the input**, and whether they see anything at all is decided by the test data
+rather than by their code: the estimator needs at least five distinct input
+sizes spanning at least 8x, and refuses otherwise
+(`docs/COMPLEXITY.md` 4).
+
+Measured on this catalogue's own `two-sum`, over **259 real accepted
+submissions**: its fourteen cases are ten edge cases of 8-39 bytes and four
+real ones at 6.8 KB, 104 KB, 519 KB and 1 MB. The memory fit is excellent on
+every single one -- O(n), r-squared 1.00, which is exactly what a hash map of
+n entries is. The time fit is not: a third of the C++ submissions report that
+no growth was visible at all (a C++ two-sum is simply too fast against a 15 ms
+floor), and the rest land WEAK, because only four of the twelve distinct sizes
+carry any scale information and the other eight measure the interpreter
+starting up.
+
+So, when the problem is one where an author WANTS the growth to be legible:
+
+* give it a **ladder** rather than a cliff -- sizes roughly doubling across
+  the range (1 K, 2 K, 4 K, ... 1 M) rather than a cluster of tiny edge cases
+  and three big ones;
+* keep the edge cases, which are worth far more than the fit is. They cost
+  nothing: the estimator takes the smallest reading per distinct size and
+  fits the constant floor as a parameter;
+* remember that the largest case has to be big enough that the work shows
+  above a few milliseconds of process start-up, which for C++ is a higher bar
+  than for Python.
+
+A problem without the ladder still works perfectly. Its students simply read
+*"the tests this ran on do not come in enough different sizes to measure
+growth"*, which is a true sentence about the problem and not about them.
+
 ## 4. Bulk import (package format 1)
 
 Upload a `.zip` on **Problems → Import**, or run the CLI on a directory or a

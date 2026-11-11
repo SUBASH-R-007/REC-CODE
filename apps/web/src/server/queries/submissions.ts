@@ -1,6 +1,12 @@
 import "server-only";
 import type { Prisma, Role } from "@recx/db";
-import { submitEditorLanguage, type JobKind, type VerdictDisplay } from "@recx/shared";
+import {
+  readComplexityDetail,
+  submitEditorLanguage,
+  type ComplexityDetail,
+  type JobKind,
+  type VerdictDisplay,
+} from "@recx/shared";
 import { isStaff } from "@/lib/auth/guards";
 import { findScopedStudent, loadStudentScope } from "@/lib/auth/scope";
 import { db } from "@/lib/db";
@@ -139,6 +145,13 @@ export interface SubmissionDetail {
   pinned: { revision: number; statementHtml: string };
   /** The problem's live revision now (null when it has none). */
   liveRevision: number | null;
+  /**
+   * What this run's own readings said about how it grows (Phase 17), or
+   * null when nothing was stored — an older row, a run with too few passing
+   * cases to read, or a row whose stored shape no longer parses. A
+   * measurement of the run, never a claim about the program.
+   */
+  complexity: ComplexityDetail | null;
 }
 
 /**
@@ -159,6 +172,9 @@ export async function getSubmissionDetail(id: string, slug: string, viewer: View
       problemVersion: { select: { ...SUBMISSION_SELECT.problemVersion.select, title: true, revision: true, statementMd: true } },
       source: { select: { source: true, archivedAt: true } },
       user: { select: { firstName: true, lastName: true } },
+      // Phase 17. Only on the full page: the live verdict stream has no
+      // use for them and polls often.
+      complexityDetail: true,
     },
   });
   if (!row || row.problem.slug !== slug || !(await canView(viewer, row.userId))) return null;
@@ -177,6 +193,7 @@ export async function getSubmissionDetail(id: string, slug: string, viewer: View
     owner: own ? null : { firstName: row.user.firstName, lastName: row.user.lastName },
     pinned: { revision: row.problemVersion.revision, statementHtml: renderMarkdown(row.problemVersion.statementMd) },
     liveRevision: row.problem.liveVersion?.revision ?? null,
+    complexity: readComplexityDetail(row.complexityDetail),
   };
 }
 

@@ -1493,6 +1493,11 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getRunView!,
     "submissions#getStudentView": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).getStudentView!,
     "submissions#recentSubmissions": async () => (await load(path.join(QUERIES_DIR, "submissions.ts"))).recentSubmissions!,
+    // Phase 17. It reads the calibration of the node that judged the
+    // submission, which is staff-only everywhere else, so the sweep has to
+    // see that none of it comes back out.
+    "solution-standing#getSolutionStanding": async () =>
+      (await load(path.join(QUERIES_DIR, "solution-standing.ts"))).getSolutionStanding!,
     "assessments#listMyAssessments": async () => (await load(path.join(QUERIES_DIR, "assessments.ts"))).listMyAssessments!,
     "sitting-report#getStudentReport": async () => (await load(path.join(QUERIES_DIR, "sitting-report.ts"))).getStudentReport!,
     "my-assessment-result#myAssessmentResult": async () =>
@@ -1629,6 +1634,7 @@ describe.skipIf(!ENABLED)("student exposure canaries against recx_test", () => {
     "submissions#getRunView": () => [[ids.run, viewer()]],
     "submissions#getStudentView": () => [["submission", ids.submission, viewer()], ["run", ids.run, viewer()]],
     "submissions#recentSubmissions": () => [[ids.user, ids.problem]],
+    "solution-standing#getSolutionStanding": () => [[ids.submission], [`${tag}-no-such-submission`]],
     "assessments#listMyAssessments": () => [
       [{ id: ids.user, batchYear: 2027, departmentCode: "CSE", section: null }],
     ],

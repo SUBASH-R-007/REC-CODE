@@ -195,6 +195,32 @@ describe.skipIf(!ENABLED)("progress engine against recx_test", () => {
     problems.revise = await createProblem("revise", "EASY");
     problems.revise2 = await createProblem("revise2", "MEDIUM");
 
+    /**
+     * Drain this run's days before using them (Phase 17, found by a gate).
+     *
+     * `DailyChallenge.date` is the PRIMARY KEY and global, and the first
+     * test `create`s a row at `day(0)`. `startOffset` is random over 300
+     * days precisely so that two runs rarely collide — but the teardown
+     * below is one transaction, so a run that is interrupted or whose
+     * teardown rolls back leaves its row behind FOREVER, and every later
+     * run then has a one-in-three-hundred chance of drawing that exact day
+     * and failing `create` on the primary key.
+     *
+     * When it happens, the first test fails and three more cascade off it,
+     * because the `first-solve` badge it was supposed to award is then
+     * still unearned when a later test counts badges. That is what it did:
+     * `recx_test` held one row at 2097-03-26 from an interrupted run in an
+     * earlier session, and a full-suite run drew it months later and
+     * reported four failures that had nothing to do with the change under
+     * test.
+     *
+     * Randomness narrows a collision; draining removes it. The window
+     * covers every `day(n)` this file uses (the largest is 99).
+     */
+    await db.dailyChallenge.deleteMany({
+      where: { date: { gte: dayAsDate(day(-1)), lte: dayAsDate(day(120)) } },
+    });
+
     // The badge catalogue is seeded by content; create only the rows missing here.
     for (const badge of PROGRESS_BADGES) {
       const existing = await db.badge.findUnique({ where: { key: badge.key }, select: { id: true } });

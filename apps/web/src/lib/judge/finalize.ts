@@ -1,11 +1,19 @@
 import "server-only";
-import type { DbTx, JudgeNode, Prisma } from "@recx/db";
+// `Prisma` is a value here as well as a type: Prisma.DbNull is how a jsonb
+// column is written back to SQL NULL (Phase 17).
+import { Prisma, type DbTx, type JudgeNode } from "@recx/db";
 import {
+  COMPLEXITY_ESTIMATOR_VERSION,
   JUDGE_RETRY,
   LIMITS,
+  MIN_FIT_POINTS,
+  complexitySamplesOf,
+  estimateComplexity,
   readResultSet,
   sanitizeToolOutput,
+  storedComplexityClass,
   writeResultSet,
+  type ComplexityClass,
   type IoMode,
   type ReleaseRequest,
   type ResultRequest,
@@ -109,6 +117,85 @@ async function loadSampleTexts(problemVersionId: string, ioMode: IoMode = "STDIN
   );
 }
 
+/**
+ * Every case of a (frozen) version with the size of the input it is handed,
+ * for the complexity fit (Phase 17).
+ *
+ * This is the one query the feature needs that a student-facing path may not
+ * make: `tests/repo/student-exposure.test.ts` rule R3 refuses any `testCase`
+ * query selecting `input` without `isSample: true`, and the import graph
+ * keeps a student page out of every module that is allowed to. So the fit
+ * happens HERE, where reading hidden test data is already the job, and what
+ * reaches the student is the fitted class rather than the sizes. The rule
+ * stands untouched: a hidden case still shows a student its index, verdict,
+ * CPU ms and memory KB and nothing else (SPEC 7).
+ *
+ * `sizeBytes` is blob metadata and never blob content -- no `inline`, no
+ * `storageKey`, nothing fetched from object storage.
+ */
+async function loadCaseInputBytes(problemVersionId: string): Promise<Map<number, number>> {
+  const rows = await db.testCase.findMany({
+    where: { problemVersionId },
+    orderBy: { index: "asc" },
+    select: { index: true, input: { select: { sizeBytes: true } } },
+  });
+  return new Map(rows.map((row) => [row.index, row.input.sizeBytes]));
+}
+
+/** The three columns Phase 17 writes, or nothing at all. */
+interface StoredComplexity {
+  timeComplexity?: ComplexityClass | null;
+  spaceComplexity?: ComplexityClass | null;
+  complexityDetail?: Prisma.InputJsonValue | typeof Prisma.DbNull;
+}
+
+/**
+ * What this run's readings say about how the solution grows.
+ *
+ * Two rules, and both are about not letting a decoration damage a verdict:
+ *
+ *  1. **It cannot fail the finalise.** Every error is caught and the columns
+ *     are left alone. A student's verdict, their XP and their daily CPU
+ *     charge are not worth risking for a line of commentary under it, and a
+ *     thrown error here would send the job back for a retry it does not
+ *     need.
+ *  2. **It does not pay for a query it cannot use.** The estimator refuses
+ *     below `MIN_FIT_POINTS` distinct sizes, so a run with fewer passing
+ *     cases than that can be refused without reading the version's cases at
+ *     all -- which is every compile error, every wrong answer on case one,
+ *     and every problem with four tests. It still CLEARS the three columns
+ *     in that case rather than leaving them: a rejudge whose run no longer
+ *     reaches five passing cases must not keep showing the class an earlier
+ *     one measured.
+ */
+async function measureComplexity(
+  problemVersionId: string,
+  tests: ResultRequest["tests"],
+): Promise<StoredComplexity> {
+  if (tests.filter((test) => test.v === "AC").length < MIN_FIT_POINTS) {
+    return { timeComplexity: null, spaceComplexity: null, complexityDetail: Prisma.DbNull };
+  }
+  try {
+    const { time, space } = complexitySamplesOf(tests, await loadCaseInputBytes(problemVersionId));
+    const timeOutcome = estimateComplexity(time, "TIME");
+    const spaceOutcome = estimateComplexity(space, "SPACE");
+    return {
+      timeComplexity: storedComplexityClass(timeOutcome),
+      spaceComplexity: storedComplexityClass(spaceOutcome),
+      // Spread into fresh literals: Prisma's InputJsonValue wants an index
+      // signature, which a named interface does not carry.
+      complexityDetail: {
+        version: COMPLEXITY_ESTIMATOR_VERSION,
+        time: { ...timeOutcome },
+        space: { ...spaceOutcome },
+      },
+    };
+  } catch (error) {
+    console.warn(`[judge] could not measure the complexity of a submission on ${problemVersionId}:`, error);
+    return {};
+  }
+}
+
 function storedCompileOutput(body: ResultRequest): string | null {
   // The worker sanitises before sending; re-sanitise defensively so no host
   // or sandbox path can reach a stored row.
@@ -161,6 +248,7 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
   // The sample indexes of the VERSION decide which cases may carry the
   // judge's message, so a worker cannot make a hidden case visible.
   const testResults = compactTestResults(body.tests, new Set(samples.map((s) => s.index)));
+  const complexity = await measureComplexity(head.problemVersionId, body.tests);
   const judgedAt = new Date();
 
   try {
@@ -207,6 +295,7 @@ export async function finalizeSubmission(node: JudgeNode, body: ResultRequest): 
           compileOutput: storedCompileOutput(body),
           judgeNodeId: node.id,
           calibrationScore: body.calibrationScore,
+          ...complexity,
           judgedAt,
           claimToken: null,
           leaseExpiresAt: null,
