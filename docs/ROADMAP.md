@@ -1,5 +1,41 @@
 # REC Code — Roadmap
 
+> ## Where this stands, 2026-11-11
+>
+> **Not complete — and every entry that is open is open on something this
+> repository cannot supply.** Each entry below carries its own dated note;
+> this is the tally.
+>
+> **Finished (9):** §1.1 LMS sign-in, §1.3 the join from the web app to a
+> student's screen, §2.5, §2.6, §2.7, §3.1 the second factor, §3.2, §3.3,
+> §3.4 field vitals.
+>
+> **Decided, deliberately not built (1):** §2.8 collaborative editing. The
+> entry sets its own condition — *"worth doing only if mentors ask for
+> it"* — and names what would reopen it.
+>
+> **Open, and what each one waits on (9):**
+>
+> | Entry | Waits on | Repository half |
+> |---|---|---|
+> | §1.2 catalogue | Faculty time: 437 more authored problems and a named per-term owner. **TREES, HEAPS and BACKTRACKING still have no problem at all** | Both pipelines proven; the aptitude bank built (201 questions); 12 authored problems + two-sum |
+> | §1.4 topology | A second host, a registry, a certificate, an offsite pgBackRest repository, a monitoring VM | Compose, Caddyfile and alert rules written and fenced; `prom-local.mjs` generates the one config that cannot be committed |
+> | §1.5 installers | **Certificates nobody has bought**, and notarisation lead time. Untouched | `electron-builder.yml` is written for signed builds; a local build says it is unsigned |
+> | §1.6 mail | Real SMTP credentials, and whether the college's relay accepts the envelope | **The whole code path has now carried a message** against a loopback sink |
+> | §1.7 archive | Two graduated batches surveyed, and one pass of moderation | The importer, the write and the template now exist — they did not before |
+> | §2.4 interactive | **Two practice contests with real students** (SPEC §11). A date, not code | The other three kinds are lifted |
+> | §3.5 capacity | The real topology (depends on §1.4) | 1,000 jobs run twice on one host, 2,000 judged, zero internal errors |
+> | §3.6 assistant scan | A model configured and an `AI_API_KEY` | The spec is written and fails loudly rather than skipping |
+> | §3.7 dependabot | **A named person** to read the weekly group | No code remains |
+>
+> So: nine done, one decided, nine waiting on people, hardware, content or a
+> purchase. Nothing on this list is waiting on engineering judgement.
+>
+> The counts in the next paragraph are from 2026-11-09 and have moved: **125
+> models, 71 migrations, five applications, 48 structural fences**, and
+> `docs/RUNBOOK.md` §3 carries 123 phase-16 rows.
+
+
 What is left, written on 2026-11-09 after reading `docs/handoff/SPEC.md`,
 `docs/OPEN-QUESTIONS.md` (4,177 lines), the 55 `NOT RUN` notes in
 `docs/RUNBOOK.md`, and the 130-page route surface under `apps/web/src/app`.
@@ -307,19 +343,35 @@ software is in the way of either any more.
 
 ## 2. Scoped, and still refused — one surface each
 
-### 2.1–2.4 Four question kinds an assessment cannot sit
+### 2.1–2.4 Four question kinds an assessment cannot sit — **one left**
+
+> **Three of the four are lifted.** Output-only in Phase 16f, debugging in
+> 16g, SQL in 16n+16o. Only **interactive** still refuses the pin, and it is
+> blocked on a date rather than on code: SPEC §11 keeps it out of
+> high-stakes papers until it has run cleanly through two practice contests,
+> and no contest has been run with real students on this deployment. The
+> original text follows, because what each refusal cost to lift is the
+> useful part of it.
 
 An interactive, debugging, output-only or SQL problem cannot be pinned into
 an assessment. Each refusal lives in three places — a trigger on
 `AssessmentProblem`, an entry in the guard catalogue, and the sentence an
 admin reads before the constraint fires.
 
+That count was wrong, and Phase 16o paid for finding out: the SQL refusal
+lived in **five** places. The two the list forgot were three repository
+fences requiring the removed sentence and a database test asserting the
+dropped trigger still fires — and a sixth, not a refusal but the same
+shape, was a `RECX_QUEUES` default that `deploy/` overrode. A rule removed
+is harder than a rule added, and the honest number is "grep for it".
+
 Phase 12p named one engine change as the blocker for all four: a language per
 question, carried through the layout, the snapshot route, the submit route
 and the marking. **That change has happened** (Phase 13a/13c), and it found
-three real defects of one shape on the way. The four refusals still stand,
-because the language was never the whole of it. Each is now blocked on one
-surface:
+three real defects of one shape on the way. The refusals stood anyway,
+because the language was never the whole of it — Phase 16h found that
+`SENSITIVE_LANES` barred the SQL engine from ASSESSMENT **by engine**, a
+clause 12p had not written down. Each was blocked on one surface:
 
 | Kind | What it still needs |
 |---|---|
