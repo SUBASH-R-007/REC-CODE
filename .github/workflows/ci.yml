@@ -69,13 +69,13 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -190,13 +190,13 @@ jobs:
       E2E_BASE_URL: http://localhost:3000
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -275,7 +275,7 @@ jobs:
 
       - name: Upload the Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
@@ -297,7 +297,7 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install isolate (pinned tag + commit; no CPU pinning on a runner)
         run: sudo bash infra/judge/install-isolate.sh
@@ -311,7 +311,7 @@ jobs:
       # install script never forces the hour-long GCC build (and vice versa).
       - name: Restore toolchains built from source (GCC, CPython)
         id: native
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             /opt/toolchains/gcc-13.2.0
@@ -327,7 +327,7 @@ jobs:
       # two, which is the same failure with a cache in front of it.
       - name: Restore vendor toolchains (Temurin, Kotlin, PyPy, Node.js, Go, Rust, .NET, testlib)
         id: vendor
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             /opt/toolchains/temurin-21.0.4+7
@@ -346,7 +346,7 @@ jobs:
 
       - name: Save toolchains built from source
         if: steps.native.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             /opt/toolchains/gcc-13.2.0
@@ -363,7 +363,7 @@ jobs:
 
       - name: Save vendor toolchains
         if: steps.vendor.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             /opt/toolchains/temurin-21.0.4+7
@@ -382,11 +382,11 @@ jobs:
           sudo chmod -R a-w,a+rX /opt/toolchains
           ls /opt/toolchains
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -424,7 +424,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The apt package ships promtool alongside the server. Pinned to the
       # distribution's version on purpose: a rule file that parses under the
@@ -511,13 +511,13 @@ jobs:
       SEED_STUDENT_PASSWORD: ci-only-student-password-lh-1
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 9.15.9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -543,7 +543,7 @@ jobs:
 
       - name: Upload the Lighthouse reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouse-reports
           path: apps/web/.lighthouseci
