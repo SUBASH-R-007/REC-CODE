@@ -1,0 +1,199 @@
+{
+  "__comment": "Phase 10b. The judge pipeline, in the order an incident is read: is there a backlog, how old is the oldest wait, are the hosts alive, how long is a run taking, and what are the verdicts. Every expression reads a metric from packages/shared/src/metrics.ts and nothing else; packages/shared/test/monitoring-files.test.ts fails if a panel ever names one that does not exist. The datasource is a variable so this imports into any Grafana without editing.",
+  "uid": "recx-judge-pipeline",
+  "title": "REC Code — judge pipeline",
+  "tags": ["recx", "judge"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "Asia/Kolkata",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Queue depth by lane",
+      "description": "Alerts above 200 for two minutes (JudgeQueueBacklog). A lane with nothing in it is published as zero, not left absent, so a flat line at zero means the scheduler is reporting.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 200 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "judge_queue_depth",
+          "legendFormat": "{{queue}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest waiting job by lane",
+      "description": "The number a student feels. Alerts above 60s for one minute (JudgeOldestJobStale).",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 60 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "judge_oldest_job_age_seconds",
+          "legendFormat": "{{queue}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Judge node heartbeat age",
+      "description": "Derived by the scheduler from JudgeNode, never self-reported: a node that has died cannot report that its own heartbeat is old, so this series rises instead of disappearing. Alerts above 90s (JudgeWorkerHeartbeatStale).",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "judge_worker_heartbeat_age_seconds",
+          "legendFormat": "{{worker}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Run duration inside the sandbox",
+      "description": "Measured by the worker around the driver call, so it excludes the queue. A high end-to-end p95 with a flat line here is queueing, not slow judging.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(judge_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(judge_run_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Verdicts per minute",
+      "description": "Counted on web, at POST /api/judge/result, where every verdict in the system passes through. Summed across both replicas by Prometheus.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (verdict) (rate(judge_verdict_total[5m])) * 60",
+          "legendFormat": "{{verdict}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "INTERNAL_ERROR share of verdicts",
+      "description": "The canary for a broken compiler image or a cgroup misconfiguration after a host upgrade. Alerts above 2% over five minutes (JudgeInternalErrorRate), with no minimum-volume guard: an IE is never normal.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.02 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(judge_verdict_total{verdict=\"IE\"}[5m])) / sum(rate(judge_verdict_total[5m]))",
+          "legendFormat": "IE share",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Sandbox failures and compile cache hits",
+      "description": "Sandbox init failures are counted after the cleanup-and-retry, so a rising line means the sandbox cannot be made at all — the signal a kernel or cgroup change leaves. Cache hits are shown beside it because a sudden drop to zero means the cache directory went away, which looks like a slow judge rather than a broken one.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(judge_sandbox_init_failures_total[5m])) * 60",
+          "legendFormat": "sandbox init failures/min",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(judge_compile_cache_hits_total[5m])) * 60",
+          "legendFormat": "compile cache hits/min",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ]
+    }
+  ]
+}

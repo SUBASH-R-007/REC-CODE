@@ -1,0 +1,45 @@
+-- Phase 12s: a paper may refuse a paste that was not copied inside it.
+--
+-- Asked for directly: "add option to disable copy paste: add a checkmark to
+-- only accept content to pasted that was copied inside only".
+--
+-- An OPTION, defaulting to false, because the engine's standing decision is
+-- the opposite and it is a good one. SPEC 5, quoted in
+-- components/exam/exam-session.tsx: "Blocking is both bypassable and
+-- counterproductive: students legitimately paste their own earlier code and
+-- sample input, blocking drives them to clipboard-typing macros which
+-- silences the signal, and preventDefault on contextmenu/copy breaks
+-- assistive technology."
+--
+-- All three objections survive this setting, which is why it is shaped the
+-- way it is rather than as a blanket block:
+--
+--   * a paste of the candidate's OWN earlier work still goes through. The
+--     sitting already hashes everything copied inside it and classifies a
+--     paste as INTERNAL_PASTE or EXTERNAL_PASTE from that set, so "only
+--     what was copied inside" is a rule the client can already evaluate;
+--   * a refused paste is still RECORDED as EXTERNAL_PASTE with its size.
+--     The signal is not silenced, which was the substantive objection: a
+--     candidate who then reaches for a clipboard-typing macro shows up as
+--     CADENCE_BURST and SNAPSHOT_JUMP instead, and the refusal itself is
+--     evidence a reviewer can see;
+--   * nothing is preventDefault-ed except paste INTO THE EDITOR. Copy, cut
+--     and the context menu are untouched everywhere, so assistive
+--     technology keeps working.
+--
+-- What it does NOT do, and docs/PROCTORING.md 2 says why in full: it does
+-- not stop clipboard transfer. A tool that types the clipboard as synthetic
+-- keystrokes is indistinguishable from typing, and a content script that
+-- runs at document_start outranks the page. This raises the cost of the
+-- casual case and records the attempt; it is not a wall.
+--
+-- Deliberately NOT added to the frozen tuple that
+-- `recx_refuse_published_assessment_change` protects. That tuple is what a
+-- result MEANS -- the window, the clock, the proctor mode, the placement
+-- flag, the attempt limit -- and this sits with `strictMode`, `onLimit` and
+-- `maxFocusWarnings`, the watching knobs an invigilator may still adjust
+-- after publishing. Extending the frozen tuple would mean replacing a
+-- catalogued guard function, which is not a thing to do in passing.
+
+ALTER TABLE "public"."Assessment"
+  ADD COLUMN "refuseOutsidePaste" BOOLEAN NOT NULL DEFAULT false;

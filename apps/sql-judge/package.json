@@ -1,0 +1,30 @@
+{
+  "name": "@recx/sql-judge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SQL judge. Runs one student statement per submission against a per-submission ephemeral schema in a sandbox PostgreSQL cluster that holds NO application data. Holds the sandbox credentials and nothing else: no application DATABASE_URL, no auth secret, no object-storage key, no student PII. Must never depend on @recx/db.",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@recx/shared": "workspace:*",
+    "bullmq": "^5.56.0",
+    "ioredis": "^5.7.0",
+    "pg": "8.16.3",
+    "pino": "^9.9.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/pg": "^8.11.10",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

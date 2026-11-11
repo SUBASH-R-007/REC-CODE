@@ -1,0 +1,50 @@
+-- Phase 16o: a SQL problem can be sat in an assessment.
+--
+-- This drops a refusal, which is rarer here than adding one, so the reason
+-- is written out in full.
+--
+-- Phase 12p refused the pin with two clauses, and both were true when they
+-- were written: "a sitting chooses ONE language for the whole paper and the
+-- exam submit route only accepts a toolchain language, so a SQL question
+-- would be a C++ editor over a problem that wants a query". Phase 16h then
+-- found a third, which that entry had not: `SENSITIVE_LANES` barred a
+-- postgres node from ASSESSMENT and CONTEST by engine, so a pinned query
+-- would have queued a submission **no node may claim**.
+--
+-- All three are gone:
+--
+--   * Phase 13a gave a sitting a language per question, through the layout,
+--     the snapshot route, the submit route and the marking;
+--   * Phase 16n gave the query engine a calibration benchmark of its own --
+--     per-row throughput on the judging cluster, through the same sandbox
+--     and the same statement_timeout a candidate's query gets -- so a SQL
+--     node that reports one serves the sensitive lanes like any other, and
+--     `lanes.ts` has no engine special case left;
+--   * Phase 16o froze the kind and taught the surfaces to read it.
+--
+-- What makes it safe to lift, all of it frozen into the attempt's layout at
+-- start so a republished problem cannot change it underneath a candidate:
+--
+--   * `LayoutQuestion.kind` is `SQL` for one of these, written when the
+--     paper is laid out from the version's own `ioMode`;
+--   * the pane offers ONE language and no picker, with the dialect, the
+--     single-statement rule and the read-only-copy sentence a candidate
+--     already read in practice (`SQL_NOTICES`, the same constants);
+--   * `/api/exam/[attemptId]/run` serves it -- a SQL question HAS sample
+--     datasets, unlike an output-only one -- and accepts only `sql17`;
+--   * `/api/exam/[attemptId]/submit` accepts `sql17` for a SQL question and
+--     ONLY for one: a toolchain key on a SQL question and `sql17` on a CODE
+--     question are both refused, because either means the client and the
+--     frozen layout disagree about what was asked;
+--   * the submission is created exactly as every other is, against the
+--     pinned version and the `sql17` LanguageConfig row, so marking,
+--     rejudging and the result pages need no special case at all. The exam
+--     console already lazy-loads the practice `ResultPanel`, which has
+--     drawn result sets since Phase 12k.
+--
+-- One kind is still refused. An interactive question needs a conversation
+-- surface, and SPEC §11 keeps it out of high-stakes assessments until it
+-- has run cleanly through two practice contests -- a date, not code.
+
+DROP TRIGGER IF EXISTS "AssessmentProblem_no_sql" ON "public"."AssessmentProblem";
+DROP FUNCTION IF EXISTS recx_refuse_sql_assessment_problem();

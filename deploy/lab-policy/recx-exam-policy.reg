@@ -1,0 +1,52 @@
+Windows Registry Editor Version 5.00
+
+; REC Code exam lab — Google Chrome machine policy.
+; The Linux equivalent, and the explanation of every key, is beside this
+; file: deploy/lab-policy/chrome-policy.json and README.md. Keep the two in
+; step; tests/repo/deploy-topology.test.ts fails if they drift.
+;
+; Replace exam.rec.invalid with the real exam host before importing. The
+; placeholder is a reserved name that can never resolve, so a machine
+; imported with it unchanged fails visibly instead of quietly allowing
+; something else.
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome]
+"IncognitoModeAvailability"=dword:00000001
+"BrowserGuestModeEnabled"=dword:00000000
+"BrowserAddPersonEnabled"=dword:00000000
+"BrowserSignin"=dword:00000000
+"SyncDisabled"=dword:00000001
+"DeveloperToolsAvailability"=dword:00000002
+"DefaultSearchProviderEnabled"=dword:00000000
+"RestoreOnStartup"=dword:00000004
+"HomepageLocation"="https://exam.rec.invalid/login"
+"HomepageIsNewTabPage"=dword:00000000
+"DownloadRestrictions"=dword:00000003
+"PrintingEnabled"=dword:00000000
+"ScreenCaptureAllowed"=dword:00000000
+"PasswordManagerEnabled"=dword:00000000
+"AutofillAddressEnabled"=dword:00000000
+"AutofillCreditCardEnabled"=dword:00000000
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionInstallBlocklist]
+"1"="*"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\URLBlocklist]
+"1"="*"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\URLAllowlist]
+"1"="https://exam.rec.invalid"
+"2"="chrome://policy"
+"3"="chrome://version"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\RestoreOnStartupURLs]
+"1"="https://exam.rec.invalid/login"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ClearBrowsingDataOnExitList]
+"1"="browsing_history"
+"2"="download_history"
+"3"="cookies_and_other_site_data"
+"4"="cached_images_and_files"
+"5"="password_signin"
+"6"="autofill"
+"7"="site_settings"

@@ -1,0 +1,92 @@
+# Dependency and Actions updates (Phase 10f).
+#
+# Closes the "Dependabot" item docs/SECURITY.md §11 carried from Phase 1.
+# It takes effect the first time this repository is pushed; nothing in this
+# file runs locally, which is why the §11 row says so rather than claiming it
+# is working.
+#
+# ── Grouped, weekly, and small on purpose ──────────────────────────────────
+#
+# A daily flood of single-package pull requests is how a team learns to merge
+# dependency updates without reading them. Weekly, grouped by what a reviewer
+# actually has to think about:
+#
+#   - the development toolchain (eslint, vitest, tsup, types) is one PR: it
+#     cannot affect what students run;
+#   - everything else is a PR of its own, because each needs its own reason.
+#
+# ── What is deliberately NOT updated automatically ─────────────────────────
+#
+# Four things are pinned exactly for security reasons and must change only
+# with a human decision and a re-verified checksum (docs/SECURITY.md §10):
+# `prisma` / `@prisma/client` (a client/engine mismatch is a migration
+# problem, not a dependency bump), `monaco-editor` (self-hosted, with a copy
+# step in `postinstall` and a size budget), and the judge worker's six
+# runtime dependencies — a package that runs before the sandbox does is not a
+# thing to merge on a Monday morning. isolate and the toolchains are not npm
+# packages at all; they are pinned in `infra/judge/` by tag, commit, GPG
+# signature and sha256.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Kolkata
+    # Enough for a weekly batch; more than this is a queue nobody reads.
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+      include: scope
+    groups:
+      # One PR for everything that cannot reach a student.
+      dev-toolchain:
+        dependency-type: development
+        patterns: ["*"]
+      # Next, React and Tailwind move together; three separate PRs would each
+      # fail against the other two.
+      next-react:
+        applies-to: version-updates
+        patterns:
+          - "next"
+          - "@next/*"
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "eslint-config-next"
+          - "tailwindcss"
+          - "@tailwindcss/*"
+    ignore:
+      # Pinned exactly on purpose — see the note above.
+      - dependency-name: "prisma"
+      - dependency-name: "@prisma/client"
+      - dependency-name: "monaco-editor"
+      # The judge worker's runtime set. A bump here is a change to what runs
+      # on a host whose job is to contain arbitrary code; it goes through a
+      # human, with `tests/repo/judge-dependencies.test.ts` as the floor.
+      - dependency-name: "bullmq"
+      - dependency-name: "ioredis"
+      - dependency-name: "@prometheus-io/client"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 3
+    labels: ["ci"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

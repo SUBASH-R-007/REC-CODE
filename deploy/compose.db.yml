@@ -1,0 +1,159 @@
+# REC Code — the DATABASE host (Phase 10e).
+#
+#   docker compose -f deploy/compose.db.yml --env-file deploy/db.env up -d
+#
+# Postgres 17 and pgBackRest, and nothing else. No application code runs on
+# this host: SPEC §10's topology, and the reason is the one that matters
+# during an incident — the thing holding every submission, every attempt and
+# every audit row should not share a machine with the thing being deployed.
+#
+# ── Not run here ───────────────────────────────────────────────────────────
+# Never started: one laptop, no second host. `docs/RUNBOOK.md` §3 records it
+# as NOT RUN with what would have to be true to run it. The RESTORE DRILL,
+# which is the part that has historically been skipped, does run here —
+# `scripts/ops/restore-drill.sh`, into a scratch database in the WSL mirror.
+#
+# ── No PgBouncer, and this comment is the reason ───────────────────────────
+# Not until web replicas exceed FOUR. Two replicas with a bounded pool each
+# are nowhere near `max_connections`, and PgBouncer in transaction mode
+# breaks session-level features (advisory locks held across statements,
+# `SET LOCAL`, prepared statements) that the reconciler and Prisma both use.
+# Adding it "while we are in here" is how a platform acquires an outage it
+# cannot explain. The alert that says it is time is
+# `PostgresConnectionsHigh` (80% of max_connections for five minutes).
+
+name: recx-db
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  postgres:
+    # Pinned by digest, enforced: compose fails with this message rather than
+    # pulling a tag that has moved under a running platform.
+    image: ${RECX_POSTGRES_IMAGE:?set to postgres:17.6@sha256:... — deploy.sh records the digest}
+    restart: unless-stopped
+    shm_size: 1gb
+    environment:
+      POSTGRES_DB: recx
+      POSTGRES_USER: recx
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # Checksums catch a corrupted page at read time rather than six months
+      # later in a backup nobody can restore. They cost a few percent and can
+      # only be enabled at initdb.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    secrets:
+      - postgres_password
+    command:
+      - postgres
+      # SPEC §10's observability line, verbatim: slow statements, the
+      # statement statistics view, and a plan for anything over two seconds.
+      - -c
+      - shared_preload_libraries=pg_stat_statements,auto_explain
+      - -c
+      - log_min_duration_statement=500ms
+      - -c
+      - auto_explain.log_min_duration=2s
+      - -c
+      - auto_explain.log_analyze=off
+      - -c
+      - pg_stat_statements.track=all
+      # WAL archiving for pgBackRest: RPO 5 minutes, RTO 2 hours.
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=pgbackrest --stanza=recx archive-push %p
+      - -c
+      - max_wal_senders=3
+      - -c
+      - max_connections=200
+      # One connection per slot of headroom over the two web pools and the
+      # scheduler's single connection; the alert fires at 160.
+      - -c
+      - track_io_timing=on
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - pgbackrest-repo:/var/lib/pgbackrest
+      - pgbackrest-spool:/var/spool/pgbackrest
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recx -d recx"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [data]
+    logging: *logging
+
+  # ── pgBackRest, as a scheduler rather than a daemon ─────────────────────
+  #
+  # It has no daemon: backups are commands on a timer. This container holds
+  # the binary and the cron, so the schedule lives with the topology instead
+  # of in some operator's crontab.
+  #
+  #   full      03:00 daily
+  #   diff      every hour
+  #   incr      every 5 minutes  (the RPO)
+  #   plus a FULL immediately before every contest, which
+  #   scripts/ops/backup.sh takes on demand — a contest is the one window
+  #   where losing an hour of submissions is not recoverable by asking
+  #   students to resubmit.
+  pgbackrest:
+    image: ${RECX_PGBACKREST_IMAGE:?set to the pgbackrest image@sha256:... — deploy.sh records the digest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGBACKREST_STANZA: recx
+    volumes:
+      - ./pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - pgbackrest-repo:/var/lib/pgbackrest
+      - pgbackrest-spool:/var/spool/pgbackrest
+      - pgdata:/var/lib/postgresql/data:ro
+      - /run/recx/secrets:/run/recx/secrets:ro
+    networks: [data, offsite]
+    logging: *logging
+
+  # ── The exporter the two database alert rules read ──────────────────────
+  #
+  # postgres_exporter 0.15's own metric names are what
+  # `packages/shared/src/alerts.ts` lists in EXPORTER_METRICS, so a rename
+  # upstream is a failing test rather than a rule that silently never fires.
+  postgres-exporter:
+    image: ${RECX_PG_EXPORTER_IMAGE:?set to quay.io/prometheuscommunity/postgres-exporter:v0.15.0@sha256:...}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_URI: postgres:5432/recx?sslmode=disable
+      DATA_SOURCE_USER: recx_exporter
+      DATA_SOURCE_PASS_FILE: /run/secrets/exporter_password
+    secrets:
+      - exporter_password
+    networks: [data, monitoring]
+    logging: *logging
+
+networks:
+  # The application hosts reach Postgres over this and nothing else.
+  data:
+  # Prometheus scrapes the exporter over this.
+  monitoring:
+  # pgBackRest pushes an encrypted repository offsite over this.
+  offsite:
+
+volumes:
+  pgdata:
+  pgbackrest-repo:
+  pgbackrest-spool:
+
+secrets:
+  postgres_password:
+    file: /run/recx/secrets/postgres_password
+  exporter_password:
+    file: /run/recx/secrets/exporter_password

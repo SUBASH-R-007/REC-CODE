@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["pnpm@9.15.9", "--filter", "@recx/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "web-prod",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev/start-prod.mjs"],
+      "port": 3000
+    }
+  ]
+}

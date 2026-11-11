@@ -1,0 +1,313 @@
+import { expect, test, type Page } from "@playwright/test";
+import { ACCOUNTS, type AccountKey } from "./support/accounts";
+import { appliedTheme, openPage, presetTheme, settle, type Theme, waitForEditor } from "./support/page";
+import { expectNoGatingViolations, record, scan } from "./support/axe";
+
+/**
+ * The axe gate (docs/ACCESSIBILITY.md §6): ZERO serious or critical
+ * violations of WCAG 2.0 / 2.1 / 2.2 A and AA rules on the gated pages, in the
+ * light and the dark theme, at 1366 × 768 and at a 375 × 812 phone viewport.
+ * A second set of pages is scanned the same way and REPORTED (annotation,
+ * attachment, console line) without gating. The coding workspace is also
+ * scanned with its console open (wide) and on its Code and Result tabs
+ * (narrow), so the editor and the results region are covered too.
+ *
+ * No axe rule is disabled.
+ *
+ * One region is excluded from every scan, with this justification:
+ *   `nextjs-portal` — the Next.js development overlay / dev-tools indicator.
+ *   `next dev` injects it into every page; it is not part of REC Code and is
+ *   never shipped (a production build has no such element). Scanning it
+ *   would gate the product on Next.js's own development UI.
+ */
+
+/**
+ * The tag set, the one exclusion and what gates now live in
+ * `support/axe.ts`, because the exam surface is scanned by a second spec
+ * that has to author and start a sitting first, and the rules it scans by
+ * must be these rules (Phase 12u).
+ */
+
+interface Viewport {
+  name: "desktop" | "mobile";
+  width: number;
+  height: number;
+  mobile: boolean;
+}
+
+const VIEWPORTS: readonly Viewport[] = [
+  { name: "desktop", width: 1366, height: 768, mobile: false },
+  { name: "mobile", width: 375, height: 812, mobile: true },
+];
+const THEMES: readonly Theme[] = ["light", "dark"];
+
+interface Target {
+  path: string;
+  /** null = signed out. */
+  as: AccountKey | null;
+  gating: boolean;
+  /** Extra readiness wait beyond `settle`. */
+  ready?: (page: Page, viewport: Viewport) => Promise<void>;
+  /**
+   * Further states of the same page to scan after the initial one (each is
+   * entered from the previous state). Every state is gated like the first.
+   */
+  states?: (viewport: Viewport) => readonly State[];
+}
+
+interface State {
+  name: string;
+  enter: (page: Page) => Promise<void>;
+}
+
+/** The coding workspace: the console drawer (wide) and the Code / Result tabs (narrow). */
+function workspaceStates(viewport: Viewport): readonly State[] {
+  if (!viewport.mobile) {
+    return [
+      {
+        name: "console open",
+        enter: async (page) => {
+          await page.getByRole("button", { name: "Console", exact: true }).click();
+          await expect(page.getByRole("heading", { name: "Console", exact: true })).toBeVisible();
+        },
+      },
+    ];
+  }
+  const tab = (name: "Code" | "Result"): State => ({
+    name: `${name} tab`,
+    enter: async (page) => {
+      // The workspace's own tabs (the console has a "Result" tab too).
+      const workspaceTab = page.getByRole("tablist", { name: "Workspace" }).getByRole("tab", { name, exact: true });
+      await workspaceTab.click();
+      await expect(workspaceTab).toHaveAttribute("aria-selected", "true");
+      if (name === "Code") await expect(page.locator('[data-editor-root][data-editor="codemirror"]')).toBeVisible();
+    },
+  });
+  return [tab("Code"), tab("Result")];
+}
+
+const TARGETS: readonly Target[] = [
+  { path: "/login", as: null, gating: true },
+  // Phase 11a: the two pages a student reaches when they cannot sign in —
+  // which is exactly when an accessibility failure is unrecoverable, since
+  // there is no other way in.
+  { path: "/forgot-password", as: null, gating: true },
+  { path: "/reset-password?token=not-a-real-token", as: null, gating: true },
+  { path: "/dashboard", as: "student", gating: true },
+  /**
+   * Phase 12u: the candidate's own list of papers, which is the way in to
+   * the one screen they cannot leave. The readiness page and the sitting
+   * itself cannot be reached from a path — a sitting has to be authored and
+   * started first — so they are scanned by `exam-a11y.spec.ts`, with the
+   * same rules from `support/axe.ts`.
+   */
+  { path: "/assessments", as: "student", gating: true },
+  { path: "/problems", as: "student", gating: true },
+  {
+    path: "/problems/two-sum",
+    as: "student",
+    gating: true,
+    // Scan the real editor (Monaco >= 768 px, CodeMirror below), not the
+    // plain textarea it replaces. On a phone it sits in the (initially
+    // hidden) Code tab, so it is waited for in the DOM, then shown.
+    ready: (page, viewport) => waitForEditor(page, viewport.mobile ? "codemirror" : "monaco"),
+    states: workspaceStates,
+  },
+  { path: "/leaderboard", as: "student", gating: true },
+  /**
+   * Phase 7, GATING. The aptitude surface is the one the largest number of
+   * students will ever use — SPEC §5 opens the phase by saying so — and a
+   * sizeable number of them use it on a phone, which is why the hub and
+   * topic practice are scanned at 375px as well as at 1366px.
+   *
+   * The timed mock SITTING is not in this list, and deliberately: it is
+   * hard-blocked below 768px (SPEC §7's "do not build a serious phone-based
+   * solving experience"), so a 375px scan would be scanning the block, and
+   * its desktop states need a live sitting that the e2e fixture does not
+   * seed. It is covered by the manual pass instead, which is recorded as a
+   * Phase 7 gate item in docs/RUNBOOK.md §3.
+   */
+  { path: "/aptitude", as: "student", gating: true },
+  { path: "/account/leave", as: "student", gating: true },
+  { path: "/account/reactivate", as: "student", gating: true },
+  /**
+   * Phase 11f. A student whose password is already their own is redirected
+   * home from here, so what axe scans is that landing — which is the right
+   * thing to keep clean anyway, and the page itself is covered by the
+   * exposure sweep and the database tests.
+   */
+  { path: "/account/new-password", as: "student", gating: true },
+  /**
+   * Phase 9c, GATING. The page is a grid of three cards with a progress bar
+   * per component, which is exactly the shape that goes wrong for a screen
+   * reader: every bar carries its own label with the denominator in it, and
+   * the scan is what keeps that true.
+   */
+  { path: "/placement", as: "student", gating: true },
+  // Reported, not gating.
+  // Phase 12c. The revision queue: a list of links and a stats block, and
+  // the one page whose whole job is to be opened every morning.
+  { path: "/revision", as: "student", gating: false },
+  // Phase 12e. The archive, whose "share one" form is the largest set of
+  // checkbox groups in the product and the one most likely to lose its
+  // fieldset legends.
+  { path: "/interviews", as: "student", gating: false },
+  // Phase 12h. Three cards of slots with buttons whose presence depends on
+  // the clock — the shape most likely to lose a label.
+  { path: "/mock-interviews", as: "student", gating: false },
+  { path: "/written", as: "student", gating: false },
+  { path: "/sheets", as: "student", gating: false },
+  { path: "/learn", as: "student", gating: false },
+  { path: "/profile", as: "student", gating: false },
+  { path: "/notes", as: "student", gating: false },
+  { path: "/bookmarks", as: "student", gating: false },
+  { path: "/help", as: "student", gating: false },
+  // Phase 9d, reported. The two staff trees the phase adds. Scanned as the
+  // SUPER_ADMIN, who holds both roles: a PLACEMENT_OFFICER and a TA_MENTOR
+  // account are not in the e2e fixture, and the markup does not depend on
+  // which of the admitted roles is looking.
+  { path: "/placement-cell", as: "admin", gating: false },
+  /**
+   * Phase 9e, GATING. The heatmap is the one surface in the whole product
+   * whose readability depends on markup rather than on copy: fourteen
+   * columns by N sections, with a count in every cell and colour as a
+   * redundant encoding. A grid that lost its scope="row" headers would be
+   * unreadable to a screen reader and would look identical to a sighted
+   * reviewer, which is exactly the failure a scan catches and a review does
+   * not.
+   */
+  { path: "/placement-cell/heatmap", as: "admin", gating: true },
+  { path: "/placement-cell/at-risk", as: "admin", gating: false },
+  { path: "/placement-cell/aptitude", as: "admin", gating: false },
+  { path: "/placement-cell/drives", as: "admin", gating: false },
+  { path: "/placement-cell/drives/new", as: "admin", gating: false },
+  { path: "/placement-cell/export", as: "admin", gating: false },
+  /**
+   * `/placement-cell/students/[id]` is deliberately NOT scanned. Every view
+   * of it writes an AuditLog row, so an automated scan on every run would
+   * manufacture a record of somebody looking at a student that nobody looked
+   * at — and the value of that log is that every row in it is real. It is
+   * covered by the capability matrix (rendered as every role, guard
+   * asserted) and by the manual pass recorded in docs/RUNBOOK.md §3.
+   */
+  { path: "/mentor", as: "admin", gating: false },
+  // Phase 12d. The two moderation surfaces: a queue of reports with a
+  // reason dialog on each, and the questions list with a reply box per
+  // thread — both are forms in a list, which is where label and heading
+  // mistakes land.
+  { path: "/mentor/doubts", as: "admin", gating: false },
+  { path: "/mentor/moderation", as: "admin", gating: false },
+  { path: "/mentor/experiences", as: "admin", gating: false },
+  { path: "/mentor/mock-interviews", as: "admin", gating: false },
+  { path: "/mentor/written", as: "admin", gating: false },
+  { path: "/admin/judge", as: "admin", gating: false },
+  // /judge is scanned signed out and GATING, with the Phase 4 block below:
+  // it was listed here as reported-only as well until Phase 15o, which is
+  // four scans of the same page under the same rules and a classification
+  // that read both ways in the README.
+  /**
+   * Phase 9f, GATING, and signed out because that is how it is read. This is
+   * the only page in the product whose audience has never seen the product:
+   * a recruiter opens it once, on whatever device is to hand, and forms their
+   * whole impression from it. An unknown code is used so the scan needs no
+   * seeded export — the frame, the status block and the footer are the same
+   * markup on every outcome, which is why Shell() renders all five.
+   */
+  { path: "/verify/aaaaaaaaaaaaaaaaaaaaaaaa", as: null, gating: true },
+  // Phase 4, GATING. /admin as the scoped ADMIN RECADMIN02 (what an admin
+  // really sees); /super as the SUPER_ADMIN RECADMIN01; /judge signed out.
+  { path: "/admin", as: "staffAdmin", gating: true },
+  { path: "/admin/students", as: "staffAdmin", gating: true },
+  { path: "/admin/students/import", as: "staffAdmin", gating: true },
+  { path: "/admin/cohorts", as: "staffAdmin", gating: true },
+  { path: "/admin/reports", as: "staffAdmin", gating: true },
+  { path: "/admin/announcements/new", as: "staffAdmin", gating: true },
+  { path: "/admin/accommodations", as: "staffAdmin", gating: true },
+  { path: "/admin/problems", as: "staffAdmin", gating: true },
+  { path: "/admin/problems/new", as: "staffAdmin", gating: true },
+  // Phase 12a. The list and the create form: the form is the one with a
+  // radio group and a conditionally disabled checkbox, which is where an
+  // accessibility mistake would actually land.
+  { path: "/admin/assessments", as: "staffAdmin", gating: true },
+  { path: "/admin/assessments/new", as: "staffAdmin", gating: true },
+  { path: "/admin/judge", as: "staffAdmin", gating: true },
+  { path: "/super", as: "admin", gating: true },
+  { path: "/super/users", as: "admin", gating: true },
+  { path: "/super/roles", as: "admin", gating: true },
+  { path: "/super/settings/branding", as: "admin", gating: true },
+  { path: "/super/settings/policy", as: "admin", gating: true },
+  { path: "/super/settings/judge", as: "admin", gating: true },
+  // Phase 12b. The AI helper's switch: a select, two numbers and a reason
+  // dialog, and the one page where a wrong label would hide what turning it
+  // on actually does.
+  { path: "/super/settings/ai", as: "admin", gating: true },
+  // Phase 13d. Status cards plus the college-wide Safe Exam Browser pair,
+  // which is the one editable thing on the page.
+  { path: "/super/settings/integrations", as: "admin", gating: true },
+  { path: "/super/audit", as: "admin", gating: true },
+  { path: "/super/impersonate", as: "admin", gating: true },
+  { path: "/super/flags", as: "admin", gating: true },
+  { path: "/super/jobs", as: "admin", gating: true },
+  { path: "/super/data", as: "admin", gating: true },
+  /**
+   * Phase 16j. The second-factor setup, GATING, as the super-admin.
+   *
+   * Worth gating rather than reporting for a reason specific to it: it is a
+   * form a person is SENT to and cannot leave until they finish, so a
+   * failure here is unrecoverable in the same way `/login` and
+   * `/forgot-password` are — and the page it bounces them from is every
+   * other admin page. The secret is rendered in a `<code>` block and the
+   * recovery codes in a list, which is where a contrast or a
+   * reading-order mistake would land.
+   *
+   * `/second-factor` (the page that asks for a code) is NOT here, and
+   * cannot be from a path: it needs a live challenge cookie, which only a
+   * password sign-in by an enrolled account creates. Its markup is the
+   * same `Field` + `Input` + alert shapes this page and `/login` already
+   * gate, and `apps/web/test/oidc-routes.test.ts` and the page's own test
+   * cover its behaviour. Recorded as a gap rather than left to look like
+   * coverage.
+   */
+  { path: "/account/two-factor", as: "admin", gating: true },
+  { path: "/judge", as: null, gating: true },
+];
+
+for (const target of TARGETS) {
+  test.describe(`${target.gating ? "gate" : "report"} ${target.path}`, () => {
+    for (const viewport of VIEWPORTS) {
+      for (const theme of THEMES) {
+        test.describe(`${viewport.name} ${theme}`, () => {
+          test.use({
+            viewport: { width: viewport.width, height: viewport.height },
+            isMobile: viewport.mobile,
+            hasTouch: viewport.mobile,
+            colorScheme: theme,
+            storageState: target.as ? ACCOUNTS[target.as].storageState : { cookies: [], origins: [] },
+          });
+
+          test(`axe ${target.path} [${viewport.name}, ${theme}]`, async ({ page }, testInfo) => {
+            const label = `${target.path} [${viewport.name} ${viewport.width}x${viewport.height}, ${theme}]`;
+            await presetTheme(page, theme);
+            const response = await openPage(page, target.path);
+            expect(response?.status(), `${target.path} should load`).toBeLessThan(400);
+            // A guarded page that bounced to /login would scan the wrong page.
+            if (target.as) expect(new URL(page.url()).pathname).not.toBe("/login");
+            await settle(page);
+            if (target.ready) await target.ready(page, viewport);
+            expect(await appliedTheme(page), "the stored theme is applied").toBe(theme);
+
+            const findings = await scan(page, "initial");
+            for (const state of target.states?.(viewport) ?? []) {
+              await state.enter(page);
+              await settle(page);
+              findings.push(...(await scan(page, state.name)));
+            }
+            await record(testInfo, label, findings, page.url());
+
+            if (target.gating) expectNoGatingViolations(findings, label);
+          });
+        });
+      }
+    }
+  });
+}

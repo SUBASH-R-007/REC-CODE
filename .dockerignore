@@ -1,0 +1,53 @@
+# What never belongs in the build context.
+#
+# Secrets first, and not because the Dockerfile copies them — it does not —
+# but because anything in the context is one careless COPY away from a layer,
+# and a layer is forever. deploy/compose.app.yml passes every credential as a
+# Docker secret at RUN time instead (*_FILE, read by packages/shared/env-file).
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# Installed and generated output: the build does its own install and build,
+# and a host node_modules is the wrong platform's binaries (argon2 and the
+# Prisma query engine are native).
+node_modules
+**/node_modules
+**/.next
+**/.next-dev
+**/dist
+**/*.tsbuildinfo
+**/playwright-report
+**/test-results
+**/coverage
+apps/web/public/monaco
+
+# History, tooling and local state.
+.git
+.github
+.gitignore
+.claude
+**/.DS_Store
+*.log
+storage
+docs/handoff
+
+# Containers, infrastructure and scripts the image does not run. The judge
+# host is provisioned from infra/judge by cloud-init, not from this image.
+compose.yaml
+deploy
+infra
+scripts/dev
+
+# Tests. The image is built from a commit CI has already gated; it does not
+# re-run them, and the e2e suite alone would drag Playwright's browsers in.
+tests
+**/test
+**/e2e
+**/*.test.ts
+**/*.test.tsx
+**/vitest.config.ts
+**/vitest.integration.config.ts
+**/playwright.config.ts

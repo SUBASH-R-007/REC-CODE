@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "baseUrl": ".",
+    // scripts/ops is not a workspace package: its bare type imports resolve
+    // to the workspace's own copies. At run time the same packages are
+    // loaded through apps/scheduler's dependency tree (schedulerRequire),
+    // which is the tree the scheduler modules this harness reuses already
+    // resolve from.
+    "paths": {
+      "bullmq": ["../../apps/scheduler/node_modules/bullmq"],
+      "ioredis": ["../../apps/scheduler/node_modules/ioredis"],
+      "pino": ["../../apps/scheduler/node_modules/pino"],
+      "@prometheus-io/client": ["../../apps/scheduler/node_modules/@prometheus-io/client"]
+    }
+  },
+  "include": ["*.ts"]
+}

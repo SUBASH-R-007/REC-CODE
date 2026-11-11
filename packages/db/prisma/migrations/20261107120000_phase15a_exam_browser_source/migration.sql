@@ -1,0 +1,27 @@
+-- Phase 15a. A fourth source for a proctor event: the exam browser itself.
+--
+-- Until now every signal about the candidate's machine arrived as CLIENT,
+-- meaning the exam page's own JavaScript said so. That is the one place in
+-- this product a candidate can run code: the console is gone, but a paste
+-- into an editor component runs in the same world, and `PROCTORING.md` §2
+-- is explicit that a page's own report of its focus, its fullscreen state
+-- and its monitor count is falsifiable.
+--
+-- The exam browser's main process is not. It signs every request with a
+-- key the page never sees (`docs/EXAM-BROWSER.md` §5), so a signal it
+-- sends is one the candidate's page script can neither forge nor suppress.
+-- Recording that difference is the whole point of this value: a reviewer
+-- comparing "the page said the window lost focus" with "the browser said
+-- the window lost focus" is comparing two different kinds of evidence, and
+-- collapsing them into one word would throw that away.
+--
+-- It changes no policy. `docs/PROCTORING.md` §3 still holds for every
+-- signal whatever its source: the most that can happen is that a human is
+-- asked to look.
+--
+-- The CHECK from 20261019160000 stands and is why these rows carry no
+-- clientSeq: (("source" = 'CLIENT') = ("clientSeq" IS NOT NULL)). The
+-- browser's signals are not part of the page's monotonic sequence and must
+-- not be counted into it -- a gap in that sequence means something
+-- specific (SEQUENCE_GAP) and must go on meaning it.
+ALTER TYPE "public"."EventSource" ADD VALUE IF NOT EXISTS 'EXAM_BROWSER';

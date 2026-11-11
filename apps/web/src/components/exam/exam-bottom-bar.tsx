@@ -1,0 +1,173 @@
+"use client";
+
+import { useState } from "react";
+import { EXAM_BOTTOM_BAR_ACTIONS, ATTEMPT_REVOKE_MESSAGES, type AttemptRevokeReason } from "@recx/shared";
+
+/**
+ * The 56px bottom bar (Phase 6c).
+ *
+ * SPEC §5 fixes the order and will not have it rearranged: "Previous · Mark
+ * for review & next · Clear response · Save & next in that order — TCS iON /
+ * AMCAT muscle memory, because an exam is the worst possible place to teach
+ * new UI."
+ *
+ * The order is read from `EXAM_BOTTOM_BAR_ACTIONS` in @recx/shared and
+ * asserted by a unit test there, so a later tidy-up cannot reorder these for
+ * visual balance without the test saying so.
+ *
+ * "Submit test" is separate and to the right, behind a confirmation, because
+ * it is the one irreversible button on the screen and it sits next to three
+ * buttons a candidate presses dozens of times.
+ */
+export function ExamBottomBar({
+  canGoPrevious,
+  onPrevious,
+  onMarkAndNext,
+  onClear,
+  onSaveAndNext,
+  onRun,
+  running,
+  onSubmit,
+  answered,
+  total,
+  status,
+  revoked,
+  handedIn = false,
+}: {
+  readonly canGoPrevious: boolean;
+  readonly onPrevious: () => void;
+  readonly onMarkAndNext: () => void;
+  /** An editor's action. Absent on a multiple-choice question (Phase 12r). */
+  readonly onClear?: () => void;
+  readonly onSaveAndNext: () => void;
+  /** Run the samples (Phase 12q.5). Absent on a question with none. */
+  readonly onRun?: () => void;
+  readonly running?: boolean;
+  readonly onSubmit?: () => void;
+  readonly answered: number;
+  readonly total: number;
+  readonly status: string;
+  readonly revoked: string | null;
+  /** True when THIS page handed the paper in, rather than being refused. */
+  readonly handedIn?: boolean;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const over = revoked !== null;
+
+  const handlers: Readonly<Record<string, () => void>> = {
+    previous: onPrevious,
+    markAndNext: onMarkAndNext,
+    clear: onClear ?? (() => undefined),
+    saveAndNext: onSaveAndNext,
+  };
+
+  if (over) {
+    /**
+     * What a candidate reads the moment their paper is in (Phase 12t).
+     *
+     * `ATTEMPT_REVOKE_MESSAGES.submitted` is "This attempt has already been
+     * submitted." — which is the right sentence for a REQUEST arriving
+     * against a finished sitting, and the wrong one for the person who just
+     * pressed Submit: "already" reads as though something had gone wrong,
+     * at the one moment a candidate most needs to be told plainly that they
+     * are done. Same reason the pill and the console say what they say.
+     */
+    const message = handedIn
+      ? "Handed in. Your answers are saved — you can close this window."
+      : ATTEMPT_REVOKE_MESSAGES[revoked as AttemptRevokeReason] ?? "This sitting has ended.";
+    return (
+      <footer className="flex min-h-14 shrink-0 items-center gap-3 border-t border-border bg-elevated px-4 py-3">
+        <p role="status" aria-live="assertive" className="text-sm font-medium text-text">
+          {message}
+        </p>
+        <p className="ml-auto text-xs tabular-nums text-text-secondary">{status}</p>
+      </footer>
+    );
+  }
+
+  return (
+    /**
+     * It WRAPS (Phase 12u).
+     *
+     * `h-14` with six controls in a row does not fit a 375 px phone, and
+     * nothing here scrolled or wrapped: the children overflowed and
+     * overlapped, so a candidate aiming at "Submit test" hit "Save & next"
+     * instead — Playwright reported it as *"Save & next intercepts pointer
+     * events"* while trying to hand a paper in on a phone. Nothing blocks a
+     * sitting below 768 px (the contest arena does; an assessment does not,
+     * on purpose, because a phone may be all a candidate has), so the bar
+     * has to fit one.
+     *
+     * Wrapping rather than scrolling, because every control here has to
+     * stay visible: one of them is irreversible, and a Submit that has
+     * scrolled out of sight is a worse answer than a taller bar.
+     */
+    <footer className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-t border-border bg-elevated px-4 py-2">
+      {EXAM_BOTTOM_BAR_ACTIONS.filter((action) => action.id !== "clear" || onClear !== undefined).map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          disabled={action.id === "previous" && !canGoPrevious}
+          onClick={handlers[action.id]}
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {action.label}
+        </button>
+      ))}
+
+      {/**
+        * Run the samples (Phase 12q.5). Beside the navigation rather than
+        * next to Submit: it is something a candidate does many times while
+        * working, and Submit is something they do once, at the end. Putting
+        * them together is how a mis-click ends a sitting.
+        */}
+      {onRun ? (
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={running}
+          className="rounded-md border border-primary/40 bg-primary-subtle px-3 py-1.5 text-sm font-medium text-text disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          {running ? "Running…" : "Run samples"}
+        </button>
+      ) : null}
+
+      <p className="ml-auto text-xs tabular-nums text-text-secondary">
+        {answered} of {total} answered
+      </p>
+
+      {confirming ? (
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-text">
+            Submit with {total - answered} unanswered?
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setConfirming(false);
+              onSubmit?.();
+            }}
+            className="rounded-md bg-danger px-3 py-1.5 text-sm font-semibold text-background focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            Yes, submit
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            Keep working
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        >
+          Submit test
+        </button>
+      )}
+    </footer>
+  );
+}

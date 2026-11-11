@@ -1,0 +1,24 @@
+node_modules/
+.next/
+.next-dev/
+.next-*/
+dist/
+out/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+storage/
+apps/web/public/monaco/
+.turbo/
+playwright-report/
+test-results/
+# Lighthouse CI reports (Phase 10d)
+.lighthouseci/
+*.log
+.DS_Store
+
+# Claude Code local session state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

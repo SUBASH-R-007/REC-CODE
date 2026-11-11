@@ -1,0 +1,84 @@
+# REC Code judge worker. Installed to /etc/systemd/system/ by
+# infra/judge/cloud-init.yaml. The checkout lives at /opt/recjudge (root-owned,
+# read-only to the service); the node's identity lives in
+# /etc/recjudge/worker.env (root:root 0600, read by systemd before it drops
+# privileges): RECX_NODE_ID, RECX_NODE_TOKEN, RECX_APP_URL, REDIS_URL.
+#
+# ── Why NoNewPrivileges= is NOT set ────────────────────────────────────────
+# The worker never runs student code itself: it invokes /usr/local/bin/isolate,
+# which is setuid root and needs real root (mount, PID, IPC and network
+# namespaces, cgroup writes, chown of the box, setuid to the box uid).
+# NoNewPrivileges=yes makes the kernel ignore the setuid bit, and isolate then
+# refuses to start ("Must be started as root"; verified on isolate 2.7).
+# For a service with User= set, systemd also turns NoNewPrivileges on
+# implicitly when any of these is used, so none of them appears below:
+#   SystemCallFilter= SystemCallArchitectures= RestrictAddressFamilies=
+#   RestrictNamespaces= PrivateDevices= ProtectKernelTunables=
+#   ProtectKernelModules= ProtectKernelLogs= ProtectClock=
+#   MemoryDenyWriteExecute= RestrictRealtime= RestrictSUIDSGID=
+#   LockPersonality= DynamicUser=
+# Also deliberately absent:
+#   CapabilityBoundingSet=   isolate's root capabilities come from the
+#                            bounding set it inherits; shrinking it breaks it.
+#   ProtectControlGroups=    isolate writes its box cgroups under
+#                            /sys/fs/cgroup (isolate.service holds the tree).
+#   PrivateUsers=, PrivateNetwork=
+#                            the first defeats setuid, the second cuts the
+#                            worker off from the app host and Redis.
+# The kernel-level equivalents are set host-wide instead (sysctl/,
+# modprobe/, kernel.modules_disabled, nftables.conf) — see docs/JUDGE.md.
+# The settings below were checked against isolate --cg on a transient unit.
+
+[Unit]
+Description=REC Code judge worker
+Documentation=file:///opt/recjudge/docs/JUDGE.md
+Wants=network-online.target
+After=network-online.target nftables.service isolate.service recjudge-modules-lock.service
+Requires=isolate.service
+RequiresMountsFor=/var/local/lib/isolate
+# A host that fails verification restarts at most 3 times per 5 minutes and
+# then stays down for an operator: it is rebuilt, not repaired.
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=recjudge
+Group=recjudge
+WorkingDirectory=/opt/recjudge/apps/judge-worker
+EnvironmentFile=/etc/recjudge/worker.env
+Environment=NODE_ENV=production
+
+# Host verification before every start. "+" runs it with full privileges:
+# net.core.bpf_jit_harden is readable by root only.
+ExecStartPre=+/bin/bash /opt/recjudge/infra/judge/verify-host.sh
+ExecStart=/usr/local/bin/node /opt/recjudge/apps/judge-worker/dist/main.js
+
+Restart=on-failure
+RestartSec=5s
+# SIGTERM to the worker; isolate processes receiving SIGTERM kill their box
+# and exit. In-flight jobs are released (infrastructure retry), never lost:
+# Postgres holds the row and the lease expires.
+KillMode=mixed
+TimeoutStopSec=45s
+
+# Filesystem: everything read-only except the RAM box root and isolate's
+# lock/cgroup-pointer directory. /proc and /sys are untouched (isolate needs
+# them); /home, /root and the real /tmp are hidden.
+ProtectSystem=strict
+ReadWritePaths=/var/local/lib/isolate /run/isolate
+ProtectHome=yes
+PrivateTmp=yes
+# Blob cache (sha256-verified test data of claimed jobs): /var/cache/recjudge,
+# exported to the process as $CACHE_DIRECTORY. Wiped on rebuild.
+CacheDirectory=recjudge
+CacheDirectoryMode=0700
+RuntimeDirectory=recjudge
+RuntimeDirectoryMode=0700
+UMask=0077
+KeyringMode=private
+LimitCORE=0
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

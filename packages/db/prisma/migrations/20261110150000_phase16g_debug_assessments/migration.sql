@@ -1,0 +1,42 @@
+-- Phase 16g: a debugging problem can be sat in an assessment.
+--
+-- The second of the four refusals, and the one whose reason was the
+-- subtlest. Phase 12m: "a debugging problem's edit budget is refused before
+-- the row, in `submitSolution` and `runCode`. An assessment submits every
+-- answer at the end of the sitting and cannot refuse one without throwing
+-- away a candidate's work, so the pin is refused instead."
+--
+-- That is true of refusing ONE answer. Refusing the whole HAND-IN is a
+-- different thing, and it is the shape the language rule beside it already
+-- had: nothing is finalised, the attempt stays IN_PROGRESS, the clock is
+-- still running, and the candidate is told which question to go back to.
+-- `submitAttempt`'s own comment says why that is the right register —
+-- "a refusal is something a candidate can act on, while a silently dropped
+-- answer is a zero they find out about when the results come out".
+--
+-- What makes it safe to lift:
+--
+--   * `LayoutQuestion.editBudget` is frozen when the paper is laid out, so
+--     an author moving the budget mid-sitting cannot change the rule the
+--     candidate was given, in either direction;
+--   * the question pane shows the rule and a LIVE count, on the same lines
+--     the server counts, so the refusal is never the first time a candidate
+--     hears about it;
+--   * `submitAttempt` counts every budgeted answer against the starter for
+--     the language it is written in — the same comparison the practice path
+--     makes — and refuses the whole hand-in, naming the question;
+--   * an answer that is still the starter counts zero, a blank one is not
+--     checked, and a question with no starter in that language has nothing
+--     to count against and is skipped, exactly as in practice.
+--
+-- What is deliberately NOT done: nothing silently drops an answer, and
+-- nothing marks one down. The budget is a rule about what may be handed in,
+-- not a penalty applied afterwards.
+--
+-- The two remaining refusals stay. A SQL question needs its lane and a
+-- result set; an interactive one needs a conversation surface, and SPEC §11
+-- keeps it out of high-stakes papers until it has run cleanly through two
+-- practice contests.
+
+DROP TRIGGER IF EXISTS "AssessmentProblem_no_debug_budget" ON "public"."AssessmentProblem";
+DROP FUNCTION IF EXISTS recx_refuse_debug_assessment_problem();

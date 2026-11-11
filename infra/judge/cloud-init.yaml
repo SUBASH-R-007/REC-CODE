@@ -1,0 +1,317 @@
+#cloud-config
+# REC Code judge host — Ubuntu 24.04 LTS server image, x86_64, 8 vCPU class.
+#
+# A judge host is CATTLE: it holds no data and no credentials beyond its own
+# narrowly scoped node token, so it is never repaired in place. Anything
+# suspicious (a failed host verification, a QUARANTINED status, a kernel CVE
+# touching namespaces, cgroups, eBPF or io_uring) is answered by destroying
+# the instance and booting a new one from this file. With the prebuilt
+# toolchain archive (TOOLCHAINS_URL) a rebuild takes under 10 minutes:
+# packages ~2 min, isolate ~1 min, toolchains ~1 min, worker build ~1 min,
+# hardened reboot ~1 min. Leaving TOOLCHAINS_URL empty builds the toolchains
+# from source instead (~30-45 min); that slow path exists to produce the
+# archive, not for routine rebuilds. See docs/RUNBOOK.md ("Judge hosts").
+#
+# Before use, substitute every @PLACEHOLDER@ in this file (for example with
+# sed in the provisioning script). Nothing else in the repository is edited:
+# the files under infra/judge/ are installed from the release archive.
+#
+#   @ADMIN_SSH_KEY@        public key for the default (ubuntu) user
+#   @ADMIN_CIDR@           operators' network allowed to SSH in
+#   @APP_HOST@             app host IPv4 (Caddy → /api/judge/*, also NTP)
+#   @APP_HOSTNAME@         the name on the app host's TLS certificate
+#   @REDIS_HOST@           Redis host IPv4
+#   @REDIS_URL@            redis://[user:password@]<REDIS_HOST>:6379
+#   @RECX_NODE_ID@         this node's id (JudgeNode.id)
+#   @RECX_NODE_TOKEN@      this node's token (only its sha256 is stored server-side)
+#   @RECJUDGE_SLOTS@       concurrent judge slots (planning figure: 5 on 8 vCPU,
+#                          docs/CAPACITY.md); also sizes the RAM box root
+#   @RECX_SLOT_CPUS@       slot -> CPU pinning, one logical CPU per slot in slot
+#                          order, each on a different physical core, e.g.
+#                          "1,2,3,4,5" on an 8-vCPU host without SMT, or
+#                          "2,4,6,8,10" where CPUs 2n/2n+1 are SMT siblings
+#                          (check lscpu -e). SMT siblings of slot CPUs stay
+#                          idle; every other CPU is housekeeping (OS, worker).
+#                          Leave empty to run unpinned (not for production).
+#   @RECX_QUEUES@          queues this node serves, e.g. all five:
+#                          judge-assessment,judge-contest,judge-run,judge-practice,judge-rejudge
+#   @RECX_SOURCE_URL@      release archive of this repository (tar.gz)
+#   @RECX_SOURCE_SHA256@   its sha256
+#   @TOOLCHAINS_URL@       prebuilt toolchain archive, made on a host that ran
+#                          build-all.sh with: tar -C /opt -cJf toolchains.tar.xz toolchains
+#                          (or empty for the slow path)
+#   @TOOLCHAINS_SHA256@    its sha256, or empty
+#
+# The node token reaches the host only through this user-data. After the
+# first boot the instance metadata service is blackholed (nftables), cloud-init
+# is disabled and its stored copies of the user-data are deleted, so the token
+# afterwards exists on the host only in /etc/recjudge/worker.env (root, 0600).
+
+ssh_pwauth: false
+disable_root: true
+# For the image's default user (ubuntu).
+ssh_authorized_keys:
+  - "@ADMIN_SSH_KEY@"
+
+users:
+  - default
+  - name: recjudge
+    system: true
+    shell: /usr/sbin/nologin
+    lock_passwd: true
+    no_create_home: true
+
+package_update: true
+# Latest patched packages at build time; the closing reboot picks up a new
+# kernel. Hosts are never patched in place afterwards (they have no egress
+# to package mirrors): they are rebuilt.
+package_upgrade: true
+packages:
+  - nftables
+  - chrony
+  - curl
+  - ca-certificates
+  - xz-utils
+  - tar
+
+write_files:
+  # Values the bootstrap script renders into nftables.conf, /etc/hosts and
+  # chrony. No secrets here.
+  - path: /etc/recjudge/host.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      APP_HOST=@APP_HOST@
+      APP_HOSTNAME=@APP_HOSTNAME@
+      REDIS_HOST=@REDIS_HOST@
+      ADMIN_CIDR=@ADMIN_CIDR@
+      RECJUDGE_SLOTS=@RECJUDGE_SLOTS@
+      RECX_SLOT_CPUS=@RECX_SLOT_CPUS@
+      RECX_SOURCE_URL=@RECX_SOURCE_URL@
+      RECX_SOURCE_SHA256=@RECX_SOURCE_SHA256@
+      TOOLCHAINS_URL=@TOOLCHAINS_URL@
+      TOOLCHAINS_SHA256=@TOOLCHAINS_SHA256@
+
+  # The worker's entire configuration. Read by systemd (as root) before the
+  # service drops to the recjudge user. No DATABASE_URL, no auth secret, no
+  # storage key, no PII — ever.
+  - path: /etc/recjudge/worker.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+      RECX_NODE_ID=@RECX_NODE_ID@
+      RECX_NODE_TOKEN=@RECX_NODE_TOKEN@
+      RECX_APP_URL=https://@APP_HOSTNAME@
+      REDIS_URL=@REDIS_URL@
+      RECX_DRIVER=isolate
+      RECX_SLOTS=@RECJUDGE_SLOTS@
+      RECX_SLOT_CPUS=@RECX_SLOT_CPUS@
+      RECX_QUEUES=@RECX_QUEUES@
+
+  # kernel.modules_disabled = 1, set LAST in boot: after nftables, chrony,
+  # isolate and the box-root tmpfs have loaded every module they need, and
+  # before the worker starts. One-way until the next reboot.
+  - path: /etc/systemd/system/recjudge-modules-lock.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Disable kernel module loading until reboot (REC Code judge)
+      After=systemd-modules-load.service nftables.service chrony.service isolate.service var-local-lib-isolate.mount network-online.target
+      Wants=network-online.target
+      Before=recjudge-worker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'echo 1 > /proc/sys/kernel/modules_disabled'
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # ── Timing stability (PRODUCTION judge hosts only; never on a dev box) ──
+  # CPU time is the authoritative verdict clock, so a judge core should run
+  # at one fixed frequency and never nap deeply between tests:
+  #   * C-states: intel_idle.max_cstate=1 processor.max_cstate=1 on the
+  #     kernel command line (below; takes effect on the closing reboot);
+  #   * governor "performance" on every CPU — the effect of
+  #     `cpupower frequency-set -g performance`, written to sysfs directly so
+  #     no kernel-version-specific linux-tools package is needed;
+  #   * turbo / boost off (intel_pstate no_turbo, or cpufreq boost = 0).
+  # Many cloud VMs expose no cpufreq interface at all (the hypervisor owns
+  # frequency); the unit then logs what it could not set and carries on —
+  # calibration (docs/JUDGE.md) is what finally gates a noisy node.
+  - path: /etc/default/grub.d/90-recjudge.cfg
+    owner: root:root
+    permissions: "0644"
+    content: |
+      # REC Code judge: shallow C-states only (timing stability). Production hosts only.
+      GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} intel_idle.max_cstate=1 processor.max_cstate=1"
+
+  - path: /usr/local/sbin/recjudge-cpu-tuning.sh
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Fixed CPU frequency for judge timing (see /etc/default/grub.d/90-recjudge.cfg).
+      # Equivalent of: cpupower frequency-set -g performance; turbo off.
+      set -u
+      n=0
+      for g in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
+        [ -w "$g" ] || continue
+        echo performance > "$g" && n=$((n + 1))
+      done
+      echo "recjudge-cpu-tuning: governor performance on $n CPU(s)"
+      if [ -w /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
+        echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo && echo "recjudge-cpu-tuning: intel_pstate turbo off"
+      elif [ -w /sys/devices/system/cpu/cpufreq/boost ]; then
+        echo 0 > /sys/devices/system/cpu/cpufreq/boost && echo "recjudge-cpu-tuning: cpufreq boost off"
+      else
+        echo "recjudge-cpu-tuning: no turbo/boost control exposed (hypervisor-managed frequency?)"
+      fi
+      echo "recjudge-cpu-tuning: kernel command line: $(cat /proc/cmdline)"
+      exit 0
+
+  - path: /etc/systemd/system/recjudge-cpu-tuning.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Fixed CPU frequency for judge timing (REC Code judge)
+      Before=recjudge-worker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/recjudge-cpu-tuning.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/sbin/recjudge-bootstrap.sh
+    owner: root:root
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # First-boot provisioning of a REC Code judge host. Runs once, from
+      # cloud-init runcmd, while the host still has unrestricted egress. It
+      # never reads /etc/recjudge/worker.env (no secret reaches the log).
+      set -euo pipefail
+      exec > >(tee -a /var/log/recjudge-bootstrap.log) 2>&1
+      export DEBIAN_FRONTEND=noninteractive
+      # shellcheck disable=SC1091
+      source /etc/recjudge/host.env
+      step() { echo "[recjudge-bootstrap] $(date -u +%FT%TZ) $*"; }
+
+      step "removing services a judge host must not run"
+      # snapd mounts squashfs (blacklisted below); unattended-upgrades needs
+      # mirror egress the host will not have. Hosts are rebuilt, not patched.
+      apt-get purge -y -qq snapd unattended-upgrades >/dev/null || true
+
+      step "installing Node.js 22 (checksum-verified official tarball)"
+      NODE_VERSION="22.17.1"
+      tmp="$(mktemp -d)"
+      base="https://nodejs.org/dist/v${NODE_VERSION}"
+      curl -fsSL -o "$tmp/node.tar.xz" "$base/node-v${NODE_VERSION}-linux-x64.tar.xz"
+      curl -fsSL -o "$tmp/SHASUMS256.txt" "$base/SHASUMS256.txt"
+      expected="$(grep " node-v${NODE_VERSION}-linux-x64.tar.xz\$" "$tmp/SHASUMS256.txt" | cut -d' ' -f1)"
+      echo "${expected}  $tmp/node.tar.xz" | sha256sum -c -
+      rm -rf /opt/node22 && mkdir -p /opt/node22
+      tar -xJf "$tmp/node.tar.xz" -C /opt/node22 --strip-components=1
+      ln -sf /opt/node22/bin/node /usr/local/bin/node
+      ln -sf /opt/node22/bin/corepack /usr/local/bin/corepack
+      rm -rf "$tmp"
+
+      step "fetching the REC Code release archive"
+      tmp="$(mktemp -d)"
+      curl -fsSL -o "$tmp/recx.tar.gz" "$RECX_SOURCE_URL"
+      echo "${RECX_SOURCE_SHA256}  $tmp/recx.tar.gz" | sha256sum -c -
+      rm -rf /opt/recjudge && mkdir -p /opt/recjudge
+      tar -xzf "$tmp/recx.tar.gz" -C /opt/recjudge --strip-components=1
+      rm -rf "$tmp"
+      find /opt/recjudge -name '*.sh' -exec sed -i 's/\r$//' {} +
+
+      step "installing isolate (pinned tag + commit; slot CPU pinning: ${RECX_SLOT_CPUS:-none})"
+      RECJUDGE_SLOTS="$RECJUDGE_SLOTS" RECX_SLOT_CPUS="$RECX_SLOT_CPUS" \
+        bash /opt/recjudge/infra/judge/install-isolate.sh
+
+      step "timing stability: shallow C-states (next boot), performance governor, turbo off"
+      update-grub >/dev/null 2>&1 || step "update-grub failed; the C-state limit will not apply"
+      systemctl enable recjudge-cpu-tuning.service >/dev/null
+
+      step "installing toolchains under /opt/toolchains"
+      if [[ -n "$TOOLCHAINS_URL" ]]; then
+        tmp="$(mktemp -d)"
+        curl -fsSL -o "$tmp/toolchains.tar.xz" "$TOOLCHAINS_URL"
+        echo "${TOOLCHAINS_SHA256}  $tmp/toolchains.tar.xz" | sha256sum -c -
+        mkdir -p /opt/toolchains
+        tar -xJf "$tmp/toolchains.tar.xz" -C /opt
+        rm -rf "$tmp"
+      else
+        step "no TOOLCHAINS_URL: building from verified sources (slow path)"
+        bash /opt/recjudge/infra/judge/toolchains/build-all.sh
+      fi
+      chown -R root:root /opt/toolchains
+      chmod -R a-w,a+rX /opt/toolchains
+
+      step "building the judge worker (no database packages are installed)"
+      export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+      cd /opt/recjudge
+      corepack pnpm@9.15.9 install --frozen-lockfile --ignore-scripts --filter "@recx/judge-worker..."
+      corepack pnpm@9.15.9 --filter @recx/judge-worker build
+      chown -R root:root /opt/recjudge
+      chmod -R go-w /opt/recjudge
+
+      step "verifying every toolchain inside isolate (catalog argv, the worker's argv builder)"
+      # A toolchain that cannot compile and run hello-world in a box must never
+      # reach the fleet: a failure here stops the bootstrap before the reboot.
+      bash /opt/recjudge/infra/judge/toolchains/verify-toolchains.sh
+
+      step "kernel hardening: sysctl + module blacklist"
+      install -m 0644 infra/judge/sysctl/99-recjudge.conf /etc/sysctl.d/99-recjudge.conf
+      install -m 0644 infra/judge/modprobe/recjudge-blacklist.conf /etc/modprobe.d/recjudge-blacklist.conf
+      sysctl --system >/dev/null
+
+      step "egress policy (applied on the closing reboot)"
+      sed -e "s|@APP_HOST@|${APP_HOST}|g" \
+          -e "s|@REDIS_HOST@|${REDIS_HOST}|g" \
+          -e "s|@ADMIN_CIDR@|${ADMIN_CIDR}|g" \
+          infra/judge/nftables.conf > /etc/nftables.conf
+      chmod 0600 /etc/nftables.conf
+      nft -c -f /etc/nftables.conf
+      systemctl enable nftables >/dev/null
+
+      step "name and time come from the app host (no DNS or public NTP egress)"
+      grep -q " ${APP_HOSTNAME}\$" /etc/hosts || echo "${APP_HOST} ${APP_HOSTNAME}" >> /etc/hosts
+      sed -i -E 's/^(pool|server) /# &/' /etc/chrony/chrony.conf
+      install -d /etc/chrony/sources.d
+      echo "server ${APP_HOST} iburst" > /etc/chrony/sources.d/recjudge.sources
+      systemctl enable chrony >/dev/null
+
+      step "worker unit + late module lock"
+      install -m 0644 infra/judge/systemd/recjudge-worker.service /etc/systemd/system/recjudge-worker.service
+      systemctl daemon-reload
+      systemctl enable recjudge-modules-lock.service recjudge-worker.service >/dev/null
+
+      step "disabling cloud-init and deleting stored user-data"
+      touch /etc/cloud/cloud-init.disabled
+      rm -f /var/lib/cloud/instances/*/user-data.txt* /var/lib/cloud/instances/*/vendor-data*.txt* \
+            /var/lib/cloud/instances/*/obj.pkl
+
+      install -d -m 0755 /var/lib/recjudge
+      date -u +%FT%TZ > /var/lib/recjudge/bootstrap.ok
+      step "done; rebooting into the hardened boot path"
+
+runcmd:
+  - [bash, /usr/local/sbin/recjudge-bootstrap.sh]
+
+# The closing reboot runs the exact boot path every later boot will: sysctl,
+# nftables, the module lock last, then the worker, whose ExecStartPre runs
+# infra/judge/verify-host.sh. Skipped if the bootstrap did not finish, so a
+# half-built host stays visibly broken instead of joining the fleet.
+power_state:
+  mode: reboot
+  delay: now
+  message: REC Code judge bootstrap complete
+  timeout: 60
+  condition: test -f /var/lib/recjudge/bootstrap.ok

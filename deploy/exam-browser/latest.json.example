@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "The current REC Exam Browser build, per platform (Phase 14f).",
+    "Copy to public/latest.json and edit. Served at",
+    "/downloads/exam-browser/latest.json with Cache-Control: no-store.",
+    "",
+    "This says what is CURRENT. What is REFUSED is the version floor, set",
+    "on /super/settings/integrations, and the two are deliberately",
+    "separate: publishing a build inconveniences nobody, while raising the",
+    "floor refuses every candidate on an older copy from their next",
+    "request onwards. See README.md.",
+    "",
+    "sha256 is here so a candidate or an invigilator can check a download",
+    "against something the college published, independently of the",
+    "signature on the installer. Produce it with:",
+    "  sha256sum REC-Exam-Browser-1.0.0-win-x64.exe"
+  ],
+  "version": "1.0.0",
+  "releasedAt": "2026-11-05",
+  "notes": "First release. docs/EXAM-BROWSER.md describes what it does and what it cannot do.",
+  "platforms": {
+    "win-x64": {
+      "file": "REC-Exam-Browser-1.0.0-win-x64.exe",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signed": true
+    },
+    "mac-arm64": {
+      "file": "REC-Exam-Browser-1.0.0-mac-arm64.dmg",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signed": true
+    },
+    "mac-x64": {
+      "file": "REC-Exam-Browser-1.0.0-mac-x64.dmg",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signed": true
+    },
+    "linux-x64": {
+      "file": "REC-Exam-Browser-1.0.0-linux-x64.AppImage",
+      "bytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "signed": false
+    }
+  }
+}

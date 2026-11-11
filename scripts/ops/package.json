@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "description": "Operational harnesses and scripts. Not a workspace package and no dependencies of its own; marked ESM so tsx runs fire-alerts.ts with import.meta. Third-party packages are loaded through apps/scheduler's dependency tree, as scripts/load does through apps/web's.",
+  "type": "module"
+}

@@ -1,0 +1,840 @@
+import "server-only";
+import {
+  PROCTOR_EVENT_LABELS,
+  normalisePaperLanguages,
+  paperLanguageViews,
+  parseAttemptLayout,
+  scoreAttempt,
+  type AttemptResult,
+  type CodingMarkingInput,
+  type PaperLanguageView,
+  type ProctorEventKind,
+  type QuestionModeration,
+  type Verdict,
+} from "@recx/shared";
+import { EXAM_BROWSER_SIGNAL_KINDS } from "@recx/shared/exam-browser";
+import type { AccountStatus } from "@recx/db";
+import { scopedStudentWhere, type StudentScope } from "@/lib/auth/scope";
+import { db } from "@/lib/db";
+
+/**
+ * What a paper came to, for the people who set it (Phase 12y).
+ *
+ * `/admin/assessments/[id]` has shown the terms, the questions and the halls
+ * since Phase 12a, and `/admin/invigilate` shows the room while it is being
+ * sat. Between the two there was nothing: once the clock ran out, no staff
+ * screen in this product said who had sat the paper or what they scored.
+ * `AssessmentAttempt.totalScore` has existed since Phase 6b with no writer,
+ * the multiple-choice half has been markable since 12r and was marked
+ * nowhere a human could read, and the coding half's verdicts sat on
+ * `Submission` rows that nothing added up.
+ *
+ * Computed on READ, as 12r decided for the marking it added: every input is
+ * immutable once the sitting is over — the layout the candidate was shown,
+ * the answers they left, the correct indexes, and the judged submissions —
+ * so a stored total would be a second copy of something derivable, and the
+ * first thing to go stale when a result is corrected or a question rejudged.
+ *
+ * SCOPED, like every other staff read of students: an ADMIN with a grant
+ * over one department sees that department's candidates and no one else's,
+ * and an ADMIN with no grant sees nobody rather than an empty-looking paper.
+ */
+
+export interface AttemptResultRow {
+  readonly attemptId: string;
+  readonly userId: string;
+  readonly collegeId: string;
+  readonly name: string;
+  readonly batchYear: number | null;
+  readonly departmentCode: string | null;
+  readonly attemptNumber: number;
+  readonly status: string;
+  readonly startedAt: Date;
+  readonly submittedAt: Date | null;
+  readonly hall: string | null;
+  readonly seatLabel: string | null;
+  /** Null for a sitting still in progress: an unfinished paper has no result. */
+  readonly result: AttemptResult | null;
+  /** The stored paper would not parse, so the choice half is unmarked and a person must look. */
+  readonly layoutUnreadable: boolean;
+  /**
+   * Which languages this candidate answered the programs in (Phase 13a),
+   * with their labels resolved, in the catalog's order.
+   *
+   * Reported because a paper may now accept several and a candidate picks
+   * per question, so "what did they write it in" is no longer a property
+   * of the paper. Empty for a sitting with no coding answer yet.
+   */
+  readonly languages: PaperLanguageView[];
+  /**
+   * What was watched during the sitting (Phase 12y.4).
+   *
+   * Counts, never a verdict and never a band. SPEC §5 is explicit that no
+   * signal penalises by itself, and these are on a RESULTS page beside a
+   * mark — so what belongs here is the facts an examiner can act on ("left
+   * full screen nine times") and not a number that reads like part of the
+   * score. The band, the points and the review live on
+   * `/admin/integrity`, where a human decides.
+   */
+  readonly watched: {
+    readonly focusLosses: number;
+    readonly fullscreenExits: number;
+    readonly pastes: number;
+    readonly longestGapSeconds: number;
+  };
+}
+
+export interface QuestionStat {
+  readonly kind: "mcq" | "coding";
+  readonly position: number;
+  readonly label: string;
+  readonly maxPoints: number;
+  /** Of the finished sittings, how many earned full marks on this question. */
+  readonly fullMarks: number;
+  readonly partial: number;
+  readonly zero: number;
+  readonly blank: number;
+  /** Pending or unjudged: not a score, and the reason a total is provisional. */
+  readonly open: number;
+  /** Phase 13i: the question's own id, so the moderation control can act. */
+  readonly questionId: string;
+  readonly moderation: QuestionModeration;
+  readonly moderationReason: string | null;
+}
+
+export interface AssessmentResults {
+  readonly rows: readonly AttemptResultRow[];
+  readonly questions: readonly QuestionStat[];
+  readonly maxPoints: number;
+  /** Finished sittings only — the denominator every average below uses. */
+  readonly finished: number;
+  readonly inProgress: number;
+  readonly provisional: number;
+  readonly needsAttention: number;
+  readonly averagePercent: number | null;
+  readonly medianPercent: number | null;
+  /**
+   * Judged programs on finished sittings whose code is still stored: what
+   * a rejudge of this paper would move (Phase 13h.3).
+   *
+   * The same rule as `rejudgeAssessment`, written in Prisma's idiom
+   * rather than its SQL -- including `NOT: { source: { is: { archivedAt:
+   * { not: null } } } }`, which matches a submission with no source row
+   * as well as one whose source is unarchived, exactly as the action's
+   * `NOT EXISTS` does. The action is authoritative; this is the number
+   * the page offers before anybody clicks.
+   */
+  readonly rejudgeable: number;
+}
+
+/** A sitting that is over: its result is worth computing and showing. */
+/**
+ * A sitting that is over: its result is worth computing and showing.
+ *
+ * VOIDED is deliberately absent — a voided sitting is one a human decided
+ * does not count, and giving it a mark on this page would invite somebody
+ * to read it as one. NOT_STARTED and DISCONNECTED are not over at all.
+ */
+const FINISHED: readonly string[] = ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED", "EXPIRED"];
+
+export async function getAssessmentResults(
+  scope: StudentScope,
+  assessmentId: string,
+): Promise<AssessmentResults> {
+  const [paper, attempts] = await Promise.all([
+    db.assessment.findUnique({
+      where: { id: assessmentId },
+      select: {
+        problems: {
+          orderBy: { position: "asc" },
+          select: {
+            id: true,
+            position: true,
+            points: true,
+            problemVersionId: true,
+            moderation: true,
+            moderationReason: true,
+            problemVersion: { select: { title: true, problem: { select: { displayCode: true } } } },
+          },
+        },
+        mcqs: {
+          orderBy: { position: "asc" },
+          select: {
+            id: true,
+            position: true,
+            points: true,
+            correctIndex: true,
+            moderation: true,
+            moderationReason: true,
+          },
+        },
+      },
+    }),
+    db.assessmentAttempt.findMany({
+      where: { assessmentId, user: scopedStudentWhere(scope) },
+      orderBy: [{ startedAt: "asc" }],
+      take: 1_000,
+      select: {
+        id: true,
+        userId: true,
+        attemptNumber: true,
+        status: true,
+        startedAt: true,
+        submittedAt: true,
+        seatLabel: true,
+        layout: true,
+        blurEventCount: true,
+        fullscreenExitCount: true,
+        pasteEventCount: true,
+        maxHeartbeatGapSeconds: true,
+        user: {
+          select: { collegeId: true, firstName: true, lastName: true, batchYear: true, departmentCode: true },
+        },
+        examSession: { select: { label: true } },
+        mcqAnswers: { select: { mcqId: true, chosenIndex: true } },
+      },
+    }),
+  ]);
+
+  if (!paper) return empty();
+
+  /**
+   * The submissions in one query, not one per sitting.
+   *
+   * `Submission.assessmentAttemptId` is a plain column with no Prisma
+   * relation on it, so there is nothing to `include`; a paper sat by two
+   * hundred candidates would otherwise be two hundred round trips. The
+   * index `[assessmentAttemptId, problemVersionId, createdAt desc]` is
+   * exactly this read.
+   *
+   * Scoped AGAIN on the student, although every attempt id above came from
+   * a scoped query. `tests/repo/admin-scope.test.ts` asked for it and the
+   * fence is right to: an id list carries no evidence of where it came
+   * from, so a later edit that widened the attempt query — or passed ids
+   * in from somewhere else — would widen this one silently. Saying it
+   * twice costs an index lookup and removes the possibility.
+   */
+  const submissions =
+    attempts.length === 0
+      ? []
+      : await db.submission.findMany({
+          where: {
+            assessmentAttemptId: { in: attempts.map((a) => a.id) },
+            user: scopedStudentWhere(scope),
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            assessmentAttemptId: true,
+            problemVersionId: true,
+            verdict: true,
+            score: true,
+            maxScore: true,
+            status: true,
+            // Phase 13a: which language this answer was written in.
+            language: true,
+          },
+        });
+  const byAttempt = new Map<string, SubmissionRow[]>();
+  for (const submission of submissions) {
+    const key = submission.assessmentAttemptId;
+    if (key === null) continue;
+    const list = byAttempt.get(key);
+    if (list) list.push(submission);
+    else byAttempt.set(key, [submission]);
+  }
+
+  const mcqById = new Map(paper.mcqs.map((m) => [m.id, m]));
+  const rows: AttemptResultRow[] = [];
+
+  for (const attempt of attempts) {
+    const finished = FINISHED.includes(attempt.status);
+    const scored = finished
+      ? resultOf(
+          { layout: attempt.layout, mcqAnswers: attempt.mcqAnswers },
+          byAttempt.get(attempt.id) ?? [],
+          paper,
+          mcqById,
+        )
+      : null;
+    rows.push({
+      attemptId: attempt.id,
+      userId: attempt.userId,
+      collegeId: attempt.user.collegeId,
+      name: `${attempt.user.firstName} ${attempt.user.lastName}`.trim(),
+      batchYear: attempt.user.batchYear,
+      departmentCode: attempt.user.departmentCode,
+      attemptNumber: attempt.attemptNumber,
+      status: attempt.status,
+      startedAt: attempt.startedAt,
+      submittedAt: attempt.submittedAt,
+      hall: attempt.examSession?.label ?? null,
+      seatLabel: attempt.seatLabel,
+      result: scored?.result ?? null,
+      layoutUnreadable: scored?.layoutUnreadable ?? false,
+      /**
+       * From the MARKS rather than from the submissions again, so the
+       * languages listed are the ones that actually count towards this
+       * result -- one per question, newest submission per question.
+       */
+      languages: paperLanguageViews(
+        normalisePaperLanguages((scored?.result.coding.marks ?? []).map((mark) => mark.language)),
+      ),
+      watched: {
+        focusLosses: attempt.blurEventCount,
+        fullscreenExits: attempt.fullscreenExitCount,
+        pastes: attempt.pasteEventCount,
+        longestGapSeconds: attempt.maxHeartbeatGapSeconds,
+      },
+    });
+  }
+
+  /**
+   * What a rejudge of this paper would move (Phase 13h.3): judged
+   * programs on FINISHED sittings whose code is still stored, scoped
+   * again on the student like every other read here.
+   */
+  const finishedAttemptIds = rows.filter((r) => r.result !== null).map((r) => r.attemptId);
+  const rejudgeable =
+    finishedAttemptIds.length === 0
+      ? 0
+      : await db.submission.count({
+          where: {
+            assessmentAttemptId: { in: finishedAttemptIds },
+            user: scopedStudentWhere(scope),
+            status: { in: ["DONE", "INTERNAL_ERROR"] },
+            NOT: { source: { is: { archivedAt: { not: null } } } },
+          },
+        });
+
+  return summarise(rows, paper, rejudgeable);
+}
+
+interface Paper {
+  readonly problems: ReadonlyArray<{
+    readonly id: string;
+    readonly position: number;
+    readonly points: number;
+    readonly problemVersionId: string;
+    readonly problemVersion: { readonly title: string; readonly problem: { readonly displayCode: string } };
+    readonly moderation: QuestionModeration;
+    readonly moderationReason: string | null;
+  }>;
+  readonly mcqs: ReadonlyArray<{
+    readonly id: string;
+    readonly position: number;
+    readonly points: number;
+    readonly correctIndex: number;
+    readonly moderation: QuestionModeration;
+    readonly moderationReason: string | null;
+  }>;
+}
+
+interface SubmissionRow {
+  readonly assessmentAttemptId: string | null;
+  readonly problemVersionId: string;
+  readonly verdict: string | null;
+  readonly score: number | null;
+  readonly maxScore: number | null;
+  readonly status: string;
+  /** The toolchain it was judged with (Phase 13a). */
+  readonly language: string;
+}
+
+interface AttemptAnswers {
+  readonly layout: unknown;
+  readonly mcqAnswers: ReadonlyArray<{ readonly mcqId: string; readonly chosenIndex: number }>;
+}
+
+/**
+ * One sitting's result, from the rows that cannot change now.
+ *
+ * The LAYOUT is what makes the multiple-choice half markable: options are
+ * shuffled per candidate, so the stored answer is an index into the order
+ * that candidate was shown and has to be mapped back before it is compared.
+ * A layout that will not parse is not guessed at — those questions are left
+ * out of the marking, exactly as `markAttemptMcqs` drops one whose row is
+ * gone, rather than charging somebody for a broken record.
+ */
+function resultOf(
+  attempt: AttemptAnswers,
+  submissions: readonly SubmissionRow[],
+  paper: Paper,
+  mcqById: Map<string, { correctIndex: number; points: number; moderation: QuestionModeration }>,
+): { readonly result: AttemptResult; readonly layoutUnreadable: boolean } {
+  let laid: ReadonlyArray<{ mcqId: string; optionOrder: readonly number[] }> = [];
+  let layoutUnreadable = false;
+  try {
+    laid = parseAttemptLayout(attempt.layout).mcqs ?? [];
+  } catch {
+    /**
+     * A layout that will not parse is a broken record, not a blank paper,
+     * so its multiple-choice half is left unmarked rather than marked
+     * zero — and SAID, through `layoutUnreadable`. The first draft only
+     * swallowed it, and the database test caught what that costs: a
+     * fixture whose layout was one field short scored the coding half,
+     * reported 10 out of 14, and looked like a candidate who had simply
+     * got the choice wrong. A silently short result is worse than a loud
+     * one, because nobody goes looking for it.
+     */
+    layoutUnreadable = true;
+    laid = [];
+  }
+  const chosen = new Map(attempt.mcqAnswers.map((a) => [a.mcqId, a.chosenIndex]));
+
+  const mcqs = laid.flatMap((entry) => {
+    const row = mcqById.get(entry.mcqId);
+    if (row === undefined) return [];
+    return [
+      {
+        mcqId: entry.mcqId,
+        points: row.points,
+        optionOrder: entry.optionOrder,
+        correctIndex: row.correctIndex,
+        chosenShownIndex: chosen.get(entry.mcqId) ?? null,
+        // Phase 13i: decided after the paper, and it overrides everything.
+        moderation: row.moderation,
+      },
+    ];
+  });
+
+  // Newest first from the query, so the first hit per version is the one
+  // that counts: a sitting creates one submission per answered question,
+  // and if that ever changes, the last word is the candidate's last word.
+  const latest = new Map<string, SubmissionRow>();
+  for (const submission of submissions) {
+    if (!latest.has(submission.problemVersionId)) latest.set(submission.problemVersionId, submission);
+  }
+
+  const coding: CodingMarkingInput[] = paper.problems.map((problem) => {
+    const submission = latest.get(problem.problemVersionId);
+    return {
+      questionId: problem.id,
+      points: problem.points,
+      moderation: problem.moderation,
+      submission:
+        submission === undefined
+          ? null
+          : {
+              verdict: (submission.verdict as Verdict | null) ?? null,
+              score: submission.score,
+              maxScore: submission.maxScore,
+              terminal: submission.status === "DONE" || submission.status === "INTERNAL_ERROR",
+              language: submission.language,
+            },
+    };
+  });
+
+  return { result: scoreAttempt({ mcqs, coding }), layoutUnreadable };
+}
+
+function summarise(rows: readonly AttemptResultRow[], paper: Paper, rejudgeable: number): AssessmentResults {
+  const done = rows.filter((r) => r.result !== null);
+  const percents = done
+    .map((r) => r.result?.percent)
+    .filter((p): p is number => typeof p === "number")
+    .sort((a, b) => a - b);
+
+  const questions: QuestionStat[] = [
+    ...paper.mcqs.map((mcq) => {
+      const marks = done.flatMap((r) => r.result?.mcq.marks.filter((m) => m.mcqId === mcq.id) ?? []);
+      return {
+        kind: "mcq" as const,
+        questionId: mcq.id,
+        moderation: mcq.moderation,
+        moderationReason: mcq.moderationReason,
+        position: mcq.position,
+        label: `Q${mcq.position}`,
+        maxPoints: mcq.points,
+        fullMarks: marks.filter((m) => m.outcome === "correct").length,
+        partial: 0,
+        zero: marks.filter((m) => m.outcome === "wrong").length,
+        blank: marks.filter((m) => m.outcome === "blank").length,
+        open: marks.filter((m) => m.outcome === "corrupt").length,
+      };
+    }),
+    ...paper.problems.map((problem) => {
+      const marks = done.flatMap((r) => r.result?.coding.marks.filter((m) => m.questionId === problem.id) ?? []);
+      return {
+        kind: "coding" as const,
+        questionId: problem.id,
+        moderation: problem.moderation,
+        moderationReason: problem.moderationReason,
+        position: problem.position,
+        label: `${problem.problemVersion.problem.displayCode} · ${problem.problemVersion.title}`,
+        maxPoints: problem.points,
+        fullMarks: marks.filter((m) => m.outcome === "accepted").length,
+        partial: marks.filter((m) => m.outcome === "partial").length,
+        zero: marks.filter((m) => m.outcome === "rejected").length,
+        blank: marks.filter((m) => m.outcome === "blank").length,
+        open: marks.filter((m) => m.outcome === "pending" || m.outcome === "unjudged").length,
+      };
+    }),
+  ].sort((a, b) => a.position - b.position || a.kind.localeCompare(b.kind));
+
+  /**
+   * Phase 13i: a withdrawn question is out of the paper's total too.
+   * Leaving it in would put "out of 50 marks" at the top of a page whose
+   * every row was marked out of 47.
+   */
+  const maxPoints =
+    paper.mcqs.filter((m) => m.moderation !== "DROPPED").reduce((sum, m) => sum + m.points, 0) +
+    paper.problems.filter((p) => p.moderation !== "DROPPED").reduce((sum, p) => sum + p.points, 0);
+
+  return {
+    rows,
+    questions,
+    maxPoints,
+    finished: done.length,
+    inProgress: rows.length - done.length,
+    provisional: done.filter((r) => r.result?.provisional).length,
+    needsAttention: done.reduce(
+      (sum, r) => sum + (r.result?.needsAttention ?? 0) + (r.layoutUnreadable ? 1 : 0),
+      0,
+    ),
+    averagePercent: percents.length > 0 ? percents.reduce((a, b) => a + b, 0) / percents.length : null,
+    medianPercent: median(percents),
+    rejudgeable,
+  };
+}
+
+/** The middle of an even-sized field is the mean of the two middle marks. */
+function median(sorted: readonly number[]): number | null {
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid] ?? null;
+  const low = sorted[mid - 1];
+  const high = sorted[mid];
+  return low === undefined || high === undefined ? null : (low + high) / 2;
+}
+
+function empty(): AssessmentResults {
+  return {
+    rows: [],
+    questions: [],
+    maxPoints: 0,
+    finished: 0,
+    inProgress: 0,
+    provisional: 0,
+    needsAttention: 0,
+    averagePercent: null,
+    medianPercent: null,
+    rejudgeable: 0,
+  };
+}
+
+/** One stored signal, as the audit shows it. */
+export interface AuditEventRow {
+  readonly kind: string;
+  readonly label: string;
+  readonly severity: string;
+  readonly source: string;
+  /** Milliseconds into the sitting, which is how a reviewer places it. */
+  readonly atMs: number;
+  readonly durationMs: number | null;
+  /** Bytes, for a paste. Never the text: PROCTORING §5 forbids capturing it. */
+  readonly size: number | null;
+  readonly occurredAt: Date;
+}
+
+export interface AttemptAudit {
+  readonly attemptId: string;
+  readonly collegeId: string;
+  readonly name: string;
+  readonly assessmentId: string;
+  readonly assessmentTitle: string;
+  readonly status: string;
+  readonly startedAt: Date;
+  readonly submittedAt: Date | null;
+  readonly hall: string | null;
+  readonly seatLabel: string | null;
+  readonly proctorMode: string;
+  readonly watched: {
+    readonly focusLosses: number;
+    readonly fullscreenExits: number;
+    readonly pastes: number;
+    readonly longestGapSeconds: number;
+  };
+  /** Every kind that fired, with how many times. The shape of the sitting. */
+  readonly byKind: ReadonlyArray<{ readonly kind: string; readonly label: string; readonly count: number }>;
+  /**
+   * The two witnesses, side by side (Phase 15a).
+   *
+   * For the three things both the exam page and the exam browser can see,
+   * how many times each of them said so. A page's account of its own
+   * focus, fullscreen state and monitor count is falsifiable -- it is the
+   * one place a candidate can run their own JavaScript
+   * (`docs/PROCTORING.md` §2) -- and the browser's main process signs
+   * with a key the page never sees.
+   *
+   * The useful thing is not either number. It is the DIFFERENCE: a paper
+   * where the browser saw seven focus losses and the page reported none
+   * is a paper whose instrumentation was interfered with, and nothing
+   * before this could show that. Empty when the paper was not sat in the
+   * exam browser, which is most of them.
+   */
+  readonly witnesses: ReadonlyArray<{
+    readonly kind: string;
+    readonly label: string;
+    readonly page: number;
+    readonly browser: number;
+  }>;
+  readonly events: readonly AuditEventRow[];
+  /** True when the list below is the cap rather than everything stored. */
+  readonly truncated: boolean;
+}
+
+/** At most this many events on one page; a noisy sitting can store thousands. */
+export const AUDIT_EVENT_LIMIT = 500;
+
+/**
+ * What each witness saw, for the kinds both of them can see (Phase 15a).
+ *
+ * Only rows where at least one of the two said something, and only when
+ * the browser was there at all -- a paper sat in an ordinary browser has
+ * one witness, and a table with an empty column beside every number
+ * invites a reviewer to read "0" as a finding rather than as "not
+ * applicable".
+ */
+function witnessRows(
+  grouped: ReadonlyArray<{ kind: string; source: string; _count: { _all: number } }>,
+  label: (kind: string) => string,
+): ReadonlyArray<{ kind: string; label: string; page: number; browser: number }> {
+  const attested = grouped.some((row) => row.source === "EXAM_BROWSER");
+  if (!attested) return [];
+  const rows = new Map<string, { kind: string; label: string; page: number; browser: number }>();
+  for (const kind of EXAM_BROWSER_SIGNAL_KINDS) {
+    rows.set(kind, { kind, label: label(kind), page: 0, browser: 0 });
+  }
+  for (const row of grouped) {
+    const entry = rows.get(row.kind);
+    if (!entry) continue;
+    if (row.source === "EXAM_BROWSER") entry.browser += row._count._all;
+    else if (row.source === "CLIENT") entry.page += row._count._all;
+  }
+  return [...rows.values()];
+}
+
+/**
+ * Everything recorded about one sitting (Phase 12y.4).
+ *
+ * The counters on the results table are a summary; this is the record they
+ * are a summary OF, which is what makes a disputed sitting answerable. SPEC
+ * §5 asks for a decision to be explainable months later, and until now the
+ * only screen that showed any of it was the integrity flag page — which
+ * exists only for sittings that were flagged. A candidate who left full
+ * screen nine times and was never flagged left no trace anybody could read.
+ *
+ * What is NOT here, deliberately: the band, the points and the integrity
+ * score. They are on `/admin/integrity`, where a human reaches a verdict
+ * with the reasoning beside it. Beside a mark they would be read as part of
+ * the mark, which is the misreading SPEC §5 exists to prevent. Nor is any
+ * pasted TEXT: the product stores a paste's size and a hash, never its
+ * content (`docs/PROCTORING.md` §5), so there is none to show.
+ */
+export async function getAttemptAudit(scope: StudentScope, attemptId: string): Promise<AttemptAudit | null> {
+  const attempt = await db.assessmentAttempt.findFirst({
+    where: { id: attemptId, user: scopedStudentWhere(scope) },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      submittedAt: true,
+      seatLabel: true,
+      proctorMode: true,
+      blurEventCount: true,
+      fullscreenExitCount: true,
+      pasteEventCount: true,
+      maxHeartbeatGapSeconds: true,
+      user: { select: { collegeId: true, firstName: true, lastName: true } },
+      examSession: { select: { label: true } },
+      assessment: { select: { id: true, title: true } },
+    },
+  });
+  if (!attempt) return null;
+
+  const [grouped, events] = await Promise.all([
+    db.proctorEvent.groupBy({
+      // By source as well as kind, so the two witnesses can be compared
+      // (Phase 15a). `byKind` sums across sources, as it always did.
+      by: ["kind", "source"],
+      where: { attemptId: attempt.id },
+      _count: { _all: true },
+    }),
+    db.proctorEvent.findMany({
+      where: { attemptId: attempt.id },
+      orderBy: [{ atMs: "asc" }, { occurredAt: "asc" }],
+      take: AUDIT_EVENT_LIMIT + 1,
+      select: {
+        kind: true,
+        severity: true,
+        source: true,
+        atMs: true,
+        durationMs: true,
+        size: true,
+        occurredAt: true,
+      },
+    }),
+  ]);
+
+  const label = (kind: string) => PROCTOR_EVENT_LABELS[kind as ProctorEventKind] ?? kind;
+  const truncated = events.length > AUDIT_EVENT_LIMIT;
+
+  return {
+    attemptId: attempt.id,
+    collegeId: attempt.user.collegeId,
+    name: `${attempt.user.firstName} ${attempt.user.lastName}`.trim(),
+    assessmentId: attempt.assessment.id,
+    assessmentTitle: attempt.assessment.title,
+    status: attempt.status,
+    startedAt: attempt.startedAt,
+    submittedAt: attempt.submittedAt,
+    hall: attempt.examSession?.label ?? null,
+    seatLabel: attempt.seatLabel,
+    proctorMode: attempt.proctorMode,
+    watched: {
+      focusLosses: attempt.blurEventCount,
+      fullscreenExits: attempt.fullscreenExitCount,
+      pastes: attempt.pasteEventCount,
+      longestGapSeconds: attempt.maxHeartbeatGapSeconds,
+    },
+    byKind: Object.entries(
+      grouped.reduce<Record<string, number>>((totals, row) => {
+        totals[row.kind] = (totals[row.kind] ?? 0) + row._count._all;
+        return totals;
+      }, {}),
+    )
+      .map(([kind, count]) => ({ kind, label: label(kind), count }))
+      .sort((a, b) => b.count - a.count || a.kind.localeCompare(b.kind)),
+    witnesses: witnessRows(grouped, label),
+    events: events.slice(0, AUDIT_EVENT_LIMIT).map((event) => ({
+      kind: event.kind,
+      label: label(event.kind),
+      severity: event.severity,
+      source: event.source,
+      atMs: event.atMs,
+      durationMs: event.durationMs,
+      size: event.size,
+      occurredAt: event.occurredAt,
+    })),
+    truncated,
+  };
+}
+
+// ── Who did not sit it ─────────────────────────────────────────────────
+
+export interface AbsentRow {
+  readonly userId: string;
+  readonly collegeId: string;
+  readonly name: string;
+  readonly batchYear: number | null;
+  readonly departmentCode: string | null;
+  readonly section: string | null;
+}
+
+export interface AssessmentAttendance {
+  /** Students the paper was set for, inside the reader's own scope. */
+  readonly expected: number;
+  /** Of those, how many opened a sitting. */
+  readonly sat: number;
+  readonly absent: readonly AbsentRow[];
+  /** True when `absent` is the cap rather than everybody. */
+  readonly truncated: boolean;
+  /**
+   * The audience, as the paper states it. A null dimension means every
+   * value of it, which is also what makes "expected" a real number rather
+   * than a guess.
+   */
+  readonly audience: {
+    readonly batchYear: number | null;
+    readonly departmentCode: string | null;
+    readonly section: string | null;
+  };
+}
+
+/** At most this many names on one page; a college-wide paper has thousands. */
+export const ABSENT_ROW_LIMIT = 500;
+
+/**
+ * Who was expected to sit this paper and did not (Phase 13h.2).
+ *
+ * The results table lists candidates who STARTED, which answers "how did
+ * they do" and cannot answer "who is missing" — and on a timed paper that
+ * is the question an invigilator is asked first and a department is asked
+ * afterwards. Until now "Nobody has sat this paper yet" and "forty of a
+ * hundred and twenty sat it" rendered as the same empty-ish table.
+ *
+ * Expected is not invented here: `Assessment.audienceBatchYear`,
+ * `audienceDepartmentCode` and `audienceSection` already decide whose
+ * `/assessments` list a paper appears on (`server/queries/assessments.ts`),
+ * with a null dimension meaning every value of it. This asks the same
+ * question of the same columns, so the two can never disagree about who was
+ * invited — then takes away everybody who has an attempt row, and narrows
+ * the whole thing to the reader's own AdminScope like every staff read of a
+ * candidate.
+ *
+ * ACTIVE and SOFT_RESTRICTED count as expected; DISABLED, GRADUATED and
+ * ARCHIVED do not. A soft restriction is about practice and XP and has
+ * never stopped anybody sitting a paper, so leaving those students out
+ * would under-report an absence that matters; a disabled or graduated
+ * account was never going to sit it, and listing them would bury the
+ * candidates somebody has to telephone.
+ */
+export async function getAssessmentAttendance(
+  scope: StudentScope,
+  assessmentId: string,
+): Promise<AssessmentAttendance | null> {
+  const paper = await db.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { audienceBatchYear: true, audienceDepartmentCode: true, audienceSection: true },
+  });
+  if (!paper) return null;
+
+  const audience = {
+    batchYear: paper.audienceBatchYear,
+    departmentCode: paper.audienceDepartmentCode,
+    section: paper.audienceSection,
+  };
+  /** A null dimension constrains nothing; a set one must match exactly. */
+  const invited = {
+    status: { in: ["ACTIVE", "SOFT_RESTRICTED"] satisfies AccountStatus[] },
+    ...(audience.batchYear === null ? {} : { batchYear: audience.batchYear }),
+    ...(audience.departmentCode === null ? {} : { departmentCode: audience.departmentCode }),
+    ...(audience.section === null ? {} : { section: audience.section }),
+  };
+
+  const [expected, sat, absent] = await Promise.all([
+    db.user.count({ where: scopedStudentWhere(scope, invited) }),
+    db.user.count({
+      where: scopedStudentWhere(scope, { ...invited, assessmentAttempts: { some: { assessmentId } } }),
+    }),
+    db.user.findMany({
+      where: scopedStudentWhere(scope, { ...invited, assessmentAttempts: { none: { assessmentId } } }),
+      orderBy: [{ collegeId: "asc" }],
+      take: ABSENT_ROW_LIMIT + 1,
+      select: {
+        id: true,
+        collegeId: true,
+        firstName: true,
+        lastName: true,
+        batchYear: true,
+        departmentCode: true,
+        section: true,
+      },
+    }),
+  ]);
+
+  return {
+    expected,
+    sat,
+    absent: absent.slice(0, ABSENT_ROW_LIMIT).map((user) => ({
+      userId: user.id,
+      collegeId: user.collegeId,
+      name: `${user.firstName} ${user.lastName}`.trim(),
+      batchYear: user.batchYear,
+      departmentCode: user.departmentCode,
+      section: user.section,
+    })),
+    truncated: absent.length > ABSENT_ROW_LIMIT,
+    audience,
+  };
+}

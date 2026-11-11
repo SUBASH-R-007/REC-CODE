@@ -1,0 +1,3 @@
+# Installers and latest.json are build output, produced by CI and copied
+# onto the host. They are tens of megabytes and are not in git.
+public/

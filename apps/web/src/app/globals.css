@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* Tailwind must also scan the design package's components. */
+@source "../../../../packages/design/src";
+
+/* Canonical tokens (verbatim from the LMS), the Tailwind theme bridge and
+   the utility layer. The admin-chosen brand is injected after these by the
+   root layout as <style id="rec-brand">. */
+@import "@recx/design/tokens.css";
+@import "@recx/design/theme.css";
+@import "@recx/design/utilities.css";

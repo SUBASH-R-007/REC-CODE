@@ -1,0 +1,638 @@
+import { describe, expect, it } from "vitest";
+import { findFiles, readRepoFile } from "./support/repo";
+
+/**
+ * The deployment artefacts (Phase 10e).
+ *
+ * None of these files has ever been started: there is one laptop and no
+ * second host, and `docs/RUNBOOK.md` §3 says so for each of them. That is
+ * exactly why they need a fence. A compose file nobody runs is reviewed once
+ * and then edited for years, and the two mistakes it can make are the ones
+ * no reviewer catches by eye:
+ *
+ *   - an image that is not pinned, so "redeploy the same version" silently
+ *     means something new;
+ *   - a port published to the world on a host whose whole design is that it
+ *     has no public listener.
+ *
+ * The third rule is about secrets, and it is the one that would matter
+ * immediately: a password written into a compose file is a password in git.
+ */
+
+const DEPLOY = ["deploy"];
+const COMPOSE = findFiles({ under: DEPLOY, extensions: [".yml", ".yaml"] });
+
+describe("the deployment files exist and say they have not been run", () => {
+  it("has one compose file per host role, a Caddyfile and a pgBackRest config", () => {
+    expect(COMPOSE.sort()).toEqual([
+      "deploy/compose.app.yml",
+      "deploy/compose.db.yml",
+      "deploy/compose.judge.yml",
+      // Phase 12k: the fourth host role, the one whose sandbox is a
+      // database. Its cluster is in this file too, because a sandbox on
+      // the database host would be a sandbox one network hop from every
+      // submission the platform has ever stored.
+      "deploy/compose.sql-judge.yml",
+    ]);
+    expect(readRepoFile("deploy/Caddyfile").length).toBeGreaterThan(500);
+    expect(readRepoFile("deploy/pgbackrest.conf").length).toBeGreaterThan(500);
+  });
+
+  it("says in each file that it has not been run here", () => {
+    /**
+     * The phase's own standard: "a row that says NOT RUN is worth more than
+     * a row that says PASS about a thing that was never tried." The same
+     * applies to the file itself — somebody reading `compose.db.yml` for the
+     * first time should learn from the file that nobody has started it.
+     */
+    for (const rel of [...COMPOSE, "deploy/Caddyfile", "deploy/pgbackrest.conf"]) {
+      expect(readRepoFile(rel), `${rel} does not say whether it has been run`).toMatch(/[Nn]ot run here/);
+    }
+  });
+});
+
+describe("every image is pinned, and the file refuses to start otherwise", () => {
+  it("takes every image from a required variable", () => {
+    /**
+     * `${VAR:?message}` makes compose fail with that message when the
+     * variable is unset, instead of pulling a tag. A tag is not a pin:
+     * `postgres:17` moves, and an image that moves under a running platform
+     * is how a Tuesday becomes an incident.
+     */
+    const problems: string[] = [];
+    for (const rel of COMPOSE) {
+      for (const line of readRepoFile(rel).split("\n")) {
+        const match = /^\s*image:\s*(.+?)\s*$/.exec(line);
+        if (!match) continue;
+        const image = match[1]!;
+        if (!/^\$\{[A-Z_]+:\?/.test(image)) problems.push(`${rel}  image: ${image}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("names a digest in the message, so the refusal says what to do", () => {
+    for (const rel of COMPOSE) {
+      for (const match of readRepoFile(rel).matchAll(/image:\s*\$\{[A-Z_]+:\?([^}]*)\}/g)) {
+        expect(match[1], `${rel}: ${match[1]}`).toContain("sha256:");
+      }
+    }
+  });
+
+  it("the deploy script refuses a tag, and says why", () => {
+    // Demonstrated as well as asserted: docs/RUNBOOK.md §3 records the run
+    // where `registry.example/recx-web:1.4.2` was refused.
+    const deploy = readRepoFile("scripts/ops/deploy.sh");
+    expect(deploy).toContain("@sha256:*");
+    expect(deploy).toMatch(/must be pinned by digest/);
+  });
+});
+
+describe("only the edge publishes a port to the world", () => {
+  it("publishes nothing from the database host", () => {
+    const published = [...readRepoFile("deploy/compose.db.yml").matchAll(/^\s*-\s*"(\d+:\d+)"/gm)];
+    // Postgres is reached over the data network by the app hosts. A
+    // published 5432 is a database on the internet, which is the one
+    // configuration mistake in this file that could not be undone.
+    expect(published.map((m) => m[1])).toEqual([]);
+  });
+
+  it("publishes the judge host's ports only on its monitoring address", () => {
+    /**
+     * Phase 2 established that a judge host has no public listener: the
+     * worker calls out, and nothing calls in except the scrape. So every
+     * published port here must be bound to an address, never to 0.0.0.0 —
+     * which is what a bare `"9103:9103"` means.
+     */
+    const problems: string[] = [];
+    for (const line of readRepoFile("deploy/compose.judge.yml").split("\n")) {
+      const match = /^\s*-\s*"([^"]+)"\s*$/.exec(line);
+      if (!match || !/\d+:\d+/.test(match[1]!)) continue;
+      if (!match[1]!.startsWith("${RECX_MONITORING_IP")) problems.push(match[1]!);
+    }
+    expect(problems, "a judge host port bound to every interface").toEqual([]);
+  });
+
+  it("publishes 80, 443 and 443/udp from the app host, and nothing else", () => {
+    const published = [...readRepoFile("deploy/compose.app.yml").matchAll(/^\s*-\s*"([^"]*\d+:\d+[^"]*)"/gm)].map(
+      (m) => m[1]!,
+    );
+    expect(published.sort()).toEqual(["443:443", "443:443/udp", "80:80"]);
+  });
+});
+
+describe("no secret is in the repository", () => {
+  const files = [...COMPOSE, "deploy/Caddyfile", "deploy/pgbackrest.conf"];
+
+  it("passes every credential by file or by variable, never by value", () => {
+    /**
+     * `*_FILE` indirection (Docker secrets, decrypted on the host from
+     * sops+age at deploy time) or `${VAR}`. A literal after `PASSWORD:` or
+     * `SECRET:` would be a credential in git, which tests/repo already
+     * refuses for `.env` and which would be no better in YAML.
+     */
+    const problems: string[] = [];
+    for (const rel of files) {
+      readRepoFile(rel)
+        .split("\n")
+        .forEach((line, index) => {
+          if (/^\s*[#;]/.test(line)) return;
+          const match = /(PASSWORD|SECRET|TOKEN|_KEY|PASSPHRASE)[A-Z_]*\s*[:=]\s*(.+)$/.exec(line);
+          if (!match) return;
+          const value = match[2]!.trim();
+          const safe =
+            value.startsWith("${") ||
+            value.startsWith("/run/") ||
+            /^\$\{?[A-Z_]+\}?$/.test(value) ||
+            /_FILE\b/.test(match[1]! + match[0]!.split(/[:=]/)[0]) ||
+            value === "" ||
+            value.startsWith("file:");
+          if (!safe) problems.push(`${rel}:${index + 1}  ${line.trim().slice(0, 80)}`);
+        });
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("encrypts the backup repository before it leaves the host", () => {
+    /**
+     * An offsite backup is a copy of every submission, every attempt and
+     * every audit row on somebody else's disk. Encrypting it at the
+     * destination would mean trusting the destination; `repo*-cipher-type`
+     * encrypts it here.
+     */
+    const conf = readRepoFile("deploy/pgbackrest.conf");
+    expect(conf).toContain("repo1-cipher-type=aes-256-cbc");
+    expect(conf).toContain("repo2-cipher-type=aes-256-cbc");
+    // The passphrase is an environment variable, never a line in this file.
+    expect(conf).not.toMatch(/^repo\d-cipher-pass=/m);
+    expect(conf).toContain("PGBACKREST_REPO1_CIPHER_PASS");
+  });
+});
+
+describe("the ops scripts", () => {
+  const scripts = findFiles({ under: ["scripts/ops"], extensions: [".sh"] });
+
+  it("are the five Phase 10e names, plus the sandbox provisioner", () => {
+    expect(scripts.sort()).toEqual([
+      "scripts/ops/backup.sh",
+      "scripts/ops/deploy.sh",
+      "scripts/ops/restore-drill.sh",
+      "scripts/ops/restore.sh",
+      // Phase 12k: the SQL judge's cluster needs one role the image cannot
+      // create for itself, because the student role's whole definition is
+      // what it may NOT do.
+      "scripts/ops/sql-sandbox-provision.sh",
+      "scripts/ops/verify-backup.sh",
+    ]);
+  });
+
+  it("stop on an error rather than carrying on", () => {
+    // A backup script that ignores a failed step writes a half set; a deploy
+    // script that ignores one restarts the next replica anyway.
+    for (const rel of scripts) {
+      expect(readRepoFile(rel), rel).toMatch(/^set -[eu]/m);
+    }
+  });
+
+  it("verify before restoring, and refuse a target that is not obviously scratch", () => {
+    const restore = readRepoFile("scripts/ops/restore.sh");
+    // The verification is not optional and not a flag: the moment somebody
+    // is restoring is the moment they are least likely to check by hand.
+    expect(restore).toContain("verify-backup.sh");
+    expect(restore).toMatch(/_scratch\|\*_restore\|\*_drill\|\*_test/);
+    expect(restore).toMatch(/refusing to restore into/);
+  });
+
+  it("takes a backup before applying migrations", () => {
+    const deploy = readRepoFile("scripts/ops/deploy.sh");
+    const migrations = deploy.slice(deploy.indexOf('RUN_MIGRATIONS" = "true"'));
+    expect(migrations.indexOf("backup.sh"), "the backup comes before the migrate").toBeLessThan(
+      migrations.indexOf("migrate deploy"),
+    );
+    // Off by default: SPEC's reason is that auto-migrating on boot runs them
+    // N times concurrently during a rolling deploy.
+    expect(deploy).toContain('RUN_MIGRATIONS="${RUN_MIGRATIONS:-false}"');
+  });
+
+  it("is backed by a drift check in CI, so a deploy's migration step is safe", () => {
+    /**
+     * `deploy.sh` can apply migrations; it cannot tell whether they produce
+     * the schema the code expects. CI can: migrations are applied to an
+     * empty database and `prisma migrate diff --exit-code` must then find
+     * nothing.
+     *
+     * The mistake it catches is invisible locally. `prisma migrate dev`
+     * keeps the developer's own database correct, so a change to
+     * schema.prisma committed WITHOUT its migration passes every test on
+     * their machine and produces a schema the code cannot use the first
+     * time somebody runs `migrate deploy`.
+     */
+    const workflow = readRepoFile(".github/workflows/ci.yml").replace(/\r\n/g, "\n");
+    expect(workflow).toContain("prisma migrate diff");
+    expect(workflow).toContain("--exit-code");
+    const verify = workflow.slice(workflow.indexOf("\n  verify:"), workflow.indexOf("\n  e2e:"));
+    expect(verify, "the drift check belongs in the gate job, after the migrations are applied").toContain(
+      "prisma migrate diff",
+    );
+    expect(verify.indexOf("pnpm db:migrate")).toBeLessThan(verify.indexOf("prisma migrate diff"));
+  });
+
+  it("refuses to deploy during a live contest unless it is told to", () => {
+    const deploy = readRepoFile("scripts/ops/deploy.sh");
+    expect(deploy).toContain("activeContest");
+    expect(deploy).toContain("FORCE_DEPLOY");
+    expect(deploy, "the override has to announce itself in the log").toMatch(
+      /FORCE_DEPLOY=1: deploying DURING a live/,
+    );
+  });
+});
+
+/**
+ * Every variable the compose files hand a REC Code process is one that
+ * process actually reads (2026-10-27).
+ *
+ * This is the fence for a failure that cost nothing to write and would have
+ * cost a deployment: the compose files were drafted in Phase 10e against
+ * variable names nobody checked, so `compose.app.yml` set
+ * `TESTDATA_S3_ENDPOINT` while the app reads `S3_ENDPOINT`, passed an
+ * `AUTH_SECRET_FILE` for a variable this application has never had, and gave
+ * the scheduler the direct database URL under the pooled URL's name — which
+ * the scheduler refuses outside development. Each of those is a process that
+ * does not start, discovered on the night of the first real deploy.
+ *
+ * The compose files say "not run here" precisely because nothing has
+ * executed them; a static check is therefore the only check available, and
+ * it is a good one, because the names are the whole interface.
+ */
+describe("the compose files and the processes agree on variable names", () => {
+  /** Keys of a `const shape = {` / `export const workerEnvShape = {` block. */
+  function schemaKeys(rel: string, declaration: string): string[] {
+    const source = readRepoFile(rel);
+    const start = source.indexOf(declaration);
+    expect(start, `${rel}: no ${declaration}`).toBeGreaterThanOrEqual(0);
+    // The block ends at the first line that closes an object at column 0,
+    // written either way: `} as const;` or `};`.
+    const close = /^\}( as const)?;/m.exec(source.slice(start));
+    expect(close, `${rel}: ${declaration} is not closed at column 0`).not.toBeNull();
+    const body = source.slice(start, start + close!.index);
+    const keys = [...body.matchAll(/^ {2}([A-Z][A-Z0-9_]*):/gm)].map((m) => m[1]!);
+    expect(keys.length, `${rel}: no keys found in ${declaration}`).toBeGreaterThan(3);
+    return keys;
+  }
+
+  /** The `environment:` keys of one service in a compose file. */
+  function serviceEnv(rel: string, service: string): string[] {
+    const lines = readRepoFile(rel).replace(/\r\n/g, "\n").split("\n");
+    const at = lines.findIndex((line) => line === `  ${service}:`);
+    expect(at, `${rel}: no service ${service}`).toBeGreaterThanOrEqual(0);
+    const keys: string[] = [];
+    let inEnv = false;
+    for (const line of lines.slice(at + 1)) {
+      if (/^ {2}\S/.test(line)) break; // the next service
+      if (/^ {4}environment:\s*$/.test(line)) {
+        inEnv = true;
+        continue;
+      }
+      if (inEnv && /^ {4}\S/.test(line)) inEnv = false;
+      const match = inEnv ? /^ {6}([A-Z][A-Z0-9_]*):/.exec(line) : null;
+      if (match) keys.push(match[1]!);
+    }
+    expect(keys.length, `${rel}: service ${service} sets no environment`).toBeGreaterThan(2);
+    return keys;
+  }
+
+  /**
+   * Variables the runtime reads rather than our schemas: Next's own server
+   * listens on PORT. Anything else must be in a schema, or it is a typo with
+   * no effect.
+   */
+  const PLATFORM = new Set(["PORT", "NODE_OPTIONS", "TZ"]);
+
+  const PROCESSES = [
+    {
+      what: "the web app",
+      file: "deploy/compose.app.yml",
+      service: "web",
+      schema: () => schemaKeys("apps/web/src/lib/env.ts", "const shape = {"),
+    },
+    {
+      what: "the scheduler",
+      file: "deploy/compose.app.yml",
+      service: "scheduler",
+      schema: () => schemaKeys("apps/scheduler/src/config.ts", "const shape = {"),
+    },
+    {
+      what: "the judge worker",
+      file: "deploy/compose.judge.yml",
+      service: "judge-worker",
+      schema: () => schemaKeys("apps/judge-worker/src/config.ts", "export const workerEnvShape = {"),
+    },
+    {
+      what: "the SQL judge",
+      file: "deploy/compose.sql-judge.yml",
+      service: "sql-judge",
+      schema: () => schemaKeys("apps/sql-judge/src/config.ts", "export const sqlJudgeEnvShape = {"),
+    },
+  ] as const;
+
+  it.each(PROCESSES)("$what is given nothing it does not read", ({ file, service, schema }) => {
+    const known = new Set(schema());
+    const unknown = serviceEnv(file, service)
+      // KEY_FILE is the Docker-secret form of KEY (@recx/shared/env-file).
+      .map((key) => ({ key, base: key.replace(/_FILE$/, "") }))
+      .filter(({ base }) => !known.has(base) && !PLATFORM.has(base))
+      .map(({ key }) => key);
+    expect(unknown, `${file}: ${service} is handed variables it never reads`).toEqual([]);
+  });
+
+  it("gives the scheduler the direct URL under the name it requires", () => {
+    /**
+     * Not interchangeable, and the failure is total rather than subtle: the
+     * scheduler takes a session advisory lock and leases rows with SKIP
+     * LOCKED, so outside development its config REFUSES a missing
+     * DATABASE_URL_DIRECT rather than falling back to the pooled URL.
+     */
+    const scheduler = serviceEnv("deploy/compose.app.yml", "scheduler");
+    expect(scheduler.some((key) => key.replace(/_FILE$/, "") === "DATABASE_URL_DIRECT")).toBe(true);
+    expect(readRepoFile("apps/scheduler/src/config.ts")).toContain(
+      "is required outside development (the scheduler needs the direct, non-pooled URL)",
+    );
+  });
+
+  it("turns on the proxy trust that Caddy's X-Real-IP is there for", () => {
+    /**
+     * `src/lib/ip.ts` reads NO client address unless TRUST_PROXY is set,
+     * deliberately — a forwarding header is client-controlled unless
+     * something overwrites it. Caddy does overwrite it, so on this host the
+     * variable must be on, or every per-address rate limit is inert and
+     * every audit row loses its ipHash while looking perfectly healthy.
+     */
+    expect(serviceEnv("deploy/compose.app.yml", "web")).toContain("TRUST_PROXY");
+    expect(readRepoFile("deploy/compose.app.yml")).toMatch(/TRUST_PROXY:\s*"true"/);
+  });
+
+  it("passes every secret a process reads as a file, not as a value", () => {
+    /**
+     * The sibling of the no-secrets-in-the-repository test above: that one
+     * says a credential must not be written here, this one says the file
+     * form is actually wired up. Until `@recx/shared/env-file` existed,
+     * every `*_FILE` in these files was read by nobody.
+     */
+    const helper = readRepoFile("packages/shared/src/env-file.ts");
+    expect(helper).toContain("export function hydrateFileBackedSecrets");
+    for (const rel of [
+      "apps/web/src/lib/env.ts",
+      "apps/scheduler/src/config.ts",
+      "apps/judge-worker/src/config.ts",
+      // The SQL judge reads three this way: its node token and both of the
+      // sandbox cluster's connection URLs, each of which has a password in it.
+      "apps/sql-judge/src/config.ts",
+    ]) {
+      expect(readRepoFile(rel), `${rel} ignores *_FILE secrets`).toContain("hydrateFileBackedSecrets");
+    }
+    /**
+     * And the database URL is resolved where Prisma is CONSTRUCTED, not
+     * only where env() is read: Prisma takes DATABASE_URL from the
+     * environment itself, and `src/lib/db-client.ts` builds the client the
+     * first time any server module touches `db`, which can happen before
+     * anything has called env().
+     *
+     * It lives there rather than in a Next start-up hook because
+     * `src/middleware.ts` exists, so Next compiles `instrumentation.ts` for
+     * the edge runtime too, where `node:fs` cannot be bundled at all
+     * ("UnhandledSchemeError"). The one place that constructs a client is a
+     * better place for the guarantee than a hook that has to dodge a
+     * bundler.
+     */
+    const dbClient = readRepoFile("apps/web/src/lib/db-client.ts");
+    expect(dbClient).toContain("hydrateFileBackedSecrets");
+    expect(dbClient.indexOf("hydrateFileBackedSecrets([")).toBeLessThan(dbClient.indexOf("createPrismaClient({"));
+  });
+});
+
+describe("the exam lab browser policy (Phase 11c)", () => {
+  /**
+   * `deploy/lab-policy/` is `docs/PROCTORING.md` §4's first control — "a
+   * supervised lab on college-managed machines" — as files somebody can
+   * install. It answers the question §8 of that document asks: a page
+   * cannot require a private window, cannot detect one, and cannot see
+   * extensions at all, so "no extensions" is available to the owner of the
+   * machine and to nobody else.
+   *
+   * Like the compose files above, this is an artefact nobody here has
+   * started: there is one laptop and no lab. That is the reason it needs a
+   * fence. Two files have to say the same thing in two syntaxes, and the
+   * ways they drift are exactly the ways no reviewer catches by eye — a key
+   * set on Linux and forgotten on Windows, or a placeholder host that
+   * resolves somewhere real.
+   */
+  const POLICY_DIR = "deploy/lab-policy";
+  const json = JSON.parse(readRepoFile(`${POLICY_DIR}/chrome-policy.json`)) as Record<string, unknown>;
+  const reg = readRepoFile(`${POLICY_DIR}/recx-exam-policy.reg`);
+  const readme = readRepoFile(`${POLICY_DIR}/README.md`);
+
+  it("disables private windows rather than requiring them, and says why", () => {
+    /**
+     * 1 is "disabled"; 2 would be "forced". Forcing it is the instinct and
+     * it is the wrong way round: what the idea wants is a clean browser for
+     * the next candidate, which `ClearBrowsingDataOnExitList` does without
+     * private mode's own hazard — a window closed by accident takes the
+     * candidate's session with it, mid-sitting, against a running clock.
+     */
+    expect(json.IncognitoModeAvailability).toBe(1);
+    expect(json.ClearBrowsingDataOnExitList).toEqual(
+      expect.arrayContaining(["cookies_and_other_site_data", "password_signin"]),
+    );
+  });
+
+  it("blocks every extension, and allows none by default", () => {
+    expect(json.ExtensionInstallBlocklist).toEqual(["*"]);
+    // An exception is a decision somebody signs for, not a default.
+    expect(json.ExtensionInstallAllowlist).toEqual([]);
+    // SPEC §5: the platform must be fully functional with no college extension.
+    expect(json.ExtensionInstallForcelist).toEqual([]);
+  });
+
+  it("closes the sync hole that would undo the blocklist", () => {
+    /**
+     * The part that is easy to miss: without these two, one Google sign-in
+     * reinstalls the candidate's own extension set on arrival and the
+     * blocklist above was theatre.
+     */
+    expect(json.BrowserSignin).toBe(0);
+    expect(json.SyncDisabled).toBe(true);
+    // And no unmanaged profile to escape into.
+    expect(json.BrowserGuestModeEnabled).toBe(false);
+    expect(json.BrowserAddPersonEnabled).toBe(false);
+  });
+
+  it("leaves the invigilator a way to verify all of this", () => {
+    // A blocklist of "*" covers chrome:// pages too, and chrome://policy is
+    // the whole of the per-hall check in RUNBOOK §2.14.
+    expect(json.URLBlocklist).toEqual(["*"]);
+    expect(json.URLAllowlist).toEqual(expect.arrayContaining(["chrome://policy"]));
+  });
+
+  it("ships a host that cannot resolve, so a forgotten placeholder fails loudly", () => {
+    const urls = JSON.stringify(json).match(/https?:\/\/[^"]+/g) ?? [];
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) {
+      expect(url, "use a .invalid placeholder: a real-looking host would be allowed by accident").toMatch(
+        /^https:\/\/[^/]*\.invalid(\/|$)/,
+      );
+    }
+    expect(reg).not.toMatch(/https?:\/\/(?![^"\s]*\.invalid)/);
+  });
+
+  it("one allowlisted host is enough, because the app is same-origin", () => {
+    /**
+     * The allowlist is sound only while the app loads nothing from
+     * elsewhere. The content security policy is where that is true or
+     * false, so read it rather than assume it: if a CDN ever appears in a
+     * directive, this policy silently stops the exam from loading.
+     */
+    const csp = readRepoFile("apps/web/src/middleware.ts");
+    const builder = csp.slice(csp.indexOf("export function buildCsp"));
+    const body = builder.slice(0, builder.indexOf("\n}"));
+    expect(body).toContain("default-src 'self'");
+    expect(body, "an external host in the CSP means URLAllowlist needs it too").not.toMatch(
+      /`[a-z-]+-src [^`]*https:\/\//,
+    );
+  });
+
+  it("says the same thing on Windows as on Linux", () => {
+    const missing: string[] = [];
+    for (const [key, value] of Object.entries(json)) {
+      if (Array.isArray(value)) {
+        // A list is a subkey; an empty one has no subkey to write.
+        if (value.length > 0 && !reg.includes(`\\Google\\Chrome\\${key}]`)) missing.push(key);
+        continue;
+      }
+      const expected =
+        typeof value === "boolean"
+          ? `"${key}"=dword:0000000${value ? 1 : 0}`
+          : typeof value === "number"
+            ? `"${key}"=dword:${value.toString(16).padStart(8, "0")}`
+            : `"${key}"="${value as string}"`;
+      if (!reg.includes(expected)) missing.push(`${key} (${expected})`);
+    }
+    expect(missing, "deploy/lab-policy/recx-exam-policy.reg has drifted from chrome-policy.json").toEqual([]);
+  });
+
+  it("explains every key it sets", () => {
+    // A policy added without a sentence about it is a policy nobody can
+    // review, and this file is read by whoever locks down the lab.
+    const unexplained = Object.keys(json).filter((key) => !readme.includes(key));
+    expect(unexplained, "document it in deploy/lab-policy/README.md").toEqual([]);
+  });
+
+  it("claims nothing about the sitting", () => {
+    // The policy raises the cost of the easy routes on one machine. The
+    // phone on the candidate's lap is untouched by all of it, and the
+    // README has to keep saying so.
+    expect(readme).toMatch(/phone/i);
+    expect(readme).toMatch(/does not claim|Nothing here claims/i);
+  });
+});
+
+describe("the application image (Phase 11e)", () => {
+  /**
+   * `deploy/compose.app.yml` took `RECX_WEB_IMAGE` by digest for a whole
+   * phase and nothing built it. Now something does, and the two have to keep
+   * agreeing: the compose file names the commands, the Dockerfile decides
+   * where those paths exist, and nobody runs either here.
+   */
+  const dockerfile = readRepoFile("Dockerfile");
+  const dockerignore = readRepoFile(".dockerignore");
+  const app = readRepoFile("deploy/compose.app.yml");
+
+  it("builds every command the compose file runs", () => {
+    // ["node", "apps/web/server.js"] → the image must put that path under
+    // its WORKDIR. The standalone tree IS the WORKDIR, so apps/web/server.js
+    // arrives with it; the bundles are copied in beside it.
+    const commands = [...app.matchAll(/command:\s*\["node",\s*"([^"]+)"\]/g)].map((m) => m[1]!);
+    expect(commands).toContain("apps/web/server.js");
+    expect(commands).toContain("apps/scheduler/dist/main.js");
+    expect(dockerfile).toMatch(/COPY --from=build[^\n]*\/\.next\/standalone\/ \.\//);
+    for (const command of commands) {
+      const dir = command.replace(/\/[^/]+$/, "");
+      if (dir === "apps/web") continue; // part of the standalone tree itself
+      expect(dockerfile, `nothing in the Dockerfile creates ${dir} for "${command}"`).toContain(`./${dir}`);
+    }
+  });
+
+  it("copies what tracing leaves behind", () => {
+    // `next build` does not put either of these in .next/standalone, and the
+    // server reads both from disk at request time.
+    expect(dockerfile).toContain("/.next/static ./apps/web/.next/static");
+    expect(dockerfile).toContain("/public ./apps/web/public");
+  });
+
+  it("installs the way the gates do, and hoists so the tree can be copied", () => {
+    expect(dockerfile).toContain("pnpm@9.15.9");
+    expect(dockerfile).toContain("--frozen-lockfile");
+    /**
+     * The flag that makes the image work at all: pnpm's default symlink farm
+     * uses ABSOLUTE links into the build directory, which `next build` copies
+     * into the standalone output as links. Copied to the runtime stage they
+     * point at nothing, and the first require fails on styled-jsx. Verified
+     * by assembling the tree and running both entrypoints (docs/RUNBOOK.md
+     * §2.15, docs/OPEN-QUESTIONS.md).
+     */
+    expect(dockerfile).toContain("node-linker=hoisted");
+  });
+
+  it("carries no toolchain: nothing in it can run student code", () => {
+    const forbidden = [/\bgcc\b/, /\bg\+\+\b/, /\bbuild-essential\b/, /\bpython3?\b/, /\bopenjdk\b/, /\bisolate\b/i, /\bgolang\b/];
+    const installs = dockerfile
+      .split("\n")
+      .filter((line) => /apt-get install|apk add/.test(line))
+      .join("\n");
+    for (const pattern of forbidden) {
+      expect(installs, `the judge host supplies toolchains (infra/judge), never this image`).not.toMatch(pattern);
+    }
+  });
+
+  it("runs as a non-root user and pins its base in one place", () => {
+    expect(dockerfile).toMatch(/^USER node$/m);
+    expect(dockerfile).toMatch(/^ARG NODE_IMAGE=/m);
+    // Every FROM uses that ARG, so there is one line to change (and one to
+    // pin by digest in CI).
+    const froms = [...dockerfile.matchAll(/^FROM (\S+)/gm)].map((m) => m[1]!);
+    expect(froms.length).toBeGreaterThan(1);
+    for (const from of froms) {
+      expect(from === "${NODE_IMAGE}" || from === "base").toBe(true);
+    }
+  });
+
+
+  it("gives each bundle the dependencies the web app does not pull in", () => {
+    // The standalone tree's modules are what the WEB imports; pino and
+    // nodemailer are not among them, so the scheduler needs its own.
+    expect(dockerfile).toMatch(/pnpm deploy --filter @recx\/scheduler --prod/);
+    expect(dockerfile).toContain("/out/scheduler/node_modules ./apps/scheduler/node_modules");
+    // And its package.json, which is how Node knows the bundle is ESM.
+    expect(dockerfile).toContain("/out/scheduler/package.json ./apps/scheduler/package.json");
+  });
+
+  it("replaces the stub Prisma client pnpm deploy leaves behind", () => {
+    /**
+     * `pnpm deploy` re-runs the db package's postinstall in the new tree and
+     * writes a 40 KB stub where the generated client should be: Prisma.sql
+     * and Prisma.raw are missing, and the scheduler dies on its first raw
+     * query with "Prisma2.raw is not a function". Found by running the
+     * assembled tree (docs/OPEN-QUESTIONS.md).
+     */
+    expect(dockerfile).toMatch(/cp -r node_modules\/\.prisma \/out\/scheduler\/node_modules\/\.prisma/);
+  });
+
+  it("cannot bake a credential into a layer", () => {
+    // The build context never contains one...
+    expect(dockerignore).toMatch(/^\.env$/m);
+    expect(dockerignore).toMatch(/^\*\*\/\.env\.\*$/m);
+    // ...and nothing copies one even by name.
+    expect(dockerfile).not.toMatch(/COPY[^\n]*\.env/);
+    // Secrets arrive as files at run time, which is the compose file's job.
+    expect(app).toContain("DATABASE_URL_FILE");
+  });
+});

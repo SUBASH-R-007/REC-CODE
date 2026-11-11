@@ -1,0 +1,208 @@
+import { csvCell, formatMarks } from "@recx/shared";
+import { audit } from "@/lib/audit";
+import { requireAdminScopeAction } from "@/lib/auth/scope";
+import { isEmptyScope } from "@/lib/auth/scope-where";
+import { AppError } from "@/lib/errors";
+import { db } from "@/lib/db";
+import { getAssessmentAttendance, getAssessmentResults } from "@/server/queries/admin-assessment-results";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/admin/assessments/[id]/results — the marks as a CSV (Phase 12y.4).
+ *
+ * A department marks a paper and then has to do something with the marks:
+ * paste them into the university's own system, mail them to a head of
+ * department, keep them with the question paper. Until this route the only
+ * way off the screen was the clipboard.
+ *
+ * Three things make it safe to hand out:
+ *
+ *   - **Scoped.** The rows are `getAssessmentResults(scope, id)`, the same
+ *     read the page uses, so an ADMIN with one department exports one
+ *     department. A file is the easiest thing in the world to forward, and
+ *     a scope that held on screen and not in the export would be worse
+ *     than no scope at all.
+ *   - **Audited before a byte is written.** "Who took the marks, and when"
+ *     is the question this record answers, and a download that failed
+ *     halfway still happened.
+ *   - **Provenance in the file.** The first line names the paper, the
+ *     person who pulled it and the moment, the way the placement export
+ *     does — so a spreadsheet found on a shared drive in March can still
+ *     say where it came from.
+ *
+ * Since 13m.2 it also carries the people who did NOT sit it, with
+ * `sat=no` and no marks. One file, because the question a department
+ * asks of this spreadsheet is "how did the cohort do", and a cohort
+ * includes the forty who never arrived — exporting only the candidates
+ * who turned up produces a column of marks whose denominator is
+ * invisible, which is how an absence quietly becomes a pass rate.
+ *
+ * What it does NOT carry: any integrity band, score or verdict. Those are
+ * `/admin/integrity`'s, where a person decides with the reasoning beside
+ * them; in a spreadsheet column next to a mark they would be read as part
+ * of the mark. The watched COUNTS are here, because they are facts about
+ * the sitting and an examiner asked for them.
+ */
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }): Promise<Response> {
+  let actorId: string;
+  let actorLabel: string;
+  let scope: Awaited<ReturnType<typeof requireAdminScopeAction>>["scope"];
+  try {
+    const guard = await requireAdminScopeAction();
+    actorId = guard.user.id;
+    // A roll number and a name, not a cuid: the provenance line is read by
+    // a person six months later, on a spreadsheet found on a shared drive.
+    actorLabel = `${guard.user.collegeId} (${guard.user.firstName} ${guard.user.lastName})`.trim();
+    scope = guard.scope;
+  } catch (error) {
+    if (error instanceof AppError) {
+      return Response.json({ error: error.message }, { status: error.status, headers: { "cache-control": "no-store" } });
+    }
+    throw error;
+  }
+
+  const { id } = await context.params;
+  const paper = await db.assessment.findUnique({ where: { id }, select: { slug: true, title: true } });
+  if (!paper) return Response.json({ error: "That assessment was not found." }, { status: 404 });
+
+  if (isEmptyScope(scope)) {
+    return Response.json(
+      { error: "You have no student scope, so there is nothing to export. Ask a super-admin for a grant." },
+      { status: 403 },
+    );
+  }
+
+  const [results, attendance] = await Promise.all([
+    getAssessmentResults(scope, id),
+    getAssessmentAttendance(scope, id),
+  ]);
+  const absent = attendance?.absent ?? [];
+
+  await audit({
+    actorId,
+    action: "assessment.results.exported",
+    entityType: "Assessment",
+    entityId: id,
+    sensitivity: "SENSITIVE",
+    metadata: {
+      slug: paper.slug,
+      rows: results.rows.length,
+      absent: absent.length,
+      maxPoints: results.maxPoints,
+    },
+  });
+
+  const at = new Date().toISOString();
+  const header = [
+    "roll_number",
+    "name",
+    "department",
+    "batch",
+    // Phase 13m.2: "no" on a row for somebody the paper was set for who
+    // never opened a sitting. Early, so a spreadsheet sorted on it puts
+    // the absences together.
+    "sat",
+    "attempt",
+    "status",
+    "started_at",
+    "submitted_at",
+    "hall",
+    "seat",
+    "marks",
+    "out_of",
+    "percent",
+    "provisional",
+    "mcq_right",
+    "mcq_wrong",
+    "mcq_blank",
+    "code_accepted",
+    "code_partial",
+    "code_rejected",
+    "code_blank",
+    "code_open",
+    // Phase 13a: which language(s) the programs were answered in. A paper
+    // may accept several and a candidate picks per question, so a column
+    // of marks with no language beside it cannot be read.
+    "languages",
+    "tab_switches",
+    "fullscreen_exits",
+    "pastes",
+    "longest_gap_seconds",
+  ];
+
+  const lines = [
+    // Provenance first, as the placement export does: a file on a shared
+    // drive in March can still say where it came from.
+    `# REC Code · ${paper.title} (${paper.slug}) · exported ${at} by ${actorLabel} · ${results.rows.length} sat, ${absent.length} did not, in your scope`,
+    header.join(","),
+    ...results.rows.map((row) =>
+      [
+        row.collegeId,
+        row.name,
+        row.departmentCode ?? "",
+        row.batchYear ?? "",
+        "yes",
+        row.attemptNumber,
+        row.status,
+        row.startedAt.toISOString(),
+        row.submittedAt?.toISOString() ?? "",
+        row.hall ?? "",
+        row.seatLabel ?? "",
+        row.result ? formatMarks(row.result.points) : "",
+        row.result ? formatMarks(row.result.maxPoints) : "",
+        row.result?.percent === null || row.result === null ? "" : Math.round(row.result.percent),
+        row.result === null ? "" : row.result.provisional ? "yes" : "no",
+        row.result?.mcq.correct ?? "",
+        row.result?.mcq.wrong ?? "",
+        row.result?.mcq.blank ?? "",
+        row.result?.coding.accepted ?? "",
+        row.result?.coding.partial ?? "",
+        row.result?.coding.rejected ?? "",
+        row.result?.coding.blank ?? "",
+        row.result === null ? "" : row.result.coding.pending + row.result.coding.unjudged,
+        // The toolchain keys, not the labels: a CSV is read by a machine as
+        // often as by a person, and `py312` is the value every other table
+        // in this product joins on.
+        row.languages.map((language) => language.key).join(" "),
+        row.watched.focusLosses,
+        row.watched.fullscreenExits,
+        row.watched.pastes,
+        row.watched.longestGapSeconds,
+      ]
+        .map(csvCell)
+        .join(","),
+    ),
+    /**
+     * Then the absences, in roll-number order, with every mark column
+     * empty rather than zero. A zero is a mark somebody earned; an
+     * absence is not a mark at all, and a spreadsheet that averages the
+     * column must not be handed a nought for a candidate who was never
+     * in the room.
+     */
+    ...absent.map((row) =>
+      [
+        row.collegeId,
+        row.name,
+        row.departmentCode ?? "",
+        row.batchYear ?? "",
+        "no",
+        "",
+        "ABSENT",
+        ...Array.from({ length: header.length - 7 }, () => ""),
+      ]
+        .map(csvCell)
+        .join(","),
+    ),
+  ];
+
+  const filename = `recx-results-${paper.slug}-${at.slice(0, 10)}.csv`;
+  return new Response(`${lines.join("\r\n")}\r\n`, {
+    headers: {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`,
+      "cache-control": "no-store",
+    },
+  });
+}

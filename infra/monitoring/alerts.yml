@@ -1,0 +1,104 @@
+# GENERATED FILE — do not edit.
+#
+# Rendered from packages/shared/src/alerts.ts, where each rule is written
+# with the number it is asserted against and the SPEC §10 phrase it
+# implements. Regenerate with:
+#
+#   RECX_UPDATE_DOCS=1 pnpm --filter @recx/shared exec vitest run test/monitoring-files.test.ts
+#
+# That test fails if this file and the rule list disagree.
+
+groups:
+  - name: recx
+    interval: 30s
+    rules:
+      - alert: JudgeQueueBacklog
+        expr: 'max by (queue) (judge_queue_depth) > 200'
+        for: 2m
+        labels:
+          severity: critical
+          spec: 'queue depth >200 for 2 min'
+        annotations:
+          summary: 'A judge lane has more than 200 jobs waiting'
+          description: 'Students are queued behind a backlog this platform cannot clear at its current capacity. Either a worker has stopped taking jobs or a contest is larger than the hosts provisioned for it.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgequeuebacklog'
+      - alert: JudgeEngineBacklog
+        expr: 'max by (queue, engine) (judge_engine_queue_depth) > 100'
+        for: 5m
+        labels:
+          severity: warning
+          spec: 'queue depth >200 for 2 min (the per-engine half of it, Phase 12k)'
+        annotations:
+          summary: 'One judging engine has more than 100 jobs waiting on a lane'
+          description: 'The two engines fail separately: the lane total can look fine while one engine''s queue is not being drained at all. Read the Engines table on /admin/judge first — "nodes online" for that engine is the usual answer, and for the SQL engine it is usually the sandbox cluster rather than the judge process.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgeenginebacklog'
+      - alert: JudgeOldestJobStale
+        expr: 'max by (queue) (judge_oldest_job_age_seconds) > 60'
+        for: 1m
+        labels:
+          severity: critical
+          spec: 'oldest job >60s'
+        annotations:
+          summary: 'The oldest job in a judge lane has waited more than 60 seconds'
+          description: 'Nothing is dispatching this lane. Check the judge nodes'' heartbeats and lane restrictions before capacity: a stale lane with an empty-looking queue is usually a node that stopped claiming, not a load problem.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgeoldestjobstale'
+      - alert: JudgeWorkerHeartbeatStale
+        expr: 'max by (worker) (judge_worker_heartbeat_age_seconds) > 90'
+        for: 1m
+        labels:
+          severity: critical
+          spec: 'worker heartbeat >90s'
+        annotations:
+          summary: 'A judge node has not checked in for more than 90 seconds'
+          description: 'The node is down, partitioned, or wedged. Its leases expire and the reconciler re-enqueues what it held, so no submission is lost; what is lost is capacity. Reported by the scheduler from JudgeNode, never self-reported, so a dead node''s series rises rather than disappearing.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgeworkerheartbeatstale'
+      - alert: JudgeInternalErrorRate
+        expr: 'sum(rate(judge_verdict_total{verdict="IE"}[5m])) / sum(rate(judge_verdict_total[5m])) > 0.02'
+        for: 5m
+        labels:
+          severity: critical
+          spec: 'INTERNAL_ERROR rate >2% over 5 min'
+        annotations:
+          summary: 'More than 2% of verdicts are INTERNAL_ERROR'
+          description: 'The canary for a broken compiler image or a cgroup misconfiguration after a host upgrade. Check judge_sandbox_init_failures_total on each worker and the node self-check results; a node whose self-check fails quarantines itself, so a rising IE rate with every node still ONLINE points at the image rather than the kernel.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#judgeinternalerrorrate'
+      - alert: HostDiskNearlyFull
+        expr: 'max by (instance, mountpoint) (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|overlay"}) > 0.8'
+        for: 10m
+        labels:
+          severity: warning
+          spec: 'disk >80%'
+        annotations:
+          summary: 'A host''s filesystem is more than 80% full'
+          description: '80% is act-today, not wake-up, which is why this is a warning. On the database host the first casualty is WAL archiving; on a judge host it is the blob cache, which evicts itself but whose ceiling (RECX_CACHE_MAX_BYTES) may be set above what the disk can give.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#hostdisknearlyfull'
+      - alert: PostgresConnectionsHigh
+        expr: 'sum(pg_stat_database_numbackends) / max(pg_settings_max_connections) > 0.8'
+        for: 5m
+        labels:
+          severity: warning
+          spec: 'DB connections >80%'
+        annotations:
+          summary: 'More than 80% of Postgres connections are in use'
+          description: 'The next connection to be refused belongs to a student mid-submission. The web app runs a bounded pool, so a number this high usually means something outside it — a migration, a psql session left open, or the scheduler''s single connection multiplied by a restart loop.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#postgresconnectionshigh'
+      - alert: FailedLoginBurst
+        expr: 'sum(rate(auth_login_failures_total[1m])) * 60 > 100'
+        for: 2m
+        labels:
+          severity: warning
+          spec: 'failed logins >100/min'
+        annotations:
+          summary: 'More than 100 sign-ins are being refused every minute'
+          description: 'Credential stuffing, or a broken integration retrying. The rate limiter is already refusing these — per account and per hashed IP — so this is a signal, not an outage; it counts rate-limited attempts too, because a run against one account shows up as a handful of credential failures and then hundreds of refusals.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#failedloginburst'
+      - alert: SubmissionLatencyP95High
+        expr: 'histogram_quantile(0.95, sum by (le) (rate(submission_e2e_latency_seconds_bucket[5m]))) > 30'
+        for: 5m
+        labels:
+          severity: critical
+          spec: 'e2e p95 >30s'
+        annotations:
+          summary: '95th-percentile submit-to-verdict is over 30 seconds'
+          description: 'The number a student experiences, measured where their wait ends rather than where the judge''s work ends. Read judge_queue_depth and judge_run_duration_seconds next: a high p95 with short run durations is queueing, and a high p95 with long run durations is a problem''s limits or a slow host.'
+          runbook_url: 'https://github.com/SUBASH-R-007/REC-CODE/blob/main/docs/RUNBOOK.md#submissionlatencyp95high'

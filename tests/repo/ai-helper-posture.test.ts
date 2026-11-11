@@ -1,0 +1,270 @@
+import { describe, expect, it } from "vitest";
+import { CODE_EXTENSIONS, findFiles, isTestPath, lexSource, lineAt, readRepoFile } from "./support/repo";
+
+/**
+ * The AI helper is a PRACTICE tool, and the promise that it is one has to
+ * survive people who have never read this file.
+ *
+ * Three things are fenced here, each because it is the thing that would
+ * quietly stop being true:
+ *
+ *   1. **Nothing in the exam or contest trees can reach the assistant.** A
+ *      candidate was told nobody is helping them; a tab in the arena that
+ *      imports `lib/ai/*` or the assistant components breaks that, and it
+ *      breaks it in a way no test of behaviour would notice until somebody
+ *      sat an exam.
+ *
+ *   2. **The provider is called from exactly one module.** `lib/ai/provider.ts`
+ *      is the one place a student's code leaves this server. A second
+ *      caller — a route handler, a worker, a "quick" admin tool — is a
+ *      second place to audit, and nobody would know to audit it.
+ *
+ *   3. **The API key is never read outside the env schema and the provider.**
+ *      A key read in a page, an action or a component is a key one render
+ *      away from the browser.
+ *
+ * The practice-only RULE itself lives in `aiHelperAccess()` (@recx/shared)
+ * and is enforced through the help chokepoint; this file fences the shape
+ * that keeps the rule reachable from one place.
+ */
+
+/** Trees that serve a sitting nobody is supposed to be helped in. */
+const SEALED = [
+  "apps/web/src/app/(exam)",
+  "apps/web/src/components/exam",
+  "apps/web/src/app/(student)/contests",
+  "apps/web/src/components/contests",
+  "apps/web/src/lib/exam",
+  "apps/web/src/lib/contests",
+  "apps/judge-worker/src",
+];
+
+/** Anything that is, or reaches, the assistant. */
+const AI_MODULE = /(^|[/@])(lib\/ai\/|components\/help\/assistant|actions\/ai-helper|actions\/super-ai)/;
+
+interface Violation {
+  readonly file: string;
+  readonly line: number;
+  readonly detail: string;
+}
+
+/** Every module specifier a file imports (static, re-export, dynamic, require). */
+function importSpecifiers(code: string): Array<{ spec: string; index: number }> {
+  const out: Array<{ spec: string; index: number }> = [];
+  const patterns = [
+    /\bimport\s+[^;'"]*?from\s*["']([^"']+)["']/g,
+    /\bimport\s*["']([^"']+)["']/g,
+    /\bexport\s+[^;'"]*?from\s*["']([^"']+)["']/g,
+    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+    /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of code.matchAll(pattern)) out.push({ spec: match[1]!, index: match.index ?? 0 });
+  }
+  return out;
+}
+
+export function aiImports(file: string, source: string): Violation[] {
+  const { code } = lexSource(source);
+  return importSpecifiers(code)
+    .filter(({ spec }) => AI_MODULE.test(spec))
+    .map(({ spec, index }) => ({ file, line: lineAt(code, index), detail: spec }));
+}
+
+describe("detector self-test", () => {
+  it.each([
+    ['import { getAiRuntime } from "@/lib/ai/settings";'],
+    ['import { AssistantPanel } from "@/components/help/assistant-panel";'],
+    ['const m = await import("@/lib/ai/ask");'],
+    ['export { askAiHelper } from "@/server/actions/ai-helper";'],
+  ])("flags %s", (snippet) => {
+    expect(aiImports("x.ts", snippet)).toHaveLength(1);
+  });
+
+  it.each([
+    ['import { getHelpState } from "@/lib/help/access";'],
+    ['// import { askProvider } from "@/lib/ai/provider";'],
+    ['import { aiSomething } from "@/lib/aircraft";'],
+  ])("ignores %s", (snippet) => {
+    expect(aiImports("x.ts", snippet)).toEqual([]);
+  });
+});
+
+describe("the AI helper cannot be reached from a proctored or rated sitting", () => {
+  const files = findFiles({ under: SEALED, extensions: [...CODE_EXTENSIONS], exclude: isTestPath });
+
+  it("scans the sealed trees (sanity)", () => {
+    expect(files.length).toBeGreaterThan(40);
+    expect(files.some((f) => f.startsWith("apps/web/src/app/(exam)"))).toBe(true);
+    expect(files.some((f) => f.startsWith("apps/web/src/components/exam"))).toBe(true);
+  });
+
+  it("imports nothing from the assistant", () => {
+    const found = files.flatMap((f) => aiImports(f, readRepoFile(f))).map((v) => `${v.file}:${v.line}  ${v.detail}`);
+    expect(found).toEqual([]);
+  });
+});
+
+describe("the provider has exactly two callers, and one of them carries nothing", () => {
+  const PROVIDER = "apps/web/src/lib/ai/provider.ts";
+  /** The student's question. The only path that may carry a student's work. */
+  const CALLER = "apps/web/src/lib/ai/ask.ts";
+  /**
+   * The super-admin's reachability check (Phase 15g). A free-text model id
+   * is only a kindness if it can be tried before five thousand students
+   * meet it, so the settings page may ask a model one FIXED question — and
+   * the tests below hold it to exactly that, because a second caller of
+   * this module is the one place a second way to send student code could
+   * appear.
+   */
+  const PROBE = "apps/web/src/server/actions/super-ai.ts";
+  const files = findFiles({ under: ["apps", "packages", "scripts"], extensions: [...CODE_EXTENSIONS], exclude: isTestPath });
+
+  it("is imported only by the student's path and the super-admin's check", () => {
+    const importers = files.filter((f) => {
+      if (f === PROVIDER) return false;
+      const { code } = lexSource(readRepoFile(f));
+      return importSpecifiers(code).some(({ spec }) => /(^|[/@])lib\/ai\/provider$/.test(spec));
+    });
+    expect([...importers].sort()).toEqual([CALLER, PROBE].sort());
+  });
+
+  it("the check sends the two fixed strings and cannot reach a real prompt", () => {
+    const probe = readRepoFile(PROBE);
+    const { code } = lexSource(probe);
+    // What it sends.
+    expect(code).toContain("AI_PROBE_SYSTEM");
+    expect(code).toContain("AI_PROBE_PROMPT");
+    // And what it has no way of sending: the builder, the student's draft,
+    // or the module that puts the two together.
+    for (const forbidden of ["buildAiPrompt", "codeDraft", "loadMaterial", "aiAssist"]) {
+      expect(code, forbidden).not.toContain(forbidden);
+    }
+    expect(importSpecifiers(code).map((i) => i.spec)).not.toContain("@/lib/ai/ask");
+  });
+
+  it("the two fixed strings interpolate nothing", () => {
+    // A template hole in either of them would be a way to smuggle a
+    // student's code into a path that is exempt from every check above.
+    const shared = readRepoFile("packages/shared/src/ai-helper.ts");
+    const section = shared.slice(shared.indexOf("export const AI_PROBE_SYSTEM"), shared.indexOf("AI_PROBE_REPLY_CHARS"));
+    expect(section).toContain("AI_PROBE_PROMPT");
+    expect(section).not.toContain("${");
+    expect(section).not.toContain("`");
+  });
+
+  it("is the only module that posts to an AI endpoint", () => {
+    const offenders = files
+      .filter((f) => f !== PROVIDER)
+      .flatMap((f) => {
+        const { strings } = lexSource(readRepoFile(f));
+        return strings
+          .filter((s) => /api\.anthropic\.com|\/v1\/messages|chat\/completions/.test(s.body))
+          .map((s) => `${f}:${s.start}`);
+      });
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("the API key stays in the environment", () => {
+  /** Where it is declared, and the one place its VALUE is used. */
+  const ALLOWED = new Set(["apps/web/src/lib/env.ts", "apps/web/src/lib/ai/provider.ts"]);
+  /**
+   * May ask WHETHER a key is set, and nothing more. Both the super-admin
+   * page and the practice page need that much in order to hide the
+   * assistant on a deployment that has no key, rather than offer a button
+   * that fails at the student.
+   */
+  const PRESENCE_ONLY = new Set(["apps/web/src/lib/ai/settings.ts"]);
+  /**
+   * Phase 12k. The SQL judge names the key in order to REFUSE to start if
+   * it is in its environment — the opposite of reading it. It is listed
+   * here rather than exempted silently, and the test below holds it to
+   * naming and never reading.
+   */
+  const REFUSES = new Set(["apps/sql-judge/src/config.ts"]);
+  const files = findFiles({ under: ["apps", "packages", "scripts"], extensions: [...CODE_EXTENSIONS], exclude: isTestPath });
+
+  it("AI_API_KEY is read only where it is declared and where it is sent", () => {
+    const offenders = files
+      .filter((f) => !ALLOWED.has(f) && !PRESENCE_ONLY.has(f) && !REFUSES.has(f))
+      .flatMap((f) => {
+        const { code } = lexSource(readRepoFile(f));
+        return [...code.matchAll(/\bAI_API_KEY\b/g)].map((m) => `${f}:${lineAt(code, m.index)}`);
+      });
+    expect(offenders).toEqual([]);
+  });
+
+  it("a file that refuses the key never reads it", () => {
+    for (const f of REFUSES) {
+      const { code } = lexSource(readRepoFile(f));
+      expect(code, f).toContain("AI_API_KEY");
+      // Named as a string in a list of keys to refuse, never dereferenced.
+      expect(code, f).not.toMatch(/process\.env\.AI_API_KEY|env\.AI_API_KEY|env\[["']AI_API_KEY/);
+      expect(code, f).toMatch(/FORBIDDEN_ENV_KEYS/);
+    }
+  });
+
+  it("a presence-only file never touches the value", () => {
+    for (const f of PRESENCE_ONLY) {
+      const { code } = lexSource(readRepoFile(f));
+      const mentions = [...code.matchAll(/.{0,16}\bAI_API_KEY\b/g)];
+      expect(mentions.length, f).toBeGreaterThan(0);
+      for (const match of mentions) {
+        // Every mention negates it; none reads what it says.
+        expect(match[0], `${f}:${lineAt(code, match.index)}`).toMatch(/!\s*[\w.]*AI_API_KEY$/);
+      }
+    }
+  });
+
+  it("each allowed file really mentions it (the allow-list stays honest)", () => {
+    for (const f of ALLOWED) expect(readRepoFile(f), f).toContain("AI_API_KEY");
+  });
+});
+
+describe("an answer is checked rather than trusted", () => {
+  /**
+   * Phase 15i. "Never a complete solution" is rule 1 of the system prompt,
+   * and a prompt is a request. The ASSISTED rule, the XP it pays and every
+   * readiness number built on unassisted solves rest on the assistant not
+   * finishing the work — so the one thing that must not quietly come back
+   * is the raw text going straight into the record and the panel.
+   */
+  it("the student's path trims the answer before it is stored or shown", () => {
+    const ask = readRepoFile("apps/web/src/lib/ai/ask.ts");
+    expect(ask).toContain("trimOversizedCode");
+    // Neither the row nor the HTML may be built from what arrived.
+    expect(ask).not.toMatch(/answer:\s*completion\.text/);
+    expect(ask).not.toMatch(/renderUntrustedMarkdown\(\s*completion\.text\s*\)/);
+  });
+
+  it("the record and the student see the same text", () => {
+    // One trim, used twice: an answer stored in a form nobody saw would
+    // make the append-only record a record of something else.
+    const ask = readRepoFile("apps/web/src/lib/ai/ask.ts");
+    expect(ask).toMatch(/const answer = trimOversizedCode\(completion\.text\)/);
+    expect(ask).toMatch(/answer:\s*answer\.text/);
+    expect(ask).toMatch(/renderUntrustedMarkdown\(answer\.text\)/);
+  });
+
+  it("the draft is quoted in a fence it cannot close", () => {
+    const shared = readRepoFile("packages/shared/src/ai-helper.ts");
+    expect(shared).toContain("function fenceFor(");
+    // A literal three-backtick fence around the draft is what let a
+    // comment in it address the model directly.
+    const builder = shared.slice(shared.indexOf("export function buildAiPrompt"));
+    expect(builder).toContain("fence,");
+    expect(builder).not.toMatch(/"```"/);
+  });
+});
+
+describe("an AI answer makes a solve assisted", () => {
+  it("the finaliser reads AiAssist, and the policy says yes", () => {
+    const apply = readRepoFile("apps/web/src/lib/progress/apply.ts");
+    expect(apply).toContain("aiAssist.findFirst");
+    expect(apply).toContain("makesSolveAssisted({ ai: true })");
+    // The rule itself, not a copy of it: a reader following the import
+    // arrives at one function that decides for hints, editorials and this.
+    expect(readRepoFile("packages/shared/src/help.ts")).toContain('"ai" in kind');
+  });
+});

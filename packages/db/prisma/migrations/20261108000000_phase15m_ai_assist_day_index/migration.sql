@@ -1,0 +1,28 @@
+-- Phase 15m. An index for the question Phase 15j started asking.
+--
+-- 15j gave the college a daily allowance, which means something now counts
+-- the day's answered asks across EVERY user:
+--
+--   SELECT count(*) FROM "AiAssist" WHERE failed = false AND "askedAt" >= $1
+--
+-- There was no index for that. `AiAssist` carried `(userId, problemId)` and
+-- `(userId, askedAt)`, both led by the column this query does not filter
+-- on, so Postgres read the whole table — and it read it not only on an ask
+-- but on every practice problem page that draws the assistant panel, which
+-- is every one of them on a deployment where the assistant is switched on.
+-- A table that grows by the day, scanned on a page view: the kind of thing
+-- that is free in a seeded development database and arrives as "the problem
+-- pages got slow" in March.
+--
+-- `(askedAt)` is enough. The planner range-scans the day and filters the
+-- handful of failures out of it, and the same index serves the 30-day
+-- groupBy on /super/settings/ai, which had the same shape and the same
+-- absence.
+--
+-- Not a partial index on `failed = false`, even though every caller filters
+-- that way. A partial index would be slightly smaller and would stop
+-- serving the moment somebody legitimately counts failures — which
+-- /super/settings/ai already does, on the next line of the same page.
+
+-- CreateIndex
+CREATE INDEX "AiAssist_askedAt_idx" ON "public"."AiAssist"("askedAt");

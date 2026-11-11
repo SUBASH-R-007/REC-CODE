@@ -1,0 +1,498 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Check, X } from "lucide-react";
+import { DeviceCheck } from "@/components/exam/device-check";
+import { MONITORED_SIGNALS } from "@/components/exam/monitored-chip";
+import { MachineNotices } from "@/components/exam/machine-notices";
+// The deep path, not the barrel: this is a client component, and
+// `@recx/shared`'s index reaches every module in the package. Measured
+// on 2026-11-10: importing four constants through it put this page
+// 41.6 KB over its 130 KB budget and the attempt page 20.9 KB over its
+// own.
+import {
+  CONSENT_CONTACT_UNSET,
+  PROCTORING_CONSENT_DECLINE,
+  PROCTORING_CONSENT_LABEL,
+  PROCTORING_CONSENT_POINTS,
+} from "@recx/shared/consent";
+import { recordProctoringConsent } from "@/server/actions/consent";
+import { clockSkew, powerState, type ClockSkew, type PowerState } from "@/lib/exam/machine-readiness";
+
+/**
+ * The pre-exam readiness check (Phase 6c).
+ *
+ * SPEC §5: "Pre-exam readiness check (~2 min): fullscreen entry/exit, a paste
+ * into a scratch box, a network round-trip, a one-line sample problem, and a
+ * plain-language list of exactly which signals are recorded — this doubles as
+ * the consent moment."
+ *
+ * "Doubles as the consent moment" is the load-bearing phrase. The list is not
+ * fine print: it is the reason the start button is disabled until the
+ * candidate has seen each check pass and ticked the box. SPEC §5 again:
+ *
+ *   No silent trapping: the deterrent requires awareness, and transparency
+ *   also removes the "I didn't know" appeal.
+ *
+ * Each check is a real exercise of the thing it checks, not a claim about it:
+ * the fullscreen check actually enters and leaves fullscreen, the paste check
+ * actually takes a paste, and the network check actually round-trips to the
+ * server. A readiness check that only says "looks fine" is worth nothing at
+ * the moment a candidate's laptop turns out not to be.
+ */
+
+type CheckId = "fullscreen" | "paste" | "network" | "sample" | "device";
+type LabelId = CheckId | "fullscreenHeld";
+
+const LABELS: Readonly<Record<LabelId, string>> = Object.freeze({
+  fullscreen: "Full screen works on this machine",
+  /**
+   * Phase 15e. Not a check, because there is nothing a candidate could do
+   * about it and nothing to find out: see `fullscreenHeld` below.
+   */
+  fullscreenHeld: "Full screen is held by REC Exam Browser",
+  paste: "Pasting works, and is recorded rather than blocked",
+  network: "This machine can reach the exam server",
+  sample: "You can type an answer and read a question",
+  device: "Your registered device works",
+});
+
+/**
+ * The name of the window a sitting opens in (Phase 12s). Named rather than
+ * anonymous so a candidate who submits the form twice lands back in the
+ * window they already have instead of collecting a second one.
+ */
+const EXAM_WINDOW_NAME = "recx-sitting";
+
+/**
+ * How long the fullscreen test waits before calling it a refusal (Phase
+ * 15e). A browser that is going to grant it does so in a frame or two;
+ * anything past this is a request nobody is going to answer.
+ */
+const FULLSCREEN_TIMEOUT_MS = 3_000;
+
+export function ReadinessCheck({
+  slug,
+  durationMinutes,
+  questionCount,
+  proctorNote,
+  needsDevice,
+  sitInPopup = false,
+  fullscreenHeld = false,
+  alreadyConsented = false,
+  consentContact,
+}: {
+  readonly slug: string;
+  readonly durationMinutes: number;
+  readonly questionCount: number;
+  readonly proctorNote: string | null;
+  /**
+   * Phase 12t. True only for the modes SPEC §5 binds to a device
+   * (REMOTE_MONITORED, LAB_SUPERVISED). On every other paper the device
+   * step has nothing to check and says so, instead of asking the candidate
+   * to prove something about a machine that was never enrolled.
+   */
+  readonly needsDevice: boolean;
+  /** Phase 12s. Open the sitting in its own window rather than this tab. */
+  readonly sitInPopup?: boolean;
+  /**
+   * True when this page is being read inside REC Exam Browser (Phase 15e).
+   *
+   * The fullscreen step is then neither possible nor meaningful, and it
+   * was BLOCKING the paper. The browser refuses every permission to the
+   * page (`policy.ts`, `REFUSED_PERMISSIONS`), and Chromium answers a
+   * refused fullscreen request by leaving the promise PENDING rather than
+   * rejecting it -- measured, not inferred. So `await
+   * requestFullscreen()` never returned, neither the success line nor the
+   * `catch` ever ran, the button did nothing and showed nothing, and
+   * `ready` stayed false for ever: a `KIOSK_RECX` paper could not be
+   * started from inside the browser it must be sat in.
+   *
+   * Removing it loses nothing. The window is already fullscreen and
+   * kiosk, held by the application against the page
+   * (`docs/EXAM-BROWSER.md` §6), and a page that COULD take or drop
+   * fullscreen in there would be the posture problem rather than the
+   * check. What a candidate needs at this moment is to be told that,
+   * which is what the row says.
+   */
+  readonly fullscreenHeld?: boolean;
+  /**
+   * Phase 16e. Whether this candidate's `ConsentRecord` for this paper and
+   * the current policy version already exists.
+   *
+   * The control below has asked for this agreement since Phase 6c and threw
+   * it away: it was client state, gone with the page. SPEC §6 asks for a
+   * record per assessment, so ticking it now writes one — and a candidate
+   * who has agreed already comes back to a ticked box rather than being
+   * asked a second time for a decision they have made.
+   */
+  readonly alreadyConsented?: boolean;
+  /** The named contact SPEC §6 asks to be on screen; null until one is set. */
+  readonly consentContact?: { name: string; email: string; office: string | null } | null;
+}) {
+  const [passed, setPassed] = useState<Record<CheckId, boolean>>({
+    // Already true inside REC Exam Browser: the application holds the
+    // screen and the page is not allowed to touch it.
+    fullscreen: fullscreenHeld,
+    paste: false,
+    network: false,
+    sample: false,
+    // The device step reports whether it was even required; an assessment
+    // that needs no device passes it by answering that.
+    device: false,
+  });
+  const [consented, setConsented] = useState(alreadyConsented);
+  /** Set when the record could not be written: the box goes back and says why. */
+  const [consentError, setConsentError] = useState<string | null>(null);
+  const [scratch, setScratch] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [networkError, setNetworkError] = useState<string | null>(null);
+  /** Phase 15b: two things about the machine, read here and sent nowhere. */
+  const [skew, setSkew] = useState<ClockSkew>({ kind: "unknown" });
+  const [power, setPower] = useState<PowerState>({ kind: "unknown" });
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  const pass = useCallback((id: CheckId) => setPassed((state) => ({ ...state, [id]: true })), []);
+
+  const tryFullscreen = useCallback(async () => {
+    setFullscreenError(null);
+    try {
+      /**
+       * Raced with a timer, because a refused request does not always
+       * reject (Phase 15e). Where the embedder denies the fullscreen
+       * permission, Chromium leaves this promise PENDING for ever --
+       * measured inside REC Exam Browser, where it meant the button did
+       * nothing at all and said nothing either. A check that can hang
+       * silently is worse than one that fails: the candidate has no idea
+       * whether to wait or to call somebody.
+       */
+      const entered = await Promise.race([
+        document.documentElement.requestFullscreen().then(() => true),
+        new Promise<false>((resolve) => window.setTimeout(() => resolve(false), FULLSCREEN_TIMEOUT_MS)),
+      ]);
+      if (!entered) throw new Error("timed out");
+      // Leave again straight away: the point is to prove both directions work
+      // before the sitting, not to hold the candidate in fullscreen now.
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+      if (document.fullscreenElement) await document.exitFullscreen();
+      pass("fullscreen");
+    } catch {
+      setFullscreenError(
+        "This browser refused full screen. Tell your invigilator before you start — some assessments require it.",
+      );
+    }
+  }, [pass]);
+
+  const tryNetwork = useCallback(async () => {
+    setNetworkError(null);
+    // Against this page, not against the attempt: the sitting does not exist
+    // yet, and it must not — the clock starts when the candidate starts, not
+    // when they test their wifi. A HEAD of this very URL still proves the
+    // whole path: this machine, this network, this server, this session.
+    try {
+      const response = await fetch(window.location.href, {
+        method: "HEAD",
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      /**
+       * The server's clock, free, from a round trip that was happening
+       * anyway. A machine more than two minutes out cannot sit a
+       * KIOSK_RECX paper at all -- every attested request is refused on
+       * its timestamp -- and the message it would get is about a
+       * signature, which tells a candidate nothing they can act on.
+       */
+      setSkew(clockSkew(response.headers.get("date"), Date.now()));
+      pass("network");
+    } catch {
+      setNetworkError("Could not reach the exam server. Check the network with your invigilator.");
+    }
+  }, [pass]);
+
+  /**
+   * The battery, if the browser will say. Read once, on mount, and never
+   * sent anywhere: a laptop at 11% is not evidence of anything, it is a
+   * reason to find a charger before the clock starts rather than after.
+   */
+  useEffect(() => {
+    let live = true;
+    const navigatorWithBattery = navigator as Navigator & {
+      getBattery?: () => Promise<{ charging: boolean; level: number }>;
+    };
+    navigatorWithBattery
+      .getBattery?.()
+      .then((battery) => {
+        if (live) setPower(powerState(battery));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const ready = Object.values(passed).every(Boolean) && consented;
+
+  return (
+    <div className="mx-auto flex max-w-2xl flex-col gap-8 p-6">
+      <header>
+        <h1 className="font-display text-2xl font-semibold text-text">Before you start</h1>
+        <p className="mt-2 text-sm text-text-secondary">
+          {questionCount} {questionCount === 1 ? "question" : "questions"} · {durationMinutes} minutes. Work
+          through the checks below — it takes about two minutes — then read what is recorded and start.
+        </p>
+        {proctorNote ? (
+          <p className="mt-3 rounded-md border border-info/40 bg-info-subtle px-3 py-2 text-sm text-info">
+            {proctorNote}
+          </p>
+        ) : null}
+        {/*
+          Not a check, because it is not checkable: a page cannot tell which
+          kind of window it is in (docs/PROCTORING.md §8). It is here for the
+          candidate's sake rather than ours — a private window drops the
+          session when it closes, and finding that out mid-sitting costs time
+          against their own clock.
+        */}
+        <p className="mt-3 text-xs text-text-secondary">
+          Use an ordinary browser window. A private or incognito window forgets your sign-in the moment it
+          closes, and your clock would still be running.
+        </p>
+      </header>
+
+      <ol className="flex flex-col gap-5">
+        {/* 1. Fullscreen: entered and left for real, unless it is already held. */}
+        <li className="rounded-lg border border-border p-4">
+          <Row
+            done={passed.fullscreen}
+            label={fullscreenHeld ? LABELS.fullscreenHeld : LABELS.fullscreen}
+          />
+          {fullscreenHeld ? (
+            <p className="mt-2 text-xs text-text-secondary">
+              There is nothing to test. This window is already full screen and REC Exam Browser keeps it
+              there — this page cannot turn that off, and neither can you from here.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => void tryFullscreen()}
+                className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                Test full screen
+              </button>
+              {fullscreenError ? <p className="mt-2 text-xs text-danger">{fullscreenError}</p> : null}
+            </>
+          )}
+        </li>
+
+        {/* 2. A real paste into a real box. */}
+        <li className="rounded-lg border border-border p-4">
+          <Row done={passed.paste} label={LABELS.paste} />
+          <p className="mt-2 text-xs text-text-secondary">
+            Copy anything and paste it here. Pasting is allowed during the exam — it is recorded, not blocked,
+            because you will legitimately paste your own earlier code.
+          </p>
+          <textarea
+            value={scratch}
+            onChange={(event) => setScratch(event.target.value)}
+            onPaste={() => pass("paste")}
+            aria-label="Scratch box: paste anything here"
+            rows={2}
+            className="mt-2 w-full rounded-md border border-border bg-surface p-2 font-mono text-xs text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          />
+        </li>
+
+        {/* 3. A real round-trip to the server. */}
+        <li className="rounded-lg border border-border p-4">
+          <Row done={passed.network} label={LABELS.network} />
+          <button
+            type="button"
+            onClick={() => void tryNetwork()}
+            className="mt-3 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            Test the connection
+          </button>
+          {networkError ? <p className="mt-2 text-xs text-danger">{networkError}</p> : null}
+          <MachineNotices skew={skew} power={power} />
+        </li>
+
+        {/* 4. A one-line question, answered. */}
+        <li className="rounded-lg border border-border p-4">
+          <Row done={passed.sample} label={LABELS.sample} />
+          <p className="mt-2 text-sm text-text">
+            Sample question: what is <code className="font-mono">2 + 2</code>?
+          </p>
+          <input
+            value={answer}
+            onChange={(event) => {
+              setAnswer(event.target.value);
+              if (event.target.value.trim() === "4") pass("sample");
+            }}
+            aria-label="Your answer to the sample question"
+            className="mt-2 w-24 rounded-md border border-border bg-surface px-2 py-1 font-mono text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          />
+        </li>
+        {/*
+          The device step (Phase 6d). It is HERE rather than in the arena
+          because the clock starts in the arena: a candidate must be able to
+          find out their key is not working while an invigilator still has
+          time to enrol the machine or issue a loaner.
+        */}
+        <DeviceCheck slug={slug} required={needsDevice} onVerified={() => pass("device")} />
+      </ol>
+
+      {/* The consent moment. */}
+      <section className="rounded-lg border border-border bg-elevated p-4">
+        <h2 className="text-sm font-semibold text-text">What is recorded during this sitting</h2>
+        <p className="mt-1 text-xs text-text-secondary">
+          This is the complete list. A person reviews anything unusual — nothing about this sitting is decided
+          automatically, and none of it is shown to recruiters.
+        </p>
+        <ul className="mt-3 flex flex-col gap-1.5 text-xs text-text-secondary">
+          {MONITORED_SIGNALS.map((signal) => (
+            <li key={signal} className="flex gap-2">
+              <span aria-hidden>·</span>
+              <span>{signal}</span>
+            </li>
+          ))}
+        </ul>
+        {/*
+          Phase 16e. The promises around the list: what is NOT done, that
+          nothing is decided automatically, how long it is kept, and who to
+          ask. All four are hashed into the record together with the list
+          above — a promise shown but not hashed is one the record cannot
+          prove was made.
+        */}
+        <ul className="mt-3 flex flex-col gap-1.5 text-xs text-text-secondary">
+          {PROCTORING_CONSENT_POINTS.map((point) => (
+            <li key={point} className="flex gap-2">
+              <span aria-hidden>·</span>
+              <span>{point}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-text-secondary">
+          {consentContact ? (
+            <>
+              Questions or a complaint about any of this:{" "}
+              <span className="font-medium text-text">{consentContact.name}</span>,{" "}
+              <a className="underline" href={`mailto:${consentContact.email}`}>
+                {consentContact.email}
+              </a>
+              {consentContact.office ? ` · ${consentContact.office}` : ""}
+            </>
+          ) : (
+            CONSENT_CONTACT_UNSET
+          )}
+        </p>
+        <label className="mt-4 flex items-start gap-2 text-sm text-text">
+          <input
+            type="checkbox"
+            checked={consented}
+            onChange={(event) => {
+              const next = event.target.checked;
+              setConsented(next);
+              setConsentError(null);
+              // Only ticking records anything. Unticking does not delete a
+              // record — the table is append-only, and a decision that can
+              // be un-made is not one anybody can rely on later. It only
+              // takes the Start button away again.
+              if (!next || alreadyConsented) return;
+              void recordProctoringConsent({ slug }).then((result) => {
+                if (result.ok) return;
+                setConsented(false);
+                setConsentError(result.error);
+              });
+            }}
+            className="mt-0.5"
+          />
+          <span>{PROCTORING_CONSENT_LABEL}</span>
+        </label>
+        <p className="mt-2 text-xs text-muted">{PROCTORING_CONSENT_DECLINE}</p>
+        {consentError ? (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {consentError}
+          </p>
+        ) : null}
+      </section>
+
+      <div className="flex items-center gap-3">
+        {/*
+          A real form, posting to the route that starts the sitting (Phase
+          12a). It has to be a POST to a route handler: starting mints the
+          attempt token and writes it to an httpOnly cookie, which Next
+          refuses during a page render — the arena used to try, and died on
+          its first load for every candidate. A form also means the button
+          works before this component hydrates, which on the worst connection
+          in the hostel is the moment it matters.
+        */}
+        <form
+          method="post"
+          action={`/api/exam/start/${slug}`}
+          /**
+           * Phase 12s: when the paper asks for it, the sitting opens in a
+           * window of its own.
+           *
+           * As an enhancement ON the form rather than instead of it, because
+           * the comment above is the point: this form works before the
+           * component hydrates, and that is the moment it matters. So the
+           * window is opened inside the click — synchronously, which is the
+           * only time `window.open` is allowed — and the form is retargeted
+           * at it. If the browser blocked it, or if this handler never ran,
+           * `target` stays empty and the sitting opens in the tab exactly as
+           * it always did. A candidate shut out by their own popup blocker
+           * would be a far worse failure than a tab.
+           */
+          onSubmit={(event) => {
+            if (!sitInPopup) return;
+            const width = Math.max(800, window.screen.availWidth);
+            const height = Math.max(600, window.screen.availHeight);
+            const opened = window.open(
+              "",
+              EXAM_WINDOW_NAME,
+              `popup=yes,width=${width},height=${height},left=0,top=0`,
+            );
+            if (!opened) return;
+            event.currentTarget.target = EXAM_WINDOW_NAME;
+            opened.focus();
+          }}
+        >
+          <button
+            type="submit"
+            disabled={!ready}
+            className={`rounded-md px-4 py-2 text-sm font-semibold ${
+              ready
+                ? "bg-primary text-primary-fg"
+                : "cursor-not-allowed border border-border text-text-secondary opacity-60"
+            } focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`}
+          >
+            Start the assessment
+          </button>
+        </form>
+        {!ready ? (
+          <p className="text-xs text-text-secondary">
+            Finish the checks above and tick the box to start. Your clock starts when you do.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Row({ done, label }: { readonly done: boolean; readonly label: string }) {
+  return (
+    <p className="flex items-center gap-2 text-sm font-medium text-text">
+      <span
+        aria-hidden
+        className={`flex h-5 w-5 items-center justify-center rounded-full border ${
+          done ? "border-success/40 bg-success-subtle text-success" : "border-border text-text-secondary"
+        }`}
+      >
+        {done ? <Check className="h-3 w-3" strokeWidth={3} /> : <X className="h-3 w-3" strokeWidth={3} />}
+      </span>
+      {label}
+      {/* The state in words, not only in a tick. */}
+      <span className="sr-only">{done ? " — passed" : " — not yet checked"}</span>
+    </p>
+  );
+}
