@@ -13,6 +13,7 @@ import { requirePlacementAction } from "@/lib/auth/guards";
 import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
+import { readFormBody } from "@/lib/http/form-body";
 import { requestIpHash } from "@/lib/ip";
 import { latestRunDay } from "@/server/queries/placement-cohort";
 import { describeCohort, parseCohortFilter } from "@/lib/placement/filter";
@@ -48,7 +49,11 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const actor = await requirePlacementAction();
 
-    const form = await request.formData();
+    // A plain urlencoded form with three hidden fields and a column list,
+    // read through the same streaming cap as the auth forms rather than
+    // `request.formData()`, which buffers whatever arrives (Phase 17 audit).
+    const form = await readFormBody(request);
+    if (!form) throw new AppError("That export request could not be read.", 400);
     const filter = parseCohortFilter({
       dept: String(form.get("dept") ?? ""),
       batch: String(form.get("batch") ?? ""),

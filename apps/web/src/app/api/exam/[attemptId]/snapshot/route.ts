@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { LANGUAGE_CATALOG, LANGUAGE_NOT_ACCEPTED_MESSAGE, SNAPSHOT_MAX_BYTES, acceptsLanguage } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
+import { readBoundedText } from "@/lib/http/body";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
@@ -47,32 +48,6 @@ const bodySchema = z
   })
   .strict();
 
-async function readBounded(request: Request, limit: number): Promise<string | null> {
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 /** The envelope, not the source, is what the extra headroom is for. */
 const MAX_REQUEST_BYTES = SNAPSHOT_MAX_BYTES + 4 * 1024;
 
@@ -97,7 +72,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     throw error;
   }
 
-  const raw = await readBounded(request, MAX_REQUEST_BYTES);
+  const raw = await readBoundedText(request, MAX_REQUEST_BYTES);
   if (raw === null) {
     return json({ error: `A snapshot is limited to ${SNAPSHOT_MAX_BYTES} bytes.` }, 413);
   }

@@ -12,6 +12,7 @@ import {
   type VitalRoute,
 } from "@recx/shared";
 import { requestIpHash } from "@/lib/ip";
+import { readJsonBody } from "@/lib/http/body";
 import { hitRateLimit, VITALS_RATE_LIMIT } from "@/lib/rate-limit";
 import { redis } from "@/lib/redis";
 
@@ -96,16 +97,15 @@ function parse(body: unknown, nowYear: number): Accepted | null {
   return { metric, route, value, cohort: labelled };
 }
 
+/**
+ * Phase 17 audit: this awaited `request.text()` and then measured
+ * `text.length` — UTF-16 code units rather than bytes, and only reachable
+ * once the whole body was already in memory. The shared reader refuses
+ * while the bytes arrive (`lib/http/body.ts`).
+ */
 async function readBody(request: Request): Promise<unknown> {
-  const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > MAX_BODY_BYTES) return null;
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+  const read = await readJsonBody(request, MAX_BODY_BYTES);
+  return read.ok ? read.value : null;
 }
 
 export async function POST(request: Request): Promise<Response> {

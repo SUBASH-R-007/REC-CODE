@@ -7,6 +7,7 @@ import {
 import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { AppError } from "@/lib/errors";
+import { readJsonBody } from "@/lib/http/body";
 import { db } from "@/lib/db";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
 import { applyHeartbeat } from "@/lib/exam/heartbeat";
@@ -74,13 +75,12 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     throw error;
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "Malformed heartbeat." }, 400);
-  }
-  const parsed = examHeartbeatRequestSchema.safeParse(body);
+  // Bounded before it is parsed: a route handler has no body limit of
+  // its own, and this one is called continuously by every candidate in
+  // the hall (Phase 17 audit, `lib/http/body.ts`).
+  const read = await readJsonBody(request);
+  if (!read.ok) return json({ error: read.status === 413 ? "Heartbeat too large." : "Malformed heartbeat." }, read.status);
+  const parsed = examHeartbeatRequestSchema.safeParse(read.value);
   if (!parsed.success) return json({ error: "Malformed heartbeat." }, 400);
 
   const sessionId = await currentSessionId();

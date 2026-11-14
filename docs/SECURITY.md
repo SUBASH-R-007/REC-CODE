@@ -918,6 +918,102 @@ so the rule is narrower rather than waived:
 
 ---
 
+## 10d. The dependency audit actually runs now (Phase 18)
+
+SPEC 0 lists `pnpm audit --audit-level=high` among the blocking checks. It
+was never wired into CI, and nothing else ran it, so for the life of the
+project the answer to "are there known vulnerabilities in our dependencies"
+was nobody's job. When it was finally run it answered: **three critical and
+six high**.
+
+Fixed, in order of what it actually bought:
+
+| Advisory | Severity | Where it reached | Done |
+|---|---|---|---|
+| Next.js image optimisation RCE with SVG, and a Server Actions DoS | critical + high | the web app, in production | `next` 15.5.27 -> **15.5.29**, and the declared floor raised from `^15.5.4` so an install cannot resolve back below the patch |
+| postcss sourceMappingURL path traversal (x2) | high | build time, through Next and tsup | pinned `>=8.5.18 <9`; 8.4.31 is gone from the tree |
+| deepmerge-ts stack exhaustion | high | the **Prisma CLI's** config loader, not the runtime client | pinned `>=8.0.0 <9` |
+| effect AsyncLocalStorage contamination | high | same parent, same reach | pinned `>=3.20.0 <4` |
+| tinypool prototype-pollution RCE (x2) | critical | vitest's worker pool: dev only | pinned `>=2.1.2 <3`, proved by running the suites on it |
+
+**The overrides are bounded to their majors, and that is not cosmetic.** The
+first attempt wrote `effect: ">=3.20.0"`, which resolved to effect **4.x**
+and broke `prisma generate` outright: `@prisma/config` is built against 3.x
+and effect 4 changed `Struct`. An unbounded override is a silent major
+upgrade of somebody else's dependency.
+
+**One high is accepted rather than fixed**, and it is listed by id in
+`pnpm.auditConfig.ignoreGhsas` so that "ignored" is a decision somebody
+wrote down:
+
+* **GHSA-mrhx-c7xc-m3w5 — zod can exhaust memory validating oversized
+  constrained collections.** There is no patched 3.x: the fix is zod **4**,
+  and zod validates every server boundary in this repository — the judge
+  protocol, every route, every action. That is a migration with its own
+  gate, not a line in an audit. What bounds it meanwhile is 10e below: zod
+  never sees a body this app has not already refused by size. Remove the
+  entry when the zod 4 migration lands.
+
+The check blocks now. `.github/workflows/ci.yml` runs
+`pnpm audit --audit-level=high` on the Linux runner before lint, so the next
+advisory is a failed build rather than a discovery.
+
+---
+
+## 10e. Every request body is bounded before it is read (Phase 18)
+
+**A route handler has no body limit of its own.** Next's 1 MB default belongs
+to server actions; a `route.ts` buffers whatever arrives. Worse,
+`request.json()`, `request.text()`, `request.formData()` and
+`request.arrayBuffer()` each consume the entire stream before they resolve —
+so a size check written *after* one of them bounds what is processed, never
+what is allocated.
+
+The audit found, on a product that runs invigilated exams:
+
+* **ten** route handlers reading a body with no cap at all, including every
+  live-exam route (`hb`, `mcq`, `run`), the exam browser's signal batches,
+  the mock-interview snapshot that fires from a candidate's editor every few
+  seconds, and the unauthenticated exam-browser token exchange;
+* **three** more (`activity`, `vitals`, the aptitude import) that awaited the
+  whole body and then measured it — two of them comparing `text.length`,
+  which is UTF-16 code units rather than bytes, so a body of multi-byte
+  characters measured short;
+* **five** separate copies of a correct streaming reader, which is the reason
+  nobody noticed the routes that had none.
+
+One candidate posting one very large body could have exhausted the web
+process serving the sitting to everybody else in the hall. The sender is
+authenticated and identified, which makes it a poor way to cheat and no
+reason at all to leave open.
+
+**What there is now.** `apps/web/src/lib/http/body.ts` is the single
+streaming reader: it checks `content-length` because it is free, then ignores
+it — it is the sender's claim, absent under chunked encoding and a lie
+whenever that is convenient — and counts bytes as they arrive, cancelling the
+stream the moment the cap is passed. `readFormBody` (the auth forms),
+`readJsonBody`, `readBoundedText` and the judge protocol's own reader all go
+through it. The problem-archive upload is the one body never held in memory
+at all: `spoolRequestBody` streams it to disk under its own cap.
+
+Every cap is derived, not chosen: a snapshot route uses `SNAPSHOT_MAX_BYTES`,
+the exam submit uses 200x it, the aptitude import uses
+`APTITUDE_IMPORT_LIMITS.maxBytes`, and a route carrying nothing but ids and
+counters uses `MAX_JSON_BYTES` (16 KB).
+
+**The fence is the part that lasts.** `tests/repo/request-bodies.test.ts`
+refuses a raw reader in any route handler, refuses a hand-rolled
+`request.body` loop outside the helper, and asserts the streaming primitive
+exists in exactly one module. It found a route the manual sweep had missed
+while it was being written.
+
+**And a second fence below it.** `deploy/Caddyfile` sets
+`request_body { max_size 320MB }` — above `IMPORT_LIMITS.archiveBytes`
+(256 MB) so a legitimate archive still uploads, and there so that a route
+added without a cap still cannot hand the web process an unbounded body.
+
+---
+
 ## 11. Still planned, after Phase 10
 
 Phase 10 closed the observability and operations half of the list this
@@ -945,3 +1041,4 @@ list for two years.
 | Hidden-test input secrecy is best-effort | Medium for assessments | a program is handed its input | per-attempt test data for assessments |
 | A compromised judge host can forge results for jobs it claims | Medium | the residual risk of any remote judge; contained to claimed jobs | rejudge-on-second-node for assessments |
 | Sign-in rate limiter fails open when Redis is down | Low | §2: availability over strictness, Argon2id cost still applies | — |
+| zod memory exhaustion on oversized constrained collections (GHSA-mrhx-c7xc-m3w5) | High, bounded to Low here | §10d: there is no patched zod 3.x — the fix is zod 4, which validates every boundary in this repository and is a migration with its own gate. Meanwhile §10e means zod never sees a body the app has not already refused by size, so the collection it could be handed is bounded before it reaches the parser | the zod 4 migration lands; remove the id from `pnpm.auditConfig.ignoreGhsas` with it |

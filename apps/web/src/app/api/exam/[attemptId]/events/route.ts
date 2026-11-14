@@ -5,6 +5,7 @@ import {
   proctorEventBatchSchema,
 } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
+import { readBoundedText } from "@/lib/http/body";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
@@ -36,36 +37,6 @@ function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: noStore });
 }
 
-/**
- * Read at most `limit` bytes; null when the body is larger. Checked by
- * streaming rather than trusting `content-length`, which a client sets.
- */
-async function readBounded(request: Request, limit: number): Promise<string | null> {
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 async function currentSessionId(): Promise<string | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -88,7 +59,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
   }
 
   // Size before shape: a 10 MB body should cost a 413, not a parse.
-  const raw = await readBounded(request, EVENT_PAYLOAD_MAX_BYTES);
+  const raw = await readBoundedText(request, EVENT_PAYLOAD_MAX_BYTES);
   if (raw === null) {
     return json({ error: `Telemetry payloads are limited to ${EVENT_PAYLOAD_MAX_BYTES} bytes.` }, 413);
   }

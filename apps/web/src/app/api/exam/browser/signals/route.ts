@@ -1,6 +1,7 @@
 import { RECX_SITTING_HEADER } from "@recx/shared/exam-browser";
 import { examBrowserVersionFloor } from "@/lib/exam/containment";
 import { verifyExamBrowserRequest } from "@/lib/exam/exam-browser";
+import { readJsonBody } from "@/lib/http/body";
 import {
   examBrowserSignalBatchSchema,
   recordExamBrowserSignals,
@@ -65,10 +66,10 @@ export async function POST(request: Request): Promise<Response> {
   });
   if (!verdict.ok) return done();
 
-  const body = await request
-    .json()
-    .then((value: unknown) => examBrowserSignalBatchSchema.safeParse(value))
-    .catch(() => null);
+  // Bounded before it is parsed (Phase 17 audit): a batch is a handful of
+  // counters, and the exam browser posts to this route throughout a sitting.
+  const read = await readJsonBody(request);
+  const body = read.ok ? examBrowserSignalBatchSchema.safeParse(read.value) : null;
   if (!body?.success) return done();
 
   /**

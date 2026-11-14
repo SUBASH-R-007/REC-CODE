@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { SNAPSHOT_MAX_BYTES } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { AppError } from "@/lib/errors";
+import { MAX_JSON_BYTES, readJsonBody } from "@/lib/http/body";
 import { pushSnapshotAs } from "@/lib/mock/interviews";
 
 export const runtime = "nodejs";
@@ -24,7 +26,13 @@ export async function POST(request: Request, context: { params: Promise<{ interv
   const { interviewId } = await context.params;
   try {
     const user = await requireActionUser();
-    await pushSnapshotAs(user.id, interviewId, await request.json());
+    // The editor's contents, so the cap is the one that already bounds
+    // a snapshot, with room for the JSON around it. Before Phase 17's
+    // audit this read whatever arrived, every few seconds, from every
+    // candidate in a mock interview.
+    const read = await readJsonBody(request, SNAPSHOT_MAX_BYTES + MAX_JSON_BYTES);
+    if (!read.ok) return NextResponse.json({ error: read.message }, { status: read.status });
+    await pushSnapshotAs(user.id, interviewId, read.value);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     if (error instanceof AppError) return NextResponse.json({ error: error.message }, { status: error.status });

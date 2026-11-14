@@ -1,5 +1,6 @@
 import { requireActionUser } from "@/lib/auth/guards";
 import { AppError } from "@/lib/errors";
+import { readJsonBody } from "@/lib/http/body";
 import { recordActivityPing } from "@/lib/help/activity";
 import { isSameOrigin } from "@/lib/help/same-origin";
 import { activityPingSchema } from "@/lib/help/schema";
@@ -29,16 +30,15 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
   return Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 }
 
+/**
+ * Phase 17 audit: this awaited `request.text()` and then measured
+ * `text.length` — UTF-16 code units rather than bytes, and only reachable
+ * once the whole body was already in memory. The shared reader refuses
+ * while the bytes arrive (`lib/http/body.ts`).
+ */
 async function readJson(request: Request): Promise<unknown> {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > MAX_BODY_BYTES) return undefined;
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
+  const read = await readJsonBody(request, MAX_BODY_BYTES);
+  return read.ok ? read.value : undefined;
 }
 
 export async function POST(request: Request): Promise<Response> {

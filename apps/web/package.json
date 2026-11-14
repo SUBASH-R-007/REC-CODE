@@ -48,7 +48,7 @@
     "monaco-editor": "0.52.2",
     "monaco-emacs": "0.3.0",
     "monaco-vim": "0.4.4",
-    "next": "^15.5.4",
+    "next": "^15.5.29",
     "pino": "^9.9.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
