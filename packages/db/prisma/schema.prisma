@@ -119,6 +119,21 @@ enum ScoringMode {
   PER_TEST
 }
 
+/// The growth a judged run's readings were consistent with (Phase 17).
+/// Mirrors COMPLEXITY_CLASSES in packages/shared/src/complexity.ts, held
+/// equal by packages/db/test/enum-parity.test.ts. There is no CONSTANT
+/// member on purpose: a flat curve is stored as null with a refusal reason
+/// in complexityDetail, because "no growth we can see" and "O(1)" are
+/// different statements.
+enum ComplexityClass {
+  LOG
+  SQRT
+  LINEAR
+  LINEARITHMIC
+  QUADRATIC
+  CUBIC
+}
+
 enum CompareMode {
   EXACT
   TOKEN
@@ -1164,6 +1179,26 @@ model Submission {
   /// a timing dispute is auditable.
   judgeNodeId         String?
   calibrationScore    Float?
+  /// How this run's per-case readings GREW with the size of the input it
+  /// was given (Phase 17), fitted at finalise time by
+  /// `estimateComplexity` over the cases that ran AND passed. A
+  /// measurement with a confidence, never a proof of the program's
+  /// complexity — and null whenever the readings could not carry a claim,
+  /// which is the common case on a problem whose tests are all one size.
+  ///
+  /// Stored rather than derived on read for three reasons: the sizes of a
+  /// frozen version's hidden cases are not readable from a student-facing
+  /// path (tests/repo/student-exposure.test.ts R3), the class has to be
+  /// GROUP BY-able to answer "what are the other accepted solutions
+  /// here", and an estimate kept beside the run that produced it stays
+  /// auditable when the estimator later changes -- the same reasoning as
+  /// calibrationScore one field up.
+  timeComplexity      ComplexityClass?
+  spaceComplexity     ComplexityClass?
+  /// {"version":n,"time":{...},"space":{...}} -- the whole outcome of both
+  /// fits, including the refusal reason when there is no class. Read for
+  /// the sentence a student sees; never for scoring.
+  complexityDetail    Json?
   queuedAt            DateTime         @default(now())
   startedAt           DateTime?
   judgedAt            DateTime?
@@ -1176,6 +1211,11 @@ model Submission {
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, problemId, createdAt(sort: Desc)])
   @@index([problemId, verdict, createdAt(sort: Desc)])
+  /// The peer population of one accepted solution (Phase 17): every other
+  /// student's accepted PRACTICE submissions to the same frozen revision in
+  /// the same language. Four equality columns, so the order is by
+  /// selectivity.
+  @@index([problemVersionId, language, origin, verdict])
   @@index([contestId, userId, problemId])
   @@index([assessmentAttemptId, problemVersionId, createdAt(sort: Desc)])
   @@index([judgeState, queuedAt])

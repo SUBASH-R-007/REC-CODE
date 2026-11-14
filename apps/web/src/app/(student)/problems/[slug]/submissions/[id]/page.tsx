@@ -6,6 +6,7 @@ import { ButtonLink, Card, VerdictBadge, publicName } from "@recx/design";
 import { requireUser } from "@/lib/auth/guards";
 import { slugSchema } from "@/lib/judge/submit-schema";
 import { getSubmissionDetail } from "@/server/queries/submissions";
+import { getSolutionStanding } from "@/server/queries/solution-standing";
 import { absoluteTime } from "@/components/problems/relative-time";
 import {
   CompileOutput,
@@ -14,6 +15,7 @@ import {
   TestResults,
 } from "@/components/workspace/result-view";
 import { SourceView } from "@/components/workspace/source-view";
+import { SolutionProfile } from "@/components/workspace/solution-profile";
 import { SubmissionLive } from "@/components/workspace/submission-live";
 
 type Params = { params: Promise<{ slug: string; id: string }> };
@@ -52,6 +54,10 @@ export default async function SubmissionPage({ params }: Params) {
   const detail = await getSubmissionDetail(id, slug.data, { id: user.id, role: user.role });
   if (!detail) notFound();
   const { view, problem } = detail;
+  // Phase 17. After the authorisation above, and only for a finished run:
+  // the peer population is read inside the query so the calibration score
+  // it scales by never travels out to this page.
+  const standing = view.terminal ? await getSolutionStanding(id) : null;
   const workspaceHref = `/problems/${problem.slug}`;
 
   return (
@@ -162,6 +168,14 @@ export default async function SubmissionPage({ params }: Params) {
           </h2>
           <CompileOutput view={view} />
         </section>
+      )}
+
+      {view.terminal && (
+        <SolutionProfile
+          complexity={detail.complexity}
+          standing={standing}
+          languageLabel={view.languageLabel}
+        />
       )}
 
       {view.terminal && view.tests.length + (view.scoring?.subtasks.length ?? 0) > 0 && (

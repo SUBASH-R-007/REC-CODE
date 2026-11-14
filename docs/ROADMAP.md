@@ -34,6 +34,10 @@
 > The counts in the next paragraph are from 2026-11-09 and have moved: **125
 > models, 71 migrations, five applications, 48 structural fences**, and
 > `docs/RUNBOOK.md` §3 carries 123 phase-16 rows.
+>
+> **Added since, outside this list (2026-11-12):** §3a.1, measured growth and
+> where a solution stands among the others (Phase 17) — asked for rather than
+> roadmapped, and it changes none of the tally above.
 
 
 What is left, written on 2026-11-09 after reading `docs/handoff/SPEC.md`,
@@ -655,6 +659,78 @@ The lesson worth keeping: **a gate that nobody runs is not a gate.** The
 seven-step Linux gate runs on a laptop with a seeded database; CI migrates
 and does not seed; the Playwright suites are in neither. Three database
 suites passed here for years and covered nothing on a runner.
+
+---
+
+## 3a. Asked for after this roadmap was written
+
+Section 3 above is titled for what it held on 2026-11-09. This one is for
+work requested afterwards, so that nothing here is mistaken for an
+enhancement nobody wanted.
+
+### 3a.1 "What is the complexity of my solution, and where does it stand?" — **built (Phase 17, 2026-11-12)**
+
+Two questions a student has the moment they read **Accepted**, and until
+Phase 17 this platform answered neither. Both are now on
+`/problems/<slug>/submissions/<id>`, under the verdict. The method, every
+threshold and the argument for each is `docs/COMPLEXITY.md`; the decisions
+are in `docs/OPEN-QUESTIONS.md`.
+
+**The interesting part is the gap between what was asked for and what can
+honestly be given.** The complexity of a program cannot be computed —
+deciding an arbitrary program's running time is undecidable, and the
+practical approximation of counting nested loops is confidently wrong about
+memoisation, early exits, a library sort and every recursive function. So
+nothing here reads the submitted code.
+
+It reads the RUN. Every submission already stored one CPU-ms and one peak-KB
+reading per test case, and a problem's cases come in different sizes: that is
+a scatter plot, and six curves of the form `y = a*f(n) + c` are fitted to it
+by least squares, the smallest residual winning. `c` is the whole reason it
+works — a Python process spends 20–30 ms starting before the student's first
+statement runs, and that floor is exactly what makes a naive log-log fit read
+every fast solution as sub-linear.
+
+**What it refuses matters more than what it reports.** No class below five
+distinct input sizes, none below an 8x span between the smallest and the
+largest, and none when the entire rise is inside the judge's own resolution
+(15 ms, or 512 KB). There is no O(1) rung at all, because a flat curve means
+"this could not see any growth" and not "constant time" — and the refusal
+sentence says so without implying the second. **Null is the normal state**,
+not an error state: on a catalogue of problems authored before any of this
+existed, most submissions will carry a reason rather than a class.
+
+Two numbers in it were measured rather than chosen, and both corrected a
+first draft. The 4x residual margin that separates STRONG from WEAK comes
+from generating each class's curve at four noise levels: every class except
+the O(n) / O(n log n) pair separates by more than 6x even at 15% noise, while
+that pair swaps places by 8% — so the margin states the true thing, that this
+method tells those two apart only on very clean readings. And the model-free
+log-log cross-check, as first written, marked almost every honest fit WEAK,
+because a clean O(n^2) rise of 800 ms on a 20 ms floor has a raw slope of
+0.77. It subtracts the winning curve's own floor now, and the independence
+that costs is written into the module.
+
+**The standing is one row per other student — their fastest accepted
+submission** — on the same frozen revision, in the same language, PRACTICE
+and Accepted only, and normalised by the calibration of the node that judged
+each one, so a solution judged on a faster host does not read as a better
+solution. Below twenty peers there is no ranking. Nothing identifying comes
+back, and the db test asserts no fixture user id appears in the result.
+
+**It never touches anything that counts.** Not a verdict, a score, XP, a
+contest standing, an assessment result, a readiness component or an
+eligibility decision. A slow Accepted solution is Accepted. And it widened no
+fence: the input sizes of a frozen version's hidden cases are not readable
+from a student-facing path, so the fit happens in `finalize.ts`, where
+reading hidden test data is already the job, and what reaches the student is
+the class rather than the sizes.
+
+**What is open.** An author-declared `n` per case would be a better x-axis
+than input bytes, and cannot be added to the problems that exist: a published
+version and its cases are frozen by trigger. Recorded in
+`docs/OPEN-QUESTIONS.md` as worth revisiting if the catalogue ever holds
+enough single-number problems for the refusals to be noticeable.
 
 ---
 

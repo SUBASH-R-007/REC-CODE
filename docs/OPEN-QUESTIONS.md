@@ -4972,3 +4972,111 @@ high-stakes assessments until it has run cleanly through two practice
 contests. No contest has been run with real students on this deployment, so
 the condition is unmeetable before launch — and building the surface first
 would be building for a date rather than for a requirement.
+
+## Measured growth is not complexity, and the words have to say so (Phase 17)
+
+A new feature rather than a spec item: *"calculate the time and space
+complexity of the solution submitted, and where their solution stands
+amongst the others."* Everything interesting about it is in the gap between
+what was asked for and what can honestly be delivered, so the narrower
+reading is recorded here and the method in `docs/COMPLEXITY.md`.
+
+**The complexity of a program cannot be computed, so this does not try.**
+Deciding the running time of an arbitrary program is undecidable, and the
+practical approximation — count the nested loops — is confidently wrong
+about memoisation, early exits, a library sort, a short-circuit and every
+recursive function. Printing `O(n²)` because the source has two `for`
+statements would teach a student something false about their own program.
+
+What is delivered instead is a **measurement of the run**: the per-case CPU
+ms and peak KB this platform already stores, fitted against the sizes of the
+inputs those cases were given. The decision is in the vocabulary — an
+estimate is `fitted`, a class is what the readings are *consistent with*, and
+the first sentence a student reads says "these are measurements of this run,
+not facts about your program".
+
+**Three places the narrower reading shows.**
+
+*No O(1) rung.* A flat curve means "this could not see any growth", not
+"constant time". The refusal sentence for `GROWTH_BELOW_NOISE` deliberately
+does not mention constant time, and a test asserts it does not.
+
+*No exponential rung.* An O(2ⁿ) solution produces no curve: it is killed by
+the time limit on the first case large enough to matter, and a killed case is
+not a measurement. The student sees a TLE and the growth over the cases that
+finished, which is the useful half.
+
+*`n` is input bytes, and that is stated.* For a list, grid, string or graph
+the bytes are proportional to the size of the thing and the class carries
+over. For a problem whose input is one number — "given n ≤ 10⁹, compute
+f(n)" — the bytes are log n and a linear solution would read as exponential.
+That shape is excluded by the 8× span gate rather than misreported on it: a
+single integer cannot span 8× in bytes without reaching 10¹⁵. The gate was
+chosen at 8 for the curve-separation reason and kept at 8 for this one.
+
+**Where it is computed, and the fence it did not widen.** The estimate is
+written at finalise and stored on `Submission`, not derived when the page
+renders. The deciding reason is `tests/repo/student-exposure.test.ts` R3: a
+`testCase` query selecting `input` must say `isSample: true`, and the import
+graph keeps a student page out of every module allowed to make one. The
+hidden cases' input sizes are exactly what the x-axis needs, so the
+alternative was to widen a security fence for a decoration. Instead the fit
+happens in `finalize.ts`, which is already allowed to read hidden test data,
+and what reaches the student is the class rather than the sizes. Two further
+reasons made it the right place anyway: the class has to be `GROUP BY`-able
+for the peer distribution, and an estimate stored beside the run that earned
+it stays auditable when the estimator changes — the same argument as
+`calibrationScore`.
+
+**`measureComplexity` cannot fail a finalise.** Every error is caught and the
+columns are left alone. A verdict, its XP and its CPU charge are not worth
+risking for a line of commentary under them.
+
+**The margin that decides STRONG was measured, not chosen.** Generating each
+class's curve at several noise levels showed that every class except the
+O(n) / O(n log n) pair separates from its runner-up by more than 6× even at
+15% noise, while that pair separates by 879× on perfectly clean data and has
+swapped places by 8%. A 4× residual margin therefore states the true thing:
+this method tells O(n) from O(n log n) only when the readings are very clean,
+and says WEAK with the other one named whenever they are not. The table is in
+`docs/COMPLEXITY.md` §5.
+
+**And the second opinion had to be corrected before it was worth having.** A
+log–log slope was added as a model-free cross-check and, as first written,
+marked almost every honest fit WEAK: a clean O(n²) rise of 800 ms on 20 ms of
+start-up has a raw log–log slope of 0.77, because the constant floor
+dominates the small end. It is taken after subtracting the winning curve's
+own fitted floor now, which costs the check its independence from the
+winner — it can no longer detect an offset the ladder got wrong, only a shape
+it got wrong. That is the error worth catching, and the limit is written into
+the module rather than left for a reader to discover.
+
+**The standing is a figure about code, not about a person.** Twenty peers
+rather than `MIN_PERCENTILE_COHORT`'s thirty, because that threshold guards a
+readiness percentile — a number about a student, identifiable in a small
+cohort — and this one guards a position with no name, no profile and nothing
+that follows anybody anywhere. One row per student, their fastest, on the same
+frozen revision in the same language, normalised by the calibration of the
+node that judged each one. Nothing in the result identifies a peer, and the
+db test asserts no fixture user id appears in it.
+
+*Revisit:* the ladder has no place for an author-declared `n` per case, which
+would be a better x-axis than input bytes. It cannot be added to existing
+problems — a published version and its test cases are frozen by trigger, so
+only versions authored after such a column existed could carry one — and the
+8× span gate already excludes the shape where bytes mislead. Worth revisiting
+if the catalogue ever has enough single-number problems for the refusals to be
+noticeable.
+
+**Revisit, added after the first live run.** The second opinion is
+under-confident on real data in a way the synthetic curves could not show. A
+real py312 submission to `two-sum`, judged by the real worker, reported
+memory as O(n) with an r-squared of **0.999** and was still called WEAK:
+with a 5.2 MB floor, the leftover growth at the small end is 24 KB of
+allocator noise, so the floor-subtracted log-log slope over all twelve points
+is **0.42 instead of 1.0** -- it is 0.95 over the top decade alone. Measuring
+the slope only where there is growth to measure would fix it, and every
+candidate rule for "where" is a number chosen from this one problem's data.
+The failure is conservative, so it stays until there are several problems'
+worth of real submissions to choose a rule against. `docs/COMPLEXITY.md` 6.
+
