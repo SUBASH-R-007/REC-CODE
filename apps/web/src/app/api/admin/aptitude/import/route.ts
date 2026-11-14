@@ -1,5 +1,6 @@
 import { APTITUDE_IMPORT_LIMITS, isAptitudeArea, isAptitudeTopic } from "@recx/shared";
 import { requireActionRole } from "@/lib/auth/guards";
+import { readBoundedBody } from "@/lib/http/body";
 import { audit } from "@/lib/audit";
 import { runAptitudeImport } from "@/lib/aptitude/import";
 import { AppError } from "@/lib/errors";
@@ -91,11 +92,16 @@ export async function POST(request: Request): Promise<Response> {
   if (topicParam !== null && !isAptitudeTopic(topicParam)) return json({ error: "That is not a topic." }, 400);
   const sourceBatch = (url.searchParams.get("batch") ?? "").trim().slice(0, 120) || null;
 
-  const body = await request.arrayBuffer();
-  if (body.byteLength > APTITUDE_IMPORT_LIMITS.maxBytes) {
-    return json({ error: `The file is larger than ${APTITUDE_IMPORT_LIMITS.maxBytes / 1024 / 1024} MB.` }, 413);
+  // Refused while it streams rather than after it is in memory (Phase 17
+  // audit): `request.arrayBuffer()` resolves only once the whole upload has
+  // been buffered, so the size check below it never bounded the allocation.
+  const body = await readBoundedBody(request, APTITUDE_IMPORT_LIMITS.maxBytes);
+  if (!body.ok) {
+    return body.reason === "too-large"
+      ? json({ error: `The file is larger than ${APTITUDE_IMPORT_LIMITS.maxBytes / 1024 / 1024} MB.` }, 413)
+      : json({ error: "The upload could not be read." }, 400);
   }
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(body);
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(body.bytes);
 
   const outcome = await runAptitudeImport({
     text,

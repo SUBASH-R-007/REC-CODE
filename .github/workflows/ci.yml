@@ -108,6 +108,17 @@ jobs:
         run: |
           pnpm exec prisma migrate diff             --from-schema-datasource prisma/schema.prisma             --to-schema-datamodel prisma/schema.prisma             --exit-code
 
+      # SPEC 0 requires this to block, and until the Phase 17 audit nothing
+      # ran it: three critical and six high advisories had accumulated
+      # unseen. Linux only -- the advisory database is the same on both
+      # runners, and running it twice doubles the rate-limited API calls for
+      # no extra signal. An advisory that cannot be fixed yet is listed in
+      # `pnpm.auditConfig.ignoreGhsas` with its reason in docs/SECURITY.md,
+      # so "ignored" is a decision somebody wrote down rather than a silence.
+      - name: Dependency audit (blocking, high and above)
+        if: runner.os == 'Linux'
+        run: pnpm audit --audit-level=high
+
       - name: Lint
         run: pnpm lint
 

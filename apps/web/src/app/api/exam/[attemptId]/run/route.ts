@@ -12,6 +12,7 @@ import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
+import { MAX_JSON_BYTES, readJsonBody } from "@/lib/http/body";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
 import { languagesOfQuestion } from "@/lib/exam/language";
 import { attemptLayoutOf } from "@/lib/exam/layout";
@@ -91,7 +92,12 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     throw error;
   }
 
-  const body = bodySchema.safeParse(await request.json().catch(() => null));
+  // This one carries the candidate's source, so the cap comes from the
+  // limit that already bounds the source itself, with room for the
+  // JSON around it (Phase 17 audit, `lib/http/body.ts`).
+  const read = await readJsonBody(request, SNAPSHOT_MAX_BYTES + MAX_JSON_BYTES);
+  if (!read.ok) return json({ error: read.status === 413 ? "Run too large." : "Malformed run." }, read.status);
+  const body = bodySchema.safeParse(read.value);
   if (!body.success) return json({ error: "Malformed run." }, 400);
 
   const sessionId = await currentSessionId();

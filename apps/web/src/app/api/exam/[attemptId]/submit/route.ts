@@ -8,6 +8,7 @@ import {
   SQL_LANGUAGE_KEY,
 } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
+import { readBoundedText } from "@/lib/http/body";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
@@ -76,32 +77,6 @@ const bodySchema = z
 /** Every answer, plus the envelope. Refused by size before it is parsed. */
 const MAX_REQUEST_BYTES = 200 * SNAPSHOT_MAX_BYTES;
 
-async function readBounded(request: Request, limit: number): Promise<string | null> {
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) return null;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => undefined);
-      return null;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(bytes);
-}
-
 async function currentSessionId(): Promise<string | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -123,7 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     throw error;
   }
 
-  const raw = await readBounded(request, MAX_REQUEST_BYTES);
+  const raw = await readBoundedText(request, MAX_REQUEST_BYTES);
   if (raw === null) return json({ error: "That submission is too large." }, 413);
 
   let parsedJson: unknown;

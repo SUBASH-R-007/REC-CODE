@@ -4,6 +4,7 @@ import { requireActionUser } from "@/lib/auth/guards";
 import { SESSION_COOKIE, hashSessionToken } from "@/lib/auth/session-token";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
+import { readJsonBody } from "@/lib/http/body";
 import { endAttemptSession, guardAttempt } from "@/lib/exam/attempt";
 import { attemptLayoutOf } from "@/lib/exam/layout";
 
@@ -72,7 +73,10 @@ export async function POST(request: Request, context: { params: Promise<{ attemp
     throw error;
   }
 
-  const body = bodySchema.safeParse(await request.json().catch(() => null));
+  // Bounded before it is parsed (Phase 17 audit, `lib/http/body.ts`).
+  const read = await readJsonBody(request);
+  if (!read.ok) return json({ error: read.status === 413 ? "Answer too large." : "Malformed answer." }, read.status);
+  const body = bodySchema.safeParse(read.value);
   if (!body.success) return json({ error: "Malformed answer." }, 400);
 
   const sessionId = await currentSessionId();

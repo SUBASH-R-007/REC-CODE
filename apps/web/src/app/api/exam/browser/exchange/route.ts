@@ -1,5 +1,6 @@
 import { EXAM_BROWSER_PROTOCOL_VERSION, EXAM_BROWSER_TOKEN_PATTERN } from "@recx/shared";
 import { audit } from "@/lib/audit";
+import { readJsonBody } from "@/lib/http/body";
 import { exchangeLaunchToken } from "@/lib/exam/exam-browser";
 import { requestIpHash } from "@/lib/ip";
 import { hitRateLimit, type RateLimitRule } from "@/lib/rate-limit";
@@ -58,7 +59,10 @@ export async function POST(request: Request): Promise<Response> {
     return json({ error: "Too many launches from here. Wait a minute and try again." }, 429);
   }
 
-  const body = (await request.json().catch(() => null)) as { token?: unknown } | null;
+  // Bounded before it is parsed: this route is unauthenticated apart
+  // from the rate limit above (Phase 17 audit, `lib/http` body cap).
+  const read = await readJsonBody(request);
+  const body = read.ok ? (read.value as { token?: unknown } | null) : null;
   const token = typeof body?.token === "string" ? body.token.trim() : "";
 
   // Shape first, so a malformed token never reaches a database lookup.

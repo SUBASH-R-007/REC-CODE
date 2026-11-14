@@ -1,4 +1,5 @@
 import "server-only";
+import { readBoundedBody } from "./body";
 
 /**
  * Reading an HTML form body in a route handler, with a size cap.
@@ -28,33 +29,13 @@ export const MAX_FORM_BYTES = 16 * 1024;
 export async function readFormBody(request: Request, maxBytes = MAX_FORM_BYTES): Promise<URLSearchParams | null> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   if (type !== "application/x-www-form-urlencoded") return null;
-  if (Number(request.headers.get("content-length") ?? 0) > maxBytes) return null;
-  if (!request.body) return new URLSearchParams();
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > maxBytes) {
-        await reader.cancel().catch(() => undefined);
-        return null;
-      }
-      chunks.push(value);
-    }
-  } catch {
-    return null;
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new URLSearchParams(new TextDecoder().decode(body));
+  // The streaming cap itself lives in `./body`, shared with the JSON routes
+  // (Phase 17's audit). This function keeps its own content-type rule and
+  // its single `null` refusal: a caller here must not be able to tell a
+  // wrong content type from an oversized body from a failed read.
+  const body = await readBoundedBody(request, maxBytes);
+  if (!body.ok) return null;
+  return new URLSearchParams(new TextDecoder().decode(body.bytes));
 }
 
 /** 303 See Other: the browser follows with a GET. A relative Location stays on whatever host the visitor used. */

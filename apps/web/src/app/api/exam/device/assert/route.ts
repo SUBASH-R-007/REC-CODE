@@ -3,6 +3,7 @@ import { requiresDeviceAssertion, type ProctorMode } from "@recx/shared";
 import { requireActionUser } from "@/lib/auth/guards";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/errors";
+import { readJsonBody } from "@/lib/http/body";
 import { assertionOptions, verifyAssertion } from "@/lib/exam/webauthn";
 
 export const runtime = "nodejs";
@@ -54,13 +55,10 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = await request.json();
-  } catch {
-    return json({ error: "Malformed request." }, 400);
-  }
-  const body = bodySchema.safeParse(parsedJson);
+  // Bounded before it is parsed (Phase 17 audit, `lib/http` body cap).
+  const read = await readJsonBody(request);
+  if (!read.ok) return json({ error: read.status === 413 ? "Request too large." : "Malformed request." }, read.status);
+  const body = bodySchema.safeParse(read.value);
   if (!body.success) return json({ error: "Malformed request." }, 400);
 
   const assessment = await db.assessment.findUnique({

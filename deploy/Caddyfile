@@ -32,6 +32,28 @@
 {$RECX_PUBLIC_HOST} {
 	encode zstd gzip
 
+	# ── A floor under every request body ─────────────────────────────────
+	#
+	# The app bounds each route itself (apps/web/src/lib/http/body.ts, and
+	# the problem-archive upload spools to disk under its own cap). This is
+	# the second fence, and the one that holds if a new route forgets: a
+	# route handler has NO body limit of its own, so without this a single
+	# authenticated candidate could hand the web process whatever it would
+	# accept.
+	#
+	# 320 MB, derived rather than chosen: the largest legitimate body on
+	# this host is a problem archive, and `IMPORT_LIMITS.archiveBytes` is
+	# 256 MB, so this clears it with room for the multipart envelope. Every
+	# other route's own cap is three or four orders of magnitude below it —
+	# this one exists to stop an unbounded body reaching the app at all, not
+	# to be the per-route limit.
+	#
+	# Raise `archiveBytes` and this has to move with it; the import answers
+	# 413 with its own message below that, and a 413 from Caddy above it.
+	request_body {
+		max_size 320MB
+	}
+
 	# ── Headers the app cannot set for itself ────────────────────────────
 	header {
 		# HSTS with preload. Two years, because a downgrade on a campus
